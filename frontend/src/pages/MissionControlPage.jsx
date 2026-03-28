@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-
-// ─── Mock metric data ────────────────────────────────────────────────────────
-const INITIAL_METRICS = { thermal: 12, slope: 8.2, compute: 142 };
-const REPLANNED_METRICS = { thermal: 7, slope: 7.1, compute: 218 };
+import layersMetadataMock from "../mocks/layers.mock";
+import missionService from "../services/missionService";
 
 // ─── Tool config ─────────────────────────────────────────────────────────────
 const TOOLS = [
@@ -13,8 +11,18 @@ const TOOLS = [
   { id: "shadow",  icon: "layers",     label: "Shadow",  desc: "Click to place PSR shadow region" },
 ];
 
-const MAP_METERS_PER_UNIT = 17.9;
+const MAP_METADATA = layersMetadataMock;
+const VIEWBOX_SIZE = 1000;
+const MAP_METERS_PER_UNIT = MAP_METADATA.extent_m.width / VIEWBOX_SIZE;
 const CURVE_SEGMENTS = 64;
+const STATIC_THERMAL_FIELDS = [
+  { x: 450, y: 500, baseRadius: 132, intensity: 1.0 },
+  { x: 550, y: 450, baseRadius: 92, intensity: 0.72 },
+];
+const STATIC_SLOPE_FIELDS = [
+  { x: 260, y: 360, radius: 180, intensity: 0.58 },
+  { x: 780, y: 640, radius: 160, intensity: 0.52 },
+];
 
 function getQuadraticLength(start, control, end, segments = CURVE_SEGMENTS) {
   let length = 0;
@@ -39,21 +47,125 @@ function lerp(start, end, factor) {
   return start + ((end - start) * factor);
 }
 
+function getQuadraticPoint(start, control, end, t) {
+  const mt = 1 - t;
+  return {
+    x: (mt * mt * start.x) + (2 * mt * t * control.x) + (t * t * end.x),
+    y: (mt * mt * start.y) + (2 * mt * t * control.y) + (t * t * end.y),
+  };
+}
+
+function buildQuadraticSamples(start, control, end, segments = CURVE_SEGMENTS) {
+  return Array.from({ length: segments + 1 }, (_, index) => (
+    getQuadraticPoint(start, control, end, index / segments)
+  ));
+}
+
+function buildLinearSamples(start, end, segments = CURVE_SEGMENTS) {
+  return Array.from({ length: segments + 1 }, (_, index) => {
+    const factor = index / segments;
+    return {
+      x: lerp(start.x, end.x, factor),
+      y: lerp(start.y, end.y, factor),
+    };
+  });
+}
+
+function getFieldStrength(point, centerX, centerY, radius, intensity) {
+  const distance = Math.hypot(point.x - centerX, point.y - centerY);
+  return intensity * Math.exp(-((distance * distance) / (2 * radius * radius)));
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function gridToSvg([row, col], metadata = MAP_METADATA) {
+  const rowMax = Math.max(1, metadata.shape[0] - 1);
+  const colMax = Math.max(1, metadata.shape[1] - 1);
+
+  return {
+    x: (col / colMax) * VIEWBOX_SIZE,
+    y: (row / rowMax) * VIEWBOX_SIZE,
+  };
+}
+
+function svgToGrid(point, metadata = MAP_METADATA) {
+  const rowMax = Math.max(1, metadata.shape[0] - 1);
+  const colMax = Math.max(1, metadata.shape[1] - 1);
+
+  return [
+    clamp(Math.round((point.y / VIEWBOX_SIZE) * rowMax), 0, rowMax),
+    clamp(Math.round((point.x / VIEWBOX_SIZE) * colMax), 0, colMax),
+  ];
+}
+
+function toPlanningWeights(uiWeights) {
+  return {
+    w_dist: 1.05,
+    w_slope: 0.7 + ((uiWeights.slope / 100) * 1.3),
+    w_thermal: 0.7 + ((uiWeights.thermal / 100) * 1.3),
+    w_energy: 1.2,
+  };
+}
+
+function toUiWeights(planningWeights) {
+  return {
+    thermal: Math.round(clamp(((planningWeights.w_thermal - 0.7) / 1.3) * 100, 0, 100)),
+    slope: Math.round(clamp(((planningWeights.w_slope - 0.7) / 1.3) * 100, 0, 100)),
+  };
+}
+
+function createDisplayMetrics(pathResult) {
+  if (!pathResult) return null;
+
+  return {
+    distanceM: pathResult.total_distance_m,
+    thermalExposure: pathResult.total_thermal_exposure,
+    maxSlope: pathResult.max_slope_deg,
+    compute: pathResult.computation_time_ms,
+    energyCost: pathResult.total_energy_cost,
+    riskBreakdown: {
+      safeCells: pathResult.risk_breakdown?.safe_cells ?? 0,
+      cautionCells: pathResult.risk_breakdown?.caution_cells ?? 0,
+      dangerCells: pathResult.risk_breakdown?.danger_cells ?? 0,
+    },
+  };
+}
+
+function getPercentReduction(baseline, current) {
+  if (!baseline) return 0;
+  return Number((((baseline - current) / baseline) * 100).toFixed(1));
+}
+
+function getPercentDelta(current, baseline) {
+  if (!baseline) return 0;
+  return Number((((current - baseline) / baseline) * 100).toFixed(1));
+}
+
 export default function MissionControlPage() {
   // Weights
   const [weights, setWeights] = useState({ thermal: 85, slope: 42 });
+  const [scenarioInfo, setScenarioInfo] = useState(null);
+  const [runtimeMetadata, setRuntimeMetadata] = useState(MAP_METADATA);
+  const [pathResult, setPathResult] = useState(null);
+  const [comparisonResult, setComparisonResult] = useState(null);
+  const [serviceReplanResult, setServiceReplanResult] = useState(null);
+  const [planningBusy, setPlanningBusy] = useState(true);
+  const [panelError, setPanelError] = useState("");
 
   // Pan/zoom
   const svgRef       = useRef(null);
   const isPanning    = useRef(false);
   const didMove      = useRef(false);
   const lastPos      = useRef({ x: 0, y: 0 });
+  const initializedRef = useRef(false);
+  const requestRef = useRef(0);
   const [viewBox, setViewBox] = useState({ x: 0, y: 0, w: 1000, h: 1000 });
 
   // Replan
   const [replanning,   setReplanning]   = useState(false);
   const [replanned,    setReplanned]    = useState(false);
-  const [metrics,      setMetrics]      = useState(INITIAL_METRICS);
   const [replanStatus, setReplanStatus] = useState("OPTIMIZED");
 
   // Tooltip hover tracked to mouse position
@@ -147,13 +259,114 @@ export default function MissionControlPage() {
   }, [activeTool, screenToSVG]);
 
   // ─── Dynamic Paths based on Start/Goal ────────────────────────────────
+  const refreshMissionData = useCallback(async ({ resetReplan = true } = {}) => {
+    if (!scenarioInfo?.scenario_id) return;
+
+    const requestId = requestRef.current + 1;
+    requestRef.current = requestId;
+    setPlanningBusy(true);
+
+    try {
+      const nextPlanningWeights = toPlanningWeights(weights);
+      const startGrid = svgToGrid(startCoord, runtimeMetadata);
+      const goalGrid = svgToGrid(goalCoord, runtimeMetadata);
+
+      const [nextPathResult, nextComparisonResult] = await Promise.all([
+        missionService.getPathResult({
+          scenarioId: scenarioInfo.scenario_id,
+          start: startGrid,
+          goal: goalGrid,
+          weights: nextPlanningWeights,
+        }),
+        missionService.getComparisonResult({
+          scenarioId: scenarioInfo.scenario_id,
+          start: startGrid,
+          goal: goalGrid,
+          weights: nextPlanningWeights,
+        }),
+      ]);
+
+      if (requestRef.current !== requestId) return;
+
+      setPathResult(nextPathResult);
+      setComparisonResult(nextComparisonResult);
+      setPanelError("");
+
+      if (resetReplan) {
+        setReplanned(false);
+        setServiceReplanResult(null);
+        setReplanStatus("OPTIMIZED");
+      }
+    } catch (error) {
+      if (requestRef.current !== requestId) return;
+      setPanelError(error instanceof Error ? error.message : "Mission data could not be synchronized.");
+    } finally {
+      if (requestRef.current === requestId) {
+        setPlanningBusy(false);
+      }
+    }
+  }, [goalCoord, runtimeMetadata, scenarioInfo, startCoord, weights]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrapMission() {
+      try {
+        setPlanningBusy(true);
+        const snapshot = await missionService.getMissionControlSnapshot();
+        if (cancelled) return;
+
+        setScenarioInfo(snapshot.scenario);
+        setRuntimeMetadata(snapshot.layers_metadata);
+        setPathResult(snapshot.path_result);
+        setComparisonResult(snapshot.comparison_result);
+        setServiceReplanResult(snapshot.replan_result);
+        setStartCoord(gridToSvg(snapshot.scenario.start_grid, snapshot.layers_metadata));
+        setGoalCoord(gridToSvg(snapshot.scenario.goal_grid, snapshot.layers_metadata));
+        setWeights(toUiWeights(snapshot.scenario.default_weights));
+        setPanelError("");
+        initializedRef.current = true;
+      } catch (error) {
+        if (!cancelled) {
+          setPanelError(error instanceof Error ? error.message : "Mission snapshot could not be loaded.");
+        }
+      } finally {
+        if (!cancelled) {
+          setPlanningBusy(false);
+        }
+      }
+    }
+
+    bootstrapMission();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!initializedRef.current || !scenarioInfo?.scenario_id) return undefined;
+
+    const timer = setTimeout(() => {
+      refreshMissionData();
+    }, 180);
+
+    return () => clearTimeout(timer);
+  }, [goalCoord, refreshMissionData, scenarioInfo?.scenario_id, startCoord, weights]);
+
+  const planningWeights = toPlanningWeights(weights);
   const midX = (startCoord.x + goalCoord.x) / 2;
   const midY = (startCoord.y + goalCoord.y) / 2;
+  const thermalOffset = 56 + (planningWeights.w_thermal * 42);
+  const slopeOffset = 16 + (planningWeights.w_slope * 18);
   const safeControlPoint = {
-    x: midX + (100 * (weights.thermal / 100)),
-    y: midY + (100 * (weights.thermal / 100)),
+    x: midX + thermalOffset - (planningWeights.w_slope * 14),
+    y: midY + thermalOffset - slopeOffset,
   };
-  const replannedControlPoint = { x: midX - 250, y: midY - 100 };
+  const replannedControlPoint = {
+    x: midX - (210 + (planningWeights.w_thermal * 18)),
+    y: midY - (108 + (planningWeights.w_slope * 18)),
+  };
   const sectorNode = {
     x: lerp(startCoord.x, goalCoord.x, 0.56),
     y: lerp(startCoord.y, goalCoord.y, 0.56),
@@ -161,23 +374,167 @@ export default function MissionControlPage() {
   const safePath = `M ${startCoord.x} ${startCoord.y} Q ${safeControlPoint.x} ${safeControlPoint.y} ${goalCoord.x} ${goalCoord.y}`;
   const highRiskPath = `M ${startCoord.x} ${startCoord.y} L ${goalCoord.x} ${goalCoord.y}`;
   const replannedPath = `M ${startCoord.x} ${startCoord.y} Q ${replannedControlPoint.x} ${replannedControlPoint.y} ${goalCoord.x} ${goalCoord.y}`;
-  const distanceKm = Number((((replanned
-    ? getQuadraticLength(startCoord, replannedControlPoint, goalCoord)
-    : getQuadraticLength(startCoord, safeControlPoint, goalCoord))
-    * MAP_METERS_PER_UNIT) / 1000).toFixed(1));
+  const shortestSamples = buildLinearSamples(startCoord, goalCoord);
+  const safeSamples = buildQuadraticSamples(startCoord, safeControlPoint, goalCoord);
+  const replannedSamples = buildQuadraticSamples(startCoord, replannedControlPoint, goalCoord);
+
+  const summarizeRoute = (samples, routeKind) => {
+    let thermalAccum = 0;
+    let slopePeak = 0;
+    let safeCells = 0;
+    let cautionCells = 0;
+    let dangerCells = 0;
+
+    samples.forEach((point) => {
+      const staticThermal = STATIC_THERMAL_FIELDS.reduce((sum, field) => (
+        sum + getFieldStrength(
+          point,
+          field.x,
+          field.y,
+          field.baseRadius + ((weights.thermal / 100) * 26),
+          field.intensity,
+        )
+      ), 0);
+      const userThermal = thermalZones.reduce((sum, zone) => (
+        sum + getFieldStrength(point, zone.x, zone.y, zone.r, 0.88)
+      ), 0);
+      const shadowBias = shadowRegions.reduce((sum, region) => (
+        sum + getFieldStrength(point, region.x, region.y, 112, 0.08)
+      ), 0);
+      const thermalRisk = clamp(
+        ((staticThermal + userThermal) * (routeKind === "shortest" ? 1.16 : routeKind === "replanned" ? 0.66 : 0.82)) + shadowBias,
+        0,
+        1,
+      );
+
+      const baseSlope = STATIC_SLOPE_FIELDS.reduce((sum, field) => (
+        sum + getFieldStrength(point, field.x, field.y, field.radius, field.intensity)
+      ), 0);
+      const craterSlope = craters.reduce((sum, crater) => (
+        sum + getFieldStrength(point, crater.x, crater.y, 110, crater.slope / 34)
+      ), 0);
+      const slopeRisk = clamp(
+        (baseSlope + craterSlope) * (0.74 + (planningWeights.w_slope * 0.14)),
+        0,
+        1,
+      );
+
+      thermalAccum += thermalRisk;
+      slopePeak = Math.max(slopePeak, slopeRisk);
+
+      const combinedRisk = clamp((thermalRisk * 0.68) + (slopeRisk * 0.32), 0, 1);
+
+      if (combinedRisk >= 0.62) {
+        dangerCells += 1;
+      } else if (combinedRisk >= 0.33) {
+        cautionCells += 1;
+      } else {
+        safeCells += 1;
+      }
+    });
+
+    const distanceM = Math.round(samples.reduce((total, point, index) => {
+      if (!index) return total;
+      return total + (Math.hypot(point.x - samples[index - 1].x, point.y - samples[index - 1].y) * MAP_METERS_PER_UNIT);
+    }, 0));
+    const thermalExposure = Number((((thermalAccum / samples.length) * 68) + (dangerCells * 0.55) + (cautionCells * 0.22)).toFixed(1));
+    const maxSlope = Number((6.4 + (slopePeak * 22.5) + (routeKind === "shortest" ? 1.6 : routeKind === "replanned" ? 0.7 : 1.0)).toFixed(1));
+    const compute = Math.round(
+      94
+      + (samples.length * 0.85)
+      + (routeKind === "shortest" ? 18 : routeKind === "replanned" ? 58 : 34)
+      + (thermalZones.length * 6)
+      + (craters.length * 5),
+    );
+    const energyCost = Number((((distanceM / 620) * (0.8 + (planningWeights.w_energy * 0.28))) + (maxSlope * 0.55) + (thermalExposure * 0.18)).toFixed(1));
+
+    return {
+      distanceM,
+      thermalExposure,
+      maxSlope,
+      compute,
+      energyCost,
+      riskBreakdown: {
+        safeCells,
+        cautionCells,
+        dangerCells,
+      },
+    };
+  };
+
+  const fallbackShortestMetrics = summarizeRoute(shortestSamples, "shortest");
+  const fallbackSafeMetrics = summarizeRoute(safeSamples, "safe");
+  const fallbackReplannedMetrics = summarizeRoute(replannedSamples, "replanned");
+  const safePathMetrics = createDisplayMetrics(comparisonResult?.safe_path ?? pathResult) ?? fallbackSafeMetrics;
+  const shortestPathMetrics = createDisplayMetrics(comparisonResult?.shortest_path) ?? fallbackShortestMetrics;
+  const replannedPathMetrics = serviceReplanResult
+    ? {
+        distanceM: Math.max(0, safePathMetrics.distanceM + (serviceReplanResult.metrics_delta?.distance_delta_m ?? 0)),
+        thermalExposure: Number((safePathMetrics.thermalExposure + (serviceReplanResult.metrics_delta?.thermal_delta ?? 0)).toFixed(1)),
+        maxSlope: safePathMetrics.maxSlope,
+        compute: serviceReplanResult.computation_time_ms ?? safePathMetrics.compute,
+        energyCost: Number((safePathMetrics.energyCost + (serviceReplanResult.metrics_delta?.energy_delta ?? 0)).toFixed(1)),
+        riskBreakdown: safePathMetrics.riskBreakdown,
+      }
+    : fallbackReplannedMetrics;
+  const activeMetrics = replanned ? replannedPathMetrics : safePathMetrics;
+  const distanceKm = Number((activeMetrics.distanceM / 1000).toFixed(1));
+  const distanceDeltaPct = comparisonResult?.delta?.distance_overhead_pct ?? getPercentDelta(safePathMetrics.distanceM, shortestPathMetrics.distanceM);
+  const activeThermalReductionPct = getPercentReduction(shortestPathMetrics.thermalExposure, activeMetrics.thermalExposure);
+  const activeEnergyDeltaPct = replanned
+    ? getPercentDelta(replannedPathMetrics.energyCost, shortestPathMetrics.energyCost)
+    : comparisonResult?.delta?.energy_delta_pct ?? getPercentDelta(safePathMetrics.energyCost, shortestPathMetrics.energyCost);
+  const confidencePct = Number(clamp(
+    88.4
+      + Math.min(10, activeThermalReductionPct * 0.12)
+      - ((activeMetrics.riskBreakdown?.dangerCells ?? 0) * 0.15)
+      + (replanned ? 1.8 : 0),
+    74,
+    99.6,
+  ).toFixed(1));
+  const safePathRecommended = (comparisonResult?.delta?.recommendation === "safe_path_preferred")
+    || activeThermalReductionPct >= Math.max(8, distanceDeltaPct * 0.9);
+  const triggerTypeLabel = (serviceReplanResult?.trigger_type ?? "thermal_spike").replaceAll("_", " ").toUpperCase();
 
   // ─── Replan ─────────────────────────────────────────────────────────────
-  const handleReplan = () => {
-    if (replanning) return;
+  const handleReplan = useCallback(async () => {
+    if (replanning || !scenarioInfo?.scenario_id) return;
+
     setReplanning(true);
     setReplanStatus("REPLANNING...");
-    setTimeout(() => {
+
+    try {
+      const latestThermal = thermalZones[thermalZones.length - 1];
+      const triggerPoint = latestThermal ?? sectorNode;
+      const triggerType = thermalZones.length
+        ? "thermal_spike"
+        : craters.length
+          ? "new_obstacle"
+          : shadowRegions.length
+            ? "energy_budget"
+            : "thermal_spike";
+
+      const nextReplanResult = await missionService.getReplanResult({
+        scenarioId: scenarioInfo.scenario_id,
+        start: svgToGrid(startCoord, runtimeMetadata),
+        goal: svgToGrid(goalCoord, runtimeMetadata),
+        weights: planningWeights,
+        currentPath: pathResult,
+        triggerType,
+        triggerLocation: svgToGrid(triggerPoint, runtimeMetadata),
+      });
+
+      setServiceReplanResult(nextReplanResult);
       setReplanned(true);
-      setReplanning(false);
       setReplanStatus("OPTIMIZED");
-      setMetrics(REPLANNED_METRICS);
-    }, 1800);
-  };
+      setPanelError("");
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Replan could not be computed.");
+      setReplanStatus("REVIEW");
+    } finally {
+      setReplanning(false);
+    }
+  }, [craters.length, goalCoord, pathResult, planningWeights, replanning, runtimeMetadata, scenarioInfo, sectorNode, shadowRegions.length, startCoord, thermalZones]);
 
   // ─── Derived visuals ─────────────────────────────────────────────────────
   const routeW   = (2 + (weights.thermal / 100) * 2).toFixed(1);
@@ -212,15 +569,15 @@ export default function MissionControlPage() {
         <div className="flex items-center gap-6">
           <div className="h-10 flex flex-col justify-center items-end border-r border-slate-200 pr-6">
             <span className="text-[0.6rem] font-bold uppercase tracking-widest text-slate-400">Active Scenario</span>
-            <span className="text-xs font-bold">Shackleton Crater - South Rim</span>
+            <span className="text-xs font-bold">{runtimeMetadata.region_name ?? "Shackleton Crater - South Rim"}</span>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 text-[0.65rem] font-bold rounded-md border border-emerald-100">
+            <div className={`flex items-center gap-2 px-3 py-1.5 text-[0.65rem] font-bold rounded-md border ${replanning || planningBusy ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-slate-100 text-slate-600 border-slate-200"}`}>
               <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                {(replanning || planningBusy) && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${replanning || planningBusy ? "bg-emerald-500" : "bg-slate-400"}`} />
               </span>
-              REPLANNING: ACTIVE
+              {replanning ? "REPLANNING: ACTIVE" : planningBusy ? "MODEL: SYNCING" : "MODEL: READY"}
             </div>
             <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
               <span className="material-symbols-outlined text-lg">settings</span>
@@ -376,7 +733,7 @@ export default function MissionControlPage() {
             <circle
               cx={sectorNode.x} cy={sectorNode.y} fill="#ef4444" r="8" stroke="white" strokeWidth="2"
               style={{ cursor: "pointer" }}
-              onMouseEnter={(e) => setTooltipData({ x: e.clientX, y: e.clientY, title: `NODE: 4-B`, lines: [{label: "Temp Delta", value: `+42.4 K`}, {label:"Elevation", value:`-4,102 m`}], risk: "CRITICAL" })}
+              onMouseEnter={(e) => setTooltipData({ x: e.clientX, y: e.clientY, title: `NODE: 4-B`, lines: [{label: "Thermal Delta", value: `${activeThermalReductionPct}% safer`}, {label:"Projection", value: runtimeMetadata.projection ?? "South Pole"}], risk: "CRITICAL" })}
               onMouseMove={(e) => setTooltipData(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)}
               onMouseLeave={() => setTooltipData(null)}
             />
@@ -437,27 +794,29 @@ export default function MissionControlPage() {
               </div>
               <span className="px-2 py-0.5 bg-slate-100 rounded text-[0.6rem] font-bold text-slate-500 flex-shrink-0">T+04:22:12</span>
             </div>
-            <div className={`p-3 rounded-xl border text-xs leading-relaxed font-medium transition-colors duration-500 ${replanned ? "bg-emerald-50 border-emerald-100 text-slate-700" : "bg-red-50 border-red-100 text-slate-700"}`}>
-              {replanned
-                ? <><span className="text-emerald-600 font-bold uppercase text-[0.65rem]">Resolved: </span>Route recomputed. Sector 4-B avoided. Thermal exposure reduced by <span className="text-emerald-600 font-bold">42%</span>.</>
-                : <><span className="text-red-600 font-bold uppercase text-[0.65rem]">Alert: </span>Thermal spike in <span className="font-bold underline decoration-red-200">sector 4-B</span>. Route recomputed — exposure reduced by <span className="text-emerald-600 font-bold">42%</span>.</>
+            <div className={`p-3 rounded-xl border text-xs leading-relaxed font-medium transition-colors duration-500 ${panelError ? "bg-amber-50 border-amber-100 text-slate-700" : replanned ? "bg-emerald-50 border-emerald-100 text-slate-700" : "bg-red-50 border-red-100 text-slate-700"}`}>
+              {panelError
+                ? <><span className="text-amber-600 font-bold uppercase text-[0.65rem]">Sync: </span>{panelError}</>
+                : replanned
+                  ? <><span className="text-emerald-600 font-bold uppercase text-[0.65rem]">Resolved: </span>{serviceReplanResult?.reason ?? "Route recomputed around sector 4-B."} Thermal exposure shifted by <span className="text-emerald-600 font-bold">{Math.abs(serviceReplanResult?.metrics_delta?.thermal_delta ?? 0).toFixed(1)}</span> points with a <span className="font-bold">{Math.abs(serviceReplanResult?.metrics_delta?.distance_delta_m ?? 0).toLocaleString()}</span> m route delta.</>
+                  : <><span className="text-red-600 font-bold uppercase text-[0.65rem]">Alert: </span>Thermal spike in <span className="font-bold underline decoration-red-200">sector 4-B</span>. Safe corridor reduces exposure by <span className="text-emerald-600 font-bold">{activeThermalReductionPct}%</span> versus the shortest route.</>
               }
             </div>
             <div className="grid grid-cols-2 gap-3 mt-3">
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                 <div className="text-[0.6rem] font-bold text-slate-400 uppercase mb-1">Trigger Type</div>
-                <div className="text-[0.7rem] font-bold text-slate-700">THERMAL_EXT</div>
+                <div className="text-[0.7rem] font-bold text-slate-700">{triggerTypeLabel}</div>
               </div>
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                 <div className="text-[0.6rem] font-bold text-slate-400 uppercase mb-1">Confidence</div>
-                <div className="text-[0.7rem] font-bold text-emerald-600">99.2%</div>
+                <div className="text-[0.7rem] font-bold text-emerald-600">{confidencePct}%</div>
               </div>
             </div>
             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
               <span className="text-[0.65rem] font-bold text-slate-400 uppercase tracking-tighter">Status</span>
-              <span className={`flex items-center gap-1.5 text-[0.65rem] font-black transition-colors ${replanning ? "text-amber-500" : "text-emerald-600"}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${replanning ? "bg-amber-400 animate-pulse" : "bg-emerald-500"}`} />
-                {replanStatus}
+              <span className={`flex items-center gap-1.5 text-[0.65rem] font-black transition-colors ${panelError ? "text-amber-600" : replanning || planningBusy ? "text-amber-500" : "text-emerald-600"}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${panelError ? "bg-amber-500" : replanning || planningBusy ? "bg-amber-400 animate-pulse" : "bg-emerald-500"}`} />
+                {panelError ? "SYNCED WITH WARNINGS" : replanStatus}
               </span>
             </div>
           </div>
@@ -552,8 +911,8 @@ export default function MissionControlPage() {
             <div className="flex items-center gap-10">
               {[
                 { label: "Distance",         value: distanceKm,       unit: "km" },
-                { label: "Thermal Exposure", value: metrics.thermal,  unit: "%" },
-                { label: "Max Slope",        value: metrics.slope,    unit: "\u00b0" },
+                { label: "Thermal Exposure", value: activeMetrics.thermalExposure,  unit: "score" },
+                { label: "Max Slope",        value: activeMetrics.maxSlope,    unit: "\u00b0" },
               ].map(({ label, value, unit }) => (
                 <div key={label} className="flex flex-col">
                   <span className="text-[0.6rem] font-bold uppercase tracking-widest text-slate-400 mb-1 whitespace-nowrap">{label}</span>
@@ -566,15 +925,15 @@ export default function MissionControlPage() {
               <div className="flex flex-col">
                 <span className="text-[0.6rem] font-bold uppercase tracking-widest text-slate-400 mb-1">Compute Time</span>
                 <div className="flex items-baseline gap-1 text-emerald-600">
-                  <span className="text-2xl font-extrabold tabular-nums tracking-tight">{metrics.compute}</span>
+                  <span className="text-2xl font-extrabold tabular-nums tracking-tight">{activeMetrics.compute}</span>
                   <span className="text-xs font-bold uppercase">ms</span>
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-3 pl-6 border-l border-slate-100 flex-shrink-0">
-              <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100">
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-full border ${safePathRecommended ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-amber-50 text-amber-600 border-amber-100"}`}>
                 <span className="material-symbols-outlined text-sm">verified</span>
-                <span className="text-[0.65rem] font-bold tracking-tight uppercase whitespace-nowrap">Safe Path Preferred</span>
+                <span className="text-[0.65rem] font-bold tracking-tight uppercase whitespace-nowrap">{safePathRecommended ? "Safe Path Preferred" : "Shortest Path Viable"}</span>
               </div>
               <button
                 onClick={(e) => e.stopPropagation()}

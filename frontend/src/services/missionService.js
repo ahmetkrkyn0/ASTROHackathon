@@ -1,80 +1,129 @@
-import comparisonResultMock, { shortestPathMock } from "../mocks/comparisonResult.mock";
-import layersMetadataMock from "../mocks/layers.mock";
-import pathResultMock from "../mocks/pathResult.mock";
-import replanResultMock from "../mocks/replanResult.mock";
-import scenariosMock from "../mocks/scenarios.mock";
+import { createWeights } from "../models/missionModels";
+import { postCompare } from "./api/compareApi";
+import { getLayers } from "./api/layersApi";
+import { postPlan } from "./api/planApi";
+import { postReplan } from "./api/replanApi";
+import {
+  applyScenario as applyScenarioApi,
+  getScenarioById as getScenarioByIdApi,
+  getScenarios as getScenariosApi,
+} from "./api/scenariosApi";
 
-function clone(data) {
-  return JSON.parse(JSON.stringify(data));
-}
-
-function createWeightedPathResult(weights) {
-  const prefersSafety = weights.w_thermal >= 1.25 || weights.w_energy >= weights.w_dist;
-  const basePath = prefersSafety ? pathResultMock : shortestPathMock;
-
-  return {
-    ...clone(basePath),
-    route_label: prefersSafety ? "Mission Plan" : "Distance-Biased Plan",
-    route_strategy: prefersSafety ? "Thermal-priority route" : "Distance-priority route",
-  };
-}
-
-function createWeightedComparisonResult(scenarioId, weights) {
-  const comparison = clone(comparisonResultMock);
-  const thermalBias = weights.w_thermal - weights.w_dist;
-  const slopeBias = weights.w_slope - 1;
-  const recommendation = thermalBias >= 0.2 ? "safe_path_preferred" : "paths_equivalent";
-
-  comparison.scenario_id = scenarioId;
-  comparison.delta.recommendation = recommendation;
-  comparison.delta.distance_overhead_pct = Number((22.9 + slopeBias * 1.4).toFixed(1));
-  comparison.delta.thermal_reduction_pct = Number((68 + thermalBias * 8).toFixed(1));
-  comparison.delta.energy_delta_pct = Number((-6.5 + (weights.w_energy - 1.2) * 7).toFixed(1));
-
-  return comparison;
-}
-
-function createScenarioAwareReplanResult(scenarioId) {
-  const result = clone(replanResultMock);
-  result.scenario_id = scenarioId;
-  return result;
+function mergeWeights(baseWeights = {}, overrides = {}) {
+  return createWeights({
+    ...baseWeights,
+    ...overrides,
+  });
 }
 
 export const missionService = {
   async getScenarios() {
-    return clone(scenariosMock);
+    return getScenariosApi();
   },
 
   async getScenarioById(scenarioId) {
-    const scenario = scenariosMock.find((item) => item.scenario_id === scenarioId) ?? scenariosMock[0];
-    return clone(scenario);
+    return getScenarioByIdApi(scenarioId);
   },
 
-  async getLayersMetadata() {
-    return clone(layersMetadataMock);
+  async applyScenario(scenarioId) {
+    return applyScenarioApi({ scenarioId });
   },
 
-  async getPathResult({ weights }) {
-    return createWeightedPathResult(weights);
+  async getLayersMetadata({ region, scenarioId } = {}) {
+    return getLayers({ region, scenarioId });
   },
 
-  async getComparisonResult({ scenarioId, weights }) {
-    return createWeightedComparisonResult(scenarioId, weights);
+  async getPathResult({ scenarioId, start, goal, weights } = {}) {
+    const scenario = await this.getScenarioById(scenarioId);
+    return postPlan({
+      scenarioId: scenario.scenario_id,
+      start: start ?? scenario.start_grid,
+      goal: goal ?? scenario.goal_grid,
+      weights: mergeWeights(scenario.default_weights, weights),
+    });
   },
 
-  async getReplanResult({ scenarioId }) {
-    return createScenarioAwareReplanResult(scenarioId);
+  async getComparisonResult({ scenarioId, start, goal, weights } = {}) {
+    const scenario = await this.getScenarioById(scenarioId);
+    return postCompare({
+      scenarioId: scenario.scenario_id,
+      start: start ?? scenario.start_grid,
+      goal: goal ?? scenario.goal_grid,
+      weights: mergeWeights(scenario.default_weights, weights),
+    });
   },
 
-  async getMissionControlSnapshot({ scenarioId, weights }) {
-    const [scenario, layers_metadata, path_result, comparison_result, replan_result] =
-      await Promise.all([
-        this.getScenarioById(scenarioId),
-        this.getLayersMetadata(),
-        this.getPathResult({ scenarioId, weights }),
-        this.getComparisonResult({ scenarioId, weights }),
-        this.getReplanResult({ scenarioId }),
-      ]);
+  async getReplanResult({
+    scenarioId,
+    start,
+    goal,
+    weights,
+    currentPath,
+    triggerType,
+    triggerLocation,
+  } = {}) {
+    const scenario = await this.getScenarioById(scenarioId);
+    return postReplan({
+      scenarioId: scenario.scenario_id,
+      start: start ?? scenario.start_grid,
+      goal: goal ?? scenario.goal_grid,
+      weights: mergeWeights(scenario.default_weights, weights),
+      current_path: currentPath ?? null,
+      trigger_type: triggerType ?? "thermal_spike",
+      trigger_location: triggerLocation ?? null,
+    });
+  },
+
+  async planRoute(payload = {}) {
+    return this.getPathResult(payload);
+  },
+
+  async compareRoutes(payload = {}) {
+    return this.getComparisonResult(payload);
+  },
+
+  async replanRoute(payload = {}) {
+    return this.getReplanResult(payload);
+  },
+
+  async getMissionControlSnapshot({
+    scenarioId,
+    start,
+    goal,
+    weights,
+    currentPath,
+    triggerType,
+    triggerLocation,
+  } = {}) {
+    const scenario = await this.getScenarioById(scenarioId);
+    const mergedWeights = mergeWeights(scenario.default_weights, weights);
+    const effectiveStart = start ?? scenario.start_grid;
+    const effectiveGoal = goal ?? scenario.goal_grid;
+
+    const [layers_metadata, path_result, comparison_result, replan_result] = await Promise.all([
+      this.getLayersMetadata({ region: scenario.grid_region, scenarioId: scenario.scenario_id }),
+      this.getPathResult({
+        scenarioId: scenario.scenario_id,
+        start: effectiveStart,
+        goal: effectiveGoal,
+        weights: mergedWeights,
+      }),
+      this.getComparisonResult({
+        scenarioId: scenario.scenario_id,
+        start: effectiveStart,
+        goal: effectiveGoal,
+        weights: mergedWeights,
+      }),
+      this.getReplanResult({
+        scenarioId: scenario.scenario_id,
+        start: effectiveStart,
+        goal: effectiveGoal,
+        weights: mergedWeights,
+        currentPath,
+        triggerType,
+        triggerLocation,
+      }),
+    ]);
 
     return {
       scenario,
