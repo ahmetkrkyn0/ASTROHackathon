@@ -1,20 +1,47 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 // ─── Mock metric data ────────────────────────────────────────────────────────
-const INITIAL_METRICS = { distance: 14.2, thermal: 12, energy: 4.8, slope: 8.2, compute: 142 };
-const REPLANNED_METRICS = { distance: 15.8, thermal: 7, energy: 5.4, slope: 7.1, compute: 218 };
+const INITIAL_METRICS = { thermal: 12, slope: 8.2, compute: 142 };
+const REPLANNED_METRICS = { thermal: 7, slope: 7.1, compute: 218 };
 
 // ─── Tool config ─────────────────────────────────────────────────────────────
 const TOOLS = [
+  { id: "start",   icon: "flag",       label: "Start",   desc: "Click to set Start location" },
+  { id: "goal",    icon: "sports_score", label: "Goal",  desc: "Click to set Goal location" },
   { id: "thermal", icon: "thermostat", label: "Thermal", desc: "Click to place thermal hazard zone" },
   { id: "crater",  icon: "terrain",    label: "Slope",   desc: "Click to place crater" },
   { id: "shadow",  icon: "layers",     label: "Shadow",  desc: "Click to place PSR shadow region" },
-  { id: "energy",  icon: "bolt",       label: "Energy",  desc: "Click to place safe energy zone" },
 ];
+
+const MAP_METERS_PER_UNIT = 17.9;
+const CURVE_SEGMENTS = 64;
+
+function getQuadraticLength(start, control, end, segments = CURVE_SEGMENTS) {
+  let length = 0;
+  let previous = start;
+
+  for (let index = 1; index <= segments; index += 1) {
+    const t = index / segments;
+    const mt = 1 - t;
+    const point = {
+      x: (mt * mt * start.x) + (2 * mt * t * control.x) + (t * t * end.x),
+      y: (mt * mt * start.y) + (2 * mt * t * control.y) + (t * t * end.y),
+    };
+
+    length += Math.hypot(point.x - previous.x, point.y - previous.y);
+    previous = point;
+  }
+
+  return length;
+}
+
+function lerp(start, end, factor) {
+  return start + ((end - start) * factor);
+}
 
 export default function MissionControlPage() {
   // Weights
-  const [weights, setWeights] = useState({ thermal: 85, slope: 42, energy: 68 });
+  const [weights, setWeights] = useState({ thermal: 85, slope: 42 });
 
   // Pan/zoom
   const svgRef       = useRef(null);
@@ -29,34 +56,44 @@ export default function MissionControlPage() {
   const [metrics,      setMetrics]      = useState(INITIAL_METRICS);
   const [replanStatus, setReplanStatus] = useState("OPTIMIZED");
 
-  // Tooltip hover
-  const [showTooltip, setShowTooltip] = useState(false);
+  // Tooltip hover tracked to mouse position
+  const [tooltipData, setTooltipData] = useState(null);
 
   // Active tool + placed elements
   const [activeTool,    setActiveTool]    = useState(null);
+  const [startCoord,    setStartCoord]    = useState({ x: 250, y: 850 });
+  const [goalCoord,     setGoalCoord]     = useState({ x: 750, y: 250 });
   const [thermalZones,  setThermalZones]  = useState([]);
   const [craters,       setCraters]       = useState([]);
   const [shadowRegions, setShadowRegions] = useState([]);
-  const [energyZones,   setEnergyZones]   = useState([]);
 
   // Convert screen → SVG coordinates
   const screenToSVG = useCallback((clientX, clientY) => {
-    const el   = svgRef.current;
+    const el = svgRef.current;
     if (!el) return { x: 500, y: 500 };
-    const rect = el.getBoundingClientRect();
-    return {
-      x: viewBox.x + ((clientX - rect.left)  / rect.width)  * viewBox.w,
-      y: viewBox.y + ((clientY - rect.top)   / rect.height) * viewBox.h,
-    };
-  }, [viewBox]);
+    const point = el.createSVGPoint();
+    const ctm = el.getScreenCTM();
+
+    if (!ctm) return { x: 500, y: 500 };
+
+    point.x = clientX;
+    point.y = clientY;
+
+    const position = point.matrixTransform(ctm.inverse());
+    return { x: position.x, y: position.y };
+  }, []);
 
   // ─── Pan ────────────────────────────────────────────────────────────────
   const onMouseDown = useCallback((e) => {
     if (e.target.closest(".map-panel")) return;
+    if (activeTool) {
+      didMove.current = false;
+      return;
+    }
     isPanning.current = true;
     didMove.current   = false;
     lastPos.current   = { x: e.clientX, y: e.clientY };
-  }, []);
+  }, [activeTool]);
 
   const onMouseMove = useCallback((e) => {
     if (!isPanning.current) return;
@@ -76,17 +113,18 @@ export default function MissionControlPage() {
   const onWheel = useCallback((e) => {
     e.preventDefault();
     const factor = e.deltaY > 0 ? 1.12 : 0.88;
+    const zoomPoint = screenToSVG(e.clientX, e.clientY);
     setViewBox((vb) => {
-      const el   = svgRef.current;
-      if (!el) return vb;
-      const rect = el.getBoundingClientRect();
-      const mx   = vb.x + ((e.clientX - rect.left) / rect.width)  * vb.w;
-      const my   = vb.y + ((e.clientY - rect.top)  / rect.height) * vb.h;
-      const nw   = Math.min(Math.max(vb.w * factor, 200), 2000);
-      const nh   = Math.min(Math.max(vb.h * factor, 200), 2000);
-      return { x: mx - (mx - vb.x) * (nw / vb.w), y: my - (my - vb.y) * (nh / vb.h), w: nw, h: nh };
+      const nw = Math.min(Math.max(vb.w * factor, 200), 2000);
+      const nh = Math.min(Math.max(vb.h * factor, 200), 2000);
+      return {
+        x: zoomPoint.x - ((zoomPoint.x - vb.x) * (nw / vb.w)),
+        y: zoomPoint.y - ((zoomPoint.y - vb.y) * (nh / vb.h)),
+        w: nw,
+        h: nh,
+      };
     });
-  }, []);
+  }, [screenToSVG]);
 
   useEffect(() => {
     const el = svgRef.current;
@@ -100,11 +138,33 @@ export default function MissionControlPage() {
     if (didMove.current || !activeTool) return;
     if (e.target.closest(".map-panel")) return;
     const pos = screenToSVG(e.clientX, e.clientY);
-    if (activeTool === "thermal") setThermalZones ((p) => [...p, { ...pos, r: 90 }]);
-    if (activeTool === "crater")  setCraters       ((p) => [...p, { ...pos }]);
-    if (activeTool === "shadow")  setShadowRegions ((p) => [...p, { ...pos }]);
-    if (activeTool === "energy")  setEnergyZones   ((p) => [...p, { ...pos, r: 70 }]);
+    
+    if (activeTool === "start")   setStartCoord(pos);
+    if (activeTool === "goal")    setGoalCoord(pos);
+    if (activeTool === "thermal") setThermalZones ((p) => [...p, { ...pos, r: 80 + Math.random()*40, tempDelta: Math.floor(Math.random() * 80) + 10 }]);
+    if (activeTool === "crater")  setCraters       ((p) => [...p, { ...pos, slope: Math.floor(Math.random() * 25) + 5, depth: Math.floor(Math.random() * 200) + 50 }]);
+    if (activeTool === "shadow")  setShadowRegions ((p) => [...p, { ...pos, temp: -Math.floor(Math.random() * 50) - 150 }]);
   }, [activeTool, screenToSVG]);
+
+  // ─── Dynamic Paths based on Start/Goal ────────────────────────────────
+  const midX = (startCoord.x + goalCoord.x) / 2;
+  const midY = (startCoord.y + goalCoord.y) / 2;
+  const safeControlPoint = {
+    x: midX + (100 * (weights.thermal / 100)),
+    y: midY + (100 * (weights.thermal / 100)),
+  };
+  const replannedControlPoint = { x: midX - 250, y: midY - 100 };
+  const sectorNode = {
+    x: lerp(startCoord.x, goalCoord.x, 0.56),
+    y: lerp(startCoord.y, goalCoord.y, 0.56),
+  };
+  const safePath = `M ${startCoord.x} ${startCoord.y} Q ${safeControlPoint.x} ${safeControlPoint.y} ${goalCoord.x} ${goalCoord.y}`;
+  const highRiskPath = `M ${startCoord.x} ${startCoord.y} L ${goalCoord.x} ${goalCoord.y}`;
+  const replannedPath = `M ${startCoord.x} ${startCoord.y} Q ${replannedControlPoint.x} ${replannedControlPoint.y} ${goalCoord.x} ${goalCoord.y}`;
+  const distanceKm = Number((((replanned
+    ? getQuadraticLength(startCoord, replannedControlPoint, goalCoord)
+    : getQuadraticLength(startCoord, safeControlPoint, goalCoord))
+    * MAP_METERS_PER_UNIT) / 1000).toFixed(1));
 
   // ─── Replan ─────────────────────────────────────────────────────────────
   const handleReplan = () => {
@@ -212,22 +272,19 @@ export default function MissionControlPage() {
                 <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
                 <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
               </radialGradient>
-              <radialGradient id="energyGradient">
-                <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
-                <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
-              </radialGradient>
               <filter id="glow"><feGaussianBlur stdDeviation="3" result="c"/><feMerge><feMergeNode in="c"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              
+              <pattern id="smallGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 40 40 M 0 40 L 40 40" fill="none" stroke="rgba(0,0,0,0.02)" strokeWidth="0.5"/>
+              </pattern>
+              <pattern id="gridPattern" width="200" height="200" patternUnits="userSpaceOnUse">
+                <rect width="200" height="200" fill="url(#smallGrid)"/>
+                <path d="M 200 0 L 200 200 M 0 200 L 200 200" fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="1"/>
+              </pattern>
             </defs>
 
-            {/* Grid */}
-            <path d="M 0 200 L 1000 200 M 0 400 L 1000 400 M 0 600 L 1000 600 M 0 800 L 1000 800" stroke="rgba(0,0,0,0.05)" strokeWidth="1" />
-            <path d="M 200 0 L 200 1000 M 400 0 L 400 1000 M 600 0 L 600 1000 M 800 0 L 800 1000" stroke="rgba(0,0,0,0.05)" strokeWidth="1" />
-            {[200, 400, 600, 800].map(v => (
-              <g key={v}>
-                <text x={v} y={14} fontSize="11" fill="rgba(0,0,0,0.12)" textAnchor="middle">{v}</text>
-                <text x={8}  y={v} fontSize="11" fill="rgba(0,0,0,0.12)" dominantBaseline="middle">{v}</text>
-              </g>
-            ))}
+            {/* Infinite Grid */}
+            <rect x="-50000" y="-50000" width="100000" height="100000" fill="url(#gridPattern)" />
 
             {/* ── Static PSR regions ──────────────────────────────────── */}
             <path className="psr-region" d="M 100 100 Q 150 80 200 150 T 300 100 L 280 250 Q 200 280 120 230 Z" />
@@ -239,7 +296,11 @@ export default function MissionControlPage() {
 
             {/* ── USER-placed thermal zones ────────────────────────────── */}
             {thermalZones.map((z, i) => (
-              <g key={`th-${i}`}>
+              <g key={`th-${i}`}
+                 style={{ cursor: "pointer" }}
+                 onMouseEnter={(e) => setTooltipData({ x: e.clientX, y: e.clientY, title: `THERMAL ZONE ${i+1}`, lines: [{label: "Temp Delta", value: `+${z.tempDelta} K`}, {label:"Radius", value:`${Math.round(z.r)} m`}], risk: "CRITICAL" })}
+                 onMouseMove={(e) => setTooltipData(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)}
+                 onMouseLeave={() => setTooltipData(null)}>
                 <circle fill="url(#thermalGradient)" opacity="0.55" cx={z.x} cy={z.y} r={z.r} />
                 <circle fill="none" stroke="#ef4444" strokeWidth="0.8" strokeDasharray="4 2" opacity="0.5" cx={z.x} cy={z.y} r={z.r} />
                 <text x={z.x} y={z.y - z.r - 6} fontSize="11" fill="#ef4444" textAnchor="middle" fontWeight="bold">THERMAL</text>
@@ -248,7 +309,11 @@ export default function MissionControlPage() {
 
             {/* ── USER-placed craters ──────────────────────────────────── */}
             {craters.map((c, i) => (
-              <g key={`cr-${i}`}>
+              <g key={`cr-${i}`}
+                 style={{ cursor: "pointer" }}
+                 onMouseEnter={(e) => setTooltipData({ x: e.clientX, y: e.clientY, title: `CRATER ${i+1}`, lines: [{label: "Slope", value: `${c.slope}\u00b0`}, {label:"Depth", value:`${c.depth} m`}], risk: "HIGH" })}
+                 onMouseMove={(e) => setTooltipData(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)}
+                 onMouseLeave={() => setTooltipData(null)}>
                 <ellipse cx={c.x} cy={c.y} rx="60" ry="40" fill="rgba(30,41,59,0.18)" stroke="rgba(30,41,59,0.35)" strokeWidth="1" strokeDasharray="4 2" />
                 <ellipse cx={c.x} cy={c.y} rx="30" ry="20" fill="rgba(30,41,59,0.28)" />
                 <text x={c.x} y={c.y - 48} fontSize="11" fill="#475569" textAnchor="middle" fontWeight="bold">CRATER</text>
@@ -257,73 +322,88 @@ export default function MissionControlPage() {
 
             {/* ── USER-placed shadow / PSR regions ───────────────────── */}
             {shadowRegions.map((s, i) => (
-              <g key={`sh-${i}`}>
+              <g key={`sh-${i}`}
+                 style={{ cursor: "pointer" }}
+                 onMouseEnter={(e) => setTooltipData({ x: e.clientX, y: e.clientY, title: `PSR REGION ${i+1}`, lines: [{label: "Surface Temp", value: `${s.temp} C`}], risk: "MODERATE" })}
+                 onMouseMove={(e) => setTooltipData(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)}
+                 onMouseLeave={() => setTooltipData(null)}>
                 <ellipse cx={s.x} cy={s.y} rx="70" ry="50" fill="rgba(30,41,59,0.15)" stroke="rgba(30,41,59,0.3)" strokeWidth="1" strokeDasharray="4 2" />
                 <text x={s.x} y={s.y - 56} fontSize="11" fill="#64748b" textAnchor="middle" fontWeight="bold">PSR SHADOW</text>
               </g>
             ))}
 
-            {/* ── USER-placed energy zones ─────────────────────────────── */}
-            {energyZones.map((z, i) => (
-              <g key={`en-${i}`}>
-                <circle fill="url(#energyGradient)" opacity="0.5" cx={z.x} cy={z.y} r={z.r} />
-                <circle fill="none" stroke="#10b981" strokeWidth="0.8" strokeDasharray="4 2" opacity="0.5" cx={z.x} cy={z.y} r={z.r} />
-                <text x={z.x} y={z.y - z.r - 6} fontSize="11" fill="#10b981" textAnchor="middle" fontWeight="bold">SAFE ZONE</text>
-              </g>
-            ))}
-
             {/* ── Routes ──────────────────────────────────────────────── */}
             {/* Short / high risk */}
-            <path d="M 250 850 L 550 450 L 750 250" fill="none" opacity={replanned ? 0.2 : 0.55} stroke="#ef4444" strokeDasharray="6,4" strokeWidth="1.5" style={{ transition: "opacity 0.8s" }} />
+            <path d={highRiskPath} fill="none" opacity={replanned ? 0.2 : 0.55} stroke="#ef4444" strokeDasharray="6,4" strokeWidth="1.5" style={{ transition: "d 0.3s, opacity 0.8s" }} />
 
             {/* Safe route */}
-            <path d="M 250 850 Q 300 900 400 850 T 500 750" fill="none" stroke="#10b981" strokeWidth={routeW} opacity={routeOp} style={{ transition: "stroke-width 0.3s, opacity 0.3s" }} />
+            <path d={safePath} fill="none" stroke="#10b981" strokeWidth={routeW} opacity={routeOp} style={{ transition: "d 0.3s, stroke-width 0.3s, opacity 0.3s" }} />
 
             {/* Replanned segment */}
-            {!replanned && <path d="M 500 750 C 550 650 650 350 750 250" fill="none" stroke="#f59e0b" strokeLinecap="round" strokeWidth="3" />}
+            {!replanned && <path d={safePath} fill="none" stroke="#f59e0b" strokeLinecap="round" strokeWidth="3" opacity="0" />}
             {replanned && (
               <>
-                <path d="M 500 750 C 480 640 520 400 730 250" fill="none" stroke="#f59e0b" strokeLinecap="round" strokeWidth="3.5" filter="url(#glow)" />
-                <circle cx="600" cy="490" fill="#f59e0b" r="6" stroke="white" strokeWidth="2" filter="url(#glow)" />
-                <text x="620" y="487" fontSize="12" fill="#f59e0b" fontWeight="bold">NEW SEGMENT</text>
+                <path d={replannedPath} fill="none" stroke="#f59e0b" strokeLinecap="round" strokeWidth="3.5" filter="url(#glow)" style={{ transition: "d 0.3s" }} />
+                <circle cx={(startCoord.x + goalCoord.x)/2 - 125} cy={(startCoord.y + goalCoord.y)/2 - 50} fill="#f59e0b" r="6" stroke="white" strokeWidth="2" filter="url(#glow)" />
+                <text x={(startCoord.x + goalCoord.x)/2 - 105} y={(startCoord.y + goalCoord.y)/2 - 47} fontSize="12" fill="#f59e0b" fontWeight="bold">NEW SEGMENT</text>
               </>
             )}
 
-            {/* Markers */}
-            <circle cx="250" cy="850" fill="#1e293b" r="8" stroke="white" strokeWidth="2" />
-            <text x="250" y="875" fontSize="13" fill="#1e293b" textAnchor="middle" fontWeight="bold">START</text>
-            <circle cx="750" cy="250" fill="#10b981" r="10" stroke="white" strokeWidth="3" filter="url(#glow)" />
-            <text x="750" y="234" fontSize="13" fill="#10b981" textAnchor="middle" fontWeight="bold">GOAL</text>
+            {/* Goal Marker */}
+            <circle cx={goalCoord.x} cy={goalCoord.y} fill="#10b981" r="14" stroke="white" strokeWidth="3" filter="url(#glow)" />
+            <text x={goalCoord.x} y={goalCoord.y - 20} fontSize="13" fill="#10b981" textAnchor="middle" fontWeight="bold">GOAL</text>
+
+            {/* Start Marker & Rover Icon */}
+            <g transform={`translate(${startCoord.x}, ${startCoord.y})`} style={{ pointerEvents: "none" }}>
+              <ellipse cx="0" cy="18" rx="24" ry="12" fill="rgba(0,0,0,0.15)" />
+              {/* Wheels */}
+              <rect x="-16" y="8" width="8" height="12" rx="2" fill="#334155" />
+              <rect x="8" y="8" width="8" height="12" rx="2" fill="#334155" />
+              <rect x="-18" y="0" width="6" height="10" rx="1.5" fill="#475569" />
+              <rect x="12" y="0" width="6" height="10" rx="1.5" fill="#475569" />
+              {/* Body */}
+              <rect x="-12" y="-4" width="24" height="16" rx="3" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1" />
+              {/* Solar Panel */}
+              <rect x="-8" y="-10" width="16" height="10" rx="1" fill="#0ea5e9" opacity="0.9" />
+              <path d="M-8 -6 L8 -6 M-4 -10 L-4 0 M4 -10 L4 0" stroke="rgba(255,255,255,0.3)" strokeWidth="0.5" />
+              {/* Antenna */}
+              <line x1="-10" y1="-4" x2="-14" y2="-16" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
+              <circle cx="-14" cy="-16" r="2" fill="#ef4444" />
+              <text x="0" y="42" fontSize="13" fill="#1e293b" textAnchor="middle" fontWeight="bold">START / ROVER</text>
+            </g>
 
             {/* Hazard marker — hover triggers tooltip */}
             <circle
-              cx="500" cy="750" fill="#ef4444" r="8" stroke="white" strokeWidth="2"
+              cx={sectorNode.x} cy={sectorNode.y} fill="#ef4444" r="8" stroke="white" strokeWidth="2"
               style={{ cursor: "pointer" }}
-              onMouseEnter={() => setShowTooltip(true)}
-              onMouseLeave={() => setShowTooltip(false)}
+              onMouseEnter={(e) => setTooltipData({ x: e.clientX, y: e.clientY, title: `NODE: 4-B`, lines: [{label: "Temp Delta", value: `+42.4 K`}, {label:"Elevation", value:`-4,102 m`}], risk: "CRITICAL" })}
+              onMouseMove={(e) => setTooltipData(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)}
+              onMouseLeave={() => setTooltipData(null)}
             />
+            <text x={sectorNode.x + 14} y={sectorNode.y + 4} fontSize="11" fill="#b91c1c" fontWeight="bold">SECTOR 4-B</text>
           </svg>
 
-          {/* ── Node Analysis tooltip — hover only ────────────────────── */}
-          {showTooltip && (
+          {/* ── Cursor-tracking Tooltip ─────────────────────────────────── */}
+          {tooltipData && (
             <div
-              className="map-panel absolute glass-panel px-4 py-3 rounded-xl shadow-xl z-30 min-w-[180px] pointer-events-none"
-              style={{ top: "74%", left: "52%" }}
+              className="map-panel absolute glass-panel px-4 py-3 rounded-xl shadow-xl z-50 min-w-[200px] pointer-events-none backdrop-blur-md"
+              style={{ top: tooltipData.y + 15, left: tooltipData.x + 15, transform: "translate(0, 0)" }}
             >
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-[0.65rem] font-black uppercase tracking-widest">Node Analysis: 4-B</span>
+                <div className={`w-2 h-2 rounded-full animate-pulse ${tooltipData.risk === 'CRITICAL' ? 'bg-red-500' : tooltipData.risk === 'SAFE' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                <span className="text-[0.65rem] font-black uppercase tracking-widest">{tooltipData.title}</span>
               </div>
               <div className="space-y-1.5 text-[0.7rem]">
-                <div className="flex justify-between text-slate-500">
-                  <span>Temp Delta</span><span className="font-bold text-slate-900">+42.4 K</span>
-                </div>
-                <div className="flex justify-between text-slate-500">
-                  <span>Elevation</span><span className="font-bold text-slate-900">-4,102 m</span>
-                </div>
-                <div className="pt-1.5 mt-1.5 border-t border-slate-100 flex justify-between">
-                  <span className="font-bold text-red-600">RISK FACTOR</span>
-                  <span className="font-black text-red-600 uppercase">Critical</span>
+                {tooltipData.lines.map((line, idx) => (
+                  <div key={idx} className="flex justify-between text-slate-500 gap-4">
+                    <span>{line.label}</span><span className="font-bold text-slate-900">{line.value}</span>
+                  </div>
+                ))}
+                <div className="pt-1.5 mt-1.5 border-t border-slate-100 flex justify-between items-center">
+                  <span className="text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest">RISK FACTOR</span>
+                  <span className={`text-[0.65rem] font-black uppercase tracking-widest ${tooltipData.risk === 'CRITICAL' ? 'text-red-600' : tooltipData.risk === 'SAFE' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {tooltipData.risk}
+                  </span>
                 </div>
               </div>
             </div>
@@ -435,7 +515,6 @@ export default function MissionControlPage() {
               {[
                 { key: "thermal", label: "THERMAL WEIGHT", color: "#1e293b" },
                 { key: "slope",   label: "SLOPE WEIGHT",   color: "#94a3b8" },
-                { key: "energy",  label: "ENERGY WEIGHT",  color: "#94a3b8" },
               ].map(({ key, label, color }) => (
                 <div key={key} className="space-y-2">
                   <div className="flex justify-between items-center text-[0.6rem] font-bold">
@@ -472,10 +551,9 @@ export default function MissionControlPage() {
           <div className="glass-panel px-8 py-5 rounded-3xl shadow-2xl border border-slate-200/50 flex items-center justify-between gap-6">
             <div className="flex items-center gap-10">
               {[
-                { label: "Distance",         value: metrics.distance, unit: "km" },
+                { label: "Distance",         value: distanceKm,       unit: "km" },
                 { label: "Thermal Exposure", value: metrics.thermal,  unit: "%" },
-                { label: "Energy Cost",      value: metrics.energy,   unit: "kWh" },
-                { label: "Max Slope",        value: metrics.slope,    unit: "°" },
+                { label: "Max Slope",        value: metrics.slope,    unit: "\u00b0" },
               ].map(({ label, value, unit }) => (
                 <div key={label} className="flex flex-col">
                   <span className="text-[0.6rem] font-bold uppercase tracking-widest text-slate-400 mb-1 whitespace-nowrap">{label}</span>

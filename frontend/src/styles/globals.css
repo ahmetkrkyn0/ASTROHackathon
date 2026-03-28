@@ -58,10 +58,7 @@
 
   .map-background {
     background-color: #f1f3f5;
-    background-image:
-      radial-gradient(circle at 50% 50%, transparent 0%, rgba(0, 0, 0, 0.02) 100%),
-      repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0, 0, 0, 0.03) 40px),
-      repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(0, 0, 0, 0.03) 40px);
+    background-image: radial-gradient(circle at 50% 50%, transparent 0%, rgba(0, 0, 0, 0.02) 100%);
   }
 
   .topo-shading {
