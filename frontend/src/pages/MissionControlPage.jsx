@@ -100,6 +100,21 @@ function svgToGrid(point, metadata = MAP_METADATA) {
   ];
 }
 
+function gridToProjected([row, col], metadata = MAP_METADATA) {
+  return {
+    x: metadata.origin_m.x + (col * metadata.resolution_m),
+    y: metadata.origin_m.y + (row * metadata.resolution_m),
+  };
+}
+
+function formatDistanceLabel(valueM, unit) {
+  if (unit === "km") {
+    return `${(valueM / 1000).toFixed(valueM % 10000 === 0 ? 0 : 1)} km`;
+  }
+
+  return `${Math.round(valueM).toLocaleString()} m`;
+}
+
 function toPlanningWeights(uiWeights) {
   return {
     w_dist: Number((uiWeights.distance / 50).toFixed(2)),
@@ -154,6 +169,10 @@ export default function MissionControlPage() {
   const [weights, setWeights] = useState({ distance: 52, thermal: 80, slope: 55, energy: 60 });
   const [scenarios, setScenarios] = useState([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
+  const [selectedLayerId, setSelectedLayerId] = useState("thermal_risk");
+  const [overlayOpacity, setOverlayOpacity] = useState(82);
+  const [showGridOverlay, setShowGridOverlay] = useState(true);
+  const [showRouteOverlay, setShowRouteOverlay] = useState(true);
   const [distanceUnit, setDistanceUnit] = useState("km");
   const [scenarioInfo, setScenarioInfo] = useState(null);
   const [runtimeMetadata, setRuntimeMetadata] = useState(MAP_METADATA);
@@ -275,6 +294,8 @@ export default function MissionControlPage() {
     setPathResult(snapshot.path_result);
     setComparisonResult(snapshot.comparison_result);
     setServiceReplanResult(snapshot.replan_result);
+    setSelectedLayerId(snapshot.scenario.default_layer_id ?? snapshot.layers_metadata.layers?.[0]?.id ?? "thermal_risk");
+    setOverlayOpacity(Math.round((snapshot.layers_metadata.overlay_opacity_default ?? 0.82) * 100));
     setStartCoord(gridToSvg(snapshot.scenario.start_grid, snapshot.layers_metadata));
     setGoalCoord(gridToSvg(snapshot.scenario.goal_grid, snapshot.layers_metadata));
     setWeights(toUiWeights(snapshot.scenario.default_weights));
@@ -611,7 +632,7 @@ export default function MissionControlPage() {
 
   // ─── Derived visuals ─────────────────────────────────────────────────────
   const routeW   = (2 + (weights.thermal / 100) * 2).toFixed(1);
-  const routeOp  = (0.5 + (weights.thermal / 100) * 0.5).toFixed(2);
+  const routeOp  = (((0.5 + (weights.thermal / 100) * 0.5) * (overlayOpacity / 100))).toFixed(2);
   const cursor   = activeTool ? "crosshair" : "grab";
   const vbStr    = `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`;
   const comparisonDelta = comparisonResult?.delta;
@@ -620,7 +641,15 @@ export default function MissionControlPage() {
     ? Math.round(activeMetrics.distanceM).toLocaleString()
     : distanceKm.toFixed(1);
   const displayDistanceUnit = distanceUnit;
-  const activeLayerLabel = runtimeMetadata.layers?.find((layer) => layer.id === scenarioInfo?.default_layer_id)?.label ?? "Thermal Risk";
+  const activeLayer = runtimeMetadata.layers?.find((layer) => layer.id === selectedLayerId) ?? runtimeMetadata.layers?.[0];
+  const activeLayerLabel = activeLayer?.label ?? "Thermal Risk";
+  const startGridCoord = svgToGrid(startCoord, runtimeMetadata);
+  const goalGridCoord = svgToGrid(goalCoord, runtimeMetadata);
+  const startProjected = gridToProjected(startGridCoord, runtimeMetadata);
+  const goalProjected = gridToProjected(goalGridCoord, runtimeMetadata);
+  const axisTicks = Array.from({ length: 5 }, (_, index) => (
+    (runtimeMetadata.extent_m.width / 4) * index
+  ));
 
   // Toggle tool (second click = deactivate)
   const toggleTool = (id) => setActiveTool((curr) => curr === id ? null : id);
@@ -721,7 +750,9 @@ export default function MissionControlPage() {
             </defs>
 
             {/* Infinite Grid */}
-            <rect x="-50000" y="-50000" width="100000" height="100000" fill="url(#gridPattern)" />
+            {showGridOverlay && (
+              <rect x="-50000" y="-50000" width="100000" height="100000" fill="url(#gridPattern)" opacity={overlayOpacity / 100} />
+            )}
 
             {/* ── Static PSR regions ──────────────────────────────────── */}
             <path className="psr-region" d="M 100 100 Q 150 80 200 150 T 300 100 L 280 250 Q 200 280 120 230 Z" />
@@ -771,14 +802,18 @@ export default function MissionControlPage() {
 
             {/* ── Routes ──────────────────────────────────────────────── */}
             {/* Short / high risk */}
-            <path d={highRiskPath} fill="none" opacity={replanned ? 0.2 : 0.55} stroke="#ef4444" strokeDasharray="6,4" strokeWidth="1.5" style={{ transition: "d 0.3s, opacity 0.8s" }} />
+            {showRouteOverlay && (
+              <path d={highRiskPath} fill="none" opacity={replanned ? 0.2 : 0.55 * (overlayOpacity / 100)} stroke="#ef4444" strokeDasharray="6,4" strokeWidth="1.5" style={{ transition: "d 0.3s, opacity 0.8s" }} />
+            )}
 
             {/* Safe route */}
-            <path d={safePath} fill="none" stroke="#10b981" strokeWidth={routeW} opacity={routeOp} style={{ transition: "d 0.3s, stroke-width 0.3s, opacity 0.3s" }} />
+            {showRouteOverlay && (
+              <path d={safePath} fill="none" stroke="#10b981" strokeWidth={routeW} opacity={routeOp} style={{ transition: "d 0.3s, stroke-width 0.3s, opacity 0.3s" }} />
+            )}
 
             {/* Replanned segment */}
-            {!replanned && <path d={safePath} fill="none" stroke="#f59e0b" strokeLinecap="round" strokeWidth="3" opacity="0" />}
-            {replanned && (
+            {!replanned && showRouteOverlay && <path d={safePath} fill="none" stroke="#f59e0b" strokeLinecap="round" strokeWidth="3" opacity="0" />}
+            {replanned && showRouteOverlay && (
               <>
                 <path d={replannedPath} fill="none" stroke="#f59e0b" strokeLinecap="round" strokeWidth="3.5" filter="url(#glow)" style={{ transition: "d 0.3s" }} />
                 <circle cx={(startCoord.x + goalCoord.x)/2 - 125} cy={(startCoord.y + goalCoord.y)/2 - 50} fill="#f59e0b" r="6" stroke="white" strokeWidth="2" filter="url(#glow)" />
@@ -821,6 +856,21 @@ export default function MissionControlPage() {
           </svg>
 
           {/* ── Cursor-tracking Tooltip ─────────────────────────────────── */}
+          <div className="map-panel pointer-events-none absolute left-24 right-40 bottom-24 z-10 flex items-center justify-between px-4" style={PANEL_MONO_STYLE}>
+            {axisTicks.map((tick) => (
+              <div key={`x-${tick}`} className="rounded-full bg-white/70 px-2 py-1 text-[0.55rem] font-black uppercase tracking-[0.14em] text-slate-500 shadow-sm">
+                {formatDistanceLabel(tick, distanceUnit)}
+              </div>
+            ))}
+          </div>
+          <div className="map-panel pointer-events-none absolute left-4 top-32 bottom-44 z-10 flex flex-col items-center justify-between py-2" style={PANEL_MONO_STYLE}>
+            {[...axisTicks].reverse().map((tick) => (
+              <div key={`y-${tick}`} className="rounded-full bg-white/70 px-2 py-1 text-[0.55rem] font-black uppercase tracking-[0.14em] text-slate-500 shadow-sm">
+                {formatDistanceLabel(tick, distanceUnit)}
+              </div>
+            ))}
+          </div>
+
           {tooltipData && (
             <div
               className="map-panel absolute glass-panel px-4 py-3 rounded-xl shadow-xl z-50 min-w-[200px] pointer-events-none backdrop-blur-md"
@@ -990,6 +1040,56 @@ export default function MissionControlPage() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-[0.62rem] font-black uppercase tracking-[0.18em] text-slate-400">Layer Switcher</span>
+                  <span className="text-[0.56rem] font-bold uppercase tracking-[0.16em] text-slate-500">{Math.round(overlayOpacity)}%</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(runtimeMetadata.layers ?? []).map((layer) => (
+                    <button
+                      key={layer.id}
+                      onClick={(e) => { e.stopPropagation(); setSelectedLayerId(layer.id); }}
+                      className={`rounded-xl border px-3 py-2 text-left text-[0.6rem] font-black uppercase tracking-[0.14em] transition ${selectedLayerId === layer.id ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-slate-50 text-slate-500 hover:text-slate-900"}`}
+                    >
+                      {layer.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-4 space-y-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-[0.6rem] font-bold uppercase tracking-[0.14em]">
+                      <span className="text-slate-400">Overlay Opacity</span>
+                      <span className="text-slate-900">{Math.round(overlayOpacity)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="20"
+                      max="100"
+                      value={overlayOpacity}
+                      onChange={(e) => setOverlayOpacity(Number(e.target.value))}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full h-1 appearance-none rounded-full outline-none cursor-pointer"
+                      style={{ background: `linear-gradient(to right, #0f172a ${overlayOpacity}%, #e2e8f0 ${overlayOpacity}%)` }}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowGridOverlay((value) => !value); }}
+                      className={`rounded-xl px-3 py-2 text-[0.58rem] font-black uppercase tracking-[0.14em] transition ${showGridOverlay ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"}`}
+                    >
+                      Grid {showGridOverlay ? "On" : "Off"}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowRouteOverlay((value) => !value); }}
+                      className={`rounded-xl px-3 py-2 text-[0.58rem] font-black uppercase tracking-[0.14em] transition ${showRouteOverlay ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"}`}
+                    >
+                      Route {showRouteOverlay ? "On" : "Off"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
                 <div className="mb-4 flex items-center justify-between">
                   <span className="text-[0.62rem] font-black uppercase tracking-[0.18em] text-slate-400">Weight Profile</span>
                   <span className="text-[0.58rem] font-bold uppercase tracking-[0.16em] text-slate-500">0.0 - 2.0 mapped</span>
@@ -1073,6 +1173,37 @@ export default function MissionControlPage() {
                   <div className="rounded-xl bg-slate-50 px-3 py-2">
                     <div className="font-black uppercase tracking-[0.16em] text-slate-400">Energy</div>
                     <div className="mt-1 font-black text-slate-900">{activeEnergyDeltaPct > 0 ? "+" : ""}{activeEnergyDeltaPct.toFixed(1)}%</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-[0.62rem] font-black uppercase tracking-[0.18em] text-slate-400">Risk Breakdown</span>
+                  <span className="text-[0.56rem] font-bold uppercase tracking-[0.16em] text-slate-500">{activeMetrics.riskBreakdown.safeCells + activeMetrics.riskBreakdown.cautionCells + activeMetrics.riskBreakdown.dangerCells} cells</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { key: "safeCells", label: "Safe", tone: "text-emerald-700 bg-emerald-50" },
+                    { key: "cautionCells", label: "Caution", tone: "text-amber-700 bg-amber-50" },
+                    { key: "dangerCells", label: "Danger", tone: "text-red-700 bg-red-50" },
+                  ].map(({ key, label, tone }) => (
+                    <div key={key} className={`rounded-xl px-3 py-3 ${tone}`}>
+                      <div className="text-[0.56rem] font-black uppercase tracking-[0.16em]">{label}</div>
+                      <div className="mt-1 text-sm font-black">{activeMetrics.riskBreakdown[key]}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                    <div className="text-[0.56rem] font-black uppercase tracking-[0.16em] text-slate-400">Start Coord</div>
+                    <div className="mt-1 text-[0.64rem] font-bold text-slate-900">X {startProjected.x.toLocaleString()}</div>
+                    <div className="text-[0.64rem] font-bold text-slate-900">Y {startProjected.y.toLocaleString()}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                    <div className="text-[0.56rem] font-black uppercase tracking-[0.16em] text-slate-400">Goal Coord</div>
+                    <div className="mt-1 text-[0.64rem] font-bold text-slate-900">X {goalProjected.x.toLocaleString()}</div>
+                    <div className="text-[0.64rem] font-bold text-slate-900">Y {goalProjected.y.toLocaleString()}</div>
                   </div>
                 </div>
               </div>
