@@ -6,6 +6,10 @@ export const scenariosMock = [
     name: "Crater Rim Detour",
     description: "A baseline mission where the shorter line cuts across a cold crater pocket and the safer route skirts the rim.",
     grid_region: "south_pole_demo_sector",
+    rover_id: "LUNA-42",
+    mission_phase: "surface_traverse",
+    estimated_energy_budget_wh: 118000,
+    thermal_limit_score: 46,
     start_grid: [78, 64],
     goal_grid: [402, 426],
     default_weights: createWeights({
@@ -19,6 +23,7 @@ export const scenariosMock = [
     queued_events: [
       { trigger_type: "thermal_spike", trigger_location: [248, 252] },
     ],
+    expected_compare_outcome: "Safe path should be modestly longer but materially cooler than the direct corridor.",
     summary: "Use this as the default Mission Control view for safe-vs-short comparison.",
   }),
   createScenario({
@@ -26,6 +31,10 @@ export const scenariosMock = [
     name: "Ridge Crossing",
     description: "Highlights the tradeoff between a steeper direct climb and a longer corridor with lower energy demand.",
     grid_region: "south_pole_demo_sector",
+    rover_id: "LUNA-42",
+    mission_phase: "surface_traverse",
+    estimated_energy_budget_wh: 134000,
+    thermal_limit_score: 58,
     start_grid: [112, 98],
     goal_grid: [378, 386],
     default_weights: createWeights({
@@ -39,6 +48,7 @@ export const scenariosMock = [
     queued_events: [
       { trigger_type: "new_obstacle", trigger_location: [264, 250] },
     ],
+    expected_compare_outcome: "Shortest route should show a steeper and more energy-intensive ridge crossing.",
     summary: "Useful for validating how slope and energy weights shift the route choice.",
   }),
   createScenario({
@@ -46,6 +56,10 @@ export const scenariosMock = [
     name: "Thermal Spike Replan",
     description: "Focuses on event-triggered replanning after a new thermal hazard appears on the active corridor.",
     grid_region: "south_pole_demo_sector",
+    rover_id: "LUNA-42",
+    mission_phase: "dynamic_replan",
+    estimated_energy_budget_wh: 109000,
+    thermal_limit_score: 40,
     start_grid: [96, 70],
     goal_grid: [404, 418],
     default_weights: createWeights({
@@ -60,6 +74,7 @@ export const scenariosMock = [
       { trigger_type: "thermal_spike", trigger_location: [248, 252] },
       { trigger_type: "energy_budget", trigger_location: [304, 312] },
     ],
+    expected_compare_outcome: "Replanned route should sacrifice some distance to cut the thermal spike exposure.",
     summary: "Best scenario for showing the manual replan trigger in the prototype.",
   }),
 ];
