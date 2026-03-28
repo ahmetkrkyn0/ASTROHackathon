@@ -46,6 +46,7 @@ def _get_grids() -> dict:
 class LoadDEMRequest(BaseModel):
     dem_file: str
     target_resolution_m: float = 50
+    image_file: Optional[str] = None   # optical image for U-Net ML enhancement
 
 class PlanRequest(BaseModel):
     start: list[int]  # [row, col]
@@ -78,7 +79,12 @@ def load_dem(req: LoadDEMRequest):
     dem_path = os.path.join(DATA_DIR, "dem", req.dem_file)
     if not os.path.exists(dem_path):
         raise HTTPException(status_code=404, detail=f"DEM file not found: {req.dem_file}")
-    _grids = load_and_preprocess_dem(dem_path, req.target_resolution_m)
+    image_path = None
+    if req.image_file:
+        image_path = os.path.join(DATA_DIR, "dem", req.image_file)
+        if not os.path.exists(image_path):
+            image_path = None  # silently skip — fallback to proxy
+    _grids = load_and_preprocess_dem(dem_path, req.target_resolution_m, image_path=image_path)
     meta = _grids["metadata"]
     return {"status": "loaded", "metadata": meta}
 
