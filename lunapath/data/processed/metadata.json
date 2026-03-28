@@ -12,5 +12,21 @@
   "window_offset": {
     "row": 3200,
     "col": 6000
-  }
+  },
+  "grids": [
+    "elevation_grid",
+    "slope_grid",
+    "aspect_grid",
+    "shadow_ratio_grid",
+    "thermal_grid",
+    "traversability_grid",
+    "cost_grid"
+  ],
+  "cost_weights": {
+    "w_slope": 0.409,
+    "w_energy": 0.259,
+    "w_shadow": 0.142,
+    "w_thermal": 0.19
+  },
+  "cost_model": "weighted_cell_cost_without_barrier"
 }

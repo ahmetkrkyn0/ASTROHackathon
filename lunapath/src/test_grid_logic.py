@@ -22,6 +22,7 @@ from process_lunar_data import (
     make_shadow_ratio_grid,
     make_thermal_grid,
     make_traversability_grid,
+    make_cost_grid,
     SLOPE_MAX_DEG,
     RESOLUTION_M,
 )
@@ -102,6 +103,27 @@ def test_traversability_thermal_block():
     print("  test_traversability_thermal_block PASSED")
 
 
+def test_cost_grid_weight_sensitivity():
+    """Ayni hucreler farkli agirliklarla farkli cost uretmeli."""
+    slope = np.array([[5, 20], [5, 20]], dtype=np.float64)
+    thermal = np.array([[60, 60], [20, 20]], dtype=np.float64)
+    shadow = np.array([[0.1, 0.9], [0.1, 0.9]], dtype=np.float64)
+    trav = np.ones_like(slope)
+
+    cost_slope = make_cost_grid(
+        slope, thermal, shadow, RESOLUTION_M, trav,
+        {"w_slope": 0.8, "w_energy": 0.1, "w_shadow": 0.05, "w_thermal": 0.05},
+    )
+    cost_shadow = make_cost_grid(
+        slope, thermal, shadow, RESOLUTION_M, trav,
+        {"w_slope": 0.1, "w_energy": 0.1, "w_shadow": 0.4, "w_thermal": 0.4},
+    )
+
+    assert not np.allclose(cost_slope, cost_shadow), \
+        "Farkli agirliklar ayni cost grid'i uretmemeli"
+    print("  test_cost_grid_weight_sensitivity PASSED")
+
+
 def main() -> None:
     print("=" * 50)
     print("  LunaPath P1 v2.0 — Birim Testleri")
@@ -114,6 +136,7 @@ def main() -> None:
         test_thermal_grid_range,
         test_traversability_slope_block,
         test_traversability_thermal_block,
+        test_cost_grid_weight_sensitivity,
     ]
 
     passed = 0

@@ -2,8 +2,8 @@
 """
 LunaPath P1 v2.0 — Cevre Analiz Paneli (Dashboard)
 ===================================================
-data/processed/ altindaki 6 grid'i ve metadata'yi yukleyerek
-profesyonel bir 2x3 subplot dashboard uretir.
+data/processed/ altindaki 7 grid'i ve metadata'yi yukleyerek
+profesyonel bir 2x4 subplot dashboard uretir.
 
 Calistirma:
     cd lunapath/src
@@ -33,6 +33,7 @@ def load_all() -> tuple[dict[str, np.ndarray], dict]:
         "shadow_ratio_grid",
         "thermal_grid",
         "traversability_grid",
+        "cost_grid",
     ]
     grids = {}
     for name in grid_names:
@@ -57,15 +58,15 @@ def _metre_extent(meta: dict) -> list[float]:
 
 
 def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
-    """6-panelli dashboard figuru olusturur."""
+    """7-grid + bilgi paneli dashboard figuru olusturur."""
 
     res = meta["resolution_m"]
     rows, cols = meta["shape"]
     extent = _metre_extent(meta)
 
     # --- Figur ---------------------------------------------------------------
-    fig = plt.figure(figsize=(22, 15), facecolor="#0e1117")
-    fig.subplots_adjust(left=0.05, right=0.82, top=0.92, bottom=0.05,
+    fig = plt.figure(figsize=(24, 14), facecolor="#0e1117")
+    fig.subplots_adjust(left=0.05, right=0.97, top=0.92, bottom=0.05,
                         wspace=0.25, hspace=0.30)
 
     title_color = "#e6edf3"
@@ -77,7 +78,7 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
         fontsize=20, fontweight="bold", color=title_color, y=0.97,
     )
 
-    axes = fig.subplots(2, 3)
+    axes = fig.subplots(2, 4)
 
     for ax in axes.flat:
         ax.set_facecolor("#161b22")
@@ -93,6 +94,7 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     shadow = grids["shadow_ratio_grid"]
     thermal = grids["thermal_grid"]
     trav = grids["traversability_grid"]
+    cost = grids["cost_grid"]
 
     # Panel 1: Yukseklik + egim konturlari
     ax1 = axes[0, 0]
@@ -155,10 +157,27 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     ax6.set_title(f"Gecilebilirlik ({passable_pct:.1f}% gecilir)",
                   fontsize=11, color=title_color, pad=6)
 
-    # --- Bilgi notu (sag panel) ----------------------------------------------
+    # Panel 7: Weighted cost grid
+    ax7 = axes[1, 3]
+    masked_cost = np.where(np.isfinite(cost), cost, np.nan)
+    im7 = ax7.imshow(masked_cost, cmap="viridis", extent=extent, aspect="equal",
+                     interpolation="nearest")
+    cb7 = fig.colorbar(im7, ax=ax7, shrink=0.82, pad=0.02)
+    cb7.set_label("cost", fontsize=8, color=label_color)
+    cb7.ax.tick_params(colors=tick_color, labelsize=6)
+    ax7.set_title("Weighted Cost Grid", fontsize=11, color=title_color, pad=6)
+
+    # --- Bilgi notu (ayri panel) ---------------------------------------------
+    info_ax = axes[0, 3]
+    info_ax.set_facecolor("#161b22")
+    info_ax.axis("off")
     origin_x = meta["origin"]["x"]
     origin_y = meta["origin"]["y"]
     total_km = rows * res / 1000
+    finite_cost = cost[np.isfinite(cost)]
+    cost_mean = float(np.mean(finite_cost)) if finite_cost.size > 0 else float("nan")
+    cost_max = float(np.max(finite_cost)) if finite_cost.size > 0 else float("nan")
+    weight_info = meta.get("cost_weights", {})
 
     info_lines = [
         "--- META VERI ---",
@@ -186,7 +205,18 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
         f"  max : {np.nanmax(thermal):>+9.2f} C",
         f"  ort : {np.nanmean(thermal):>+9.2f} C",
         "",
+        f"Maliyet",
+        f"  ort : {cost_mean:>9.4f}",
+        f"  max : {cost_max:>9.4f}",
+        "",
         f"Gecilebilirlik: %{passable_pct:.1f}",
+        "",
+        "--- WEIGHTS ---",
+        "",
+        f"wslope : {weight_info.get('w_slope', float('nan')):.3f}",
+        f"wenergy: {weight_info.get('w_energy', float('nan')):.3f}",
+        f"wshadow: {weight_info.get('w_shadow', float('nan')):.3f}",
+        f"wtherm : {weight_info.get('w_thermal', float('nan')):.3f}",
         "",
         "--- PROJEKSIYON ---",
         "",
@@ -194,11 +224,11 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
         "Stereographic (Guney)",
     ]
 
-    fig.text(
-        0.84, 0.50,
+    info_ax.text(
+        0.05, 0.95,
         "\n".join(info_lines),
         fontsize=8, fontfamily="monospace", color="#c9d1d9",
-        verticalalignment="center",
+        verticalalignment="top",
         bbox=dict(boxstyle="round,pad=0.8", facecolor="#161b22",
                   edgecolor="#30363d", linewidth=1.5),
     )

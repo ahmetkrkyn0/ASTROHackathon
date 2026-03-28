@@ -2,7 +2,7 @@
 """
 LunaPath P1 v2.0 — Gorsel Dogrulama
 ====================================
-Uretilen 6 grid'i yukleyip 2x3 subplot ile gorsellestirerek
+Uretilen 7 grid'i yukleyip 2x4 subplot ile gorsellestirerek
 verinin tutarliligini dogrular.
 """
 
@@ -24,6 +24,7 @@ GRID_NAMES = [
     "shadow_ratio_grid",
     "thermal_grid",
     "traversability_grid",
+    "cost_grid",
 ]
 
 
@@ -41,8 +42,8 @@ def load_grids() -> dict[str, np.ndarray]:
 
 
 def plot_all_grids(grids: dict[str, np.ndarray]) -> None:
-    """6 grid'i 2x3 subplot ile cizer."""
-    fig, axes = plt.subplots(2, 3, figsize=(20, 12))
+    """7 grid'i 2x4 subplot ile cizer."""
+    fig, axes = plt.subplots(2, 4, figsize=(22, 12))
     fig.suptitle("LunaPath P1 v2.0 — Veri Dogrulama", fontsize=16, fontweight="bold")
 
     configs = [
@@ -52,16 +53,24 @@ def plot_all_grids(grids: dict[str, np.ndarray]) -> None:
         ("shadow_ratio_grid",   "Golge Orani",             "gray_r",  (0, 1)),
         ("thermal_grid",        "Yuzey Sicakligi (C)",     "coolwarm", None),
         ("traversability_grid", "Gecilebilirlik (0/1)",    "RdYlGn",  (0, 1)),
+        ("cost_grid",           "Weighted Cost",           "viridis", None),
     ]
 
-    for ax, (name, title, cmap, vlim) in zip(axes.flat, configs):
+    flat_axes = axes.flatten()
+
+    for ax, (name, title, cmap, vlim) in zip(flat_axes, configs):
         data = grids[name]
+        if name == "cost_grid":
+            data = np.where(np.isfinite(data), data, np.nan)
         kwargs = {"cmap": cmap, "aspect": "equal"}
         if vlim is not None:
             kwargs["vmin"], kwargs["vmax"] = vlim
         im = ax.imshow(data, **kwargs)
         ax.set_title(title)
         fig.colorbar(im, ax=ax, shrink=0.8)
+
+    for ax in flat_axes[len(configs):]:
+        ax.axis("off")
 
     plt.tight_layout()
     out_path = PROCESSED_DIR / "validation_plot.png"
@@ -75,6 +84,7 @@ def print_consistency_checks(grids: dict[str, np.ndarray]) -> None:
     slope = grids["slope_grid"]
     trav = grids["traversability_grid"]
     thermal = grids["thermal_grid"]
+    cost = grids["cost_grid"]
 
     # Dik yamaclarda gecilebilirlik 0 olmali
     steep_mask = slope > 25.0
@@ -96,6 +106,16 @@ def print_consistency_checks(grids: dict[str, np.ndarray]) -> None:
             print("  DOGRU: Soguk bolgeler gecilmez olarak isaretlenmis.")
         else:
             print("  UYARI: Soguk bolge tutarsizligi!")
+
+    blocked = trav < 0.5
+    if blocked.any():
+        blocked_cost = cost[blocked]
+        inf_ratio = np.mean(np.isinf(blocked_cost))
+        print(f"  Bloklu hucrelerde INF cost orani: {inf_ratio:.3f}")
+        if inf_ratio > 0.99:
+            print("  DOGRU: Hard-block mask ile cost grid ayrik tutuluyor.")
+        else:
+            print("  UYARI: Bloklu hucrelerde cost beklenenden farkli.")
 
 
 def main() -> None:

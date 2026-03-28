@@ -2,16 +2,17 @@
 """
 LunaPath P1 v2.0 — Veri Isleme Hatti
 =====================================
-Tek bir NASA DEM dosyasindan 6 fiziksel olarak baglantili grid uretir.
+Tek bir NASA DEM dosyasindan 7 fiziksel olarak baglantili grid uretir.
 
 Girdiler  : LDEM (yukseklik) — data/raw/
 Ciktilar  : elevation_grid.npy, slope_grid.npy, aspect_grid.npy,
             shadow_ratio_grid.npy, thermal_grid.npy, traversability_grid.npy,
-            metadata.json
+            cost_grid.npy, metadata.json
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -25,6 +26,7 @@ _BACKEND_ROOT = str(Path(__file__).resolve().parent.parent.parent / "backend")
 if _BACKEND_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_ROOT)
 
+from app.cost_engine import compute_cost_grid, resolve_weights  # noqa: E402
 from app.traversability import compute_traversability  # noqa: E402
 
 # --- Proje dizinleri --------------------------------------------------------
@@ -114,7 +116,7 @@ def find_action_window(
 
 
 # =============================================================================
-# 2) GRID URETIMI — 6 katman
+# 2) GRID URETIMI — 7 katman
 # =============================================================================
 
 def make_elevation_grid(dem_ds: rasterio.DatasetReader, win: Window) -> np.ndarray:
@@ -209,6 +211,31 @@ def make_traversability_grid(
     return compute_traversability(slope, thermal)
 
 
+def make_cost_grid(
+    slope: np.ndarray,
+    thermal: np.ndarray,
+    shadow_ratio: np.ndarray,
+    resolution: float,
+    traversability: np.ndarray,
+    weights: dict[str, float] | None = None,
+) -> np.ndarray:
+    """Cell-level weighted cost grid.
+
+    Cost grid planner ile ayni penalty fonksiyonlarini kullanir, fakat
+    log-barrier terimini bilerek disarida birakir. Cunku bariyer cezasi
+    kume halinde biriken shadow/SOC durumuna baglidir ve yalnizca rota
+    uzerinde anlamlidir.
+    """
+    return compute_cost_grid(
+        slope,
+        thermal,
+        shadow_ratio,
+        resolution,
+        traversable=traversability.astype(bool),
+        weights=weights,
+    )
+
+
 # =============================================================================
 # 3) METADATA
 # =============================================================================
@@ -222,6 +249,7 @@ def save_metadata(
     crs: str,
     window_row_off: int,
     window_col_off: int,
+    cost_weights: dict[str, float],
 ) -> Path:
     """Grid metadata'sini JSON olarak diske yazar."""
     meta = {
@@ -237,7 +265,10 @@ def save_metadata(
             "shadow_ratio_grid",
             "thermal_grid",
             "traversability_grid",
+            "cost_grid",
         ],
+        "cost_weights": cost_weights,
+        "cost_model": "weighted_cell_cost_without_barrier",
     }
     path = out_dir / "metadata.json"
     path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -251,6 +282,7 @@ def save_metadata(
 def print_validation(
     thermal: np.ndarray,
     traversability: np.ndarray,
+    cost_grid: np.ndarray,
     grids: dict[str, np.ndarray],
 ) -> None:
     """Konsola dogrulama istatistiklerini yazdirir."""
@@ -267,13 +299,28 @@ def print_validation(
     print(f"\n  traversability_grid:")
     print(f"    Gecilebilir alan = {passable}/{total} piksel ({pct:.1f}%)")
 
+    finite_cost = cost_grid[np.isfinite(cost_grid)]
+    if finite_cost.size > 0:
+        print(f"\n  cost_grid:")
+        print(f"    min  = {np.min(finite_cost):>9.4f}")
+        print(f"    max  = {np.max(finite_cost):>9.4f}")
+        print(f"    mean = {np.mean(finite_cost):>9.4f}")
+    else:
+        print(f"\n  cost_grid:")
+        print("    UYARI: sonlu maliyet bulunamadi")
+
     print("\n  Grid boyut ve NaN kontrolu:")
     for name, arr in grids.items():
         if np.issubdtype(arr.dtype, np.floating):
             nan_count = int(np.isnan(arr).sum())
+            inf_count = int(np.isinf(arr).sum())
         else:
             nan_count = 0
-        status = "TEMIZ" if nan_count == 0 else f"{nan_count} NaN"
+            inf_count = 0
+        if nan_count == 0 and inf_count == 0:
+            status = "TEMIZ"
+        else:
+            status = f"{nan_count} NaN / {inf_count} INF"
         print(f"    {name:<25s} shape={str(arr.shape):<14s} {status}")
 
 
@@ -281,7 +328,7 @@ def print_validation(
 # 5) ANA ISLEM AKISI
 # =============================================================================
 
-def main() -> None:
+def main(weights: dict[str, float] | None = None) -> None:
     print("=" * 60)
     print("  LunaPath P1 v2.0 — Ay Yuzey Verisi Isleme")
     print("=" * 60)
@@ -293,6 +340,11 @@ def main() -> None:
     print(f"\n  Ham veri  : {RAW_DIR}")
     print(f"  Cikti     : {PROCESSED_DIR}\n")
 
+    resolved_weights = resolve_weights(weights)
+    print("  Cost agirliklari:")
+    for key, value in resolved_weights.items():
+        print(f"    {key:<10s}= {value:.3f}")
+
     # -- 1. DEM okuma ---------------------------------------------------------
     dem_ds = rasterio.open(LDEM_FILE)
     print(f"LDEM: {dem_ds.width} x {dem_ds.height}, "
@@ -302,8 +354,8 @@ def main() -> None:
     print("\n--- Aksiyonlu Bolge Araniyor ---")
     win = find_action_window(dem_ds)
 
-    # -- 3. Grid uretimi (6 katman) -------------------------------------------
-    print("\n--- Grid Uretimi (6 katman) ---")
+    # -- 3. Grid uretimi (7 katman) -------------------------------------------
+    print("\n--- Grid Uretimi (7 katman) ---")
 
     elevation_grid = make_elevation_grid(dem_ds, win)
     print(f"  elevation_grid  : min={np.nanmin(elevation_grid):.1f}, "
@@ -331,6 +383,23 @@ def main() -> None:
     passable_pct = 100.0 * np.nansum(traversability_grid) / traversability_grid.size
     print(f"  traversability  : gecilebilir={passable_pct:.1f}%")
 
+    cost_grid = make_cost_grid(
+        slope_grid,
+        thermal_grid,
+        shadow_ratio_grid,
+        RESOLUTION_M,
+        traversability_grid,
+        resolved_weights,
+    )
+    finite_cost = cost_grid[np.isfinite(cost_grid)]
+    if finite_cost.size > 0:
+        print(
+            f"  cost_grid       : min={np.min(finite_cost):.4f}, "
+            f"max={np.max(finite_cost):.4f}, mean={np.mean(finite_cost):.4f}"
+        )
+    else:
+        print("  cost_grid       : UYARI sonlu maliyet yok")
+
     # -- 4. Dogrulama ---------------------------------------------------------
     grids = {
         "elevation_grid": elevation_grid,
@@ -339,8 +408,9 @@ def main() -> None:
         "shadow_ratio_grid": shadow_ratio_grid,
         "thermal_grid": thermal_grid,
         "traversability_grid": traversability_grid,
+        "cost_grid": cost_grid,
     }
-    print_validation(thermal_grid, traversability_grid, grids)
+    print_validation(thermal_grid, traversability_grid, cost_grid, grids)
 
     # -- 5. Kaydetme ----------------------------------------------------------
     print("\n--- Ciktilar Diske Yaziliyor ---")
@@ -361,6 +431,7 @@ def main() -> None:
         crs=str(dem_ds.crs),
         window_row_off=win.row_off,
         window_col_off=win.col_off,
+        cost_weights=resolved_weights,
     )
     print("  metadata.json kaydedildi")
 
@@ -372,5 +443,30 @@ def main() -> None:
     print("=" * 60)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="LunaPath weighted grid generator")
+    parser.add_argument(
+        "--weights-json",
+        help=(
+            "Opsiyonel agirlik override. "
+            "Ornek: '{\"w_slope\":0.7,\"w_energy\":0.1,\"w_shadow\":0.1,\"w_thermal\":0.1}'"
+        ),
+    )
+    return parser.parse_args()
+
+
+def parse_weight_overrides(raw: str | None) -> dict[str, float] | None:
+    if raw is None:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Gecersiz --weights-json: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit("--weights-json bir JSON obje olmali.")
+    return {str(key): float(value) for key, value in payload.items()}
+
+
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(parse_weight_overrides(args.weights_json))

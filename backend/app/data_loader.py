@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any
@@ -11,6 +12,7 @@ import rasterio
 from scipy.ndimage import uniform_filter
 
 from .constants import DEFAULT_TARGET_RESOLUTION_M
+from .cost_engine import compute_cost_grid, resolve_weights
 from .thermal_grid import generate_thermal_grid
 from .traversability import compute_traversability_bool
 
@@ -23,6 +25,7 @@ _GRID_KEYS: tuple[str, ...] = (
     "aspect",
     "thermal",
     "shadow_ratio",
+    "cost",
 )
 
 
@@ -30,13 +33,15 @@ def load_and_preprocess_dem(
     dem_path: str,
     target_resolution_m: float = DEFAULT_TARGET_RESOLUTION_M,
     use_cache: bool = True,
+    weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Load raw DEM and produce all grid layers.
 
     Returns dict with keys:
         elevation, slope, aspect, thermal, shadow_ratio, traversable, metadata
     """
-    cache_key = _cache_key(dem_path, target_resolution_m)
+    resolved_weights = resolve_weights(weights)
+    cache_key = _cache_key(dem_path, target_resolution_m, resolved_weights)
     if use_cache:
         cached = _load_cache(cache_key)
         if cached is not None:
@@ -78,6 +83,14 @@ def load_and_preprocess_dem(
 
     # Traversability (canonical logic from traversability module)
     traversable = compute_traversability_bool(slope, thermal, elevation)
+    cost = compute_cost_grid(
+        slope,
+        thermal,
+        shadow_ratio,
+        actual_resolution,
+        traversable=traversable,
+        weights=resolved_weights,
+    )
 
     result: dict[str, Any] = {
         "elevation": elevation,
@@ -85,12 +98,15 @@ def load_and_preprocess_dem(
         "aspect": aspect,
         "thermal": thermal,
         "shadow_ratio": shadow_ratio,
+        "cost": cost,
         "traversable": traversable,
         "metadata": {
             "resolution_m": float(actual_resolution),
             "shape": list(elevation.shape),
             "crs": str(crs),
             "dem_source": dem_path,
+            "cost_weights": resolved_weights,
+            "cost_model": "weighted_cell_cost_without_barrier",
         },
     }
 
@@ -118,9 +134,15 @@ def geo_to_pixel(x: float, y: float, transform) -> tuple[int, int]:
 
 # ── Cache ────────────────────────────────────────────────────────────────────
 
-def _cache_key(dem_path: str, resolution: float) -> str:
+def _cache_key(
+    dem_path: str,
+    resolution: float,
+    weights: dict[str, float],
+) -> str:
     basename = os.path.splitext(os.path.basename(dem_path))[0]
-    return f"{basename}_{int(resolution)}m"
+    weight_blob = json.dumps(weights, sort_keys=True)
+    weight_hash = hashlib.md5(weight_blob.encode("utf-8")).hexdigest()[:8]
+    return f"{basename}_{int(resolution)}m_{weight_hash}"
 
 
 def _save_cache(key: str, data: dict[str, Any]) -> None:
