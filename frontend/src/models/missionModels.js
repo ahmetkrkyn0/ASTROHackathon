@@ -71,6 +71,8 @@ export function createReplanResult(overrides = {}) {
     scenario_id: "",
     trigger_type: "",
     affected_segment_start: 0,
+    baseline_path: null,
+    replanned_path: null,
     old_segment: [],
     new_segment: [],
     reason: "",
@@ -89,8 +91,17 @@ export function createGridMetadata(overrides = {}) {
   return {
     region_id: "",
     region_name: "",
-    resolution_m: 50,
-    shape: [12, 12],
+    resolution_m: 80,
+    shape: [500, 500],
+    origin_m: {
+      x: 176000,
+      y: 48000,
+    },
+    extent_m: {
+      width: 40000,
+      height: 40000,
+    },
+    projection: "Moon 2015 Polar Stereographic",
     start_grid: [0, 0],
     goal_grid: [0, 0],
     layers: [],
