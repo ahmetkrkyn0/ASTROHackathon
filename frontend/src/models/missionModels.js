@@ -71,6 +71,8 @@ export function createReplanResult(overrides = {}) {
     scenario_id: "",
     trigger_type: "",
     affected_segment_start: 0,
+    baseline_path: null,
+    replanned_path: null,
     old_segment: [],
     new_segment: [],
     reason: "",

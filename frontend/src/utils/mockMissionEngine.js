@@ -440,6 +440,8 @@ export function buildReplanResult({
     scenario_id: scenarioId,
     trigger_type: triggerType,
     affected_segment_start: affectedSegmentStart,
+    baseline_path: baselinePath,
+    replanned_path: replannedPath,
     old_segment: baselinePath.path_grid.slice(affectedSegmentStart, affectedSegmentStart + 8),
     new_segment: replannedPath.path_grid.slice(affectedSegmentStart, affectedSegmentStart + 8),
     reason: triggerType === "new_obstacle"

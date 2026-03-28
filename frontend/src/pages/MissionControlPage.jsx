@@ -13,67 +13,13 @@ const TOOLS = [
 
 const MAP_METADATA = layersMetadataMock;
 const VIEWBOX_SIZE = 1000;
-const MAP_METERS_PER_UNIT = MAP_METADATA.extent_m.width / VIEWBOX_SIZE;
-const CURVE_SEGMENTS = 64;
 const STATIC_THERMAL_FIELDS = [
   { x: 450, y: 500, baseRadius: 132, intensity: 1.0 },
   { x: 550, y: 450, baseRadius: 92, intensity: 0.72 },
 ];
-const STATIC_SLOPE_FIELDS = [
-  { x: 260, y: 360, radius: 180, intensity: 0.58 },
-  { x: 780, y: 640, radius: 160, intensity: 0.52 },
-];
-
-function getQuadraticLength(start, control, end, segments = CURVE_SEGMENTS) {
-  let length = 0;
-  let previous = start;
-
-  for (let index = 1; index <= segments; index += 1) {
-    const t = index / segments;
-    const mt = 1 - t;
-    const point = {
-      x: (mt * mt * start.x) + (2 * mt * t * control.x) + (t * t * end.x),
-      y: (mt * mt * start.y) + (2 * mt * t * control.y) + (t * t * end.y),
-    };
-
-    length += Math.hypot(point.x - previous.x, point.y - previous.y);
-    previous = point;
-  }
-
-  return length;
-}
 
 function lerp(start, end, factor) {
   return start + ((end - start) * factor);
-}
-
-function getQuadraticPoint(start, control, end, t) {
-  const mt = 1 - t;
-  return {
-    x: (mt * mt * start.x) + (2 * mt * t * control.x) + (t * t * end.x),
-    y: (mt * mt * start.y) + (2 * mt * t * control.y) + (t * t * end.y),
-  };
-}
-
-function buildQuadraticSamples(start, control, end, segments = CURVE_SEGMENTS) {
-  return Array.from({ length: segments + 1 }, (_, index) => (
-    getQuadraticPoint(start, control, end, index / segments)
-  ));
-}
-
-function buildLinearSamples(start, end, segments = CURVE_SEGMENTS) {
-  return Array.from({ length: segments + 1 }, (_, index) => {
-    const factor = index / segments;
-    return {
-      x: lerp(start.x, end.x, factor),
-      y: lerp(start.y, end.y, factor),
-    };
-  });
-}
-
-function getFieldStrength(point, centerX, centerY, radius, intensity) {
-  const distance = Math.hypot(point.x - centerX, point.y - centerY);
-  return intensity * Math.exp(-((distance * distance) / (2 * radius * radius)));
 }
 
 function clamp(value, min, max) {
@@ -163,6 +109,19 @@ function getPercentDelta(current, baseline) {
 const PANEL_MONO_STYLE = {
   fontFamily: "'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', 'SFMono-Regular', Consolas, monospace",
 };
+
+const EMPTY_DISPLAY_METRICS = Object.freeze({
+  distanceM: 0,
+  thermalExposure: 0,
+  maxSlope: 0,
+  compute: 0,
+  energyCost: 0,
+  riskBreakdown: {
+    safeCells: 0,
+    cautionCells: 0,
+    dangerCells: 0,
+  },
+});
 
 const LAYER_VISUALS = Object.freeze({
   elevation: {
@@ -528,116 +487,18 @@ export default function MissionControlPage() {
   const safePath = `M ${startCoord.x} ${startCoord.y} Q ${safeControlPoint.x} ${safeControlPoint.y} ${goalCoord.x} ${goalCoord.y}`;
   const highRiskPath = `M ${startCoord.x} ${startCoord.y} L ${goalCoord.x} ${goalCoord.y}`;
   const replannedPath = `M ${startCoord.x} ${startCoord.y} Q ${replannedControlPoint.x} ${replannedControlPoint.y} ${goalCoord.x} ${goalCoord.y}`;
-  const shortestSamples = buildLinearSamples(startCoord, goalCoord);
-  const safeSamples = buildQuadraticSamples(startCoord, safeControlPoint, goalCoord);
-  const replannedSamples = buildQuadraticSamples(startCoord, replannedControlPoint, goalCoord);
-
-  const summarizeRoute = (samples, routeKind) => {
-    let thermalAccum = 0;
-    let slopePeak = 0;
-    let safeCells = 0;
-    let cautionCells = 0;
-    let dangerCells = 0;
-
-    samples.forEach((point) => {
-      const staticThermal = STATIC_THERMAL_FIELDS.reduce((sum, field) => (
-        sum + getFieldStrength(
-          point,
-          field.x,
-          field.y,
-          field.baseRadius + ((weights.thermal / 100) * 26),
-          field.intensity,
-        )
-      ), 0);
-      const userThermal = thermalZones.reduce((sum, zone) => (
-        sum + getFieldStrength(point, zone.x, zone.y, zone.r, 0.88)
-      ), 0);
-      const shadowBias = shadowRegions.reduce((sum, region) => (
-        sum + getFieldStrength(point, region.x, region.y, 112, 0.08)
-      ), 0);
-      const thermalRisk = clamp(
-        ((staticThermal + userThermal) * (routeKind === "shortest" ? 1.16 : routeKind === "replanned" ? 0.66 : 0.82)) + shadowBias,
-        0,
-        1,
-      );
-
-      const baseSlope = STATIC_SLOPE_FIELDS.reduce((sum, field) => (
-        sum + getFieldStrength(point, field.x, field.y, field.radius, field.intensity)
-      ), 0);
-      const craterSlope = craters.reduce((sum, crater) => (
-        sum + getFieldStrength(point, crater.x, crater.y, 110, crater.slope / 34)
-      ), 0);
-      const slopeRisk = clamp(
-        (baseSlope + craterSlope) * (0.74 + (planningWeights.w_slope * 0.14)),
-        0,
-        1,
-      );
-
-      thermalAccum += thermalRisk;
-      slopePeak = Math.max(slopePeak, slopeRisk);
-
-      const combinedRisk = clamp((thermalRisk * 0.68) + (slopeRisk * 0.32), 0, 1);
-
-      if (combinedRisk >= 0.62) {
-        dangerCells += 1;
-      } else if (combinedRisk >= 0.33) {
-        cautionCells += 1;
-      } else {
-        safeCells += 1;
-      }
-    });
-
-    const distanceM = Math.round(samples.reduce((total, point, index) => {
-      if (!index) return total;
-      return total + (Math.hypot(point.x - samples[index - 1].x, point.y - samples[index - 1].y) * MAP_METERS_PER_UNIT);
-    }, 0));
-    const thermalExposure = Number((((thermalAccum / samples.length) * 68) + (dangerCells * 0.55) + (cautionCells * 0.22)).toFixed(1));
-    const maxSlope = Number((6.4 + (slopePeak * 22.5) + (routeKind === "shortest" ? 1.6 : routeKind === "replanned" ? 0.7 : 1.0)).toFixed(1));
-    const compute = Math.round(
-      94
-      + (samples.length * 0.85)
-      + (routeKind === "shortest" ? 18 : routeKind === "replanned" ? 58 : 34)
-      + (thermalZones.length * 6)
-      + (craters.length * 5),
-    );
-    const energyCost = Number((((distanceM / 620) * (0.8 + (planningWeights.w_energy * 0.28))) + (maxSlope * 0.55) + (thermalExposure * 0.18)).toFixed(1));
-
-    return {
-      distanceM,
-      thermalExposure,
-      maxSlope,
-      compute,
-      energyCost,
-      riskBreakdown: {
-        safeCells,
-        cautionCells,
-        dangerCells,
-      },
-    };
-  };
-
-  const fallbackShortestMetrics = summarizeRoute(shortestSamples, "shortest");
-  const fallbackSafeMetrics = summarizeRoute(safeSamples, "safe");
-  const fallbackReplannedMetrics = summarizeRoute(replannedSamples, "replanned");
-  const safePathMetrics = createDisplayMetrics(comparisonResult?.safe_path ?? pathResult) ?? fallbackSafeMetrics;
-  const shortestPathMetrics = createDisplayMetrics(comparisonResult?.shortest_path) ?? fallbackShortestMetrics;
-  const replannedPathMetrics = serviceReplanResult
-    ? {
-        distanceM: Math.max(0, safePathMetrics.distanceM + (serviceReplanResult.metrics_delta?.distance_delta_m ?? 0)),
-        thermalExposure: Number((safePathMetrics.thermalExposure + (serviceReplanResult.metrics_delta?.thermal_delta ?? 0)).toFixed(1)),
-        maxSlope: safePathMetrics.maxSlope,
-        compute: serviceReplanResult.computation_time_ms ?? safePathMetrics.compute,
-        energyCost: Number((safePathMetrics.energyCost + (serviceReplanResult.metrics_delta?.energy_delta ?? 0)).toFixed(1)),
-        riskBreakdown: safePathMetrics.riskBreakdown,
-      }
-    : fallbackReplannedMetrics;
-  const activeMetrics = replanned ? replannedPathMetrics : safePathMetrics;
+  const safePathMetrics = createDisplayMetrics(comparisonResult?.safe_path ?? pathResult) ?? EMPTY_DISPLAY_METRICS;
+  const shortestPathMetrics = createDisplayMetrics(comparisonResult?.shortest_path) ?? EMPTY_DISPLAY_METRICS;
+  const replannedPathMetrics = createDisplayMetrics(serviceReplanResult?.replanned_path) ?? safePathMetrics;
+  const activeMetrics = replanned && serviceReplanResult?.replanned_path ? replannedPathMetrics : safePathMetrics;
   const distanceKm = Number((activeMetrics.distanceM / 1000).toFixed(1));
-  const distanceDeltaPct = comparisonResult?.delta?.distance_overhead_pct ?? getPercentDelta(safePathMetrics.distanceM, shortestPathMetrics.distanceM);
-  const activeThermalReductionPct = getPercentReduction(shortestPathMetrics.thermalExposure, activeMetrics.thermalExposure);
+  const distanceDeltaPct = comparisonResult?.delta?.distance_overhead_pct ?? 0;
+  const activeThermalReductionPct = replanned && serviceReplanResult?.replanned_path
+    ? getPercentReduction(shortestPathMetrics.thermalExposure, activeMetrics.thermalExposure)
+    : comparisonResult?.delta?.thermal_reduction_pct ?? 0;
   const activeEnergyDeltaPct = replanned
     ? getPercentDelta(replannedPathMetrics.energyCost, shortestPathMetrics.energyCost)
-    : comparisonResult?.delta?.energy_delta_pct ?? getPercentDelta(safePathMetrics.energyCost, shortestPathMetrics.energyCost);
+    : comparisonResult?.delta?.energy_delta_pct ?? 0;
   const confidencePct = Number(clamp(
     88.4
       + Math.min(10, activeThermalReductionPct * 0.12)
@@ -646,8 +507,7 @@ export default function MissionControlPage() {
     74,
     99.6,
   ).toFixed(1));
-  const safePathRecommended = (comparisonResult?.delta?.recommendation === "safe_path_preferred")
-    || activeThermalReductionPct >= Math.max(8, distanceDeltaPct * 0.9);
+  const safePathRecommended = comparisonResult?.delta?.recommendation === "safe_path_preferred";
   const triggerTypeLabel = (serviceReplanResult?.trigger_type ?? "thermal_spike").replaceAll("_", " ").toUpperCase();
 
   // ─── Replan ─────────────────────────────────────────────────────────────
@@ -673,7 +533,7 @@ export default function MissionControlPage() {
         start: svgToGrid(startCoord, runtimeMetadata),
         goal: svgToGrid(goalCoord, runtimeMetadata),
         weights: planningWeights,
-        currentPath: pathResult,
+        currentPath: comparisonResult?.safe_path ?? pathResult,
         triggerType,
         triggerLocation: svgToGrid(triggerPoint, runtimeMetadata),
       });
@@ -688,7 +548,7 @@ export default function MissionControlPage() {
     } finally {
       setReplanning(false);
     }
-  }, [craters.length, goalCoord, pathResult, planningWeights, replanning, runtimeMetadata, scenarioInfo, sectorNode, shadowRegions.length, startCoord, thermalZones]);
+  }, [comparisonResult?.safe_path, craters.length, goalCoord, pathResult, planningWeights, replanning, runtimeMetadata, scenarioInfo, sectorNode, shadowRegions.length, startCoord, thermalZones]);
 
   // ─── Derived visuals ─────────────────────────────────────────────────────
   const routeW   = (2 + (weights.thermal / 100) * 2).toFixed(1);

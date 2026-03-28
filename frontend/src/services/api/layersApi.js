@@ -1,4 +1,6 @@
+import { apiGet, isMockApiEnabled } from "./client";
 import { resolveGridMetadata, resolveScenario } from "../../utils/mockMissionEngine";
+import { validateGridMetadata } from "./validators";
 
 const REGION_ALIASES = Object.freeze({
   south_pole_demo: "south_pole_demo_sector",
@@ -30,8 +32,16 @@ function resolveScenarioForRegion(region, scenarioId) {
 }
 
 export async function getLayers(payload = {}) {
+  if (!isMockApiEnabled()) {
+    return validateGridMetadata(await apiGet("/layers", {
+      query: {
+        region: payload.region,
+      },
+    }));
+  }
+
   const scenario = resolveScenarioForRegion(payload.region, payload.scenarioId);
-  return withLatency(resolveGridMetadata(scenario.scenario_id));
+  return withLatency(validateGridMetadata(resolveGridMetadata(scenario.scenario_id)));
 }
 
 export default {
