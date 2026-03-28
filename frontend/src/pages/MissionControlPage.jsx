@@ -102,17 +102,19 @@ function svgToGrid(point, metadata = MAP_METADATA) {
 
 function toPlanningWeights(uiWeights) {
   return {
-    w_dist: 1.05,
-    w_slope: 0.7 + ((uiWeights.slope / 100) * 1.3),
-    w_thermal: 0.7 + ((uiWeights.thermal / 100) * 1.3),
-    w_energy: 1.2,
+    w_dist: Number((uiWeights.distance / 50).toFixed(2)),
+    w_slope: Number((uiWeights.slope / 50).toFixed(2)),
+    w_thermal: Number((uiWeights.thermal / 50).toFixed(2)),
+    w_energy: Number((uiWeights.energy / 50).toFixed(2)),
   };
 }
 
 function toUiWeights(planningWeights) {
   return {
-    thermal: Math.round(clamp(((planningWeights.w_thermal - 0.7) / 1.3) * 100, 0, 100)),
-    slope: Math.round(clamp(((planningWeights.w_slope - 0.7) / 1.3) * 100, 0, 100)),
+    distance: Math.round(clamp((planningWeights.w_dist ?? 1) * 50, 0, 100)),
+    thermal: Math.round(clamp((planningWeights.w_thermal ?? 1.6) * 50, 0, 100)),
+    slope: Math.round(clamp((planningWeights.w_slope ?? 1.1) * 50, 0, 100)),
+    energy: Math.round(clamp((planningWeights.w_energy ?? 1.2) * 50, 0, 100)),
   };
 }
 
@@ -143,9 +145,16 @@ function getPercentDelta(current, baseline) {
   return Number((((current - baseline) / baseline) * 100).toFixed(1));
 }
 
+const PANEL_MONO_STYLE = {
+  fontFamily: "'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', 'SFMono-Regular', Consolas, monospace",
+};
+
 export default function MissionControlPage() {
   // Weights
-  const [weights, setWeights] = useState({ thermal: 85, slope: 42 });
+  const [weights, setWeights] = useState({ distance: 52, thermal: 80, slope: 55, energy: 60 });
+  const [scenarios, setScenarios] = useState([]);
+  const [selectedScenarioId, setSelectedScenarioId] = useState("");
+  const [distanceUnit, setDistanceUnit] = useState("km");
   const [scenarioInfo, setScenarioInfo] = useState(null);
   const [runtimeMetadata, setRuntimeMetadata] = useState(MAP_METADATA);
   const [pathResult, setPathResult] = useState(null);
@@ -259,6 +268,29 @@ export default function MissionControlPage() {
   }, [activeTool, screenToSVG]);
 
   // ─── Dynamic Paths based on Start/Goal ────────────────────────────────
+  const applySnapshotToUi = useCallback((snapshot, { clearPlaced = false } = {}) => {
+    setScenarioInfo(snapshot.scenario);
+    setSelectedScenarioId(snapshot.scenario.scenario_id);
+    setRuntimeMetadata(snapshot.layers_metadata);
+    setPathResult(snapshot.path_result);
+    setComparisonResult(snapshot.comparison_result);
+    setServiceReplanResult(snapshot.replan_result);
+    setStartCoord(gridToSvg(snapshot.scenario.start_grid, snapshot.layers_metadata));
+    setGoalCoord(gridToSvg(snapshot.scenario.goal_grid, snapshot.layers_metadata));
+    setWeights(toUiWeights(snapshot.scenario.default_weights));
+    setDistanceUnit(snapshot.layers_metadata.alternate_coordinate_units === "kilometers" ? "km" : "m");
+    setReplanned(false);
+    setReplanStatus("OPTIMIZED");
+    setPanelError("");
+
+    if (clearPlaced) {
+      setThermalZones([]);
+      setCraters([]);
+      setShadowRegions([]);
+      setActiveTool(null);
+    }
+  }, []);
+
   const refreshMissionData = useCallback(async ({ resetReplan = true } = {}) => {
     if (!scenarioInfo?.scenario_id) return;
 
@@ -313,18 +345,14 @@ export default function MissionControlPage() {
     async function bootstrapMission() {
       try {
         setPlanningBusy(true);
-        const snapshot = await missionService.getMissionControlSnapshot();
+        const [scenarioList, snapshot] = await Promise.all([
+          missionService.getScenarios(),
+          missionService.getMissionControlSnapshot(),
+        ]);
         if (cancelled) return;
 
-        setScenarioInfo(snapshot.scenario);
-        setRuntimeMetadata(snapshot.layers_metadata);
-        setPathResult(snapshot.path_result);
-        setComparisonResult(snapshot.comparison_result);
-        setServiceReplanResult(snapshot.replan_result);
-        setStartCoord(gridToSvg(snapshot.scenario.start_grid, snapshot.layers_metadata));
-        setGoalCoord(gridToSvg(snapshot.scenario.goal_grid, snapshot.layers_metadata));
-        setWeights(toUiWeights(snapshot.scenario.default_weights));
-        setPanelError("");
+        setScenarios(scenarioList);
+        applySnapshotToUi(snapshot);
         initializedRef.current = true;
       } catch (error) {
         if (!cancelled) {
@@ -342,7 +370,7 @@ export default function MissionControlPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applySnapshotToUi]);
 
   useEffect(() => {
     if (!initializedRef.current || !scenarioInfo?.scenario_id) return undefined;
@@ -355,6 +383,51 @@ export default function MissionControlPage() {
   }, [goalCoord, refreshMissionData, scenarioInfo?.scenario_id, startCoord, weights]);
 
   const planningWeights = toPlanningWeights(weights);
+
+  const handleScenarioChange = useCallback(async (event) => {
+    const nextScenarioId = event.target.value;
+
+    if (!nextScenarioId || nextScenarioId === selectedScenarioId) {
+      return;
+    }
+
+    setSelectedScenarioId(nextScenarioId);
+    setPlanningBusy(true);
+
+    try {
+      const snapshot = await missionService.applyScenario(nextScenarioId);
+      applySnapshotToUi(snapshot, { clearPlaced: true });
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Scenario could not be applied.");
+    } finally {
+      setPlanningBusy(false);
+    }
+  }, [applySnapshotToUi, selectedScenarioId]);
+
+  const handlePlanRoute = useCallback(async () => {
+    await refreshMissionData();
+  }, [refreshMissionData]);
+
+  const handleCompareRoutes = useCallback(async () => {
+    setPlanningBusy(true);
+
+    try {
+      const nextComparisonResult = await missionService.getComparisonResult({
+        scenarioId: selectedScenarioId || scenarioInfo?.scenario_id,
+        start: svgToGrid(startCoord, runtimeMetadata),
+        goal: svgToGrid(goalCoord, runtimeMetadata),
+        weights: planningWeights,
+      });
+
+      setComparisonResult(nextComparisonResult);
+      setPanelError("");
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : "Comparison could not be computed.");
+    } finally {
+      setPlanningBusy(false);
+    }
+  }, [goalCoord, planningWeights, runtimeMetadata, scenarioInfo?.scenario_id, selectedScenarioId, startCoord]);
+
   const midX = (startCoord.x + goalCoord.x) / 2;
   const midY = (startCoord.y + goalCoord.y) / 2;
   const thermalOffset = 56 + (planningWeights.w_thermal * 42);
@@ -541,6 +614,13 @@ export default function MissionControlPage() {
   const routeOp  = (0.5 + (weights.thermal / 100) * 0.5).toFixed(2);
   const cursor   = activeTool ? "crosshair" : "grab";
   const vbStr    = `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`;
+  const comparisonDelta = comparisonResult?.delta;
+  const eventEntries = serviceReplanResult?.event_log ?? [];
+  const displayDistanceValue = distanceUnit === "m"
+    ? Math.round(activeMetrics.distanceM).toLocaleString()
+    : distanceKm.toFixed(1);
+  const displayDistanceUnit = distanceUnit;
+  const activeLayerLabel = runtimeMetadata.layers?.find((layer) => layer.id === scenarioInfo?.default_layer_id)?.label ?? "Thermal Risk";
 
   // Toggle tool (second click = deactivate)
   const toggleTool = (id) => setActiveTool((curr) => curr === id ? null : id);
@@ -864,44 +944,164 @@ export default function MissionControlPage() {
         </aside>
 
         {/* ── Weighting Parameters ─────────────────────────────────────────── */}
-        <div className="map-panel absolute right-32 top-1/2 -translate-y-1/2 w-64 z-20">
-          <div className="glass-panel p-5 rounded-2xl shadow-xl border border-slate-200/50">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-[0.65rem] font-black uppercase tracking-widest">Weighting Parameters</h3>
-              <span className="material-symbols-outlined text-slate-300 text-base">tune</span>
-            </div>
-            <div className="space-y-5">
-              {[
-                { key: "thermal", label: "THERMAL WEIGHT", color: "#1e293b" },
-                { key: "slope",   label: "SLOPE WEIGHT",   color: "#94a3b8" },
-              ].map(({ key, label, color }) => (
-                <div key={key} className="space-y-2">
-                  <div className="flex justify-between items-center text-[0.6rem] font-bold">
-                    <span className="text-slate-400">{label}</span>
-                    <span className="tabular-nums text-slate-900">{weights[key]}%</span>
-                  </div>
-                  <input
-                    type="range" min="0" max="100" value={weights[key]}
-                    onChange={(e) => setWeights((w) => ({ ...w, [key]: +e.target.value }))}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-full h-1 appearance-none rounded-full outline-none cursor-pointer"
-                    style={{ background: `linear-gradient(to right, ${color} ${weights[key]}%, #e2e8f0 ${weights[key]}%)` }}
-                  />
+        <div className="map-panel absolute right-32 top-24 bottom-32 w-80 z-20">
+          <div className="glass-panel h-full rounded-2xl shadow-xl border border-slate-200/50 overflow-hidden" style={PANEL_MONO_STYLE}>
+            <div className="h-full overflow-y-auto px-5 py-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-[0.65rem] font-black uppercase tracking-[0.22em] text-slate-900">Mission Controls</h3>
+                  <p className="mt-1 text-[0.62rem] font-bold uppercase tracking-[0.18em] text-slate-400">{activeLayerLabel} layer active</p>
                 </div>
-              ))}
-            </div>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleReplan(); }}
-              disabled={replanning}
-              className="mt-6 w-full py-2.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 rounded-xl text-[0.65rem] font-bold text-slate-900 transition-colors uppercase tracking-widest"
-            >
-              {replanning
-                ? <span className="flex items-center justify-center gap-2">
-                    <span className="w-3 h-3 border-2 border-slate-400 border-t-slate-800 rounded-full animate-spin inline-block" />
-                    Replanning...
+                <div className={`rounded-full border px-2.5 py-1 text-[0.58rem] font-black uppercase tracking-[0.18em] ${planningBusy ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                  {planningBusy ? "syncing" : "ready"}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-[0.62rem] font-black uppercase tracking-[0.18em] text-slate-400">Scenario Selector</span>
+                  <span className="text-[0.6rem] font-bold uppercase tracking-[0.14em] text-slate-500">{runtimeMetadata.projection?.includes("Moon") ? "polar stereo" : "demo"}</span>
+                </div>
+                <select
+                  value={selectedScenarioId}
+                  onChange={handleScenarioChange}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[0.72rem] font-bold text-slate-800 outline-none transition focus:border-slate-300"
+                >
+                  {scenarios.map((scenario) => (
+                    <option key={scenario.scenario_id} value={scenario.scenario_id}>
+                      {scenario.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-3 flex items-center justify-between text-[0.62rem]">
+                  <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Units</span>
+                  <div className="flex rounded-full border border-slate-200 bg-slate-50 p-1">
+                    {["m", "km"].map((unit) => (
+                      <button
+                        key={unit}
+                        onClick={(e) => { e.stopPropagation(); setDistanceUnit(unit); }}
+                        className={`rounded-full px-2.5 py-1 text-[0.58rem] font-black uppercase tracking-[0.16em] transition ${distanceUnit === unit ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                      >
+                        {unit}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <span className="text-[0.62rem] font-black uppercase tracking-[0.18em] text-slate-400">Weight Profile</span>
+                  <span className="text-[0.58rem] font-bold uppercase tracking-[0.16em] text-slate-500">0.0 - 2.0 mapped</span>
+                </div>
+                <div className="space-y-4">
+                  {[
+                    { key: "distance", label: "DISTANCE", color: "#64748b", metricKey: "w_dist" },
+                    { key: "slope", label: "SLOPE", color: "#94a3b8", metricKey: "w_slope" },
+                    { key: "thermal", label: "THERMAL", color: "#1e293b", metricKey: "w_thermal" },
+                    { key: "energy", label: "ENERGY", color: "#0f766e", metricKey: "w_energy" },
+                  ].map(({ key, label, color, metricKey }) => (
+                    <div key={key} className="space-y-2">
+                      <div className="flex items-center justify-between text-[0.62rem] font-bold uppercase tracking-[0.16em]">
+                        <span className="text-slate-400">{label}</span>
+                        <span className="tabular-nums text-slate-900">{planningWeights[metricKey].toFixed(2)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={weights[key]}
+                        onChange={(e) => setWeights((current) => ({ ...current, [key]: Number(e.target.value) }))}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full h-1 appearance-none rounded-full outline-none cursor-pointer"
+                        style={{ background: `linear-gradient(to right, ${color} ${weights[key]}%, #e2e8f0 ${weights[key]}%)` }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-5 grid grid-cols-3 gap-2">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handlePlanRoute(); }}
+                    className="rounded-xl bg-slate-100 px-3 py-2 text-[0.6rem] font-black uppercase tracking-[0.16em] text-slate-900 transition hover:bg-slate-200"
+                  >
+                    Plan
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCompareRoutes(); }}
+                    className="rounded-xl bg-slate-100 px-3 py-2 text-[0.6rem] font-black uppercase tracking-[0.16em] text-slate-900 transition hover:bg-slate-200"
+                  >
+                    Compare
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleReplan(); }}
+                    disabled={replanning}
+                    className="rounded-xl bg-slate-900 px-3 py-2 text-[0.6rem] font-black uppercase tracking-[0.16em] text-white transition hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    Replan
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-[0.62rem] font-black uppercase tracking-[0.18em] text-slate-400">Comparison View</span>
+                  <span className={`rounded-full px-2 py-1 text-[0.55rem] font-black uppercase tracking-[0.16em] ${safePathRecommended ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                    {safePathRecommended ? "safe route" : "shortest viable"}
                   </span>
-                : "Replan Mission"}
-            </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[0.66rem]">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="mb-1 font-black uppercase tracking-[0.16em] text-slate-400">Shortest</div>
+                    <div className="text-sm font-black text-slate-900">{(shortestPathMetrics.distanceM / 1000).toFixed(1)} km</div>
+                    <div className="mt-1 text-slate-500">Thermal {shortestPathMetrics.thermalExposure.toFixed(1)}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="mb-1 font-black uppercase tracking-[0.16em] text-slate-400">Safe</div>
+                    <div className="text-sm font-black text-slate-900">{(safePathMetrics.distanceM / 1000).toFixed(1)} km</div>
+                    <div className="mt-1 text-slate-500">Thermal {safePathMetrics.thermalExposure.toFixed(1)}</div>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-[0.6rem]">
+                  <div className="rounded-xl bg-slate-50 px-3 py-2">
+                    <div className="font-black uppercase tracking-[0.16em] text-slate-400">Distance</div>
+                    <div className="mt-1 font-black text-slate-900">+{Math.abs(comparisonDelta?.distance_overhead_pct ?? distanceDeltaPct)}%</div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 px-3 py-2">
+                    <div className="font-black uppercase tracking-[0.16em] text-slate-400">Thermal</div>
+                    <div className="mt-1 font-black text-emerald-700">-{Math.abs(comparisonDelta?.thermal_reduction_pct ?? activeThermalReductionPct)}%</div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 px-3 py-2">
+                    <div className="font-black uppercase tracking-[0.16em] text-slate-400">Energy</div>
+                    <div className="mt-1 font-black text-slate-900">{activeEnergyDeltaPct > 0 ? "+" : ""}{activeEnergyDeltaPct.toFixed(1)}%</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-[0.62rem] font-black uppercase tracking-[0.18em] text-slate-400">Event Feed</span>
+                  <span className="text-[0.56rem] font-bold uppercase tracking-[0.16em] text-slate-500">{eventEntries.length} events</span>
+                </div>
+                <div className="space-y-2.5">
+                  {eventEntries.length
+                    ? eventEntries.slice(-3).map((entry) => (
+                        <div key={entry.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-[0.58rem] font-black uppercase tracking-[0.16em] text-slate-400">{entry.timestamp}</span>
+                            <span className={`text-[0.56rem] font-black uppercase tracking-[0.16em] ${entry.level === "warning" ? "text-amber-600" : entry.level === "success" ? "text-emerald-600" : "text-slate-500"}`}>{entry.level}</span>
+                          </div>
+                          <div className="mt-1 text-[0.67rem] font-bold text-slate-900">{entry.title}</div>
+                          <div className="mt-1 text-[0.62rem] leading-relaxed text-slate-500">{entry.detail}</div>
+                        </div>
+                      ))
+                    : (
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-[0.62rem] font-bold uppercase tracking-[0.14em] text-slate-400">
+                          Replan history will appear here.
+                        </div>
+                      )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -910,7 +1110,7 @@ export default function MissionControlPage() {
           <div className="glass-panel px-8 py-5 rounded-3xl shadow-2xl border border-slate-200/50 flex items-center justify-between gap-6">
             <div className="flex items-center gap-10">
               {[
-                { label: "Distance",         value: distanceKm,       unit: "km" },
+                { label: "Distance",         value: displayDistanceValue,       unit: displayDistanceUnit },
                 { label: "Thermal Exposure", value: activeMetrics.thermalExposure,  unit: "score" },
                 { label: "Max Slope",        value: activeMetrics.maxSlope,    unit: "\u00b0" },
               ].map(({ label, value, unit }) => (
