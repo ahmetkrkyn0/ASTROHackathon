@@ -1,5 +1,3 @@
-import PanelCard from "../layout/PanelCard";
-
 const weightFields = [
   { key: "w_dist", label: "Distance" },
   { key: "w_slope", label: "Slope" },
@@ -39,11 +37,15 @@ export default function ControlPanel({
   onPreviewReplan,
 }) {
   return (
-    <PanelCard
-      title="ControlPanel"
-      description="Adjust the weighted A* priorities and switch the layer preview."
-      contentClassName="space-y-5"
-    >
+    <section className="space-y-6">
+      <div className="space-y-2">
+        <p className="mission-label">ControlPanel</p>
+        <h2 className="mission-title">Route priorities</h2>
+        <p className="text-sm leading-6 text-slate-500">
+          Tune the weighted planning bias, then refresh the mock route or preview a replan event.
+        </p>
+      </div>
+
       <div className="space-y-4">
         {weightFields.map((field) => (
           <WeightSlider
@@ -55,12 +57,12 @@ export default function ControlPanel({
         ))}
       </div>
 
-      <label className="block">
+      <label className="block space-y-2">
         <span className="mb-2 block text-sm font-medium text-slate-700">Active layer</span>
         <select
           value={selectedLayer}
           onChange={(event) => onLayerChange(event.target.value)}
-          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+          className="w-full rounded-2xl bg-white/80 px-3.5 py-3 text-sm text-slate-700 outline-none ring-1 ring-slate-200/80 transition focus:ring-2 focus:ring-slate-300"
         >
           {layerOptions.map((layer) => (
             <option key={layer.id} value={layer.id}>
@@ -70,22 +72,26 @@ export default function ControlPanel({
         </select>
       </label>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3">
         <button
           type="button"
           onClick={onApplyWeights}
-          className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
+          className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800"
         >
           Refresh Mock Plan
         </button>
         <button
           type="button"
           onClick={onPreviewReplan}
-          className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+          className="rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium text-slate-700 ring-1 ring-slate-200/80 transition hover:bg-white"
         >
           Preview Replan
         </button>
       </div>
-    </PanelCard>
+
+      <p className="text-xs leading-5 text-slate-400">
+        This phase is mock-data driven. Controls reshape the local prototype state only.
+      </p>
+    </section>
   );
 }

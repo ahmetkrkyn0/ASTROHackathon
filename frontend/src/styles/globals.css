@@ -14,18 +14,63 @@
   html {
     margin: 0;
     min-height: 100%;
-    background: #f1f5f9;
+    background: #eef3f7;
   }
 
   body {
     margin: 0;
     min-height: 100%;
-    background: #f1f5f9;
+    background:
+      radial-gradient(circle at 0% 0%, rgba(148, 163, 184, 0.2), transparent 22%),
+      radial-gradient(circle at 100% 0%, rgba(14, 165, 233, 0.1), transparent 24%),
+      linear-gradient(180deg, #eef3f7 0%, #f8fafc 42%, #edf3f8 100%);
     color: #0f172a;
     font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   }
 
   #root {
     min-height: 100vh;
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .mission-surface {
+    border: 1px solid rgba(255, 255, 255, 0.82);
+    border-radius: 28px;
+    background: rgba(255, 255, 255, 0.74);
+    box-shadow: 0 28px 80px -48px rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(18px);
+  }
+
+  .mission-divider {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      rgba(148, 163, 184, 0),
+      rgba(148, 163, 184, 0.28),
+      rgba(148, 163, 184, 0)
+    );
+  }
+
+  .mission-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #94a3b8;
+  }
+
+  .mission-title {
+    font-size: 1.1rem;
+    line-height: 1.25;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: #0f172a;
   }
 }

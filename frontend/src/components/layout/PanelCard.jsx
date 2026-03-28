@@ -11,23 +11,18 @@ export default function PanelCard({
   contentClassName = "",
 }) {
   return (
-    <section
-      className={joinClasses(
-        "rounded-2xl border border-slate-200 bg-white shadow-sm",
-        className,
-      )}
-    >
+    <section className={joinClasses("mission-surface", className)}>
       {(title || description || actions) && (
-        <header className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <header className="flex flex-col gap-3 px-5 py-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            {title ? <h2 className="text-sm font-semibold text-slate-900">{title}</h2> : null}
-            {description ? <p className="mt-1 text-sm text-slate-500">{description}</p> : null}
+            {title ? <p className="mission-label">{title}</p> : null}
+            {description ? <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p> : null}
           </div>
           {actions ? <div className="shrink-0">{actions}</div> : null}
         </header>
       )}
 
-      <div className={joinClasses("px-5 py-4", contentClassName)}>{children}</div>
+      <div className={joinClasses("px-5 pb-5", contentClassName)}>{children}</div>
     </section>
   );
 }

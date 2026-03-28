@@ -91,12 +91,12 @@ export default function MissionControlPage() {
         topBar={
           <TopBar
             title="Mission Control Panel"
-            subtitle="Preparing LunaPath mock data foundation."
+            subtitle="Preparing the LunaPath mission control surface."
             scenarioName="Loading"
           />
         }
       >
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+        <div className="mission-surface px-6 py-8 text-sm text-slate-500">
           Loading mock mission data...
         </div>
       </PageShell>
@@ -108,42 +108,54 @@ export default function MissionControlPage() {
       topBar={
         <TopBar
           title="Mission Control Panel"
-          subtitle="Phase 1 foundation with modular placeholders and mock mission data."
+          subtitle="Mock-data mission operations surface focused on route planning, comparison, and replan review."
           scenarioName={activeScenario.name}
         />
       }
     >
-      <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <div className="space-y-6">
-          <ScenarioSelector
-            scenarios={scenarios}
-            activeScenarioId={activeScenarioId}
-            onSelect={applyScenario}
-          />
-          <ControlPanel
-            weights={weights}
-            selectedLayer={selectedLayer}
-            layerOptions={layersMetadata.layers}
-            onWeightChange={handleWeightChange}
-            onLayerChange={setSelectedLayer}
-            onApplyWeights={applyWeights}
-            onPreviewReplan={previewReplan}
-          />
-          <EventLog events={replanResult.event_log} />
+      <div className="space-y-6">
+        <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)_320px]">
+          <aside className="order-2 self-start xl:order-1 xl:sticky xl:top-24">
+            <div className="mission-surface px-5 py-5 sm:px-6 sm:py-6">
+              <ScenarioSelector
+                scenarios={scenarios}
+                activeScenarioId={activeScenarioId}
+                onSelect={applyScenario}
+              />
+              <div className="mission-divider my-6" />
+              <ControlPanel
+                weights={weights}
+                selectedLayer={selectedLayer}
+                layerOptions={layersMetadata.layers}
+                onWeightChange={handleWeightChange}
+                onLayerChange={setSelectedLayer}
+                onApplyWeights={applyWeights}
+                onPreviewReplan={previewReplan}
+              />
+            </div>
+          </aside>
+
+          <section className="order-1 xl:order-2">
+            <MapView
+              gridMetadata={layersMetadata}
+              selectedLayer={selectedLayer}
+              pathResult={pathResult}
+              comparisonResult={comparisonResult}
+              replanResult={replanResult}
+            />
+          </section>
+
+          <aside className="order-3 self-start xl:sticky xl:top-24">
+            <div className="mission-surface px-5 py-5 sm:px-6 sm:py-6">
+              <MetricsPanel pathResult={pathResult} comparisonResult={comparisonResult} />
+              <div className="mission-divider my-6" />
+              <ComparisonView comparisonResult={comparisonResult} />
+            </div>
+          </aside>
         </div>
 
-        <div className="space-y-6">
-          <MapView
-            gridMetadata={layersMetadata}
-            selectedLayer={selectedLayer}
-            pathResult={pathResult}
-            comparisonResult={comparisonResult}
-            replanResult={replanResult}
-          />
-          <div className="grid gap-6 xl:grid-cols-2">
-            <MetricsPanel pathResult={pathResult} comparisonResult={comparisonResult} />
-            <ComparisonView comparisonResult={comparisonResult} />
-          </div>
+        <div className="mission-surface px-5 py-4 sm:px-6 sm:py-5">
+          <EventLog events={replanResult.event_log} />
         </div>
       </div>
     </PageShell>

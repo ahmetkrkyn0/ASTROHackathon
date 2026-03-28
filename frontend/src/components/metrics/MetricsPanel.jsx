@@ -1,5 +1,3 @@
-import PanelCard from "../layout/PanelCard";
-
 const metricItems = [
   {
     key: "total_distance_m",
@@ -30,48 +28,63 @@ function formatValue(value, unit) {
 
 export default function MetricsPanel({ pathResult, comparisonResult }) {
   return (
-    <PanelCard
-      title="MetricsPanel"
-      description="Core mission metrics for the currently selected mock plan."
-      contentClassName="space-y-4"
-    >
-      <div className="grid gap-3 sm:grid-cols-2">
-        {metricItems.map((item) => (
-          <div key={item.key} className="rounded-xl bg-slate-50 p-4">
-            <p className="text-sm text-slate-500">{item.label}</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">
-              {formatValue(pathResult[item.key], item.unit)}
-            </p>
-          </div>
-        ))}
+    <section className="space-y-5">
+      <div className="space-y-2">
+        <p className="mission-label">MetricsPanel</p>
+        <h2 className="mission-title">Mission summary</h2>
+        <p className="text-sm leading-6 text-slate-500">
+          Compact operational readout for the active mock plan.
+        </p>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <p className="text-sm font-medium text-slate-900">Risk breakdown</p>
-        <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
-          <div className="rounded-lg bg-emerald-50 px-3 py-2">
-            Safe cells: {pathResult.risk_breakdown.safe_cells}
+      <dl className="space-y-3">
+        {metricItems.map((item) => (
+          <div
+            key={item.key}
+            className="flex items-end justify-between gap-4 border-b border-slate-200/70 pb-3 last:border-b-0 last:pb-0"
+          >
+            <div>
+              <dt className="text-sm text-slate-500">{item.label}</dt>
+              <dd className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">
+                {formatValue(pathResult[item.key], item.unit)}
+              </dd>
+            </div>
+            <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-300">
+              Live
+            </span>
           </div>
-          <div className="rounded-lg bg-amber-50 px-3 py-2">
-            Caution cells: {pathResult.risk_breakdown.caution_cells}
+        ))}
+      </dl>
+
+      <div className="rounded-[24px] bg-slate-950 px-4 py-4 text-slate-50">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Risk mix</p>
+        <div className="mt-3 space-y-2 text-sm">
+          <div className="flex items-center justify-between rounded-2xl bg-white/6 px-3 py-2">
+            <span>Safe cells</span>
+            <span className="font-semibold">{pathResult.risk_breakdown.safe_cells}</span>
           </div>
-          <div className="rounded-lg bg-rose-50 px-3 py-2">
-            Danger cells: {pathResult.risk_breakdown.danger_cells}
+          <div className="flex items-center justify-between rounded-2xl bg-white/6 px-3 py-2">
+            <span>Caution cells</span>
+            <span className="font-semibold">{pathResult.risk_breakdown.caution_cells}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-2xl bg-white/6 px-3 py-2">
+            <span>Danger cells</span>
+            <span className="font-semibold">{pathResult.risk_breakdown.danger_cells}</span>
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-        Comparison delta: safe route thermal reduction is{" "}
+      <div className="rounded-2xl bg-slate-100/80 px-4 py-3 text-sm leading-6 text-slate-600">
+        Current comparison delta indicates{" "}
         <span className="font-semibold text-slate-900">
-          {comparisonResult.delta.thermal_reduction_pct.toFixed(1)}%
+          {comparisonResult.delta.thermal_reduction_pct.toFixed(1)}% lower thermal exposure
         </span>{" "}
-        with a distance overhead of{" "}
+        for the safer route with a{" "}
         <span className="font-semibold text-slate-900">
-          {comparisonResult.delta.distance_overhead_pct.toFixed(1)}%
+          {comparisonResult.delta.distance_overhead_pct.toFixed(1)}% distance premium
         </span>
         .
       </div>
-    </PanelCard>
+    </section>
   );
 }
