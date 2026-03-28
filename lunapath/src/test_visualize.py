@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """
-LunaPath P1 – Görsel Doğrulama Scripti
-=======================================
-process_lunar_data.py tarafından üretilen grid'leri yükler ve
-2×2 subplot ile görselleştirerek verinin tutarlılığını doğrular.
-
-Kontrol listesi:
-  - Dik yamaçlar düşük traversability veriyor mu?
-  - PSR maskesi mantıklı bölgeleri işaretliyor mu?
-  - Yükseklik haritası jeolojik olarak tutarlı mı?
+LunaPath P1 v2.0 — Gorsel Dogrulama
+====================================
+Uretilen 6 grid'i yukleyip 2x3 subplot ile gorsellestirerek
+verinin tutarliligini dogrular.
 """
 
 from __future__ import annotations
@@ -18,128 +13,106 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ─── Yollar ──────────────────────────────────────────────────────────────────
+# --- Yollar ------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 
+GRID_NAMES = [
+    "elevation_grid",
+    "slope_grid",
+    "aspect_grid",
+    "shadow_ratio_grid",
+    "thermal_grid",
+    "traversability_grid",
+]
+
 
 def load_grids() -> dict[str, np.ndarray]:
-    """İşlenmiş grid dosyalarını yükler."""
-    names = [
-        "elevation_grid",
-        "slope_grid",
-        "psr_mask",
-        "traversability_grid",
-        "thermal_risk_grid",
-    ]
+    """Islenmis grid dosyalarini yukler."""
     grids = {}
-    for name in names:
+    for name in GRID_NAMES:
         path = PROCESSED_DIR / f"{name}.npy"
         if not path.exists():
             raise FileNotFoundError(
-                f"{path} bulunamadı. Önce process_lunar_data.py çalıştırın."
+                f"{path} bulunamadi. Once process_lunar_data.py calistirin."
             )
         grids[name] = np.load(path, allow_pickle=False)
     return grids
 
 
-def plot_main_grids(grids: dict[str, np.ndarray]) -> None:
-    """Elevation, slope, PSR mask ve traversability'yi 2×2 subplot ile çizer."""
-    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
-    fig.suptitle("LunaPath P1 – Veri Doğrulama Görselleştirmesi", fontsize=16, fontweight="bold")
+def plot_all_grids(grids: dict[str, np.ndarray]) -> None:
+    """6 grid'i 2x3 subplot ile cizer."""
+    fig, axes = plt.subplots(2, 3, figsize=(20, 12))
+    fig.suptitle("LunaPath P1 v2.0 — Veri Dogrulama", fontsize=16, fontweight="bold")
 
-    # Elevation
-    ax = axes[0, 0]
-    im = ax.imshow(grids["elevation_grid"], cmap="terrain", aspect="equal")
-    ax.set_title("Yükseklik (m)")
-    fig.colorbar(im, ax=ax, label="metre", shrink=0.8)
+    configs = [
+        ("elevation_grid",      "Yukseklik (m)",           "terrain", None),
+        ("slope_grid",          "Egim (derece)",           "YlOrRd",  None),
+        ("aspect_grid",         "Baki Yonu (derece)",      "hsv",     (0, 360)),
+        ("shadow_ratio_grid",   "Golge Orani",             "gray_r",  (0, 1)),
+        ("thermal_grid",        "Yuzey Sicakligi (C)",     "coolwarm", None),
+        ("traversability_grid", "Gecilebilirlik (0/1)",    "RdYlGn",  (0, 1)),
+    ]
 
-    # Slope
-    ax = axes[0, 1]
-    im = ax.imshow(grids["slope_grid"], cmap="YlOrRd", aspect="equal")
-    ax.set_title("Eğim (derece)")
-    fig.colorbar(im, ax=ax, label="derece", shrink=0.8)
-
-    # PSR Mask
-    ax = axes[1, 0]
-    im = ax.imshow(grids["psr_mask"].astype(np.uint8), cmap="Blues", aspect="equal", vmin=0, vmax=1)
-    ax.set_title("PSR Maskesi (mavi = gölge riski)")
-    fig.colorbar(im, ax=ax, label="True/False", shrink=0.8)
-
-    # Traversability
-    ax = axes[1, 1]
-    im = ax.imshow(grids["traversability_grid"], cmap="RdYlGn", aspect="equal", vmin=0, vmax=1)
-    ax.set_title("Geçilebilirlik (0=imkansız, 1=kolay)")
-    fig.colorbar(im, ax=ax, label="skor", shrink=0.8)
+    for ax, (name, title, cmap, vlim) in zip(axes.flat, configs):
+        data = grids[name]
+        kwargs = {"cmap": cmap, "aspect": "equal"}
+        if vlim is not None:
+            kwargs["vmin"], kwargs["vmax"] = vlim
+        im = ax.imshow(data, **kwargs)
+        ax.set_title(title)
+        fig.colorbar(im, ax=ax, shrink=0.8)
 
     plt.tight_layout()
     out_path = PROCESSED_DIR / "validation_plot.png"
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    print(f"✓ Görsel kaydedildi → {out_path}")
-    plt.show()
-
-
-def plot_thermal_risk(grids: dict[str, np.ndarray]) -> None:
-    """Termal risk grid'ini ayrı bir figür olarak çizer."""
-    fig, ax = plt.subplots(figsize=(8, 7))
-    im = ax.imshow(grids["thermal_risk_grid"], cmap="hot", aspect="equal", vmin=0, vmax=1)
-    ax.set_title("Termal Risk Grid (0=düşük, 1=yüksek)", fontsize=14)
-    fig.colorbar(im, ax=ax, label="risk skoru", shrink=0.8)
-    plt.tight_layout()
-    out_path = PROCESSED_DIR / "thermal_risk_plot.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
-    print(f"✓ Termal risk görseli kaydedildi → {out_path}")
+    print(f"Gorsel kaydedildi: {out_path}")
     plt.show()
 
 
 def print_consistency_checks(grids: dict[str, np.ndarray]) -> None:
-    """Temel tutarlılık kontrollerini yazdırır."""
+    """Temel tutarlilik kontrollerini yazdirir."""
     slope = grids["slope_grid"]
     trav = grids["traversability_grid"]
+    thermal = grids["thermal_grid"]
 
-    steep_mask = slope > 30
+    # Dik yamaclarda gecilebilirlik 0 olmali
+    steep_mask = slope > 25.0
     if steep_mask.any():
-        avg_trav_steep = np.nanmean(trav[steep_mask])
-        avg_trav_flat = np.nanmean(trav[~steep_mask & ~np.isnan(slope)])
-        print(f"\n─── Tutarlılık Kontrolü ───")
-        print(f"  Dik (>30°) bölgelerde ort. geçilebilirlik : {avg_trav_steep:.3f}")
-        print(f"  Düz (≤30°) bölgelerde ort. geçilebilirlik : {avg_trav_flat:.3f}")
-        if avg_trav_steep < avg_trav_flat:
-            print("  ✓ DOĞRU: Dik yamaçlar daha düşük geçilebilirlik veriyor.")
+        trav_at_steep = np.nanmean(trav[steep_mask])
+        print(f"\n--- Tutarlilik Kontrolu ---")
+        print(f"  Dik (>25 deg) bolgelerde ort. gecilebilirlik: {trav_at_steep:.3f}")
+        if trav_at_steep < 0.01:
+            print("  DOGRU: Dik yamaclar gecilmez olarak isaretlenmis.")
         else:
-            print("  ✗ UYARI: Tutarsızlık tespit edildi!")
-    else:
-        print("  (!) 30° üzeri eğim bulunamadı, kontrol atlanıyor.")
+            print("  UYARI: Dik yamac tutarsizligi!")
 
-    psr = grids["psr_mask"]
-    elev = grids["elevation_grid"]
-    if psr.any():
-        avg_elev_psr = np.nanmean(elev[psr])
-        avg_elev_non = np.nanmean(elev[~psr])
-        print(f"  PSR bölgelerinde ort. yükseklik  : {avg_elev_psr:.1f} m")
-        print(f"  PSR dışında ort. yükseklik       : {avg_elev_non:.1f} m")
-        if avg_elev_psr < avg_elev_non:
-            print("  ✓ DOĞRU: PSR bölgeleri daha alçak (beklenen).")
+    # Cok soguk bolgelerde gecilebilirlik 0 olmali
+    cold_mask = thermal < -150.0
+    if cold_mask.any():
+        trav_at_cold = np.nanmean(trav[cold_mask])
+        print(f"  Soguk (<-150 C) bolgelerde ort. gecilebilirlik: {trav_at_cold:.3f}")
+        if trav_at_cold < 0.01:
+            print("  DOGRU: Soguk bolgeler gecilmez olarak isaretlenmis.")
         else:
-            print("  ✗ UYARI: PSR yükseklik tutarsızlığı!")
+            print("  UYARI: Soguk bolge tutarsizligi!")
 
 
 def main() -> None:
     print("=" * 60)
-    print("  LunaPath P1 – Görsel Doğrulama")
+    print("  LunaPath P1 v2.0 — Gorsel Dogrulama")
     print("=" * 60)
 
     grids = load_grids()
-    print(f"\n✓ {len(grids)} grid yüklendi.\n")
+    print(f"\n  {len(grids)} grid yuklendi.\n")
 
     for name, arr in grids.items():
         print(f"  {name:<25s} shape={str(arr.shape):<14s} dtype={arr.dtype}")
 
     print_consistency_checks(grids)
-    plot_main_grids(grids)
-    plot_thermal_risk(grids)
+    plot_all_grids(grids)
 
-    print("\nDoğrulama tamamlandı ✓")
+    print("\nDogrulama tamamlandi.")
 
 
 if __name__ == "__main__":
