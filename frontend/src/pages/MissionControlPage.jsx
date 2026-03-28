@@ -164,6 +164,66 @@ const PANEL_MONO_STYLE = {
   fontFamily: "'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', 'SFMono-Regular', Consolas, monospace",
 };
 
+const LAYER_VISUALS = Object.freeze({
+  elevation: {
+    swatch: ["#58a6ff", "#3fb950", "#d29922", "#f8fafc"],
+    badge: "terrain",
+    chipTone: "border-sky-200 bg-sky-50 text-sky-700",
+  },
+  slope: {
+    swatch: ["#111827", "#6b21a8", "#f97316", "#facc15"],
+    badge: "magma",
+    chipTone: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700",
+  },
+  thermal_risk: {
+    swatch: ["#111827", "#f85149", "#ffb347", "#fff7d6"],
+    badge: "hot",
+    chipTone: "border-red-200 bg-red-50 text-red-700",
+  },
+  traversability: {
+    swatch: ["#f85149", "#d29922", "#3fb950"],
+    badge: "RdYlGn",
+    chipTone: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  },
+  psr_mask: {
+    swatch: ["#0f172a", "#64748b", "#cbd5e1", "#f8fafc"],
+    badge: "bone",
+    chipTone: "border-slate-200 bg-slate-100 text-slate-700",
+  },
+});
+
+function getGradientCss(stops) {
+  return `linear-gradient(90deg, ${stops.join(", ")})`;
+}
+
+function formatLayerRange(layer) {
+  if (!layer?.value_range) return "Range unavailable";
+
+  const [min, max] = layer.value_range;
+
+  if (layer.unit === "m") {
+    return `${Math.round(min).toLocaleString()} to ${Math.round(max).toLocaleString()} m`;
+  }
+
+  if (layer.unit === "deg") {
+    return `${Number(min).toFixed(0)}° to ${Number(max).toFixed(0)}°`;
+  }
+
+  if (layer.unit === "boolean") {
+    return `${min} to ${max} mask`;
+  }
+
+  return `${Number(min).toFixed(1)} to ${Number(max).toFixed(1)} ${layer.unit}`;
+}
+
+function formatProjectedMeters(value) {
+  return `${Math.round(value).toLocaleString()} m`;
+}
+
+function formatProjectedKilometers(value) {
+  return `${(value / 1000).toFixed(1)} km`;
+}
+
 export default function MissionControlPage() {
   // Weights
   const [weights, setWeights] = useState({ distance: 52, thermal: 80, slope: 55, energy: 60 });
@@ -643,6 +703,8 @@ export default function MissionControlPage() {
   const displayDistanceUnit = distanceUnit;
   const activeLayer = runtimeMetadata.layers?.find((layer) => layer.id === selectedLayerId) ?? runtimeMetadata.layers?.[0];
   const activeLayerLabel = activeLayer?.label ?? "Thermal Risk";
+  const activeLayerVisual = LAYER_VISUALS[activeLayer?.id] ?? LAYER_VISUALS.thermal_risk;
+  const activeLayerRangeLabel = formatLayerRange(activeLayer);
   const startGridCoord = svgToGrid(startCoord, runtimeMetadata);
   const goalGridCoord = svgToGrid(goalCoord, runtimeMetadata);
   const startProjected = gridToProjected(startGridCoord, runtimeMetadata);
@@ -650,6 +712,60 @@ export default function MissionControlPage() {
   const axisTicks = Array.from({ length: 5 }, (_, index) => (
     (runtimeMetadata.extent_m.width / 4) * index
   ));
+  const layerOverlayOpacity = Number(clamp((overlayOpacity / 100) * 0.76, 0.18, 0.92).toFixed(2));
+  const mapExtentLabel = `${(runtimeMetadata.extent_m.width / 1000).toFixed(0)} km x ${(runtimeMetadata.extent_m.height / 1000).toFixed(0)} km`;
+  const resolutionLabel = `${runtimeMetadata.resolution_m} m/cell`;
+  const secondaryDistanceLabel = distanceUnit === "km"
+    ? `${Math.round(activeMetrics.distanceM).toLocaleString()} m`
+    : `${(activeMetrics.distanceM / 1000).toFixed(1)} km`;
+  const routeStrategyLabel = replanned
+    ? "replanned corridor"
+    : safePathRecommended
+      ? "safe corridor"
+      : "shortest viable";
+  const maxSlopeDelta = Number((activeMetrics.maxSlope - shortestPathMetrics.maxSlope).toFixed(1));
+  const computeDelta = activeMetrics.compute - shortestPathMetrics.compute;
+  const bottomMetricCards = [
+    {
+      label: "Distance",
+      value: displayDistanceValue,
+      unit: displayDistanceUnit,
+      secondary: secondaryDistanceLabel,
+      delta: `${distanceDeltaPct >= 0 ? "+" : ""}${distanceDeltaPct.toFixed(1)}% vs shortest`,
+      deltaTone: distanceDeltaPct > 0 ? "text-amber-600" : "text-emerald-600",
+    },
+    {
+      label: "Thermal Exposure",
+      value: activeMetrics.thermalExposure.toFixed(1),
+      unit: "score",
+      secondary: `Shortest ${shortestPathMetrics.thermalExposure.toFixed(1)}`,
+      delta: `-${Math.abs(activeThermalReductionPct).toFixed(1)}% safer`,
+      deltaTone: "text-emerald-600",
+    },
+    {
+      label: "Max Slope",
+      value: activeMetrics.maxSlope.toFixed(1),
+      unit: "°",
+      secondary: `Shortest ${shortestPathMetrics.maxSlope.toFixed(1)}°`,
+      delta: `${maxSlopeDelta >= 0 ? "+" : ""}${maxSlopeDelta.toFixed(1)}° corridor delta`,
+      deltaTone: maxSlopeDelta <= 0 ? "text-emerald-600" : "text-amber-600",
+    },
+    {
+      label: "Compute Time",
+      value: activeMetrics.compute,
+      unit: "ms",
+      secondary: routeStrategyLabel,
+      delta: `${computeDelta >= 0 ? "+" : ""}${computeDelta} ms vs shortest`,
+      deltaTone: computeDelta <= 0 ? "text-emerald-600" : "text-sky-600",
+    },
+  ];
+  const staticPsrOpacity = selectedLayerId === "psr_mask" ? 0.95 : 0.58;
+  const staticThermalPrimaryOpacity = selectedLayerId === "thermal_risk"
+    ? 0.42 + (weights.thermal / 100) * 0.28
+    : 0.22 + (weights.thermal / 100) * 0.14;
+  const staticThermalSecondaryOpacity = selectedLayerId === "thermal_risk"
+    ? 0.3 + (weights.thermal / 100) * 0.2
+    : 0.16 + (weights.thermal / 100) * 0.1;
 
   // Toggle tool (second click = deactivate)
   const toggleTool = (id) => setActiveTool((curr) => curr === id ? null : id);
@@ -738,6 +854,49 @@ export default function MissionControlPage() {
                 <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
                 <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
               </radialGradient>
+              <radialGradient id="thermalOverlayGradient">
+                <stop offset="0%" stopColor="#fff7d6" stopOpacity="0.95" />
+                <stop offset="42%" stopColor="#ffb347" stopOpacity="0.65" />
+                <stop offset="72%" stopColor="#f85149" stopOpacity="0.42" />
+                <stop offset="100%" stopColor="#111827" stopOpacity="0" />
+              </radialGradient>
+              <linearGradient id="thermalRouteGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#111827" stopOpacity="0" />
+                <stop offset="25%" stopColor="#f85149" stopOpacity="0.18" />
+                <stop offset="70%" stopColor="#ffb347" stopOpacity="0.16" />
+                <stop offset="100%" stopColor="#fff7d6" stopOpacity="0.1" />
+              </linearGradient>
+              <linearGradient id="terrainOverlayGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#58a6ff" stopOpacity="0.22" />
+                <stop offset="38%" stopColor="#3fb950" stopOpacity="0.18" />
+                <stop offset="72%" stopColor="#d29922" stopOpacity="0.22" />
+                <stop offset="100%" stopColor="#f8fafc" stopOpacity="0.34" />
+              </linearGradient>
+              <linearGradient id="terrainContourGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#4a6fa5" stopOpacity="0.18" />
+                <stop offset="50%" stopColor="#8d6b2f" stopOpacity="0.34" />
+                <stop offset="100%" stopColor="#f8fafc" stopOpacity="0.16" />
+              </linearGradient>
+              <linearGradient id="slopeOverlayGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#111827" stopOpacity="0.28" />
+                <stop offset="35%" stopColor="#6b21a8" stopOpacity="0.24" />
+                <stop offset="70%" stopColor="#f97316" stopOpacity="0.34" />
+                <stop offset="100%" stopColor="#facc15" stopOpacity="0.2" />
+              </linearGradient>
+              <linearGradient id="traversabilityOverlayGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#f85149" stopOpacity="0.36" />
+                <stop offset="50%" stopColor="#d29922" stopOpacity="0.32" />
+                <stop offset="100%" stopColor="#3fb950" stopOpacity="0.36" />
+              </linearGradient>
+              <linearGradient id="psrOverlayGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#0f172a" stopOpacity="0.2" />
+                <stop offset="55%" stopColor="#94a3b8" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="#f8fafc" stopOpacity="0.14" />
+              </linearGradient>
+              <pattern id="psrHatch" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(24)">
+                <rect width="20" height="20" fill="rgba(248,250,252,0.22)" />
+                <line x1="0" y1="0" x2="0" y2="20" stroke="rgba(71,85,105,0.18)" strokeWidth="6" />
+              </pattern>
               <filter id="glow"><feGaussianBlur stdDeviation="3" result="c"/><feMerge><feMergeNode in="c"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
               
               <pattern id="smallGrid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -754,13 +913,114 @@ export default function MissionControlPage() {
               <rect x="-50000" y="-50000" width="100000" height="100000" fill="url(#gridPattern)" opacity={overlayOpacity / 100} />
             )}
 
+            {selectedLayerId === "elevation" && (
+              <g opacity={layerOverlayOpacity}>
+                <rect x="0" y="0" width={VIEWBOX_SIZE} height={VIEWBOX_SIZE} fill="url(#terrainOverlayGradient)" opacity="0.42" />
+                {[
+                  "M 20 158 C 180 110 318 212 468 168 S 764 78 980 148",
+                  "M -10 302 C 184 252 302 360 480 322 S 812 224 1030 318",
+                  "M -20 468 C 212 420 340 548 560 508 S 846 404 1020 468",
+                  "M 10 642 C 176 596 342 704 540 670 S 844 570 1010 626",
+                  "M 60 812 C 214 764 380 858 586 820 S 850 724 968 782",
+                ].map((d, index) => (
+                  <path
+                    key={`elevation-contour-${index}`}
+                    d={d}
+                    fill="none"
+                    stroke="url(#terrainContourGradient)"
+                    strokeLinecap="round"
+                    strokeWidth={index % 2 === 0 ? 5 : 2.5}
+                    opacity={0.28 + (index * 0.06)}
+                  />
+                ))}
+              </g>
+            )}
+
+            {selectedLayerId === "slope" && (
+              <g opacity={layerOverlayOpacity}>
+                <rect x="0" y="0" width={VIEWBOX_SIZE} height={VIEWBOX_SIZE} fill="url(#slopeOverlayGradient)" opacity="0.18" />
+                {[
+                  { d: "M 40 120 C 212 76 370 214 506 186 S 820 42 980 120", width: 88, opacity: 0.14 },
+                  { d: "M -30 286 C 194 228 338 390 548 330 S 830 236 1028 294", width: 102, opacity: 0.18 },
+                  { d: "M 40 520 C 210 470 394 624 598 552 S 828 442 1000 500", width: 110, opacity: 0.2 },
+                  { d: "M 86 796 C 260 738 412 898 648 834 S 866 706 974 758", width: 92, opacity: 0.16 },
+                ].map((band, index) => (
+                  <path
+                    key={`slope-band-${index}`}
+                    d={band.d}
+                    fill="none"
+                    stroke="url(#slopeOverlayGradient)"
+                    strokeLinecap="round"
+                    strokeWidth={band.width}
+                    opacity={band.opacity}
+                  />
+                ))}
+              </g>
+            )}
+
+            {selectedLayerId === "thermal_risk" && (
+              <g opacity={layerOverlayOpacity}>
+                <path d={highRiskPath} fill="none" stroke="url(#thermalRouteGradient)" strokeWidth="84" strokeLinecap="round" opacity="0.12" />
+                {STATIC_THERMAL_FIELDS.map((field, index) => (
+                  <circle
+                    key={`thermal-overlay-${index}`}
+                    fill="url(#thermalOverlayGradient)"
+                    cx={field.x}
+                    cy={field.y}
+                    r={field.baseRadius + ((weights.thermal / 100) * 44)}
+                    opacity={index === 0 ? 0.44 : 0.3}
+                  />
+                ))}
+                {thermalZones.map((zone, index) => (
+                  <circle
+                    key={`thermal-user-overlay-${index}`}
+                    fill="url(#thermalOverlayGradient)"
+                    cx={zone.x}
+                    cy={zone.y}
+                    r={zone.r * 1.12}
+                    opacity="0.36"
+                  />
+                ))}
+              </g>
+            )}
+
+            {selectedLayerId === "traversability" && (
+              <g opacity={layerOverlayOpacity}>
+                <path d={safePath} fill="none" stroke="url(#traversabilityOverlayGradient)" strokeWidth="112" strokeLinecap="round" opacity="0.12" />
+                <path d={safePath} fill="none" stroke="url(#traversabilityOverlayGradient)" strokeWidth="34" strokeLinecap="round" opacity="0.34" />
+                <circle cx={safeControlPoint.x} cy={safeControlPoint.y} r="84" fill="#3fb950" opacity="0.12" />
+                <circle cx={sectorNode.x} cy={sectorNode.y} r="52" fill="#d29922" opacity="0.14" />
+              </g>
+            )}
+
+            {selectedLayerId === "psr_mask" && (
+              <g opacity={layerOverlayOpacity}>
+                <rect x="0" y="0" width={VIEWBOX_SIZE} height={VIEWBOX_SIZE} fill="url(#psrOverlayGradient)" opacity="0.18" />
+                <path d="M 100 100 Q 150 80 200 150 T 300 100 L 280 250 Q 200 280 120 230 Z" fill="url(#psrHatch)" stroke="rgba(71,85,105,0.28)" strokeWidth="1.4" />
+                <path d="M 750 600 Q 850 550 900 650 T 800 800 Q 700 750 750 600" fill="url(#psrHatch)" stroke="rgba(71,85,105,0.28)" strokeWidth="1.4" />
+                {shadowRegions.map((region, index) => (
+                  <ellipse
+                    key={`shadow-overlay-${index}`}
+                    cx={region.x}
+                    cy={region.y}
+                    rx="82"
+                    ry="58"
+                    fill="url(#psrHatch)"
+                    stroke="rgba(71,85,105,0.28)"
+                    strokeWidth="1.2"
+                    strokeDasharray="4 2"
+                  />
+                ))}
+              </g>
+            )}
+
             {/* ── Static PSR regions ──────────────────────────────────── */}
-            <path className="psr-region" d="M 100 100 Q 150 80 200 150 T 300 100 L 280 250 Q 200 280 120 230 Z" />
-            <path className="psr-region" d="M 750 600 Q 850 550 900 650 T 800 800 Q 700 750 750 600" />
+            <path className="psr-region" d="M 100 100 Q 150 80 200 150 T 300 100 L 280 250 Q 200 280 120 230 Z" opacity={staticPsrOpacity} />
+            <path className="psr-region" d="M 750 600 Q 850 550 900 650 T 800 800 Q 700 750 750 600" opacity={staticPsrOpacity} />
 
             {/* ── Static thermal hazards ──────────────────────────────── */}
-            <circle fill="url(#thermalGradient)" opacity={0.3 + (weights.thermal/100)*0.3} cx="450" cy="500" r={130 + (weights.thermal/100)*40} />
-            <circle fill="url(#thermalGradient)" opacity={0.2 + (weights.thermal/100)*0.2} cx="550" cy="450" r={80  + (weights.thermal/100)*30} />
+            <circle fill="url(#thermalGradient)" opacity={staticThermalPrimaryOpacity} cx="450" cy="500" r={130 + (weights.thermal/100)*40} />
+            <circle fill="url(#thermalGradient)" opacity={staticThermalSecondaryOpacity} cx="550" cy="450" r={80  + (weights.thermal/100)*30} />
 
             {/* ── USER-placed thermal zones ────────────────────────────── */}
             {thermalZones.map((z, i) => (
@@ -874,7 +1134,7 @@ export default function MissionControlPage() {
           {tooltipData && (
             <div
               className="map-panel absolute glass-panel px-4 py-3 rounded-xl shadow-xl z-50 min-w-[200px] pointer-events-none backdrop-blur-md"
-              style={{ top: tooltipData.y + 15, left: tooltipData.x + 15, transform: "translate(0, 0)" }}
+              style={{ ...PANEL_MONO_STYLE, top: tooltipData.y + 15, left: tooltipData.x + 15, transform: "translate(0, 0)" }}
             >
               <div className="flex items-center gap-2 mb-2">
                 <div className={`w-2 h-2 rounded-full animate-pulse ${tooltipData.risk === 'CRITICAL' ? 'bg-red-500' : tooltipData.risk === 'SAFE' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
@@ -897,14 +1157,24 @@ export default function MissionControlPage() {
           )}
 
           {/* ── Map Legend ───────────────────────────────────────────────── */}
-          <div className="map-panel absolute bottom-36 left-8 glass-panel p-4 rounded-xl border border-slate-200 text-[0.65rem] font-bold space-y-2.5 z-10">
+          <div className="map-panel absolute bottom-36 left-8 glass-panel p-4 rounded-xl border border-slate-200 text-[0.65rem] font-bold space-y-2.5 z-10" style={PANEL_MONO_STYLE}>
             <h4 className="uppercase tracking-widest text-slate-400 mb-1">Map Legend</h4>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[0.56rem] font-black uppercase tracking-[0.16em] text-slate-400">Active Layer</span>
+                <span className={`rounded-full border px-2 py-1 text-[0.5rem] font-black uppercase tracking-[0.16em] ${activeLayerVisual.chipTone}`}>{activeLayerVisual.badge}</span>
+              </div>
+              <div className="mt-2 text-[0.68rem] font-black text-slate-900">{activeLayerLabel}</div>
+              <div className="mt-2 h-2 rounded-full" style={{ background: getGradientCss(activeLayerVisual.swatch) }} />
+              <div className="mt-2 text-[0.56rem] font-bold uppercase tracking-[0.14em] text-slate-500">{activeLayerRangeLabel}</div>
+              <div className="mt-1 text-[0.55rem] font-bold uppercase tracking-[0.14em] text-slate-400">{resolutionLabel} / {mapExtentLabel}</div>
+            </div>
             <div className="flex items-center gap-2"><span className="w-3 h-0.5 bg-emerald-500"/><span>SAFE PATH</span></div>
             <div className="flex items-center gap-2"><span className="w-3 h-0.5 bg-amber-500"/><span>REPLANNED SEGMENT</span></div>
             <div className="flex items-center gap-2"><span className="w-3 h-0.5 bg-red-400"/><span className="text-slate-400">HIGH RISK</span></div>
             <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-slate-300 opacity-50 border border-slate-400 border-dashed"/><span>PSR REGION</span></div>
             <div className="pt-2 border-t border-slate-100 text-slate-400 space-y-0.5">
-              <span className="block">🖱 Drag → pan</span><span className="block">⚙ Scroll → zoom</span>
+              <span className="block">Drag to pan</span><span className="block">Scroll to zoom</span>
             </div>
           </div>
         </div>
@@ -1086,6 +1356,32 @@ export default function MissionControlPage() {
                       Route {showRouteOverlay ? "On" : "Off"}
                     </button>
                   </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[0.56rem] font-black uppercase tracking-[0.16em] text-slate-400">Layer Readout</span>
+                      <span className={`rounded-full border px-2 py-1 text-[0.5rem] font-black uppercase tracking-[0.16em] ${activeLayerVisual.chipTone}`}>{activeLayerVisual.badge}</span>
+                    </div>
+                    <div className="mt-3 h-2 rounded-full" style={{ background: getGradientCss(activeLayerVisual.swatch) }} />
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[0.56rem] font-bold uppercase tracking-[0.14em]">
+                      <div className="rounded-lg bg-white px-2.5 py-2">
+                        <div className="text-slate-400">Range</div>
+                        <div className="mt-1 normal-case tracking-normal text-slate-900">{activeLayerRangeLabel}</div>
+                      </div>
+                      <div className="rounded-lg bg-white px-2.5 py-2">
+                        <div className="text-slate-400">Resolution</div>
+                        <div className="mt-1 normal-case tracking-normal text-slate-900">{resolutionLabel}</div>
+                      </div>
+                      <div className="rounded-lg bg-white px-2.5 py-2">
+                        <div className="text-slate-400">Extent</div>
+                        <div className="mt-1 normal-case tracking-normal text-slate-900">{mapExtentLabel}</div>
+                      </div>
+                      <div className="rounded-lg bg-white px-2.5 py-2">
+                        <div className="text-slate-400">Overlay</div>
+                        <div className="mt-1 normal-case tracking-normal text-slate-900">{Math.round(layerOverlayOpacity * 100)}% visual</div>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-[0.58rem] leading-relaxed text-slate-500">{activeLayer?.description}</p>
+                  </div>
                 </div>
               </div>
 
@@ -1197,13 +1493,15 @@ export default function MissionControlPage() {
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                     <div className="text-[0.56rem] font-black uppercase tracking-[0.16em] text-slate-400">Start Coord</div>
-                    <div className="mt-1 text-[0.64rem] font-bold text-slate-900">X {startProjected.x.toLocaleString()}</div>
-                    <div className="text-[0.64rem] font-bold text-slate-900">Y {startProjected.y.toLocaleString()}</div>
+                    <div className="mt-1 text-[0.64rem] font-bold text-slate-900">X {formatProjectedMeters(startProjected.x)}</div>
+                    <div className="text-[0.64rem] font-bold text-slate-900">Y {formatProjectedMeters(startProjected.y)}</div>
+                    <div className="mt-1 text-[0.56rem] font-bold uppercase tracking-[0.14em] text-slate-400">({formatProjectedKilometers(startProjected.x)} / {formatProjectedKilometers(startProjected.y)})</div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                     <div className="text-[0.56rem] font-black uppercase tracking-[0.16em] text-slate-400">Goal Coord</div>
-                    <div className="mt-1 text-[0.64rem] font-bold text-slate-900">X {goalProjected.x.toLocaleString()}</div>
-                    <div className="text-[0.64rem] font-bold text-slate-900">Y {goalProjected.y.toLocaleString()}</div>
+                    <div className="mt-1 text-[0.64rem] font-bold text-slate-900">X {formatProjectedMeters(goalProjected.x)}</div>
+                    <div className="text-[0.64rem] font-bold text-slate-900">Y {formatProjectedMeters(goalProjected.y)}</div>
+                    <div className="mt-1 text-[0.56rem] font-bold uppercase tracking-[0.14em] text-slate-400">({formatProjectedKilometers(goalProjected.x)} / {formatProjectedKilometers(goalProjected.y)})</div>
                   </div>
                 </div>
               </div>
@@ -1238,28 +1536,19 @@ export default function MissionControlPage() {
 
         {/* ── Bottom Metrics Bar ───────────────────────────────────────────── */}
         <div className="map-panel fixed bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-5xl z-40">
-          <div className="glass-panel px-8 py-5 rounded-3xl shadow-2xl border border-slate-200/50 flex items-center justify-between gap-6">
-            <div className="flex items-center gap-10">
-              {[
-                { label: "Distance",         value: displayDistanceValue,       unit: displayDistanceUnit },
-                { label: "Thermal Exposure", value: activeMetrics.thermalExposure,  unit: "score" },
-                { label: "Max Slope",        value: activeMetrics.maxSlope,    unit: "\u00b0" },
-              ].map(({ label, value, unit }) => (
-                <div key={label} className="flex flex-col">
-                  <span className="text-[0.6rem] font-bold uppercase tracking-widest text-slate-400 mb-1 whitespace-nowrap">{label}</span>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-2xl font-extrabold tabular-nums tracking-tight">{value}</span>
-                    <span className="text-xs font-bold text-slate-400">{unit}</span>
+          <div className="glass-panel px-8 py-5 rounded-3xl shadow-2xl border border-slate-200/50 flex items-center justify-between gap-6" style={PANEL_MONO_STYLE}>
+            <div className="grid flex-1 grid-cols-2 gap-4 xl:grid-cols-4">
+              {bottomMetricCards.map(({ label, value, unit, secondary, delta, deltaTone }) => (
+                <div key={label} className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
+                  <span className="text-[0.56rem] font-black uppercase tracking-[0.18em] text-slate-400">{label}</span>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-2xl font-extrabold tabular-nums tracking-tight text-slate-900">{value}</span>
+                    <span className="text-xs font-bold uppercase text-slate-400">{unit}</span>
                   </div>
+                  <div className="mt-1 text-[0.58rem] font-bold uppercase tracking-[0.14em] text-slate-500">{secondary}</div>
+                  <div className={`mt-2 text-[0.58rem] font-black uppercase tracking-[0.14em] ${deltaTone}`}>{delta}</div>
                 </div>
               ))}
-              <div className="flex flex-col">
-                <span className="text-[0.6rem] font-bold uppercase tracking-widest text-slate-400 mb-1">Compute Time</span>
-                <div className="flex items-baseline gap-1 text-emerald-600">
-                  <span className="text-2xl font-extrabold tabular-nums tracking-tight">{activeMetrics.compute}</span>
-                  <span className="text-xs font-bold uppercase">ms</span>
-                </div>
-              </div>
             </div>
             <div className="flex items-center gap-3 pl-6 border-l border-slate-100 flex-shrink-0">
               <div className={`flex items-center gap-2 px-3 py-2 rounded-full border ${safePathRecommended ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-amber-50 text-amber-600 border-amber-100"}`}>
