@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    margin: 0;
+    min-height: 100%;
+    background: #f1f5f9;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100%;
+    background: #f1f5f9;
+    color: #0f172a;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
