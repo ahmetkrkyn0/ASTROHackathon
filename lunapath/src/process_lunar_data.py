@@ -20,6 +20,13 @@ import numpy as np
 import rasterio
 from rasterio.windows import Window
 
+# Backend traversability module — canonical source of truth
+_BACKEND_ROOT = str(Path(__file__).resolve().parent.parent.parent / "backend")
+if _BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, _BACKEND_ROOT)
+
+from app.traversability import compute_traversability  # noqa: E402
+
 # --- Proje dizinleri --------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent          # lunapath/
 ASTRO_ROOT = PROJECT_ROOT.parent                               # repo root
@@ -37,7 +44,6 @@ LDEM_FILE = RAW_DIR / "LDEM_80S_80MPP_ADJ.tiff"
 WINDOW_SIZE = 500
 RESOLUTION_M = 80.0
 SLOPE_MAX_DEG = 25.0
-THERMAL_MIN_TRAVERSABLE_C = -150.0
 
 
 # =============================================================================
@@ -198,14 +204,9 @@ def make_traversability_grid(
 ) -> np.ndarray:
     """Ikili gecebilirlik maskesi.
 
-    False (0) kosullari:
-      - slope > 25.0 derece
-      - thermal < -150.0 Celsius
+    Hesaplama backend/app/traversability.py modulunden gelir (tek kaynak).
     """
-    passable = (slope <= SLOPE_MAX_DEG) & (thermal >= THERMAL_MIN_TRAVERSABLE_C)
-    # NaN iceren hucreler gecilmez
-    passable = passable & ~np.isnan(slope) & ~np.isnan(thermal)
-    return passable.astype(np.float64)
+    return compute_traversability(slope, thermal)
 
 
 # =============================================================================

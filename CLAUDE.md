@@ -32,16 +32,22 @@ pip install -r requirements.txt
 cd lunapath/src
 python process_lunar_data.py
 
+# Unit tests for grid logic (no DEM file needed)
+cd lunapath/src
+python test_grid_logic.py
+
 # Visualize processed grids (requires process_lunar_data.py to have run first)
 python test_visualize.py
 python visualize_processed_data.py
 
-# Backend (not yet scaffolded)
+# Backend server
 cd backend
-uvicorn main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8000
 
 # Backend tests
-pytest
+cd backend
+python test_cost_engine.py
+python test_traversability.py
 
 # Frontend (not yet scaffolded)
 cd frontend
@@ -53,7 +59,7 @@ npm run lint && npm run typecheck
 
 ## Current State
 
-**Phase 1 (P1) is complete.** Raw NASA 80MPP GeoTIFF files are processed into five 500×500 numpy arrays saved under `lunapath/data/processed/`:
+**Phase 1 (P1) is complete.** Raw NASA 80MPP GeoTIFF files are processed into six 500×500 numpy arrays saved under `lunapath/data/processed/`:
 
 | File | Description |
 |---|---|
@@ -68,7 +74,7 @@ npm run lint && npm run typecheck
 Raw input file expected in `lunapath/data/raw/`:
 - `LDEM_80S_80MPP_ADJ.tiff` — elevation DEM (single file, LDSM/HILL no longer required)
 
-Phases 2–6 (path planner, thermal model, replanning, FastAPI, React) are **not yet scaffolded**.
+**Backend (P2–P5) is partially scaffolded.** Constants, cost engine (all penalty functions), thermal grid, traversability module, data loader with caching, and FastAPI shell are implemented. Path planner (A*), replanning manager, and frontend (P6) are not yet scaffolded.
 
 ---
 
@@ -78,9 +84,10 @@ Phases 2–6 (path planner, thermal model, replanning, FastAPI, React) are **not
 lunapath/
   src/
     process_lunar_data.py   # P1 main — reads GeoTIFFs, writes .npy + metadata
-    utils.py                # pixel_to_geo, geo_to_pixel, save_metadata, report_*
-    test_visualize.py       # 2×2 subplot validation: elevation, slope, PSR, traversability
-    visualize_processed_data.py  # Dark-themed environment dashboard
+    utils.py                # pixel_to_geo, geo_to_pixel coordinate transforms
+    test_visualize.py       # 2×3 subplot validation: all 6 grids + consistency checks
+    visualize_processed_data.py  # Dark-themed 6-panel environment dashboard
+    test_grid_logic.py      # Unit tests for grid computations (no DEM required)
   data/
     raw/                    # NASA GeoTIFF input files (gitignored)
     processed/              # Output .npy arrays + metadata.json + PNG plots
@@ -89,16 +96,28 @@ docs/
   lunapath_referans_belgesi_2.md  # v2.0 authoritative math reference
 ```
 
-Planned layout for upcoming phases:
+Backend (scaffolded, P2-P5 in progress):
 
 ```
 backend/
-  main.py                   # FastAPI entrypoint
-  modules/
-    constants.py            # LPR-1 rover constants (see §2.1 of ref doc)
-    data_layer.py           # Loads processed .npy files, exposes grid dict
+  app/
+    __init__.py
+    main.py                 # FastAPI entrypoint (health, load-dem endpoints)
+    constants.py            # LPR-1 rover constants (v3.2, frozen)
+    cost_engine.py          # f_slope, f_energy, f_shadow, f_thermal, log_barrier, total_edge_cost
+    data_loader.py          # DEM → grid pipeline with .npy caching
+    thermal_grid.py         # Synthetic thermal grid generation
+    traversability.py       # Canonical traversability logic (single source of truth)
+  test_cost_engine.py       # Cost engine accuracy tests vs v3.2 spec
+  test_traversability.py    # Traversability hard-block rule tests
+  requirements.txt
+```
+
+Planned (not yet scaffolded):
+
+```
+backend/app/
     path_planner.py         # Multi-criteria A* with heapq
-    thermal_model.py        # Per-cell thermal risk scoring
     replanning_manager.py   # Event-triggered replan
   rover_profiles/           # JSON rover thermal profiles
 frontend/
@@ -119,9 +138,11 @@ data/
 
 ### P1 — Data Layer (`lunapath/src/`)
 
-`process_lunar_data.py` selects the most "actionable" 500×500 window from the full raster by scoring candidate windows on `elevation_range × slope_variance`. All downstream modules consume the five `.npy` outputs.
+`process_lunar_data.py` selects the most "actionable" 500×500 window from the full raster by scoring candidate windows on `elevation_range × slope_variance`. All downstream modules consume the six `.npy` outputs.
 
 `utils.py` provides coordinate transforms: `pixel_to_geo(row, col, transform)` uses the affine matrix with +0.5 pixel-centre offset. Internal coordinates are always `(row, col)`; geographic `(x, y)` only in metadata/API.
+
+Traversability is computed by `backend/app/traversability.py` (single source of truth). Both `process_lunar_data.py` and `backend/app/data_loader.py` delegate to this module — do not duplicate traversability logic.
 
 ### P2 — Multi-Criteria A* (planned: `backend/modules/path_planner.py`)
 
@@ -182,6 +203,8 @@ Map renders backend grid via canvas layer or GeoJSON overlay — not a standard 
 - ML component is out of scope unless time permits.
 - Grid coordinates are `(row, col)` internally; geographic only in API responses.
 - Weights are user-adjustable via frontend sliders; AHP defaults are the starting point.
+- Traversability hard blocks: `slope > 25°` OR `thermal < -150°C` → cell impassable (binary mask, not continuous).
+- P1 grid functions are code-complete but **runtime-unvalidated** — numpy DLL loading fails on this Windows environment (Python 3.13 + NumPy 2.4.3 + Windows application control policy conflict). Resolve before running any Python scripts.
 
 ---
 

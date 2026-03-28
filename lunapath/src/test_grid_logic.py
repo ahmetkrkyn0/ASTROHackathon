@@ -8,6 +8,12 @@ from __future__ import annotations
 
 import numpy as np
 import sys
+from pathlib import Path
+
+# Backend traversability module path
+_BACKEND_ROOT = str(Path(__file__).resolve().parent.parent.parent / "backend")
+if _BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, _BACKEND_ROOT)
 
 # --- Test edilecek fonksiyonlari import et -----------------------------------
 from process_lunar_data import (
@@ -17,9 +23,9 @@ from process_lunar_data import (
     make_thermal_grid,
     make_traversability_grid,
     SLOPE_MAX_DEG,
-    THERMAL_MIN_TRAVERSABLE_C,
     RESOLUTION_M,
 )
+from app.traversability import THERMAL_MIN_TRAVERSABLE_C
 
 
 def test_slope_grid():

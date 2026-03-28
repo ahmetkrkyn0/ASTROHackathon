@@ -10,8 +10,9 @@ import numpy as np
 import rasterio
 from scipy.ndimage import uniform_filter
 
-from .constants import DEFAULT_TARGET_RESOLUTION_M, SLOPE_MAX_DEG
+from .constants import DEFAULT_TARGET_RESOLUTION_M
 from .thermal_grid import generate_thermal_grid
+from .traversability import compute_traversability_bool
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
@@ -75,11 +76,8 @@ def load_and_preprocess_dem(
     elev_norm = (elevation - elev_min) / (elev_max - elev_min + 1e-10)
     shadow_ratio = (1.0 - elev_norm).astype(np.float32)
 
-    # Traversability
-    traversable = np.ones_like(elevation, dtype=bool)
-    traversable[slope > SLOPE_MAX_DEG] = False
-    traversable[thermal < -150.0] = False
-    traversable[np.isnan(elevation)] = False
+    # Traversability (canonical logic from traversability module)
+    traversable = compute_traversability_bool(slope, thermal, elevation)
 
     result: dict[str, Any] = {
         "elevation": elevation,
