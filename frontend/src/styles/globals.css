@@ -11,66 +11,80 @@
     box-sizing: border-box;
   }
 
-  html {
+  html, body {
     margin: 0;
-    min-height: 100%;
-    background: #eef3f7;
-  }
-
-  body {
-    margin: 0;
-    min-height: 100%;
-    background:
-      radial-gradient(circle at 0% 0%, rgba(148, 163, 184, 0.2), transparent 22%),
-      radial-gradient(circle at 100% 0%, rgba(14, 165, 233, 0.1), transparent 24%),
-      linear-gradient(180deg, #eef3f7 0%, #f8fafc 42%, #edf3f8 100%);
-    color: #0f172a;
-    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    letter-spacing: -0.01em;
   }
 
   #root {
-    min-height: 100vh;
+    height: 100%;
   }
 
-  button,
-  input,
-  select {
+  button, input, select {
     font: inherit;
   }
 }
 
 @layer components {
-  .mission-surface {
-    border: 1px solid rgba(255, 255, 255, 0.82);
-    border-radius: 28px;
-    background: rgba(255, 255, 255, 0.74);
-    box-shadow: 0 28px 80px -48px rgba(15, 23, 42, 0.45);
-    backdrop-filter: blur(18px);
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 24px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
   }
 
-  .mission-divider {
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      rgba(148, 163, 184, 0),
-      rgba(148, 163, 184, 0.28),
-      rgba(148, 163, 184, 0)
-    );
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
   }
 
-  .mission-label {
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: #94a3b8;
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(0, 0, 0, 0.05);
   }
 
-  .mission-title {
-    font-size: 1.1rem;
-    line-height: 1.25;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: #0f172a;
+  .map-background {
+    background-color: #f1f3f5;
+    background-image:
+      radial-gradient(circle at 50% 50%, transparent 0%, rgba(0, 0, 0, 0.02) 100%),
+      repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0, 0, 0, 0.03) 40px),
+      repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(0, 0, 0, 0.03) 40px);
+  }
+
+  .topo-shading {
+    background:
+      linear-gradient(135deg, rgba(0, 0, 0, 0.05) 25%, transparent 25%),
+      linear-gradient(225deg, rgba(0, 0, 0, 0.05) 25%, transparent 25%),
+      linear-gradient(45deg, rgba(0, 0, 0, 0.05) 25%, transparent 25%),
+      linear-gradient(315deg, rgba(0, 0, 0, 0.05) 25%, transparent 25%);
+    background-position: 10px 0, 10px 0, 0 0, 0 0;
+    background-size: 20px 20px;
+    background-repeat: repeat;
+    opacity: 0.1;
+  }
+
+  .psr-region {
+    fill: rgba(30, 41, 59, 0.15);
+    stroke: rgba(30, 41, 59, 0.3);
+    stroke-width: 1;
+    stroke-dasharray: 4 2;
+  }
+
+  .thermal-hazard {
+    fill: url(#thermalGradient);
+    opacity: 0.4;
   }
 }
