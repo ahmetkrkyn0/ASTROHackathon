@@ -16,7 +16,6 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import numpy as np
 
 # --- Yollar ------------------------------------------------------------------
@@ -66,8 +65,7 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
 
     # --- Figur ---------------------------------------------------------------
     fig = plt.figure(figsize=(24, 14), facecolor="#0e1117")
-    fig.subplots_adjust(left=0.05, right=0.97, top=0.92, bottom=0.05,
-                        wspace=0.25, hspace=0.30)
+    gs = fig.add_gridspec(2, 4, width_ratios=[1.0, 1.0, 1.0, 1.15], wspace=0.24, hspace=0.28)
 
     title_color = "#e6edf3"
     label_color = "#8b949e"
@@ -78,9 +76,17 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
         fontsize=20, fontweight="bold", color=title_color, y=0.97,
     )
 
-    axes = fig.subplots(2, 4)
+    # Sabit GridSpec kullanimi, bilgi paneli ve cost panelinin daralmasini engeller.
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax3 = fig.add_subplot(gs[0, 2])
+    info_ax = fig.add_subplot(gs[0, 3])
+    ax4 = fig.add_subplot(gs[1, 0])
+    ax5 = fig.add_subplot(gs[1, 1])
+    ax6 = fig.add_subplot(gs[1, 2])
+    ax7 = fig.add_subplot(gs[1, 3])
 
-    for ax in axes.flat:
+    for ax in [ax1, ax2, ax3, ax4, ax5, ax6, ax7]:
         ax.set_facecolor("#161b22")
         ax.tick_params(colors=tick_color, labelsize=7)
         for spine in ax.spines.values():
@@ -97,7 +103,6 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     cost = grids["cost_grid"]
 
     # Panel 1: Yukseklik + egim konturlari
-    ax1 = axes[0, 0]
     im1 = ax1.imshow(elev, cmap="terrain", extent=extent, aspect="equal",
                      interpolation="bilinear")
     cb1 = fig.colorbar(im1, ax=ax1, shrink=0.82, pad=0.02)
@@ -111,7 +116,6 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     ax1.set_title("Yukseklik (kontur: egim)", fontsize=11, color=title_color, pad=6)
 
     # Panel 2: Egim
-    ax2 = axes[0, 1]
     im2 = ax2.imshow(slope, cmap="magma", extent=extent, aspect="equal",
                      interpolation="bilinear")
     cb2 = fig.colorbar(im2, ax=ax2, shrink=0.82, pad=0.02)
@@ -120,7 +124,6 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     ax2.set_title("Egim Haritasi", fontsize=11, color=title_color, pad=6)
 
     # Panel 3: Aspect (Baki Yonu)
-    ax3 = axes[0, 2]
     im3 = ax3.imshow(aspect, cmap="hsv", extent=extent, aspect="equal",
                      vmin=0, vmax=360, interpolation="bilinear")
     cb3 = fig.colorbar(im3, ax=ax3, shrink=0.82, pad=0.02)
@@ -129,7 +132,6 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     ax3.set_title("Baki Yonu (0=K, 90=D)", fontsize=11, color=title_color, pad=6)
 
     # Panel 4: Shadow Ratio
-    ax4 = axes[1, 0]
     im4 = ax4.imshow(shadow, cmap="gray_r", extent=extent, aspect="equal",
                      vmin=0, vmax=1, interpolation="bilinear")
     cb4 = fig.colorbar(im4, ax=ax4, shrink=0.82, pad=0.02)
@@ -138,7 +140,6 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     ax4.set_title("Golge Orani (1=karanlik)", fontsize=11, color=title_color, pad=6)
 
     # Panel 5: Thermal
-    ax5 = axes[1, 1]
     im5 = ax5.imshow(thermal, cmap="coolwarm", extent=extent, aspect="equal",
                      interpolation="bilinear")
     cb5 = fig.colorbar(im5, ax=ax5, shrink=0.82, pad=0.02)
@@ -147,7 +148,6 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     ax5.set_title("Yuzey Sicakligi (C)", fontsize=11, color=title_color, pad=6)
 
     # Panel 6: Traversability
-    ax6 = axes[1, 2]
     im6 = ax6.imshow(trav, cmap="RdYlGn", extent=extent, aspect="equal",
                      vmin=0, vmax=1, interpolation="nearest")
     cb6 = fig.colorbar(im6, ax=ax6, shrink=0.82, pad=0.02, ticks=[0, 1])
@@ -158,9 +158,8 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
                   fontsize=11, color=title_color, pad=6)
 
     # Panel 7: Weighted cost grid
-    ax7 = axes[1, 3]
     masked_cost = np.where(np.isfinite(cost), cost, np.nan)
-    im7 = ax7.imshow(masked_cost, cmap="viridis", extent=extent, aspect="equal",
+    im7 = ax7.imshow(masked_cost, cmap="viridis", extent=extent, aspect="auto",
                      interpolation="nearest")
     cb7 = fig.colorbar(im7, ax=ax7, shrink=0.82, pad=0.02)
     cb7.set_label("cost", fontsize=8, color=label_color)
@@ -168,7 +167,6 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     ax7.set_title("Weighted Cost Grid", fontsize=11, color=title_color, pad=6)
 
     # --- Bilgi notu (ayri panel) ---------------------------------------------
-    info_ax = axes[0, 3]
     info_ax.set_facecolor("#161b22")
     info_ax.axis("off")
     origin_x = meta["origin"]["x"]
@@ -179,63 +177,64 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     cost_max = float(np.max(finite_cost)) if finite_cost.size > 0 else float("nan")
     weight_info = meta.get("cost_weights", {})
 
-    info_lines = [
-        "--- META VERI ---",
-        "",
-        f"Merkez Koordinat",
-        f"  X : {origin_x:,.0f} m",
-        f"  Y : {origin_y:,.0f} m",
-        "",
-        f"Cozunurluk : {res:.0f} m/piksel",
-        f"Grid Boyutu: {rows} x {cols}",
-        f"Toplam Alan: {total_km:.0f} x {total_km:.0f} km",
-        "",
-        "--- ISTATISTIKLER ---",
-        "",
-        f"Yukseklik",
-        f"  min : {np.nanmin(elev):>+9.1f} m",
-        f"  max : {np.nanmax(elev):>+9.1f} m",
-        "",
-        f"Egim",
-        f"  min : {np.nanmin(slope):>7.2f} deg",
-        f"  max : {np.nanmax(slope):>7.2f} deg",
-        "",
-        f"Sicaklik",
-        f"  min : {np.nanmin(thermal):>+9.2f} C",
-        f"  max : {np.nanmax(thermal):>+9.2f} C",
-        f"  ort : {np.nanmean(thermal):>+9.2f} C",
-        "",
-        f"Maliyet",
-        f"  ort : {cost_mean:>9.4f}",
-        f"  max : {cost_max:>9.4f}",
-        "",
-        f"Gecilebilirlik: %{passable_pct:.1f}",
-        "",
-        "--- WEIGHTS ---",
-        "",
-        f"wslope : {weight_info.get('w_slope', float('nan')):.3f}",
-        f"wenergy: {weight_info.get('w_energy', float('nan')):.3f}",
-        f"wshadow: {weight_info.get('w_shadow', float('nan')):.3f}",
-        f"wtherm : {weight_info.get('w_thermal', float('nan')):.3f}",
-        "",
-        "--- PROJEKSIYON ---",
-        "",
-        "Moon 2015 Polar",
-        "Stereographic (Guney)",
+    info_ax.text(
+        0.5,
+        0.98,
+        "META VERI & AGIRLIKLAR",
+        ha="center",
+        va="top",
+        fontsize=11,
+        fontweight="bold",
+        color=title_color,
+    )
+    info_rows = [
+        ("Merkez X", f"{origin_x:,.0f} m"),
+        ("Merkez Y", f"{origin_y:,.0f} m"),
+        ("Cozunurluk", f"{res:.0f} m/piksel"),
+        ("Grid Boyutu", f"{rows} x {cols}"),
+        ("Toplam Alan", f"{total_km:.0f} x {total_km:.0f} km"),
+        ("Yukseklik min", f"{np.nanmin(elev):>+9.1f} m"),
+        ("Yukseklik max", f"{np.nanmax(elev):>+9.1f} m"),
+        ("Egim min", f"{np.nanmin(slope):>7.2f} deg"),
+        ("Egim max", f"{np.nanmax(slope):>7.2f} deg"),
+        ("Sicaklik min", f"{np.nanmin(thermal):>+9.2f} C"),
+        ("Sicaklik max", f"{np.nanmax(thermal):>+9.2f} C"),
+        ("Sicaklik ort", f"{np.nanmean(thermal):>+9.2f} C"),
+        ("Maliyet ort", f"{cost_mean:>9.4f}"),
+        ("Maliyet max", f"{cost_max:>9.4f}"),
+        ("Gecilebilirlik", f"%{passable_pct:.1f}"),
+        ("w_slope", f"{weight_info.get('w_slope', float('nan')):.3f}"),
+        ("w_energy", f"{weight_info.get('w_energy', float('nan')):.3f}"),
+        ("w_shadow", f"{weight_info.get('w_shadow', float('nan')):.3f}"),
+        ("w_thermal", f"{weight_info.get('w_thermal', float('nan')):.3f}"),
+        ("Projeksiyon", "Moon 2015 Polar"),
+        ("", "Stereographic (Guney)"),
     ]
 
-    info_ax.text(
-        0.05, 0.95,
-        "\n".join(info_lines),
-        fontsize=8, fontfamily="monospace", color="#c9d1d9",
-        verticalalignment="top",
-        bbox=dict(boxstyle="round,pad=0.8", facecolor="#161b22",
-                  edgecolor="#30363d", linewidth=1.5),
+    table = info_ax.table(
+        cellText=[[k, v] for k, v in info_rows],
+        colLabels=["Alan", "Deger"],
+        cellLoc="left",
+        colLoc="left",
+        bbox=[0.02, 0.02, 0.96, 0.90],
+        colWidths=[0.42, 0.54],
     )
+    table.auto_set_font_size(False)
+    table.set_fontsize(8)
+    table.scale(1.0, 1.18)
+    for (row, _col), cell in table.get_celld().items():
+        if row == 0:
+            cell.set_text_props(color=title_color, weight="bold")
+            cell.set_facecolor("#0d1117")
+        else:
+            cell.set_text_props(color="#c9d1d9")
+            cell.set_facecolor("#161b22")
+        cell.set_edgecolor("#30363d")
+        cell.set_linewidth(0.6)
 
     # --- Kaydet & Goster -----------------------------------------------------
     out_path = PROCESSED_DIR / "environment_dashboard.png"
-    fig.savefig(out_path, dpi=180, facecolor=fig.get_facecolor(), bbox_inches="tight")
+    fig.savefig(out_path, dpi=180, facecolor=fig.get_facecolor())
     print(f"Dashboard kaydedildi: {out_path}")
     plt.show()
 
