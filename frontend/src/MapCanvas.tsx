@@ -216,11 +216,6 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     setHoverCell(null)
   }, [])
 
-  const cursorLabel =
-    clickMode === 'start' ? 'Click to set START' :
-    clickMode === 'goal' ? 'Click to set GOAL' :
-    ''
-
   const loading =
     viewMode === 'surface' ? !elevationGrid :
     viewMode === 'thermal' ? !thermalGrid :
@@ -258,27 +253,6 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
           imageRendering: viewMode === 'traversability' || viewMode === 'cost' ? 'pixelated' : 'auto',
         }}
       />
-
-      {cursorLabel && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 12,
-            left: 12,
-            padding: '5px 9px',
-            background: 'rgba(5, 5, 10, 0.72)',
-            border: `1px solid ${clickMode === 'start' ? '#00e676' : '#ff1744'}`,
-            color: clickMode === 'start' ? '#00e676' : '#ff1744',
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: 10,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            pointerEvents: 'none',
-          }}
-        >
-          {cursorLabel}
-        </div>
-      )}
 
       {loading && (
         <div

@@ -483,6 +483,42 @@ select {
   margin: -2px 0 12px;
 }
 
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  margin: 0 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 143, 157, 0.22);
+  background: rgba(13, 13, 22, 0.72);
+  color: rgba(228, 225, 237, 0.8);
+  font-family: var(--font-data);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.status-pill--idle {
+  color: rgba(199, 197, 211, 0.76);
+}
+
+.status-pill--ready,
+.status-pill--safe {
+  border-color: rgba(0, 230, 118, 0.24);
+  color: var(--safe);
+}
+
+.status-pill--critical {
+  border-color: rgba(255, 23, 68, 0.26);
+  color: var(--critical);
+}
+
+.status-pill--neutral {
+  border-color: rgba(173, 198, 255, 0.24);
+  color: var(--secondary);
+}
+
 .profile-list {
   display: flex;
   flex-direction: column;

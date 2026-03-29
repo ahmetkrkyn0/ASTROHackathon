@@ -362,15 +362,24 @@ export default function App() {
   const riskCounts = countRiskLevels(waypoints)
   const totalRiskSamples = RISK_LEVELS.reduce((sum, level) => sum + riskCounts[level], 0)
   const waypointPreview = buildWaypointPreview(waypoints)
+  const playbackWaypoint =
+    routePlaybackStep !== null && routePlaybackStep >= 0 && routePlaybackStep < waypoints.length
+      ? waypoints[routePlaybackStep]
+      : null
 
   const averageVelocityMs =
     summary && summary.total_elapsed_hours > 0
       ? (summary.total_distance_km * 1000) / (summary.total_elapsed_hours * 3600)
       : 0
 
-  const batteryPct = clamp(summary?.final_battery_pct ?? 100, 0, 100)
+  const batteryPct = clamp(playbackWaypoint?.battery_pct ?? summary?.final_battery_pct ?? 100, 0, 100)
   const batteryStrokeOffset = BATTERY_CIRCUMFERENCE * (1 - batteryPct / 100)
-  const batteryLabel = summary ? 'Remaining' : 'Starting Reserve'
+  const batteryLabel = playbackWaypoint ? 'Live Playback' : summary ? 'Remaining' : 'Starting Reserve'
+  const batteryMeta = playbackWaypoint
+    ? `Waypoint ${String(playbackWaypoint.step).padStart(3, '0')}`
+    : summary
+      ? 'Projected after route'
+      : 'Mission start default'
   const routeGuidance = !start
     ? 'Choose a start point on the map to begin.'
     : !goal
@@ -390,6 +399,16 @@ export default function App() {
         : planResult
           ? 'Route ready'
           : 'Ready to plan'
+  const mapStatusTone =
+    hoverPoint
+      ? 'neutral'
+      : clickMode === 'start'
+        ? 'safe'
+        : clickMode === 'goal'
+          ? 'critical'
+          : planResult
+            ? 'ready'
+            : 'idle'
 
   const missionStatus = layerError ? 'ATTN' : planning ? 'PLANNING' : planResult ? 'LOCKED' : 'NOMINAL'
   const appIsVisible = phase === 'app'
@@ -442,6 +461,7 @@ export default function App() {
 
             <section className="rail-section">
               <p className="eyebrow">Route Control</p>
+              <div className={`status-pill status-pill--${mapStatusTone}`}>{mapStatus}</div>
               <p className="section-note">{routeGuidance}</p>
               <div className="coord-chip-grid">
                 <button
@@ -538,11 +558,6 @@ export default function App() {
                 <span className="map-data-value">{formatTemperature(focusTelemetry.thermalC)}</span>
               </div>
             </div>
-
-            <div className="map-overlay map-overlay-top-center">
-              <span className="map-status-tag">{mapStatus}</span>
-            </div>
-
             <div className="map-overlay-top-right">
               <div className="map-switch">
                 {MAP_VIEW_OPTIONS.map((option) => (
@@ -641,7 +656,7 @@ export default function App() {
             <section className="battery-card">
               <div className="card-head">
                 <span className="eyebrow tight">Battery</span>
-                <span className="card-meta">{summary ? 'Projected after route' : 'Mission start default'}</span>
+                <span className="card-meta">{batteryMeta}</span>
               </div>
               <div className="battery-ring">
                 <svg viewBox="0 0 128 128" aria-hidden="true">
