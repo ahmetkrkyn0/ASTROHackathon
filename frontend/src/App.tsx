@@ -266,7 +266,7 @@ export default function App() {
                   <Metric label="Nodes expanded" value={String(metrics.nodes_expanded ?? '—')} />
                 )}
                 {metrics && (
-                  <Metric label="Compute time"   value={`${((metrics.comp_time_ms as number) ?? 0).toFixed(0)} ms`} />
+                  <Metric label="Compute time"   value={`${(metrics.computation_time_ms ?? 0).toFixed(0)} ms`} />
                 )}
               </MetricGroup>
 
