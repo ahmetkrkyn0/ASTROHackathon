@@ -11,14 +11,12 @@ import {
   checkHealth,
   fetchCellTelemetry,
   fetchLayer,
-  fetchProfiles,
   loadPreprocessed,
   planRoute,
   type FocusTelemetryResponse,
   type LayerResponse,
   type PlanResponse,
   type PlanWeights,
-  type ProfileEntry,
   type Waypoint,
 } from './api'
 import { batteryToHex, riskToHex } from './colormap'
@@ -29,48 +27,6 @@ const DEFAULT_WEIGHTS: PlanWeights = {
   w_shadow: 0.142,
   w_thermal: 0.19,
 }
-
-const FALLBACK_PROFILES: ProfileEntry[] = [
-  {
-    id: 'balanced',
-    name: 'Balanced',
-    color: '#3b82f6',
-    weights: DEFAULT_WEIGHTS,
-  },
-  {
-    id: 'energy_saver',
-    name: 'Energy Saver',
-    color: '#22c55e',
-    weights: {
-      w_slope: 0.32,
-      w_energy: 0.42,
-      w_shadow: 0.11,
-      w_thermal: 0.15,
-    },
-  },
-  {
-    id: 'fast_recon',
-    name: 'Fast Recon',
-    color: '#ef4444',
-    weights: {
-      w_slope: 0.48,
-      w_energy: 0.16,
-      w_shadow: 0.12,
-      w_thermal: 0.24,
-    },
-  },
-  {
-    id: 'shadow_traverse',
-    name: 'Shadow Traverse',
-    color: '#a855f7',
-    weights: {
-      w_slope: 0.34,
-      w_energy: 0.2,
-      w_shadow: 0.28,
-      w_thermal: 0.18,
-    },
-  },
-]
 
 const DEFAULT_POINT: [number, number] = [250, 250]
 const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
@@ -93,6 +49,15 @@ const MAP_VIEW_OPTIONS: Array<{
   { id: 'traversability', label: 'Traverse', title: 'Traversability Grid' },
   { id: 'slope', label: 'Slope', title: 'Slope Grid' },
   { id: 'aspect', label: 'Aspect', title: 'Aspect Grid' },
+] as const
+const WEIGHT_CONTROLS: Array<{
+  key: keyof PlanWeights
+  label: string
+}> = [
+  { key: 'w_slope', label: 'Slope Safety' },
+  { key: 'w_energy', label: 'Energy Use' },
+  { key: 'w_shadow', label: 'Shadow Exposure' },
+  { key: 'w_thermal', label: 'Thermal Risk' },
 ] as const
 
 type RiskLevel = (typeof RISK_LEVELS)[number]
@@ -145,9 +110,7 @@ export default function App() {
   const [traversableLayer, setTraversableLayer] = useState<LayerResponse | null>(null)
   const [layerError, setLayerError] = useState<string | null>(null)
 
-  const [profiles, setProfiles] = useState<ProfileEntry[]>([])
-  const [selectedProfile, setSelectedProfile] = useState<string>('balanced')
-  const [viewMode, setViewMode] = useState<MapViewMode>('thermal')
+  const [viewMode, setViewMode] = useState<MapViewMode>('surface')
 
   const [clickMode, setClickMode] = useState<ClickMode>('idle')
   const [start, setStart] = useState<[number, number] | null>(null)
@@ -172,7 +135,7 @@ export default function App() {
           await loadPreprocessed()
         }
 
-        const [elevation, slope, aspect, shadow, thermal, cost, traversable, fetchedProfiles] = await Promise.all([
+        const [elevation, slope, aspect, shadow, thermal, cost, traversable] = await Promise.all([
           fetchLayer('elevation', DOWNSAMPLE),
           fetchLayer('slope', DOWNSAMPLE),
           fetchLayer('aspect', DOWNSAMPLE),
@@ -180,7 +143,6 @@ export default function App() {
           fetchLayer('thermal', DOWNSAMPLE),
           fetchLayer('cost', DOWNSAMPLE, { weights }),
           fetchLayer('traversable', DOWNSAMPLE),
-          fetchProfiles(),
         ])
 
         setElevationLayer(elevation)
@@ -190,7 +152,6 @@ export default function App() {
         setThermalLayer(thermal)
         setCostLayer(cost)
         setTraversableLayer(traversable)
-        setProfiles(fetchedProfiles)
         setBootstrapState('ready')
       } catch (error) {
         setLayerError((error as Error).message)
@@ -200,25 +161,6 @@ export default function App() {
 
     void init()
   }, [])
-
-  const availableProfiles = profiles.length > 0 ? profiles : FALLBACK_PROFILES
-
-  useEffect(() => {
-    if (availableProfiles.some((profile) => profile.id === selectedProfile)) {
-      return
-    }
-    const fallbackProfile = availableProfiles[0]
-    if (!fallbackProfile) {
-      return
-    }
-    setSelectedProfile(fallbackProfile.id)
-    setWeights(fallbackProfile.weights)
-  }, [availableProfiles, selectedProfile])
-
-  const activeProfile =
-    availableProfiles.find((profile) => profile.id === selectedProfile) ??
-    availableProfiles[0] ??
-    FALLBACK_PROFILES[0]
 
   const handleEnterMission = useCallback(() => {
     setPhase('loading')
@@ -264,20 +206,6 @@ export default function App() {
 
     return () => window.clearTimeout(timer)
   }, [bootstrapState, layerError, loadingFloorReached, phase])
-
-  const handleProfileChange = useCallback(
-    (profileId: string) => {
-      setSelectedProfile(profileId)
-      const profile = availableProfiles.find((candidate) => candidate.id === profileId)
-      if (profile) {
-        setWeights(profile.weights)
-      }
-      setPlanResult(null)
-      setPlanError(null)
-      setRoutePlaybackStep(null)
-    },
-    [availableProfiles],
-  )
 
   useEffect(() => {
     if (bootstrapState === 'loading') {
@@ -440,20 +368,28 @@ export default function App() {
       ? (summary.total_distance_km * 1000) / (summary.total_elapsed_hours * 3600)
       : 0
 
-  const batteryPct = clamp(summary?.final_battery_pct ?? 67.3, 0, 100)
+  const batteryPct = clamp(summary?.final_battery_pct ?? 100, 0, 100)
   const batteryStrokeOffset = BATTERY_CIRCUMFERENCE * (1 - batteryPct / 100)
+  const batteryLabel = summary ? 'Remaining' : 'Starting Reserve'
+  const routeGuidance = !start
+    ? 'Choose a start point on the map to begin.'
+    : !goal
+      ? 'Choose a goal point to unlock route generation.'
+      : planResult
+        ? 'Route is ready. Hover the map or review checkpoints.'
+        : 'Tune priorities if needed, then generate the route.'
 
   const riskState = resolveRiskState(riskCounts)
   const mapStatus =
     hoverPoint
-      ? 'Inspecting cell'
+      ? 'Inspecting terrain'
       : clickMode === 'start'
-      ? 'Select START on map'
+      ? 'Pick a start point'
       : clickMode === 'goal'
-        ? 'Select GOAL on map'
+        ? 'Pick a goal point'
         : planResult
           ? 'Route ready'
-          : 'Standby'
+          : 'Ready to plan'
 
   const missionStatus = layerError ? 'ATTN' : planning ? 'PLANNING' : planResult ? 'LOCKED' : 'NOMINAL'
   const appIsVisible = phase === 'app'
@@ -481,9 +417,9 @@ export default function App() {
           <span className="brand-mark">LUNAPATH</span>
         </div>
         <div className="topbar-status">
-          <span className="status-line">MISSION_STATUS: {missionStatus}</span>
+          <span className="status-line">Mission: {missionStatus}</span>
           <span className="status-line status-line-muted">
-            UPLINK: {hasData ? 'ACTIVE' : 'SYNCING'}
+            Data link: {hasData ? 'Active' : 'Syncing'}
           </span>
         </div>
       </header>
@@ -495,46 +431,32 @@ export default function App() {
               <div className="rail-section-header">
                 <div className="avatar-tile">MC</div>
                 <div>
-                  <p className="panel-kicker">Mission Control</p>
-                  <h2 className="panel-title">Sector 7-G</h2>
+                  <p className="panel-kicker">Mission Workspace</p>
+                  <h2 className="panel-title">South Pole Route Planner</h2>
+                  <p className="panel-description">
+                    Review terrain, place mission points, and generate a safer rover corridor.
+                  </p>
                 </div>
               </div>
             </section>
 
             <section className="rail-section">
-              <p className="eyebrow">Profiles</p>
-              <div className="profile-list">
-                {availableProfiles.map((profile) => (
-                  <button
-                    key={profile.id}
-                    type="button"
-                    className={`profile-button ${profile.id === activeProfile.id ? 'is-active' : ''}`}
-                    onClick={() => handleProfileChange(profile.id)}
-                    style={{ borderLeftColor: profile.color }}
-                  >
-                    <span className="profile-name">{profile.name}</span>
-                    <span className="profile-id">{profile.id.split('_').join(' ')}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="rail-section">
               <p className="eyebrow">Route Control</p>
+              <p className="section-note">{routeGuidance}</p>
               <div className="coord-chip-grid">
                 <button
                   type="button"
                   className={`coord-chip ${clickMode === 'start' ? 'is-start' : ''}`}
                   onClick={() => setClickMode(clickMode === 'start' ? 'idle' : 'start')}
                 >
-                  {start ? `START ${start[0]},${start[1]}` : 'Set START'}
+                  {start ? `START ${start[0]},${start[1]}` : 'Select Start'}
                 </button>
                 <button
                   type="button"
                   className={`coord-chip ${clickMode === 'goal' ? 'is-goal' : ''}`}
                   onClick={() => setClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
                 >
-                  {goal ? `GOAL ${goal[0]},${goal[1]}` : 'Set GOAL'}
+                  {goal ? `GOAL ${goal[0]},${goal[1]}` : 'Select Goal'}
                 </button>
               </div>
               <div className="coord-readout">
@@ -554,12 +476,15 @@ export default function App() {
             </section>
 
             <section className="rail-section">
-              <p className="eyebrow">Mission Constraints</p>
+              <p className="eyebrow">Route Priorities</p>
+              <p className="section-note">
+                Increase a priority to make the planner avoid that condition more aggressively.
+              </p>
               <div className="slider-stack">
-                {(Object.keys(weights) as (keyof PlanWeights)[]).map((key) => (
+                {WEIGHT_CONTROLS.map(({ key, label }) => (
                   <label key={key} className="slider-row">
                     <span className="slider-head">
-                      <span className="slider-name">{key}</span>
+                      <span className="slider-name">{label}</span>
                       <span className="slider-value">{weights[key].toFixed(3)}</span>
                     </span>
                     <input
@@ -586,7 +511,7 @@ export default function App() {
 
           <div className="left-actions">
             <button type="button" className="ghost-btn" onClick={handleReset}>
-              Reset Selection
+              Clear Points
             </button>
             <button
               type="button"
@@ -594,7 +519,7 @@ export default function App() {
               onClick={handlePlan}
               disabled={!start || !goal || planning}
             >
-              {planning ? 'Computing route...' : 'Calculate Route'}
+              {planning ? 'Generating route...' : 'Generate Route'}
             </button>
           </div>
         </aside>
@@ -680,8 +605,11 @@ export default function App() {
         <aside className="right-rail">
           <div className="telemetry-header">
             <div>
-              <p className="panel-kicker">Telemetry Stream</p>
+              <p className="panel-kicker">Mission Snapshot</p>
               <h2 className="panel-title">Route Analytics</h2>
+              <p className="panel-description">
+                Selected cell telemetry and route health update here as you plan.
+              </p>
             </div>
             <span className={`signal-dot ${hasData ? 'is-live' : ''}`} />
           </div>
@@ -689,28 +617,32 @@ export default function App() {
           <div className="telemetry-scroll">
             <section className="telemetry-grid">
               <TelemetryWell
-                label="Velocity"
+                label="Route Speed"
                 value={`${averageVelocityMs.toFixed(2)} M/S`}
                 accent="#a0a0ff"
               />
               <TelemetryWell
-                label="Incline"
+                label="Steepest Segment"
                 value={summary ? `${summary.max_slope_deg.toFixed(1)} deg` : '--'}
                 accent="#adc6ff"
               />
               <TelemetryWell
-                label="Temp Ext"
+                label="Cell Temperature"
                 value={formatTemperature(focusTelemetry.thermalC)}
                 accent={focusTelemetry.thermalC !== null && focusTelemetry.thermalC < -150 ? '#ff6d00' : '#00e676'}
               />
               <TelemetryWell
-                label="Nodes"
+                label="Planner Effort"
                 value={metrics ? String(metrics.nodes_expanded ?? '--') : '--'}
                 accent="#00e676"
               />
             </section>
 
             <section className="battery-card">
+              <div className="card-head">
+                <span className="eyebrow tight">Battery</span>
+                <span className="card-meta">{summary ? 'Projected after route' : 'Mission start default'}</span>
+              </div>
               <div className="battery-ring">
                 <svg viewBox="0 0 128 128" aria-hidden="true">
                   <circle
@@ -731,14 +663,14 @@ export default function App() {
                 </svg>
                 <div className="battery-copy">
                   <strong>{batteryPct.toFixed(1)}%</strong>
-                  <span>Battery</span>
+                  <span>{batteryLabel}</span>
                 </div>
               </div>
             </section>
 
             <section className="risk-card">
               <div className="risk-head">
-                <span className="eyebrow tight">Risk Assessment</span>
+                <span className="eyebrow tight">Risk Mix</span>
                 <span className="risk-state" style={{ color: riskState.color }}>
                   {riskState.label}
                 </span>
@@ -770,7 +702,7 @@ export default function App() {
 
             <section className="waypoint-card">
               <div className="risk-head">
-                <span className="eyebrow tight">Active Waypoints</span>
+                <span className="eyebrow tight">Route Milestones</span>
                 <span className="waypoint-meta">
                   {summary ? `${summary.waypoint_count} nodes` : 'No route'}
                 </span>
@@ -794,17 +726,6 @@ export default function App() {
           </div>
         </aside>
       </main>
-
-      <footer className="footer-bar">
-        <div className="footer-group">
-          <span className="footer-live">System Ready</span>
-          <span className="footer-copy">PROFILE: {activeProfile.name}</span>
-        </div>
-        <div className="footer-group footer-group-right">
-          <span className="footer-copy">GRID 500 x 500</span>
-          <span className="footer-copy">{focusTelemetry.resolutionM.toFixed(0)} M/PIX</span>
-        </div>
-      </footer>
       </div>
     </>
   )
@@ -889,23 +810,23 @@ function buildWaypointPreview(waypoints: Waypoint[]): WaypointPreviewItem[] {
     return [
       {
         key: 'wp-start',
-        label: 'WP_000',
-        detail: 'Await start lock',
-        status: 'PEND',
+        label: 'START',
+        detail: 'Choose a start point',
+        status: 'WAIT',
         accent: '#918f9d',
       },
       {
         key: 'wp-track',
-        label: 'WP_001',
-        detail: 'Await route trace',
+        label: 'ROUTE',
+        detail: 'Generate a route preview',
         status: 'IDLE',
         accent: '#918f9d',
       },
       {
         key: 'wp-goal',
-        label: 'WP_999',
-        detail: 'Await goal lock',
-        status: 'PEND',
+        label: 'GOAL',
+        detail: 'Choose a goal point',
+        status: 'WAIT',
         accent: '#918f9d',
       },
     ]
@@ -920,10 +841,16 @@ function buildWaypointPreview(waypoints: Waypoint[]): WaypointPreviewItem[] {
     const waypoint = waypoints[index]
     const status =
       position === 0 ? 'START' : position === indexes.length - 1 ? 'GOAL' : waypoint.risk_level
+    const label =
+      position === 0
+        ? 'START'
+        : position === indexes.length - 1
+          ? 'GOAL'
+          : `WP ${String(waypoint.step).padStart(3, '0')}`
 
     return {
       key: `${waypoint.step}-${index}`,
-      label: `WP_${String(waypoint.step).padStart(3, '0')}`,
+      label,
       detail: `${waypoint.row},${waypoint.col} | ${formatTemperature(waypoint.surface_temp_c)}`,
       status,
       accent: riskToHex(waypoint.risk_level),

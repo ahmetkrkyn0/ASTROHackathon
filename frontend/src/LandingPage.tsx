@@ -285,16 +285,22 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
 
       <div className="landing-brand">
         <span className="landing-brand-mark">LUNAPATH</span>
-        <span className="landing-brand-sub">Lunar South Pole Route Planner</span>
+        <span className="landing-brand-sub">Lunar south pole route planning workspace</span>
       </div>
 
       <div className="landing-copy">
-        <p className="landing-kicker">Mission Control Interface</p>
-        <h1>Traverse the rim before the light window closes.</h1>
+        <p className="landing-kicker">Terrain-aware mission planning</p>
+        <h1>Plan safer rover routes across the lunar south pole.</h1>
         <p className="landing-description">
-          Inspect terrain risk, thermal exposure, and viable rover corridors from a single
-          mission dashboard.
+          Compare slope, shadow, temperature, and traversability before you commit a path.
+          LUNAPATH keeps mission setup, telemetry, and route analysis in one operator-friendly
+          control surface.
         </p>
+        <div className="landing-feature-list" aria-label="Key mission planning features">
+          <span className="landing-feature">Slope and shadow review</span>
+          <span className="landing-feature">Live cell telemetry</span>
+          <span className="landing-feature">Weighted route planning</span>
+        </div>
       </div>
 
       <div className="landing-actions">
@@ -304,9 +310,9 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
           onClick={() => setIsExploring(true)}
           disabled={isExploring}
         >
-          [ Explore ]
+          Open mission planner
         </button>
-        <span className="landing-hint">Drag to rotate. Scroll to zoom.</span>
+        <span className="landing-hint">Rotate the moon to inspect the region. Scroll to zoom.</span>
       </div>
     </section>
   )

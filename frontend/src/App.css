@@ -50,6 +50,7 @@ select {
 }
 
 .app-shell {
+  height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -58,6 +59,7 @@ select {
     radial-gradient(circle at top right, rgba(173, 198, 255, 0.05), transparent 22%),
     linear-gradient(180deg, rgba(10, 10, 18, 0.96) 0%, rgba(19, 19, 27, 0.98) 100%);
   transition: opacity 0.6s ease, transform 0.6s ease, filter 0.6s ease;
+  overflow: hidden;
 }
 
 .app-shell.is-hidden {
@@ -139,14 +141,14 @@ select {
   color: rgba(205, 211, 255, 0.52);
   font-family: var(--font-data);
   font-size: 10px;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .landing-copy {
   top: 50%;
   left: 6vw;
-  width: min(34rem, 42vw);
+  width: min(38rem, 44vw);
   transform: translateY(-52%);
 }
 
@@ -177,18 +179,37 @@ select {
 .landing-copy h1 {
   margin: 18px 0 14px;
   font-family: var(--font-display);
-  font-size: clamp(2.8rem, 5vw, 5.8rem);
+  font-size: clamp(2.9rem, 5vw, 5.7rem);
   font-weight: 700;
-  line-height: 0.94;
+  line-height: 0.98;
   letter-spacing: -0.04em;
-  max-width: 10ch;
+  max-width: 11ch;
 }
 
 .landing-description {
-  max-width: 28rem;
-  color: rgba(228, 225, 237, 0.76);
-  font-size: clamp(1rem, 1.4vw, 1.15rem);
-  line-height: 1.75;
+  max-width: 31rem;
+  color: rgba(228, 225, 237, 0.82);
+  font-size: clamp(1.02rem, 1.35vw, 1.16rem);
+  line-height: 1.72;
+}
+
+.landing-feature-list {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.landing-feature {
+  padding: 9px 12px;
+  background: rgba(10, 11, 20, 0.62);
+  border: 1px solid rgba(173, 198, 255, 0.2);
+  border-radius: 999px;
+  color: rgba(225, 229, 255, 0.86);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(16px);
 }
 
 .landing-actions {
@@ -203,18 +224,20 @@ select {
 .landing-explore-button {
   display: inline-flex;
   align-items: center;
-  min-height: 48px;
-  padding: 0 24px;
+  justify-content: center;
+  min-height: 50px;
+  padding: 0 22px;
   background:
     linear-gradient(135deg, rgba(173, 198, 255, 0.1), rgba(160, 160, 255, 0.16)),
     rgba(8, 8, 18, 0.72);
   border: 1px solid rgba(173, 198, 255, 0.34);
+  border-radius: 14px;
   color: #d7deff;
   cursor: pointer;
-  font-family: var(--font-data);
-  font-size: 12px;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   transition:
     transform 0.24s ease,
     background 0.24s ease,
@@ -280,8 +303,8 @@ select {
 }
 
 .topbar {
-  height: 48px;
-  padding: 0 20px;
+  height: 54px;
+  padding: 0 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -311,11 +334,10 @@ select {
 
 .status-line {
   color: var(--primary-container);
-  font-family: var(--font-display);
-  font-size: 11px;
+  font-family: var(--font-body);
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .status-line-muted {
@@ -326,7 +348,8 @@ select {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 260px;
+  grid-template-columns: 252px minmax(0, 1fr) 304px;
+  overflow: hidden;
 }
 
 .left-rail,
@@ -352,30 +375,41 @@ select {
 .telemetry-scroll {
   min-height: 0;
   overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.rail-scroll::-webkit-scrollbar,
+.telemetry-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .rail-scroll {
-  padding: 14px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .rail-section,
 .battery-card,
 .risk-card,
 .waypoint-card {
-  background: linear-gradient(180deg, rgba(31, 31, 40, 0.88), rgba(18, 18, 26, 0.96));
+  background: linear-gradient(180deg, rgba(31, 31, 40, 0.92), rgba(17, 18, 27, 0.98));
   border: 1px solid rgba(70, 70, 81, 0.24);
+  border-radius: 16px;
+  box-shadow: 0 16px 30px rgba(2, 3, 8, 0.18);
 }
 
 .rail-section {
-  padding: 14px;
+  padding: 16px;
 }
 
 .rail-section-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
 }
 
@@ -417,9 +451,21 @@ select {
   margin: 0;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: 0.03em;
+}
+
+.panel-description,
+.section-note,
+.card-meta {
+  color: rgba(214, 212, 224, 0.72);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.panel-description {
+  margin: 8px 0 0;
 }
 
 .eyebrow {
@@ -431,6 +477,10 @@ select {
 
 .eyebrow.tight {
   margin-bottom: 8px;
+}
+
+.section-note {
+  margin: -2px 0 12px;
 }
 
 .profile-list {
@@ -488,19 +538,19 @@ select {
 .ghost-btn,
 .primary-btn,
 .map-switch button {
-  min-height: 38px;
-  border-radius: 2px;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
+  min-height: 42px;
+  border-radius: 12px;
+  letter-spacing: 0.08em;
 }
 
 .coord-chip {
-  padding: 0 10px;
+  padding: 0 12px;
   background: var(--surface-lowest);
   border: 1px solid rgba(70, 70, 81, 0.34);
   color: rgba(199, 197, 211, 0.82);
-  font-family: var(--font-data);
-  font-size: 10px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -523,6 +573,7 @@ select {
 .coord-card {
   padding: 10px 12px;
   background: var(--surface-lowest);
+  border-radius: 12px;
 }
 
 .coord-label {
@@ -544,7 +595,7 @@ select {
 .slider-stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .slider-row {
@@ -563,7 +614,7 @@ select {
 .slider-name,
 .slider-value {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -580,6 +631,7 @@ select {
   width: 100%;
   accent-color: var(--primary-container);
   cursor: pointer;
+  margin: 0;
 }
 
 .alert-card {
@@ -592,10 +644,11 @@ select {
 }
 
 .left-actions {
-  padding: 14px;
+  padding: 18px;
   display: grid;
-  gap: 8px;
+  gap: 10px;
   border-top: 1px solid rgba(70, 70, 81, 0.2);
+  background: linear-gradient(180deg, rgba(17, 18, 27, 0.9), rgba(14, 15, 23, 0.98));
 }
 
 .ghost-btn,
@@ -608,6 +661,7 @@ select {
   background: var(--surface-high);
   border: 1px solid rgba(145, 143, 157, 0.2);
   color: rgba(199, 197, 211, 0.86);
+  font-weight: 600;
 }
 
 .primary-btn {
@@ -625,6 +679,8 @@ select {
 .center-stage {
   position: relative;
   min-height: 0;
+  min-width: 0;
+  display: flex;
   overflow: hidden;
   background:
     radial-gradient(circle at center, rgba(255, 255, 255, 0.03), transparent 60%),
@@ -644,17 +700,18 @@ select {
 .map-stage {
   position: relative;
   z-index: 1;
+  flex: 1;
   min-height: 0;
-  height: 100%;
   padding: 20px 22px 24px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
 }
 
 .map-canvas-shell {
-  width: min(100%, calc(100vh - 154px));
+  width: min(100%, calc(100vh - 196px));
   max-width: 100%;
+  max-height: calc(100% - 28px);
   aspect-ratio: 1 / 1;
   display: flex;
   align-items: center;
@@ -666,6 +723,7 @@ select {
   z-index: 2;
   background: rgba(13, 13, 22, 0.72);
   border: 1px solid rgba(70, 70, 81, 0.4);
+  border-radius: 16px;
   backdrop-filter: blur(18px);
 }
 
@@ -740,6 +798,7 @@ select {
   gap: 6px;
   background: rgba(13, 13, 22, 0.72);
   border: 1px solid rgba(70, 70, 81, 0.4);
+  border-radius: 18px;
   backdrop-filter: blur(18px);
 }
 
@@ -751,7 +810,7 @@ select {
   color: rgba(199, 197, 211, 0.72);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -765,6 +824,7 @@ select {
   padding: 12px 14px;
   background: rgba(13, 13, 22, 0.72);
   border: 1px solid rgba(70, 70, 81, 0.4);
+  border-radius: 16px;
   backdrop-filter: blur(18px);
 }
 
@@ -819,7 +879,7 @@ select {
 }
 
 .telemetry-header {
-  padding: 16px;
+  padding: 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -840,10 +900,10 @@ select {
 }
 
 .telemetry-scroll {
-  padding: 16px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
 }
 
 .telemetry-grid {
@@ -853,12 +913,13 @@ select {
 }
 
 .telemetry-well {
-  padding: 12px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   background: var(--surface-low);
-  border-left: 2px solid currentColor;
+  border-left: 3px solid currentColor;
+  border-radius: 14px;
 }
 
 .telemetry-label {
@@ -883,7 +944,24 @@ select {
 
 .battery-card {
   display: flex;
+  flex-direction: column;
+  gap: 14px;
   justify-content: center;
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-meta {
+  font-family: var(--font-data);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .battery-ring {
@@ -968,6 +1046,7 @@ select {
   display: flex;
   overflow: hidden;
   background: var(--surface-lowest);
+  border-radius: 999px;
 }
 
 .risk-count-grid {
@@ -980,6 +1059,7 @@ select {
 .risk-count-card {
   padding: 8px;
   background: var(--surface-lowest);
+  border-radius: 12px;
 }
 
 .risk-count-card span {
@@ -1018,6 +1098,7 @@ select {
   justify-content: space-between;
   gap: 12px;
   background: var(--surface-low);
+  border-radius: 12px;
 }
 
 .waypoint-main {
@@ -1049,42 +1130,9 @@ select {
   text-transform: uppercase;
 }
 
-.footer-bar {
-  height: 24px;
-  padding: 0 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-top: 1px solid rgba(70, 70, 81, 0.26);
-  background: rgba(13, 13, 22, 0.94);
-}
-
-.footer-group {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.footer-live {
-  color: var(--safe);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-}
-
-.footer-copy {
-  color: rgba(199, 197, 211, 0.66);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-}
-
-.footer-group-right {
-  justify-content: flex-end;
-}
-
 @media (max-width: 1180px) {
   .content-grid {
-    grid-template-columns: 208px minmax(0, 1fr) 244px;
+    grid-template-columns: 230px minmax(0, 1fr) 276px;
   }
 }
 
@@ -1126,6 +1174,7 @@ select {
 
   .map-stage {
     padding: 16px;
+    align-items: center;
   }
 
   .map-overlay-top-left,
@@ -1167,6 +1216,7 @@ select {
 
   .map-canvas-shell {
     width: 100%;
+    max-height: none;
   }
 }
 
@@ -1210,6 +1260,14 @@ select {
     max-width: 24rem;
     font-size: 0.96rem;
     line-height: 1.65;
+  }
+
+  .landing-feature-list {
+    gap: 8px;
+  }
+
+  .landing-feature {
+    font-size: 0.82rem;
   }
 
   .landing-explore-button {
