@@ -191,6 +191,8 @@ def states_to_waypoints(
             "lat": round(lat, 6),
             "altitude_m": altitude_m,
             "battery_pct": round(s.battery_pct, 2),
+            "recharge_count": s.recharge_count,
+            "recharged_this_step": s.recharged_this_step,
             "risk_level": s.risk_level,
             "slope_deg": round(s.slope_deg, 2),
             "surface_temp_c": round(s.surface_temp_c, 2),

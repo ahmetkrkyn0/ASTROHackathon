@@ -10,6 +10,8 @@ export interface Waypoint {
   lat: number
   altitude_m: number | null
   battery_pct: number
+  recharge_count: number
+  recharged_this_step: boolean
   risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
   slope_deg: number
   surface_temp_c: number
@@ -31,6 +33,7 @@ export interface SimSummary {
   critical_steps_count: number
   high_or_above_steps_count: number
   waypoint_count: number
+  total_recharges: number
 }
 
 export interface AstarMetrics {

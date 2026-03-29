@@ -104,6 +104,8 @@ def test_single_node_path():
     check(s.elapsed_hours == 0.0, "elapsed_hours is 0 for first node")
     check(s.step_energy_wh == 0.0, "step_energy_wh is 0 for first node")
     check(abs(s.battery_wh - BATTERY_CAPACITY_WH) < 1e-6, "battery full at start")
+    check(s.recharge_count == 0, "recharge_count starts at 0")
+    check(not s.recharged_this_step, "start node is not a recharge step")
     check(s.risk_level == "LOW", "risk is LOW at full battery")
     check(abs(s.slope_deg - 5.0) < 1e-4, "slope_deg read from grid")
     check(abs(s.surface_temp_c - (-60.0)) < 1e-4, "surface_temp from grid")
@@ -189,6 +191,10 @@ def test_battery_recharges_to_full_when_depleted():
         any(abs(states[i].battery_pct - 100.0) < 1e-6 for i in recharge_steps),
         "recharged state returns to 100%",
     )
+    check(
+        any(states[i].recharged_this_step for i in recharge_steps),
+        "recharged steps are flagged on the state",
+    )
 
 
 # ── simulate_path — cumulative fields ────────────────────────────────────────
@@ -258,6 +264,7 @@ def test_summarize_basic():
     check(s["critical_steps_count"] >= 0, "critical_steps_count >= 0")
     check(s["high_or_above_steps_count"] >= s["critical_steps_count"],
           "high_or_above includes critical")
+    check("total_recharges" in s, "summary includes recharge count")
 
 
 def test_summarize_shadow_exposure():
@@ -285,6 +292,7 @@ def test_summarize_risk_counts():
     # With heavy drain, expect at least some high-risk steps
     check(s["high_or_above_steps_count"] > 0,
           "heavy drain produces high-risk steps")
+    check(s["total_recharges"] > 0, "heavy drain produces recharge events")
 
 
 if __name__ == "__main__":

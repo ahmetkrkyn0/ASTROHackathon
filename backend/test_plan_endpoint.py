@@ -286,6 +286,8 @@ def test_successful_plan_response_structure():
     check("geojson" in body, "response has geojson")
     check("waypoints" in body, "response has waypoints (include_simulation=True)")
     check("altitude_m" in body["waypoints"][0], "waypoints include altitude telemetry")
+    check("recharge_count" in body["waypoints"][0], "waypoints include recharge count")
+    check("recharged_this_step" in body["waypoints"][0], "waypoints include recharge step flag")
 
     geojson = body["geojson"]
     check(geojson["type"] == "Feature", "geojson.type == Feature")
@@ -295,6 +297,7 @@ def test_successful_plan_response_structure():
     summary = body["summary"]
     check("waypoint_count" in summary, "summary has waypoint_count")
     check("final_battery_pct" in summary, "summary has final_battery_pct")
+    check("total_recharges" in summary, "summary has total_recharges")
     check(summary["waypoint_count"] >= 2, "waypoint_count >= 2")
 
 

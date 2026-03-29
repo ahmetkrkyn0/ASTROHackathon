@@ -1201,6 +1201,37 @@ select {
   text-transform: uppercase;
 }
 
+.milestone-stats {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.milestone-stat {
+  padding: 10px;
+  background: var(--surface-lowest);
+  border-radius: 12px;
+}
+
+.milestone-stat span {
+  display: block;
+  color: rgba(199, 197, 211, 0.48);
+  font-family: var(--font-data);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.milestone-stat strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+}
+
 .waypoint-list {
   margin-top: 10px;
   display: flex;
@@ -1412,7 +1443,8 @@ select {
 
   .coord-chip-grid,
   .telemetry-grid,
-  .risk-count-grid {
+  .risk-count-grid,
+  .milestone-stats {
     grid-template-columns: 1fr;
   }
 

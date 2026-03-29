@@ -429,9 +429,9 @@ export default function App() {
   const batteryStrokeOffset = BATTERY_CIRCUMFERENCE * (1 - batteryPct / 100)
   const batteryLabel = playbackWaypoint ? 'Live Playback' : summary ? 'Remaining' : 'Starting Reserve'
   const batteryMeta = playbackWaypoint
-    ? `Waypoint ${String(playbackWaypoint.step).padStart(3, '0')}`
+    ? `Waypoint ${String(playbackWaypoint.step).padStart(3, '0')} • ${playbackWaypoint.recharge_count} recharge${playbackWaypoint.recharge_count === 1 ? '' : 's'}`
     : summary
-      ? 'Projected after route'
+      ? `${summary.total_recharges} recharge${summary.total_recharges === 1 ? '' : 's'}`
       : 'Mission start default'
   const routeGuidance = !start
     ? 'Choose a start point on the map to begin.'
@@ -772,6 +772,22 @@ export default function App() {
                   {summary ? `${summary.waypoint_count} nodes` : 'No route'}
                 </span>
               </div>
+              {summary && (
+                <div className="milestone-stats">
+                  <div className="milestone-stat">
+                    <span>Distance</span>
+                    <strong>{summary.total_distance_km.toFixed(2)} km</strong>
+                  </div>
+                  <div className="milestone-stat">
+                    <span>Recharges</span>
+                    <strong>{summary.total_recharges}</strong>
+                  </div>
+                  <div className="milestone-stat">
+                    <span>End Battery</span>
+                    <strong>{summary.final_battery_pct.toFixed(1)}%</strong>
+                  </div>
+                </div>
+              )}
               <div className="waypoint-list">
                 {waypointPreview.map((item) => (
                   <div key={item.key} className="waypoint-row">
@@ -925,20 +941,34 @@ function buildWaypointPreview(waypoints: Waypoint[]): WaypointPreviewItem[] {
   return indexes.map((index, position) => {
     const waypoint = waypoints[index]
     const status =
-      position === 0 ? 'START' : position === indexes.length - 1 ? 'GOAL' : waypoint.risk_level
+      position === 0
+        ? 'START'
+        : position === indexes.length - 1
+          ? 'GOAL'
+          : waypoint.recharged_this_step
+            ? 'RECHARGE'
+            : waypoint.risk_level
     const label =
       position === 0
         ? 'START'
         : position === indexes.length - 1
           ? 'GOAL'
           : `WP ${String(waypoint.step).padStart(3, '0')}`
+    const detailParts = [
+      formatDistanceKm(waypoint.distance_m),
+      `${waypoint.battery_pct.toFixed(1)}% battery`,
+    ]
+
+    if (waypoint.recharge_count > 0) {
+      detailParts.push(`${waypoint.recharge_count} recharge${waypoint.recharge_count === 1 ? '' : 's'}`)
+    }
 
     return {
       key: `${waypoint.step}-${index}`,
       label,
-      detail: `${waypoint.row},${waypoint.col} | ${formatTemperature(waypoint.surface_temp_c)}`,
+      detail: detailParts.join(' | '),
       status,
-      accent: riskToHex(waypoint.risk_level),
+      accent: waypoint.recharged_this_step ? '#8ca2ff' : riskToHex(waypoint.risk_level),
     }
   })
 }
@@ -971,6 +1001,10 @@ function formatTemperature(value: number | null): string {
     return '--'
   }
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)} C`
+}
+
+function formatDistanceKm(distanceM: number): string {
+  return `${(distanceM / 1000).toFixed(2)} km`
 }
 
 function clamp(value: number, min: number, max: number): number {

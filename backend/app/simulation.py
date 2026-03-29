@@ -71,6 +71,8 @@ class RoverState:
     node_cost: float
     step_energy_wh: float       # energy consumed this step
     cumulative_cost: float      # running sum of cost_grid values
+    recharge_count: int         # cumulative full-battery restores
+    recharged_this_step: bool
 
     def to_dict(self) -> dict:
         return {
@@ -88,6 +90,8 @@ class RoverState:
             "node_cost": round(self.node_cost, 2),
             "step_energy_wh": round(self.step_energy_wh, 2),
             "cumulative_cost": round(self.cumulative_cost, 2),
+            "recharge_count": self.recharge_count,
+            "recharged_this_step": self.recharged_this_step,
         }
 
 
@@ -139,6 +143,7 @@ def simulate_path(
     cumulative_dist_m = 0.0
     elapsed_hours = 0.0
     cumulative_cost = 0.0
+    recharge_count = 0
 
     for i, node in enumerate(path_pixels):
         r, c = int(node[0]), int(node[1])
@@ -175,10 +180,13 @@ def simulate_path(
 
         # 6. Battery state
         battery_wh -= step_energy
+        recharged_this_step = False
         if i > 0 and battery_wh <= 0.0:
             # Mission rule: if the pack is depleted, it is immediately
             # restored to full charge and traversal continues.
             battery_wh = BATTERY_CAPACITY_WH
+            recharge_count += 1
+            recharged_this_step = True
         battery_pct = battery_wh / BATTERY_CAPACITY_WH * 100.0
 
         # 7. Risk level
@@ -205,6 +213,8 @@ def simulate_path(
             node_cost=node_cost,
             step_energy_wh=step_energy,
             cumulative_cost=cumulative_cost,
+            recharge_count=recharge_count,
+            recharged_this_step=recharged_this_step,
         ))
 
     return states
@@ -226,7 +236,7 @@ def summarize_simulation(states: List[RoverState]) -> dict:
         Keys: total_distance_km, total_elapsed_hours, final_battery_pct,
         min_battery_pct, max_slope_deg, total_energy_consumed_wh,
         total_shadow_exposure, critical_steps_count,
-        high_or_above_steps_count, waypoint_count.
+        high_or_above_steps_count, waypoint_count, total_recharges.
     """
     if not states:
         return {
@@ -240,6 +250,7 @@ def summarize_simulation(states: List[RoverState]) -> dict:
             "critical_steps_count": 0,
             "high_or_above_steps_count": 0,
             "waypoint_count": 0,
+            "total_recharges": 0,
         }
 
     last = states[-1]
@@ -274,4 +285,5 @@ def summarize_simulation(states: List[RoverState]) -> dict:
             1 for s in states if s.risk_level in ("HIGH", "CRITICAL")
         ),
         "waypoint_count": len(states),
+        "total_recharges": max(s.recharge_count for s in states),
     }

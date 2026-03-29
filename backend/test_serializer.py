@@ -56,6 +56,8 @@ def _make_state(step=0, row=250, col=250, battery_pct=80.0,
         node_cost=0.5,
         step_energy_wh=step_energy_wh,
         cumulative_cost=cumulative_cost,
+        recharge_count=0,
+        recharged_this_step=False,
     )
 
 
@@ -179,6 +181,7 @@ def test_waypoints_fields():
         "step", "lon", "lat", "battery_pct", "risk_level",
         "slope_deg", "surface_temp_c", "shadow_ratio", "node_cost",
         "elapsed_hours", "distance_m", "step_energy_wh", "altitude_m",
+        "recharge_count", "recharged_this_step",
     )
     for key in required_keys:
         check(key in wp, f"waypoint has key '{key}'")
