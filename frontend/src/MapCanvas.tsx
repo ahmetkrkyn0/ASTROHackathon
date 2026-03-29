@@ -41,8 +41,15 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const baseImageRef = useRef<ImageData | null>(null)
-  const animFrameRef = useRef<number>(0)
+  const animTimeoutRef = useRef<number | null>(null)
   const [animStep, setAnimStep] = useState<number | null>(null)
+
+  const stopAnimation = useCallback(() => {
+    if (animTimeoutRef.current !== null) {
+      window.clearTimeout(animTimeoutRef.current)
+      animTimeoutRef.current = null
+    }
+  }, [])
 
   // ── Build base ImageData from grid layers ──────────────────────────────────
 
@@ -105,33 +112,34 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
 
   const startAnimation = useCallback(() => {
     if (!waypoints || waypoints.length === 0) return
-    cancelAnimationFrame(animFrameRef.current)
+    stopAnimation()
     let step = 0
 
     const tick = () => {
       step++
       if (step >= waypoints.length) {
         setAnimStep(waypoints.length - 1)
+        animTimeoutRef.current = null
         return
       }
       setAnimStep(step)
-      // ~30fps regardless of monitor refresh rate
-      animFrameRef.current = requestAnimationFrame(() =>
-        setTimeout(tick, 33),
-      ) as unknown as number
+      animTimeoutRef.current = window.setTimeout(tick, 33)
     }
 
     setAnimStep(0)
-    animFrameRef.current = requestAnimationFrame(() =>
-      setTimeout(tick, 33),
-    ) as unknown as number
-  }, [waypoints])
+    animTimeoutRef.current = window.setTimeout(tick, 33)
+  }, [stopAnimation, waypoints])
 
   useImperativeHandle(ref, () => ({ startAnimation }), [startAnimation])
 
   useEffect(() => {
-    return () => cancelAnimationFrame(animFrameRef.current)
-  }, [])
+    return stopAnimation
+  }, [stopAnimation])
+
+  useEffect(() => {
+    stopAnimation()
+    setAnimStep(null)
+  }, [waypoints, stopAnimation])
 
   // ── Core render function ───────────────────────────────────────────────────
 
@@ -144,12 +152,14 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     }
 
     if (waypoints && waypoints.length > 1) {
-      const drawUpTo = currentStep ?? waypoints.length - 1
+      const lastIndex = waypoints.length - 1
+      const drawUpTo = Math.min(currentStep ?? lastIndex, lastIndex)
 
       // Path segments — color by risk level
       for (let i = 1; i <= drawUpTo; i++) {
         const prev = waypoints[i - 1]
         const curr = waypoints[i]
+        if (!prev || !curr) continue
         ctx.strokeStyle = riskToHex(curr.risk_level)
         ctx.lineWidth = 2
         ctx.beginPath()
@@ -161,13 +171,15 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       // Rover dot at current animation step
       if (currentStep !== null && currentStep < waypoints.length) {
         const roverWp = waypoints[currentStep]
-        ctx.fillStyle = '#ffffff'
-        ctx.beginPath()
-        ctx.arc(roverWp.col, roverWp.row, 4, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.strokeStyle = riskToHex(roverWp.risk_level)
-        ctx.lineWidth = 1.5
-        ctx.stroke()
+        if (roverWp) {
+          ctx.fillStyle = '#ffffff'
+          ctx.beginPath()
+          ctx.arc(roverWp.col, roverWp.row, 4, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.strokeStyle = riskToHex(roverWp.risk_level)
+          ctx.lineWidth = 1.5
+          ctx.stroke()
+        }
       }
     }
 

@@ -562,7 +562,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   btn: {
     background: 'transparent',
-    border: '1px solid #2a2a5a',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: '#2a2a5a',
     color: '#a0a0d0',
     padding: '5px 12px',
     cursor: 'pointer',
