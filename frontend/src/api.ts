@@ -8,7 +8,10 @@ export interface Waypoint {
   col: number
   lon: number
   lat: number
+  altitude_m: number | null
   battery_pct: number
+  recharge_count: number
+  recharged_this_step: boolean
   risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
   slope_deg: number
   surface_temp_c: number
@@ -30,14 +33,20 @@ export interface SimSummary {
   critical_steps_count: number
   high_or_above_steps_count: number
   waypoint_count: number
+  total_recharges: number
 }
 
 export interface AstarMetrics {
-  path_steps: number
+  path_length_nodes: number
   total_distance_m: number
-  total_cost: number
+  total_weighted_cost: number
+  total_energy_wh: number
+  total_shadow_hours: number
+  max_slope_deg: number
+  max_thermal_risk: number
+  min_surface_temp_c: number
   nodes_expanded: number
-  comp_time_ms: number
+  computation_time_ms: number
   [key: string]: unknown
 }
 
@@ -47,6 +56,10 @@ export interface PlanResponse {
   summary: SimSummary
   geojson: object
   waypoints: Waypoint[]
+  rover?: {
+    id: string
+    name: string
+  }
 }
 
 export interface LayerResponse {
@@ -70,13 +83,58 @@ export interface ProfileEntry {
   color: string
 }
 
+export interface FocusTelemetryResponse {
+  row: number
+  col: number
+  lon: number
+  lat: number
+  altitude_m: number | null
+  thermal_c: number | null
+  resolution_m: number
+  span_km: number
+}
+
+export interface RoverEntry {
+  id: string
+  name: string
+  mass_kg: number
+  v_max_ms: number
+  e_cap_wh: number
+  slope_max_deg: number
+  h_max_shadow_h: number
+  default_weights: PlanWeights
+}
+
+export interface RoverCatalogResponse {
+  default_rover_id: string
+  rovers: RoverEntry[]
+}
+
 // ── API calls ──────────────────────────────────────────────────────────────────
 
 export async function fetchLayer(
   name: string,
   downsample = 2,
+  options?: {
+    weights?: PlanWeights
+    roverId?: string
+    signal?: AbortSignal
+  },
 ): Promise<LayerResponse> {
-  const r = await fetch(`${BASE}/layers/${name}?downsample=${downsample}`)
+  const query = new URLSearchParams({ downsample: String(downsample) })
+  if (options?.roverId) {
+    query.set('rover_id', options.roverId)
+  }
+  if (options?.weights) {
+    query.set('w_slope', String(options.weights.w_slope))
+    query.set('w_energy', String(options.weights.w_energy))
+    query.set('w_shadow', String(options.weights.w_shadow))
+    query.set('w_thermal', String(options.weights.w_thermal))
+  }
+
+  const r = await fetch(`${BASE}/layers/${name}?${query.toString()}`, {
+    signal: options?.signal,
+  })
   if (!r.ok) throw new Error(`Layer fetch failed: ${name} (${r.status})`)
   return r.json() as Promise<LayerResponse>
 }
@@ -85,6 +143,7 @@ export async function planRoute(
   start: [number, number],
   goal: [number, number],
   weights: PlanWeights,
+  roverId: string,
 ): Promise<PlanResponse> {
   const r = await fetch(`${BASE}/plan`, {
     method: 'POST',
@@ -92,6 +151,7 @@ export async function planRoute(
     body: JSON.stringify({
       start: { row: start[0], col: start[1] },
       goal: { row: goal[0], col: goal[1] },
+      rover_id: roverId,
       weights,
       include_simulation: true,
     }),
@@ -106,7 +166,31 @@ export async function planRoute(
 export async function fetchProfiles(): Promise<ProfileEntry[]> {
   const r = await fetch(`${BASE}/profiles`)
   if (!r.ok) throw new Error('Failed to fetch profiles')
-  return r.json() as Promise<ProfileEntry[]>
+  const data = await r.json() as Record<string, Omit<ProfileEntry, 'id'>>
+  return Object.entries(data).map(([id, profile]) => ({ id, ...profile }))
+}
+
+export async function fetchRovers(): Promise<RoverCatalogResponse> {
+  const r = await fetch(`${BASE}/rovers`)
+  if (!r.ok) throw new Error('Failed to fetch rovers')
+  return r.json() as Promise<RoverCatalogResponse>
+}
+
+export async function fetchCellTelemetry(
+  row: number,
+  col: number,
+  signal?: AbortSignal,
+): Promise<FocusTelemetryResponse> {
+  const query = new URLSearchParams({
+    row: String(row),
+    col: String(col),
+  })
+  const r = await fetch(`${BASE}/cell-telemetry?${query.toString()}`, { signal })
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }))
+    throw new Error((err as { detail?: string }).detail ?? 'Cell telemetry request failed')
+  }
+  return r.json() as Promise<FocusTelemetryResponse>
 }
 
 export async function checkHealth(): Promise<{ dem_loaded: boolean }> {

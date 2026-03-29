@@ -26,6 +26,7 @@ from app.simulation import (
     simulate_path,
     summarize_simulation,
 )
+from app.constants import get_rover
 
 GRID_SHAPE = (50, 50)
 
@@ -104,6 +105,8 @@ def test_single_node_path():
     check(s.elapsed_hours == 0.0, "elapsed_hours is 0 for first node")
     check(s.step_energy_wh == 0.0, "step_energy_wh is 0 for first node")
     check(abs(s.battery_wh - BATTERY_CAPACITY_WH) < 1e-6, "battery full at start")
+    check(s.recharge_count == 0, "recharge_count starts at 0")
+    check(not s.recharged_this_step, "start node is not a recharge step")
     check(s.risk_level == "LOW", "risk is LOW at full battery")
     check(abs(s.slope_deg - 5.0) < 1e-4, "slope_deg read from grid")
     check(abs(s.surface_temp_c - (-60.0)) < 1e-4, "surface_temp from grid")
@@ -161,10 +164,26 @@ def test_shadow_heater_contribution():
     check(abs(s1.step_energy_wh - expected_energy) < 1e-6, "heater energy included")
 
 
+def test_custom_rover_changes_energy_and_speed():
+    rover = get_rover("luvmi_m")
+    grids = _flat_grids(slope=0.0, shadow=0.0)
+    path = [[0, 0], [0, 1]]
+    states = simulate_path(_astar_result(path), *grids, rover=rover)
+    s1 = states[1]
+
+    expected_time_h = PIXEL_SIZE_M / float(rover["v_max_ms"]) / 3600.0
+    expected_energy = (float(rover["p_base_w"]) + float(rover["p_idle_w"])) * expected_time_h
+    expected_battery = float(rover["e_cap_wh"]) - expected_energy
+
+    check(abs(s1.elapsed_hours - expected_time_h) < 1e-9, "custom rover speed affects elapsed time")
+    check(abs(s1.step_energy_wh - expected_energy) < 1e-6, "custom rover power affects energy use")
+    check(abs(s1.battery_wh - expected_battery) < 1e-6, "custom rover battery capacity is used")
+
+
 # ── simulate_path — battery floor ─────────────────────────────────────────────
 
 def test_battery_does_not_go_negative():
-    # Very steep + many steps: battery should floor at 0
+    # Very steep + many steps: battery should never go negative
     grids = _flat_grids(slope=24.0, shadow=1.0)
     # Build a path that stays within GRID_SHAPE (50x50)
     path = [[0, i] for i in range(GRID_SHAPE[1])]
@@ -172,6 +191,27 @@ def test_battery_does_not_go_negative():
     for s in states:
         check(s.battery_wh >= 0.0, f"battery_wh >= 0 at step {s.step}")
         check(s.battery_pct >= 0.0, f"battery_pct >= 0 at step {s.step}")
+
+
+def test_battery_recharges_to_full_when_depleted():
+    grids = _flat_grids(slope=24.0, shadow=1.0)
+    path = [[0, i] for i in range(GRID_SHAPE[1])]
+    states = simulate_path(_astar_result(path), *grids)
+
+    recharge_steps = [
+        i for i in range(1, len(states))
+        if states[i].battery_pct > states[i - 1].battery_pct + 1e-6
+    ]
+
+    check(len(recharge_steps) > 0, "battery recharge happens on long traversal")
+    check(
+        any(abs(states[i].battery_pct - 100.0) < 1e-6 for i in recharge_steps),
+        "recharged state returns to 100%",
+    )
+    check(
+        any(states[i].recharged_this_step for i in recharge_steps),
+        "recharged steps are flagged on the state",
+    )
 
 
 # ── simulate_path — cumulative fields ────────────────────────────────────────
@@ -241,6 +281,7 @@ def test_summarize_basic():
     check(s["critical_steps_count"] >= 0, "critical_steps_count >= 0")
     check(s["high_or_above_steps_count"] >= s["critical_steps_count"],
           "high_or_above includes critical")
+    check("total_recharges" in s, "summary includes recharge count")
 
 
 def test_summarize_shadow_exposure():
@@ -268,6 +309,7 @@ def test_summarize_risk_counts():
     # With heavy drain, expect at least some high-risk steps
     check(s["high_or_above_steps_count"] > 0,
           "heavy drain produces high-risk steps")
+    check(s["total_recharges"] > 0, "heavy drain produces recharge events")
 
 
 if __name__ == "__main__":
@@ -280,7 +322,9 @@ if __name__ == "__main__":
         test_cardinal_step,
         test_diagonal_step,
         test_shadow_heater_contribution,
+        test_custom_rover_changes_energy_and_speed,
         test_battery_does_not_go_negative,
+        test_battery_recharges_to_full_when_depleted,
         test_cumulative_distance_monotone,
         test_cumulative_cost_matches_sum,
         test_to_dict_rounds_floats,

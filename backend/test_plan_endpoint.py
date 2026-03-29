@@ -23,6 +23,7 @@ os.environ["LUNAPATH_SKIP_STARTUP"] = "YES"  # harmless — startup still runs b
 from fastapi.testclient import TestClient
 import app.main as _main_module
 from app.main import app
+from app.serializer import pixel_to_lonlat
 
 SHAPE = (20, 20)
 _ROWS, _COLS = SHAPE
@@ -94,6 +95,14 @@ def test_health():
     r = client.get("/api/health")
     check(r.status_code == 200, "GET /api/health returns 200")
     check(r.json()["status"] == "ok", "health.status == ok")
+
+
+def test_rovers_returns_catalog():
+    r = client.get("/api/rovers")
+    check(r.status_code == 200, "GET /api/rovers returns 200")
+    body = r.json()
+    check(body["default_rover_id"] == "lpr_1", "default rover id is exposed")
+    check(any(entry["id"] == "nasa_viper" for entry in body["rovers"]), "catalog includes NASA VIPER")
 
 
 # ── 503 when no grids loaded ──────────────────────────────────────────────────
@@ -186,6 +195,84 @@ def test_goal_out_of_bounds():
     check(r.status_code == 422, "goal out of bounds returns 422")
 
 
+def test_cell_telemetry_returns_backend_values():
+    grids = _make_grids(temp_val=-84.7)
+    grids["elevation"][7, 8] = -1972.7
+    _inject_grids(grids)
+
+    r = client.get("/api/cell-telemetry?row=7&col=8")
+    check(r.status_code == 200, "GET /api/cell-telemetry returns 200")
+    body = r.json()
+    check(body["row"] == 7 and body["col"] == 8, "telemetry returns requested row/col")
+    check(math.isclose(body["altitude_m"], -1972.7, rel_tol=0, abs_tol=1e-6), "altitude comes from backend elevation grid")
+    check(math.isclose(body["thermal_c"], -84.7, rel_tol=0, abs_tol=1e-6), "temperature comes from backend thermal grid")
+    check(math.isclose(body["span_km"], 1.6, rel_tol=0, abs_tol=1e-6), "span_km uses backend shape metadata")
+
+
+def test_cost_layer_respects_weight_overrides():
+    grids = _make_grids(slope_val=12.0, temp_val=-120.0, shadow_val=0.35)
+    _inject_grids(grids)
+
+    baseline = client.get("/api/layers/cost?downsample=1")
+    override = client.get(
+        "/api/layers/cost?downsample=1&w_slope=0.8&w_energy=0.1&w_shadow=0.9&w_thermal=0.2"
+    )
+
+    check(baseline.status_code == 200, "baseline cost layer returns 200")
+    check(override.status_code == 200, "weighted cost layer returns 200")
+
+    baseline_value = baseline.json()["data"][0][0]
+    override_body = override.json()
+    override_value = override_body["data"][0][0]
+
+    check(baseline_value == 0.5, "baseline cost layer uses stored preprocessed cost grid")
+    check(
+        isinstance(override_value, float) and not math.isclose(override_value, baseline_value, rel_tol=0, abs_tol=1e-9),
+        "weighted cost layer recomputes grid for requested weights",
+    )
+    check(
+        math.isclose(override_body["metadata"]["cost_weights"]["w_shadow"], 0.9, rel_tol=0, abs_tol=1e-9),
+        "weighted cost layer metadata reflects override weights",
+    )
+
+
+def test_rover_specific_traversability_changes_with_slope_limit():
+    grids = _make_grids(slope_val=23.0)
+    _inject_grids(grids)
+
+    default_plan = client.post("/api/plan", json={
+        "start": {"row": 0, "col": 0},
+        "goal": {"row": 0, "col": 1},
+        "rover_id": "lpr_1",
+    })
+    viper_plan = client.post("/api/plan", json={
+        "start": {"row": 0, "col": 0},
+        "goal": {"row": 0, "col": 1},
+        "rover_id": "nasa_viper",
+    })
+    viper_layer = client.get("/api/layers/traversable?downsample=1&rover_id=nasa_viper")
+
+    check(default_plan.status_code == 200, "default rover can traverse 23deg slope cell")
+    check(viper_plan.status_code == 422, "VIPER blocks 23deg slope cell")
+    check("not traversable" in viper_plan.json()["detail"].lower(), "VIPER plan explains traversability")
+    check(viper_layer.status_code == 200, "rover-aware traversability layer returns 200")
+    check(viper_layer.json()["data"][0][0] == 0, "VIPER traversability layer blocks steep cell")
+
+
+def test_geo_input_with_metadata_origin_accepted():
+    grids = _make_grids()
+    grids["metadata"]["origin"] = {"x": 176000.0, "y": 48000.0}
+    start_lon, start_lat = pixel_to_lonlat(3, 4, grids["metadata"])
+    goal_lon, goal_lat = pixel_to_lonlat(8, 9, grids["metadata"])
+    _inject_grids(grids)
+
+    r = client.post("/api/plan", json={
+        "start": {"lon": start_lon, "lat": start_lat},
+        "goal": {"lon": goal_lon, "lat": goal_lat},
+    })
+    check(r.status_code == 200, "geo plan uses metadata-aware coordinate transform")
+
+
 # ── Traversability checks ─────────────────────────────────────────────────────
 
 def test_impassable_start_returns_422():
@@ -229,6 +316,9 @@ def test_successful_plan_response_structure():
     check("summary" in body, "response has summary")
     check("geojson" in body, "response has geojson")
     check("waypoints" in body, "response has waypoints (include_simulation=True)")
+    check("altitude_m" in body["waypoints"][0], "waypoints include altitude telemetry")
+    check("recharge_count" in body["waypoints"][0], "waypoints include recharge count")
+    check("recharged_this_step" in body["waypoints"][0], "waypoints include recharge step flag")
 
     geojson = body["geojson"]
     check(geojson["type"] == "Feature", "geojson.type == Feature")
@@ -238,6 +328,7 @@ def test_successful_plan_response_structure():
     summary = body["summary"]
     check("waypoint_count" in summary, "summary has waypoint_count")
     check("final_battery_pct" in summary, "summary has final_battery_pct")
+    check("total_recharges" in summary, "summary has total_recharges")
     check(summary["waypoint_count"] >= 2, "waypoint_count >= 2")
 
 
@@ -273,6 +364,7 @@ def test_astar_metrics_and_summary_are_separate():
 if __name__ == "__main__":
     tests = [
         test_health,
+        test_rovers_returns_catalog,
         test_plan_503_when_no_grids,
         test_weights_out_of_range,
         test_weights_default_accepted,
@@ -281,6 +373,10 @@ if __name__ == "__main__":
         test_geo_out_of_range_returns_422,
         test_start_out_of_bounds,
         test_goal_out_of_bounds,
+        test_cell_telemetry_returns_backend_values,
+        test_cost_layer_respects_weight_overrides,
+        test_rover_specific_traversability_changes_with_slope_limit,
+        test_geo_input_with_metadata_origin_accepted,
         test_impassable_start_returns_422,
         test_impassable_goal_returns_422,
         test_successful_plan_response_structure,

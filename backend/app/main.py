@@ -12,9 +12,17 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from .constants import W_SLOPE, W_ENERGY, W_SHADOW, W_THERMAL
+from .constants import (
+    DEFAULT_ROVER_ID,
+    W_ENERGY,
+    W_SHADOW,
+    W_SLOPE,
+    W_THERMAL,
+    get_rover,
+    rover_catalog,
+)
 from .cost_engine import compute_cost_grid, resolve_weights
-from .data_loader import load_and_preprocess_dem, load_preprocessed_grids, DATA_DIR
+from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .pathfinder import astar
 from .scenarios import (
     MISSION_PROFILES,
@@ -24,8 +32,9 @@ from .scenarios import (
     list_scenarios,
     load_scenario,
 )
-from .serializer import build_plan_response, lonlat_to_pixel
+from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
 from .simulation import simulate_path, summarize_simulation
+from .traversability import compute_traversability_bool
 
 logger = logging.getLogger(__name__)
 
@@ -39,20 +48,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory grid store — populated at startup and/or via load endpoints.
 _grids: dict | None = None
 
 
-# ── Startup ────────────────────────────────────────────────────────────────────
-
 @app.on_event("startup")
 async def _startup_load_grids() -> None:
-    """Attempt to load P1 .npy grids at server start.
-
-    Sets _grids and app.state.grids if successful.
-    Logs a warning and leaves both as None if grids are not found —
-    the server still starts so that load endpoints remain usable.
-    """
+    """Attempt to load P1 .npy grids at server start."""
     global _grids
     try:
         grids = load_preprocessed_grids()
@@ -72,8 +73,6 @@ async def _startup_load_grids() -> None:
         app.state.grids = None
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
 def _get_grids() -> dict:
     if _grids is None:
         raise HTTPException(
@@ -84,10 +83,7 @@ def _get_grids() -> dict:
 
 
 def _active_grids(request: Request) -> dict:
-    """Return the active grids dict, preferring app.state over the module global.
-
-    Returns 503 if no grids are available.
-    """
+    """Return the active grids dict, preferring app.state over the module global."""
     grids = getattr(request.app.state, "grids", None) or _grids
     if grids is None:
         raise HTTPException(
@@ -101,43 +97,75 @@ def _active_grids(request: Request) -> dict:
     return grids
 
 
-def _grids_with_weights(base_grids: dict, weights: dict[str, float] | None) -> dict:
-    """Return grids dict with cost layer recomputed for the given weights.
+def _grids_for_rover(
+    base_grids: dict,
+    rover_id: str = DEFAULT_ROVER_ID,
+    weights: dict[str, float] | None = None,
+) -> dict:
+    """Return grids adapted for the selected rover and weights."""
+    rover = get_rover(rover_id)
+    metadata = dict(base_grids.get("metadata", {}))
+    default_rover_id = metadata.get("default_rover_id", DEFAULT_ROVER_ID)
+    stored_weights = metadata.get("cost_weights", {})
+    resolved_weights = resolve_weights(weights, rover)
 
-    If *weights* match the stored cost weights (or are None), return as-is
-    to avoid redundant work.
-    """
-    if weights is None:
-        return base_grids
-    stored = base_grids.get("metadata", {}).get("cost_weights", {})
-    resolved = resolve_weights(weights)
-    if resolved == stored:
-        return base_grids
-    new_cost = compute_cost_grid(
-        base_grids["slope"],
-        base_grids["thermal"],
-        base_grids["shadow_ratio"],
-        float(base_grids["metadata"]["resolution_m"]),
-        traversable=base_grids["traversable"],
-        weights=resolved,
+    traversable = (
+        base_grids["traversable"]
+        if rover_id == default_rover_id
+        else compute_traversability_bool(
+            base_grids["slope"],
+            base_grids["thermal"],
+            base_grids.get("elevation"),
+            rover=rover,
+        )
     )
-    return {**base_grids, "cost": new_cost}
+
+    needs_cost_recompute = rover_id != default_rover_id or resolved_weights != stored_weights
+    cost = (
+        compute_cost_grid(
+            base_grids["slope"],
+            base_grids["thermal"],
+            base_grids["shadow_ratio"],
+            float(metadata["resolution_m"]),
+            traversable=traversable,
+            weights=resolved_weights,
+            rover=rover,
+        )
+        if needs_cost_recompute
+        else base_grids["cost"]
+    )
+
+    metadata["cost_weights"] = resolved_weights
+    metadata["rover_id"] = rover_id
+    metadata["rover_name"] = rover["name"]
+    metadata["default_rover_id"] = default_rover_id
+
+    return {
+        **base_grids,
+        "traversable": traversable,
+        "cost": cost,
+        "metadata": metadata,
+    }
 
 
-def _to_pixel(coord: "StartGoalPixel | StartGoalGeo", label: str) -> tuple[int, int]:
-    """Normalise a start/goal input to (row, col).
+def _read_grid_value(grid: np.ndarray, row: int, col: int) -> float | None:
+    value = grid[row, col]
+    return float(value) if np.isfinite(value) else None
 
-    Raises HTTPException(422) if a geo coordinate cannot be mapped to the grid.
-    """
+
+def _to_pixel(
+    coord: "StartGoalPixel | StartGoalGeo",
+    label: str,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[int, int]:
+    """Normalise a start/goal input to (row, col)."""
     if isinstance(coord, StartGoalPixel):
         return coord.row, coord.col
     try:
-        return lonlat_to_pixel(coord.lon, coord.lat)
+        return lonlat_to_pixel(coord.lon, coord.lat, metadata)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"{label}: {exc}") from exc
 
-
-# ── Request models ─────────────────────────────────────────────────────────────
 
 class StartGoalPixel(BaseModel):
     row: int
@@ -164,10 +192,9 @@ class PlanWeights(BaseModel):
 
 
 class PlanRequest(BaseModel):
-    # Accepts either {"row": r, "col": c} or {"lon": x, "lat": y}.
-    # Pydantic v2 tries Union members left-to-right; pixel wins when row/col present.
     start: Union[StartGoalPixel, StartGoalGeo]
     goal: Union[StartGoalPixel, StartGoalGeo]
+    rover_id: str = DEFAULT_ROVER_ID
     weights: PlanWeights = Field(default_factory=PlanWeights)
     include_simulation: bool = True
 
@@ -176,11 +203,13 @@ class PlanMultiRequest(BaseModel):
     start: list[int]
     goal: list[int]
     profiles: list[str]
+    rover_id: str = DEFAULT_ROVER_ID
 
 
 class CompareRequest(BaseModel):
     start: list[int]
     goal: list[int]
+    rover_id: str = DEFAULT_ROVER_ID
 
 
 class LoadDEMRequest(BaseModel):
@@ -195,13 +224,19 @@ class LoadPreprocessedRequest(BaseModel):
     weights: dict[str, float] | None = None
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
-
 @app.get("/api/health")
 def health():
     loaded = _grids is not None
     shape = _grids["metadata"]["shape"] if loaded else None
     return {"status": "ok", "version": "0.3.0", "dem_loaded": loaded, "grid_shape": shape}
+
+
+@app.get("/api/rovers")
+def rovers():
+    return {
+        "default_rover_id": DEFAULT_ROVER_ID,
+        "rovers": rover_catalog(),
+    }
 
 
 @app.post("/api/load-preprocessed")
@@ -241,25 +276,47 @@ def load_dem(req: LoadDEMRequest):
     return {"status": "loaded", "metadata": meta}
 
 
+@app.get("/api/cell-telemetry")
+def get_cell_telemetry(row: int, col: int, request: Request):
+    grids = _active_grids(request)
+    metadata = grids["metadata"]
+    shape = metadata["shape"]
+    rows, cols = int(shape[0]), int(shape[1])
+
+    if not (0 <= row < rows and 0 <= col < cols):
+        raise HTTPException(
+            status_code=422,
+            detail=f"({row}, {col}) is outside the {rows}x{cols} grid.",
+        )
+
+    lon, lat = pixel_to_lonlat(row, col, metadata)
+    resolution_m = float(metadata["resolution_m"])
+
+    return {
+        "row": row,
+        "col": col,
+        "lon": round(lon, 6),
+        "lat": round(lat, 6),
+        "altitude_m": _read_grid_value(grids["elevation"], row, col),
+        "thermal_c": _read_grid_value(grids["thermal"], row, col),
+        "resolution_m": resolution_m,
+        "span_km": round((rows * resolution_m) / 1000.0, 4),
+    }
+
+
 @app.post("/api/plan")
 def plan(req: PlanRequest, request: Request):
-    """Plan a single route with physics simulation.
-
-    Accepts start/goal as pixel (row/col) or geographic (lon/lat) coordinates.
-    Returns A* metrics, physics simulation summary, GeoJSON path, and
-    per-waypoint telemetry.
-
-    Why sync: A* is ~1.5 s of CPU-bound Python. async def would block the
-    event loop; sync handlers run in FastAPI's thread pool automatically.
-    """
+    """Plan a single route with physics simulation."""
     grids = _active_grids(request)
+    rover = get_rover(req.rover_id)
+    weights_dict = req.weights.model_dump()
+    grids_for_plan = _grids_for_rover(grids, req.rover_id, weights_dict)
 
-    # 1. Normalise coordinates
-    start = _to_pixel(req.start, "start")
-    goal = _to_pixel(req.goal, "goal")
+    metadata = grids_for_plan["metadata"]
+    start = _to_pixel(req.start, "start", metadata)
+    goal = _to_pixel(req.goal, "goal", metadata)
 
-    # 2. Bounds and traversability checks
-    shape = grids["metadata"]["shape"]
+    shape = metadata["shape"]
     rows, cols = shape[0], shape[1]
 
     if not (0 <= start[0] < rows and 0 <= start[1] < cols):
@@ -273,49 +330,60 @@ def plan(req: PlanRequest, request: Request):
             detail=f"goal {goal} is outside the {rows}x{cols} grid.",
         )
 
-    traversable = grids["traversable"]
+    traversable = grids_for_plan["traversable"]
     if not bool(traversable[start[0], start[1]]):
         raise HTTPException(
             status_code=422,
-            detail=f"start {start} is not traversable (slope > 25° or extreme thermal).",
+            detail=(
+                f"start {start} is not traversable for {rover['name']} "
+                "(slope limit or extreme thermal)."
+            ),
         )
     if not bool(traversable[goal[0], goal[1]]):
         raise HTTPException(
             status_code=422,
-            detail=f"goal {goal} is not traversable (slope > 25° or extreme thermal).",
+            detail=(
+                f"goal {goal} is not traversable for {rover['name']} "
+                "(slope limit or extreme thermal)."
+            ),
         )
 
-    # 3. Cost grid (recompute if custom weights differ from stored)
-    weights_dict = req.weights.model_dump()
-    grids_for_plan = _grids_with_weights(grids, weights_dict)
-
-    # 4. A*
     astar_result = astar(
         grids_for_plan,
         start,
         goal,
         weights=weights_dict,
+        rover=rover,
     )
     if astar_result.get("error"):
         raise HTTPException(status_code=404, detail=astar_result["error"])
 
-    # 5. Physics simulation
     try:
         states = simulate_path(
             astar_result,
             grids_for_plan["cost"],
-            grids["slope"],
-            grids["thermal"],
-            grids["shadow_ratio"],
+            grids_for_plan["slope"],
+            grids_for_plan["thermal"],
+            grids_for_plan["shadow_ratio"],
+            rover=rover,
+            pixel_size_m=float(metadata["resolution_m"]),
         )
         summary = summarize_simulation(states)
     except Exception:
         logger.error("Simulation failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal simulation error.")
 
-    # 6. Serialise and return
     try:
-        return build_plan_response(astar_result, states, summary, req.include_simulation)
+        return build_plan_response(
+            astar_result,
+            states,
+            summary,
+            req.include_simulation,
+            metadata,
+            grids_for_plan["elevation"],
+            rover_id=req.rover_id,
+            rover_name=rover["name"],
+        )
     except Exception:
         logger.error("Response serialization failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal serialization error.")
@@ -324,6 +392,7 @@ def plan(req: PlanRequest, request: Request):
 @app.post("/api/plan-multi")
 def plan_multi(req: PlanMultiRequest):
     base_grids = _get_grids()
+    rover = get_rover(req.rover_id)
     results: list[dict[str, Any]] = []
     for profile_id in req.profiles:
         profile = get_profile(profile_id)
@@ -339,13 +408,14 @@ def plan_multi(req: PlanMultiRequest):
                 }
             )
             continue
-        grids = _grids_with_weights(base_grids, profile["weights"])
+        grids = _grids_for_rover(base_grids, req.rover_id, profile["weights"])
         result = astar(
             grids,
             tuple(req.start),
             tuple(req.goal),
             weights=profile["weights"],
             constraints=profile["constraints"],
+            rover=rover,
         )
         result["profile_id"] = profile_id
         result["profile_name"] = profile["name"]
@@ -357,15 +427,17 @@ def plan_multi(req: PlanMultiRequest):
 @app.post("/api/compare")
 def compare(req: CompareRequest):
     base_grids = _get_grids()
+    rover = get_rover(req.rover_id)
     results = []
     for profile_id, profile in MISSION_PROFILES.items():
-        grids = _grids_with_weights(base_grids, profile["weights"])
+        grids = _grids_for_rover(base_grids, req.rover_id, profile["weights"])
         result = astar(
             grids,
             tuple(req.start),
             tuple(req.goal),
             weights=profile["weights"],
             constraints=profile["constraints"],
+            rover=rover,
         )
         result["profile_id"] = profile_id
         result["profile_name"] = profile["name"]
@@ -380,8 +452,16 @@ def compare(req: CompareRequest):
 
 
 @app.get("/api/layers/{layer_name}")
-def get_layer(layer_name: str, downsample: int = 1):
-    grids = _get_grids()
+def get_layer(
+    layer_name: str,
+    downsample: int = 1,
+    rover_id: str = DEFAULT_ROVER_ID,
+    w_slope: float | None = None,
+    w_energy: float | None = None,
+    w_shadow: float | None = None,
+    w_thermal: float | None = None,
+):
+    base_grids = _get_grids()
     valid_layers = (
         "elevation",
         "slope",
@@ -393,6 +473,27 @@ def get_layer(layer_name: str, downsample: int = 1):
     )
     if layer_name not in valid_layers:
         raise HTTPException(status_code=400, detail=f"Layer must be one of {valid_layers}")
+
+    weight_overrides = {
+        key: value
+        for key, value in {
+            "w_slope": w_slope,
+            "w_energy": w_energy,
+            "w_shadow": w_shadow,
+            "w_thermal": w_thermal,
+        }.items()
+        if value is not None
+    }
+
+    rover = get_rover(rover_id)
+    grids = (
+        _grids_for_rover(base_grids, rover_id, weight_overrides or None)
+        if layer_name in ("cost", "traversable") or rover_id != DEFAULT_ROVER_ID or weight_overrides
+        else base_grids
+    )
+    metadata = dict(grids["metadata"])
+    metadata["rover_id"] = rover_id
+    metadata["rover_name"] = rover["name"]
 
     layer = grids[layer_name]
     if downsample > 1:
@@ -406,7 +507,7 @@ def get_layer(layer_name: str, downsample: int = 1):
     return {
         "layer": layer_name,
         "shape": list(layer.shape),
-        "metadata": grids["metadata"],
+        "metadata": metadata,
         "data": serializable,
     }
 

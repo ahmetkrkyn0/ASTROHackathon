@@ -12,7 +12,7 @@ import numpy as np
 import rasterio
 from scipy.ndimage import uniform_filter
 
-from .constants import DEFAULT_TARGET_RESOLUTION_M
+from .constants import DEFAULT_ROVER_ID, DEFAULT_TARGET_RESOLUTION_M
 from .cost_engine import compute_cost_grid, resolve_weights
 from .thermal_grid import generate_thermal_grid
 from .traversability import compute_traversability_bool
@@ -100,11 +100,13 @@ def load_preprocessed_grids(
         cost_weights = stored_weights or resolved
 
     result["metadata"] = {
+        "origin": metadata.get("origin"),
         "resolution_m": float(metadata["resolution_m"]),
         "shape": metadata["shape"],
         "crs": metadata.get("crs", "unknown"),
         "source": "preprocessed",
         "processed_dir": d,
+        "default_rover_id": metadata.get("default_rover_id", DEFAULT_ROVER_ID),
         "cost_weights": cost_weights,
         "cost_model": metadata.get("cost_model", "weighted_cell_cost_without_barrier"),
     }
@@ -184,11 +186,16 @@ def load_and_preprocess_dem(
         "cost": cost,
         "traversable": traversable,
         "metadata": {
+            "origin": {
+                "x": float(transform.c),
+                "y": float(transform.f),
+            },
             "resolution_m": float(actual_resolution),
             "shape": list(elevation.shape),
             "crs": str(crs),
             "source": "dem",
             "dem_path": dem_path,
+            "default_rover_id": DEFAULT_ROVER_ID,
             "cost_weights": resolved_weights,
             "cost_model": "weighted_cell_cost_without_barrier",
         },
