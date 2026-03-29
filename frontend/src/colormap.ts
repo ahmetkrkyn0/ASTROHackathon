@@ -56,15 +56,21 @@ export function batteryToHex(percent: number): string {
   return '#ff1744'
 }
 
-export function thermalToRgb(value: number | null, min: number, max: number): RGB {
+export function thermalToRgb(value: number | null, min: number, max: number, lut?: number[]): RGB {
   if (value === null || !Number.isFinite(value)) {
     return [12, 14, 20]
   }
 
-  return sampleStops(THERMAL_STOPS, normalize(value, min, max))
+  const t = lut
+    ? lookupEqualized(value, min, max, lut)
+    : normalize(value, min, max)
+  return sampleStops(THERMAL_STOPS, t)
 }
 
-export function elevationToRegolith(t: number): RGB {
+export function elevationToRegolith(t: number, lut?: number[], min?: number, max?: number): RGB {
+  if (lut && min !== undefined && max !== undefined) {
+    return sampleStops(REGOLITH_STOPS, clamp01(lookupEqualized(t, min, max, lut)))
+  }
   return sampleStops(REGOLITH_STOPS, clamp01(t))
 }
 
@@ -153,6 +159,51 @@ export function pixelToApproxLonLat(
     lon: +((Math.atan2(x, y) * 180) / Math.PI).toFixed(4),
     lat: +((Math.asin(-Math.cos(c)) * 180) / Math.PI).toFixed(4),
   }
+}
+
+// ── Histogram equalization ─────────────────────────────────────────────────
+
+const EQ_BINS = 256
+
+/**
+ * Grid verisi üzerinden histogram equalization LUT'u oluşturur.
+ * Sonuç: her bin için [0,1] arası eşitlenmiş değer dizisi.
+ */
+export function buildEqualizationLut(grid: (number | null)[][], min: number, max: number): number[] {
+  const histogram = new Uint32Array(EQ_BINS)
+  let totalCount = 0
+
+  for (const row of grid) {
+    for (const value of row) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        const bin = Math.min(EQ_BINS - 1, Math.max(0, Math.floor(((value - min) / (max - min)) * (EQ_BINS - 1))))
+        histogram[bin]++
+        totalCount++
+      }
+    }
+  }
+
+  // CDF oluştur
+  const cdf = new Float64Array(EQ_BINS)
+  cdf[0] = histogram[0]
+  for (let i = 1; i < EQ_BINS; i++) {
+    cdf[i] = cdf[i - 1] + histogram[i]
+  }
+
+  // Normalize CDF → [0, 1]
+  const lut: number[] = new Array(EQ_BINS)
+  const cdfMin = cdf.find(v => v > 0) ?? 0
+  const denom = totalCount - cdfMin
+  for (let i = 0; i < EQ_BINS; i++) {
+    lut[i] = denom > 0 ? (cdf[i] - cdfMin) / denom : i / (EQ_BINS - 1)
+  }
+
+  return lut
+}
+
+function lookupEqualized(value: number, min: number, max: number, lut: number[]): number {
+  const bin = Math.min(EQ_BINS - 1, Math.max(0, Math.floor(((value - min) / (max - min)) * (EQ_BINS - 1))))
+  return lut[bin]
 }
 
 function sampleStops(stops: RGB[], t: number): RGB {

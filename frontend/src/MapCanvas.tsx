@@ -8,6 +8,7 @@ import React, {
 } from 'react'
 import type { Waypoint } from './api'
 import {
+  buildEqualizationLut,
   computeHillshade,
   riskToHex,
   shadeRegolith,
@@ -345,6 +346,7 @@ function buildThermalImage(
 
   const imageData = ctx.createImageData(CANVAS_SIZE, CANVAS_SIZE)
   const range = getFiniteRange(thermalGrid)
+  const lut = buildEqualizationLut(thermalGrid, range.min, range.max)
   const rows = thermalGrid.length
   const cols = thermalGrid[0].length
   const cellPx = CANVAS_SIZE / rows
@@ -354,7 +356,7 @@ function buildThermalImage(
       const value = thermalGrid[row][col]
       const traversable = traversableGrid[row]?.[col]
 
-      let color = thermalToRgb(value, range.min, range.max)
+      let color = thermalToRgb(value, range.min, range.max, lut)
       if (traversable !== 1) {
         color = tintRgb(color, [96, 14, 10], 0.24)
       }
@@ -378,6 +380,7 @@ function buildSurfaceImage(
 
   const imageData = ctx.createImageData(CANVAS_SIZE, CANVAS_SIZE)
   const range = getFiniteRange(elevationGrid)
+  const lut = buildEqualizationLut(elevationGrid, range.min, range.max)
   const rows = elevationGrid.length
   const cols = elevationGrid[0].length
   const cellPx = CANVAS_SIZE / rows
@@ -391,8 +394,7 @@ function buildSurfaceImage(
       let color: [number, number, number]
 
       if (typeof value === 'number' && Number.isFinite(value)) {
-        const normalized = normalize(value, range.min, range.max)
-        const base = elevationToRegolith(normalized)
+        const base = elevationToRegolith(value, lut, range.min, range.max)
         const shade = computeHillshade(elevationGrid, row, col, effectiveResolution)
         color = shadeRegolith(base, shade)
       } else {
@@ -456,13 +458,6 @@ function getFiniteRange(grid: (number | null)[][]): { min: number; max: number }
   }
 
   return { min, max }
-}
-
-function normalize(value: number, min: number, max: number): number {
-  if (max - min < 1e-9) {
-    return 0.5
-  }
-  return Math.max(0, Math.min(1, (value - min) / (max - min)))
 }
 
 function drawMarker(
