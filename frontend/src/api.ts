@@ -33,11 +33,16 @@ export interface SimSummary {
 }
 
 export interface AstarMetrics {
-  path_steps: number
+  path_length_nodes: number
   total_distance_m: number
-  total_cost: number
+  total_weighted_cost: number
+  total_energy_wh: number
+  total_shadow_hours: number
+  max_slope_deg: number
+  max_thermal_risk: number
+  min_surface_temp_c: number
   nodes_expanded: number
-  comp_time_ms: number
+  computation_time_ms: number
   [key: string]: unknown
 }
 
@@ -197,6 +202,11 @@ export async function fetchRovers(): Promise<RoversResponse> {
   }
   if (!r.ok) throw new Error(await readErrorDetail(r, 'Failed to fetch rovers'))
   return r.json() as Promise<RoversResponse>
+export async function fetchProfiles(): Promise<ProfileEntry[]> {
+  const r = await fetch(`${BASE}/profiles`)
+  if (!r.ok) throw new Error('Failed to fetch profiles')
+  const data = await r.json() as Record<string, Omit<ProfileEntry, 'id'>>
+  return Object.entries(data).map(([id, profile]) => ({ id, ...profile }))
 }
 
 export async function checkHealth(): Promise<{ dem_loaded: boolean }> {
