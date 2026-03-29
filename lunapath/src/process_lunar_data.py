@@ -27,6 +27,7 @@ if _BACKEND_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_ROOT)
 
 from app.cost_engine import compute_cost_grid, resolve_weights  # noqa: E402
+from app.thermal_grid import generate_thermal_grid  # noqa: E402
 from app.traversability import compute_traversability  # noqa: E402
 
 # --- Proje dizinleri --------------------------------------------------------
@@ -161,43 +162,10 @@ def make_thermal_grid(
 ) -> np.ndarray:
     """Sentetik yuzey sicaklik grid'i (Celsius).
 
-    5 adimli model:
-      1. T_base   — yukseklige dayali baz sicaklik [-180, +80]
-      2. sun_factor — aspect'e dayali gunes faktoru
-      3. slope_weight — normalize egim agirligi
-      4. T_aspect_delta — gunes + egim etki terimi
-      5. shadow_penalty — kuzey komsu yukseklik farkindan ceza
+    Hesaplama backend/app/thermal_grid.py modulunden gelir (tek kaynak).
+    Sonuc float64'e donusturulur (P1 grid standardi).
     """
-    e_min = np.nanmin(elevation)
-    e_max = np.nanmax(elevation)
-    elev_norm = (elevation - e_min) / (e_max - e_min + 1e-10)
-
-    # Adim 1: Baz sicaklik
-    T_base = -180.0 + elev_norm * (80.0 - (-180.0))
-
-    # Adim 2: Gunes faktoru (aspect'e dayali)
-    sun_factor = np.cos(np.radians(aspect))
-
-    # Adim 3: Egim agirligi
-    slope_weight = np.clip(slope / 25.0, 0.0, 1.0)
-
-    # Adim 4: Aspect-egim etki terimi
-    T_aspect_delta = sun_factor * slope_weight * 40.0
-
-    # Adim 5: Shadow penalty — kuzey komsu farki
-    north_neighbor = np.roll(elevation, 1, axis=0)
-    # Ilk satir icin sinir kosulu: kendisiyle ayni (ceza yok)
-    north_neighbor[0, :] = elevation[0, :]
-    height_diff = north_neighbor - elevation
-    height_diff = np.clip(height_diff, 0.0, None)  # sadece pozitif fark
-    shadow_penalty = np.clip(height_diff / (resolution * 0.1), 0.0, 1.0) * (-30.0)
-
-    # Final sicaklik
-    T_surface = np.clip(
-        T_base + T_aspect_delta + shadow_penalty,
-        -250.0, 130.0,
-    )
-    return T_surface
+    return generate_thermal_grid(elevation, slope, aspect, resolution).astype(np.float64)
 
 
 def make_traversability_grid(

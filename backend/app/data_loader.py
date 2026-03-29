@@ -1,10 +1,11 @@
-"""DEM → grid pipeline with .npy caching."""
+"""DEM → grid pipeline with .npy caching, plus direct P1 grid loading."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,12 @@ from .traversability import compute_traversability_bool
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 
+# P1 processed output directory
+_P1_PROCESSED_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "lunapath", "data", "processed",
+)
+
 _GRID_KEYS: tuple[str, ...] = (
     "elevation",
     "slope",
@@ -27,6 +34,82 @@ _GRID_KEYS: tuple[str, ...] = (
     "shadow_ratio",
     "cost",
 )
+
+
+def load_preprocessed_grids(
+    processed_dir: str | None = None,
+    weights: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Load pre-computed .npy grids produced by the P1 pipeline.
+
+    This is the preferred loading method — it reuses the grids that
+    ``lunapath/src/process_lunar_data.py`` already generated, avoiding
+    duplicate DEM processing.
+
+    If *weights* differ from the stored cost weights the cost grid is
+    recomputed on the fly (cheap, <1 s for 500×500).
+    """
+    d = processed_dir or _P1_PROCESSED_DIR
+
+    meta_path = os.path.join(d, "metadata.json")
+    if not os.path.exists(meta_path):
+        raise FileNotFoundError(
+            f"metadata.json not found in {d}. Run the P1 pipeline first."
+        )
+
+    with open(meta_path, encoding="utf-8") as f:
+        metadata = json.load(f)
+
+    # Map between .npy file stem and the key used in the grids dict
+    _FILE_TO_KEY = {
+        "elevation_grid": "elevation",
+        "slope_grid": "slope",
+        "aspect_grid": "aspect",
+        "thermal_grid": "thermal",
+        "shadow_ratio_grid": "shadow_ratio",
+        "traversability_grid": "traversable",
+        "cost_grid": "cost",
+    }
+
+    result: dict[str, Any] = {}
+    for file_stem, key in _FILE_TO_KEY.items():
+        npy_path = os.path.join(d, f"{file_stem}.npy")
+        if not os.path.exists(npy_path):
+            raise FileNotFoundError(f"Required grid file missing: {npy_path}")
+        arr = np.load(npy_path)
+        if key == "traversable":
+            result[key] = arr.astype(bool)
+        else:
+            result[key] = arr.astype(np.float64)
+
+    resolved = resolve_weights(weights)
+    stored_weights = metadata.get("cost_weights", {})
+
+    # Recompute cost grid if requested weights differ from what P1 used
+    if weights is not None and resolved != stored_weights:
+        result["cost"] = compute_cost_grid(
+            result["slope"],
+            result["thermal"],
+            result["shadow_ratio"],
+            float(metadata["resolution_m"]),
+            traversable=result["traversable"],
+            weights=resolved,
+        )
+        cost_weights = resolved
+    else:
+        cost_weights = stored_weights or resolved
+
+    result["metadata"] = {
+        "resolution_m": float(metadata["resolution_m"]),
+        "shape": metadata["shape"],
+        "crs": metadata.get("crs", "unknown"),
+        "source": "preprocessed",
+        "processed_dir": d,
+        "cost_weights": cost_weights,
+        "cost_model": metadata.get("cost_model", "weighted_cell_cost_without_barrier"),
+    }
+
+    return result
 
 
 def load_and_preprocess_dem(
@@ -38,7 +121,7 @@ def load_and_preprocess_dem(
     """Load raw DEM and produce all grid layers.
 
     Returns dict with keys:
-        elevation, slope, aspect, thermal, shadow_ratio, traversable, metadata
+        elevation, slope, aspect, thermal, shadow_ratio, cost, traversable, metadata
     """
     resolved_weights = resolve_weights(weights)
     cache_key = _cache_key(dem_path, target_resolution_m, resolved_weights)
@@ -104,7 +187,8 @@ def load_and_preprocess_dem(
             "resolution_m": float(actual_resolution),
             "shape": list(elevation.shape),
             "crs": str(crs),
-            "dem_source": dem_path,
+            "source": "dem",
+            "dem_path": dem_path,
             "cost_weights": resolved_weights,
             "cost_model": "weighted_cell_cost_without_barrier",
         },
@@ -114,22 +198,6 @@ def load_and_preprocess_dem(
         _save_cache(cache_key, result)
 
     return result
-
-
-# ── Coordinate helpers ───────────────────────────────────────────────────────
-
-def pixel_to_geo(row: int, col: int, transform) -> tuple[float, float]:
-    """Grid (row, col) → geographic (x, y)."""
-    x = transform.c + col * transform.a + row * transform.e
-    y = transform.f + col * transform.d + row * transform.e
-    return x, y
-
-
-def geo_to_pixel(x: float, y: float, transform) -> tuple[int, int]:
-    """Geographic (x, y) → grid (row, col)."""
-    col = int((x - transform.c) / transform.a)
-    row = int((y - transform.f) / transform.e)
-    return row, col
 
 
 # ── Cache ────────────────────────────────────────────────────────────────────

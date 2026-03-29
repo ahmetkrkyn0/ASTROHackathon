@@ -8,7 +8,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .data_loader import load_and_preprocess_dem, DATA_DIR
+from .cost_engine import compute_cost_grid, resolve_weights
+from .data_loader import load_and_preprocess_dem, load_preprocessed_grids, DATA_DIR
 from .pathfinder import astar
 from .scenarios import (
     MISSION_PROFILES,
@@ -19,7 +20,7 @@ from .scenarios import (
     load_scenario,
 )
 
-app = FastAPI(title="LunaPath", version="0.1.0")
+app = FastAPI(title="LunaPath", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,14 +36,46 @@ _grids: dict | None = None
 
 def _get_grids() -> dict:
     if _grids is None:
-        raise HTTPException(status_code=400, detail="No DEM loaded. Call POST /api/load-dem first.")
+        raise HTTPException(
+            status_code=400,
+            detail="No grids loaded. Call POST /api/load-preprocessed or POST /api/load-dem first.",
+        )
     return _grids
+
+
+def _grids_with_weights(base_grids: dict, weights: dict[str, float] | None) -> dict:
+    """Return grids dict with cost layer recomputed for the given weights.
+
+    If *weights* match the stored cost weights (or are None), return as-is
+    to avoid redundant work.
+    """
+    if weights is None:
+        return base_grids
+    stored = base_grids.get("metadata", {}).get("cost_weights", {})
+    resolved = resolve_weights(weights)
+    if resolved == stored:
+        return base_grids
+    # Recompute cost grid for this weight profile
+    new_cost = compute_cost_grid(
+        base_grids["slope"],
+        base_grids["thermal"],
+        base_grids["shadow_ratio"],
+        float(base_grids["metadata"]["resolution_m"]),
+        traversable=base_grids["traversable"],
+        weights=resolved,
+    )
+    return {**base_grids, "cost": new_cost}
 
 
 class LoadDEMRequest(BaseModel):
     dem_file: str
-    target_resolution_m: float = 50
+    target_resolution_m: float = 80
     use_cache: bool = True
+    weights: dict[str, float] | None = None
+
+
+class LoadPreprocessedRequest(BaseModel):
+    processed_dir: str | None = None
     weights: dict[str, float] | None = None
 
 
@@ -69,7 +102,26 @@ class CompareRequest(BaseModel):
 def health():
     loaded = _grids is not None
     shape = _grids["metadata"]["shape"] if loaded else None
-    return {"status": "ok", "version": "0.1.0", "dem_loaded": loaded, "grid_shape": shape}
+    return {"status": "ok", "version": "0.2.0", "dem_loaded": loaded, "grid_shape": shape}
+
+
+@app.post("/api/load-preprocessed")
+def load_preprocessed(req: LoadPreprocessedRequest):
+    """Load pre-computed .npy grids from the P1 pipeline output.
+
+    This is the preferred loading method — avoids duplicate DEM processing.
+    """
+    global _grids
+    try:
+        _grids = load_preprocessed_grids(
+            processed_dir=req.processed_dir,
+            weights=req.weights,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"status": "loaded", "metadata": _grids["metadata"]}
 
 
 @app.post("/api/load-dem")
@@ -93,7 +145,7 @@ def load_dem(req: LoadDEMRequest):
 
 @app.post("/api/plan")
 def plan(req: PlanRequest):
-    grids = _get_grids()
+    base_grids = _get_grids()
     profile = get_profile(req.profile_id) if req.profile_id else None
 
     if req.profile_id and profile is None:
@@ -104,6 +156,7 @@ def plan(req: PlanRequest):
     if req.constraints:
         constraints.update(req.constraints)
 
+    grids = _grids_with_weights(base_grids, weights)
     result = astar(
         grids,
         tuple(req.start),
@@ -119,7 +172,7 @@ def plan(req: PlanRequest):
 
 @app.post("/api/plan-multi")
 def plan_multi(req: PlanMultiRequest):
-    grids = _get_grids()
+    base_grids = _get_grids()
     results: list[dict[str, Any]] = []
     for profile_id in req.profiles:
         profile = get_profile(profile_id)
@@ -135,6 +188,7 @@ def plan_multi(req: PlanMultiRequest):
                 }
             )
             continue
+        grids = _grids_with_weights(base_grids, profile["weights"])
         result = astar(
             grids,
             tuple(req.start),
@@ -151,9 +205,10 @@ def plan_multi(req: PlanMultiRequest):
 
 @app.post("/api/compare")
 def compare(req: CompareRequest):
-    grids = _get_grids()
+    base_grids = _get_grids()
     results = []
     for profile_id, profile in MISSION_PROFILES.items():
+        grids = _grids_with_weights(base_grids, profile["weights"])
         result = astar(
             grids,
             tuple(req.start),
@@ -227,7 +282,7 @@ def load_scenario_endpoint(scenario_id: str):
         if os.path.exists(dem_path):
             _grids = load_and_preprocess_dem(
                 dem_path,
-                scenario.get("grid_resolution_m", 50),
+                scenario.get("grid_resolution_m", 80),
                 weights=scenario.get("weights"),
             )
     return scenario

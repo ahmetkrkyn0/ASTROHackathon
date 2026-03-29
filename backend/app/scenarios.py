@@ -10,6 +10,7 @@ from . import constants as C
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 SCENARIOS_DIR = os.path.join(DATA_DIR, "scenarios")
 
+# Weights and constraints frozen at v3.2 spec (docs/lunapath_referans_belgesi_2.md §5.2)
 MISSION_PROFILES: dict[str, dict] = {
     "balanced": {
         "name": "Dengeli Kesif",
@@ -50,9 +51,9 @@ MISSION_PROFILES: dict[str, dict] = {
         "description": "Daha agresif, daha kisa rota tercih eden profil.",
         "weights": {
             "w_slope": 0.500,
-            "w_energy": 0.200,
-            "w_shadow": 0.075,
-            "w_thermal": 0.225,
+            "w_energy": 0.150,
+            "w_shadow": 0.100,
+            "w_thermal": 0.250,
         },
         "constraints": {
             "max_shadow_h": 50.0,
@@ -62,22 +63,22 @@ MISSION_PROFILES: dict[str, dict] = {
         },
         "color": "#EF4444",
     },
-    "shadow_safe": {
-        "name": "Golge Guvenli",
-        "description": "Uzun golge kalma riskini ve termal riski baskin gorur.",
+    "shadow_traverse": {
+        "name": "Golge Gecis",
+        "description": "Golgeli bolgeden gecmek zorunlu — termal guvenlik kritik.",
         "weights": {
-            "w_slope": 0.150,
-            "w_energy": 0.100,
-            "w_shadow": 0.350,
-            "w_thermal": 0.400,
+            "w_slope": 0.200,
+            "w_energy": 0.150,
+            "w_shadow": 0.300,
+            "w_thermal": 0.350,
         },
         "constraints": {
-            "max_shadow_h": 35.0,
+            "max_shadow_h": 45.0,
             "max_slope_deg": 25.0,
-            "max_energy_wh": 4200.0,
+            "max_energy_wh": 4000.0,
             "min_soc": 0.25,
         },
-        "color": "#8B5CF6",
+        "color": "#A855F7",
     },
 }
 

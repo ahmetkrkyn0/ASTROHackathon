@@ -90,14 +90,6 @@ def surface_to_inner(T_surface_C: float) -> float:
     return T_surface_C + C.THERMAL_OFFSET_HOT
 
 
-def edge_path_length_m(theta_deg: float, d_m: float) -> float:
-    """Return rover travel length along a sloped edge."""
-    cos_t = math.cos(math.radians(theta_deg))
-    if cos_t <= 0:
-        return float("inf")
-    return d_m / cos_t
-
-
 def edge_travel_time_s(theta_deg: float, d_m: float) -> float:
     """Return traversal time for one edge in seconds."""
     cos_t = math.cos(math.radians(theta_deg))

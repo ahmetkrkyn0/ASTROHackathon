@@ -46,24 +46,3 @@ def generate_thermal_grid(
     return T_surface.astype(np.float32)
 
 
-def validate_thermal_grid(
-    thermal_grid: np.ndarray, elevation_grid: np.ndarray
-) -> dict:
-    """Return validation statistics for a thermal grid."""
-    valid = ~np.isnan(elevation_grid)
-    corr = float(
-        np.corrcoef(elevation_grid[valid].ravel(), thermal_grid[valid].ravel())[0, 1]
-    )
-    total = thermal_grid.size
-    return {
-        "min_C": float(np.nanmin(thermal_grid)),
-        "max_C": float(np.nanmax(thermal_grid)),
-        "mean_C": float(np.nanmean(thermal_grid)),
-        "median_C": float(np.nanmedian(thermal_grid)),
-        "elev_thermal_correlation": corr,
-        "pct_safe": float(np.sum(thermal_grid > -30) / total * 100),
-        "pct_caution": float(
-            np.sum((thermal_grid <= -30) & (thermal_grid > -100)) / total * 100
-        ),
-        "pct_danger": float(np.sum(thermal_grid <= -100) / total * 100),
-    }
