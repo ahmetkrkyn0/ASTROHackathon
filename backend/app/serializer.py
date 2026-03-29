@@ -142,6 +142,8 @@ def states_to_waypoints(states: "List[RoverState]") -> list[dict]:
         lon, lat = pixel_to_lonlat(s.row, s.col)
         waypoints.append({
             "step": s.step,
+            "row": s.row,
+            "col": s.col,
             "lon": round(lon, 6),
             "lat": round(lat, 6),
             "battery_pct": round(s.battery_pct, 2),
