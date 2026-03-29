@@ -1,13 +1,18 @@
 """LunaPath FastAPI backend."""
 
+from __future__ import annotations
+
+import logging
 import os
-from typing import Any
+import traceback
+from typing import Any, Union
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
+from .constants import W_SLOPE, W_ENERGY, W_SHADOW, W_THERMAL
 from .cost_engine import compute_cost_grid, resolve_weights
 from .data_loader import load_and_preprocess_dem, load_preprocessed_grids, DATA_DIR
 from .pathfinder import astar
@@ -19,8 +24,12 @@ from .scenarios import (
     list_scenarios,
     load_scenario,
 )
+from .serializer import build_plan_response, lonlat_to_pixel
+from .simulation import simulate_path, summarize_simulation
 
-app = FastAPI(title="LunaPath", version="0.2.0")
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="LunaPath", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,9 +39,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory grid store (loaded once)
+# In-memory grid store — populated at startup and/or via load endpoints.
 _grids: dict | None = None
 
+
+# ── Startup ────────────────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def _startup_load_grids() -> None:
+    """Attempt to load P1 .npy grids at server start.
+
+    Sets _grids and app.state.grids if successful.
+    Logs a warning and leaves both as None if grids are not found —
+    the server still starts so that load endpoints remain usable.
+    """
+    global _grids
+    try:
+        grids = load_preprocessed_grids()
+        _grids = grids
+        app.state.grids = grids
+        shape = grids["metadata"]["shape"]
+        logger.info("Grids loaded at startup: shape=%s", shape)
+    except FileNotFoundError as exc:
+        logger.warning(
+            "Grid files not found at startup (%s). "
+            "Call POST /api/load-preprocessed or POST /api/load-dem before planning.",
+            exc,
+        )
+        app.state.grids = None
+    except Exception as exc:
+        logger.error("Unexpected error loading grids at startup: %s", exc)
+        app.state.grids = None
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _get_grids() -> dict:
     if _grids is None:
@@ -41,6 +81,24 @@ def _get_grids() -> dict:
             detail="No grids loaded. Call POST /api/load-preprocessed or POST /api/load-dem first.",
         )
     return _grids
+
+
+def _active_grids(request: Request) -> dict:
+    """Return the active grids dict, preferring app.state over the module global.
+
+    Returns 503 if no grids are available.
+    """
+    grids = getattr(request.app.state, "grids", None) or _grids
+    if grids is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Grid data not loaded. "
+                "Run the P1 pipeline and call POST /api/load-preprocessed, "
+                "or wait for server startup to complete."
+            ),
+        )
+    return grids
 
 
 def _grids_with_weights(base_grids: dict, weights: dict[str, float] | None) -> dict:
@@ -55,7 +113,6 @@ def _grids_with_weights(base_grids: dict, weights: dict[str, float] | None) -> d
     resolved = resolve_weights(weights)
     if resolved == stored:
         return base_grids
-    # Recompute cost grid for this weight profile
     new_cost = compute_cost_grid(
         base_grids["slope"],
         base_grids["thermal"],
@@ -65,6 +122,65 @@ def _grids_with_weights(base_grids: dict, weights: dict[str, float] | None) -> d
         weights=resolved,
     )
     return {**base_grids, "cost": new_cost}
+
+
+def _to_pixel(coord: "StartGoalPixel | StartGoalGeo", label: str) -> tuple[int, int]:
+    """Normalise a start/goal input to (row, col).
+
+    Raises HTTPException(422) if a geo coordinate cannot be mapped to the grid.
+    """
+    if isinstance(coord, StartGoalPixel):
+        return coord.row, coord.col
+    try:
+        return lonlat_to_pixel(coord.lon, coord.lat)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{label}: {exc}") from exc
+
+
+# ── Request models ─────────────────────────────────────────────────────────────
+
+class StartGoalPixel(BaseModel):
+    row: int
+    col: int
+
+
+class StartGoalGeo(BaseModel):
+    lon: float
+    lat: float
+
+
+class PlanWeights(BaseModel):
+    w_slope: float = W_SLOPE
+    w_energy: float = W_ENERGY
+    w_shadow: float = W_SHADOW
+    w_thermal: float = W_THERMAL
+
+    @field_validator("w_slope", "w_energy", "w_shadow", "w_thermal")
+    @classmethod
+    def _check_range(cls, v: float) -> float:
+        if not 0.0 <= v <= 2.0:
+            raise ValueError(f"weight must be in [0.0, 2.0], got {v}")
+        return v
+
+
+class PlanRequest(BaseModel):
+    # Accepts either {"row": r, "col": c} or {"lon": x, "lat": y}.
+    # Pydantic v2 tries Union members left-to-right; pixel wins when row/col present.
+    start: Union[StartGoalPixel, StartGoalGeo]
+    goal: Union[StartGoalPixel, StartGoalGeo]
+    weights: PlanWeights = Field(default_factory=PlanWeights)
+    include_simulation: bool = True
+
+
+class PlanMultiRequest(BaseModel):
+    start: list[int]
+    goal: list[int]
+    profiles: list[str]
+
+
+class CompareRequest(BaseModel):
+    start: list[int]
+    goal: list[int]
 
 
 class LoadDEMRequest(BaseModel):
@@ -79,44 +195,25 @@ class LoadPreprocessedRequest(BaseModel):
     weights: dict[str, float] | None = None
 
 
-class PlanRequest(BaseModel):
-    start: list[int]
-    goal: list[int]
-    profile_id: str | None = None
-    custom_weights: dict[str, float] | None = None
-    constraints: dict[str, float] | None = None
-
-
-class PlanMultiRequest(BaseModel):
-    start: list[int]
-    goal: list[int]
-    profiles: list[str]
-
-
-class CompareRequest(BaseModel):
-    start: list[int]
-    goal: list[int]
-
+# ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 def health():
     loaded = _grids is not None
     shape = _grids["metadata"]["shape"] if loaded else None
-    return {"status": "ok", "version": "0.2.0", "dem_loaded": loaded, "grid_shape": shape}
+    return {"status": "ok", "version": "0.3.0", "dem_loaded": loaded, "grid_shape": shape}
 
 
 @app.post("/api/load-preprocessed")
 def load_preprocessed(req: LoadPreprocessedRequest):
-    """Load pre-computed .npy grids from the P1 pipeline output.
-
-    This is the preferred loading method — avoids duplicate DEM processing.
-    """
+    """Load pre-computed .npy grids from the P1 pipeline output."""
     global _grids
     try:
         _grids = load_preprocessed_grids(
             processed_dir=req.processed_dir,
             weights=req.weights,
         )
+        app.state.grids = _grids
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -137,6 +234,7 @@ def load_dem(req: LoadDEMRequest):
             use_cache=req.use_cache,
             weights=req.weights,
         )
+        app.state.grids = _grids
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     meta = _grids["metadata"]
@@ -144,30 +242,83 @@ def load_dem(req: LoadDEMRequest):
 
 
 @app.post("/api/plan")
-def plan(req: PlanRequest):
-    base_grids = _get_grids()
-    profile = get_profile(req.profile_id) if req.profile_id else None
+def plan(req: PlanRequest, request: Request):
+    """Plan a single route with physics simulation.
 
-    if req.profile_id and profile is None:
-        raise HTTPException(status_code=400, detail=f"Unknown profile: {req.profile_id}")
+    Accepts start/goal as pixel (row/col) or geographic (lon/lat) coordinates.
+    Returns A* metrics, physics simulation summary, GeoJSON path, and
+    per-waypoint telemetry.
 
-    weights = req.custom_weights or (profile["weights"] if profile else None)
-    constraints = dict(profile["constraints"]) if profile else {}
-    if req.constraints:
-        constraints.update(req.constraints)
+    Why sync: A* is ~1.5 s of CPU-bound Python. async def would block the
+    event loop; sync handlers run in FastAPI's thread pool automatically.
+    """
+    grids = _active_grids(request)
 
-    grids = _grids_with_weights(base_grids, weights)
-    result = astar(
-        grids,
-        tuple(req.start),
-        tuple(req.goal),
-        weights=weights,
-        constraints=constraints or None,
+    # 1. Normalise coordinates
+    start = _to_pixel(req.start, "start")
+    goal = _to_pixel(req.goal, "goal")
+
+    # 2. Bounds and traversability checks
+    shape = grids["metadata"]["shape"]
+    rows, cols = shape[0], shape[1]
+
+    if not (0 <= start[0] < rows and 0 <= start[1] < cols):
+        raise HTTPException(
+            status_code=422,
+            detail=f"start {start} is outside the {rows}x{cols} grid.",
+        )
+    if not (0 <= goal[0] < rows and 0 <= goal[1] < cols):
+        raise HTTPException(
+            status_code=422,
+            detail=f"goal {goal} is outside the {rows}x{cols} grid.",
+        )
+
+    traversable = grids["traversable"]
+    if not bool(traversable[start[0], start[1]]):
+        raise HTTPException(
+            status_code=422,
+            detail=f"start {start} is not traversable (slope > 25° or extreme thermal).",
+        )
+    if not bool(traversable[goal[0], goal[1]]):
+        raise HTTPException(
+            status_code=422,
+            detail=f"goal {goal} is not traversable (slope > 25° or extreme thermal).",
+        )
+
+    # 3. Cost grid (recompute if custom weights differ from stored)
+    weights_dict = req.weights.model_dump()
+    grids_for_plan = _grids_with_weights(grids, weights_dict)
+
+    # 4. A*
+    astar_result = astar(
+        grids_for_plan,
+        start,
+        goal,
+        weights=weights_dict,
     )
-    result["profile_id"] = req.profile_id or "custom"
-    result["profile_name"] = profile["name"] if profile else "Custom"
-    result["color"] = profile["color"] if profile else "#64748B"
-    return result
+    if astar_result.get("error"):
+        raise HTTPException(status_code=404, detail=astar_result["error"])
+
+    # 5. Physics simulation
+    try:
+        states = simulate_path(
+            astar_result,
+            grids_for_plan["cost"],
+            grids["slope"],
+            grids["thermal"],
+            grids["shadow_ratio"],
+        )
+        summary = summarize_simulation(states)
+    except Exception:
+        logger.error("Simulation failed:\n%s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal simulation error.")
+
+    # 6. Serialise and return
+    try:
+        return build_plan_response(astar_result, states, summary, req.include_simulation)
+    except Exception:
+        logger.error("Response serialization failed:\n%s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal serialization error.")
 
 
 @app.post("/api/plan-multi")
@@ -285,4 +436,5 @@ def load_scenario_endpoint(scenario_id: str):
                 scenario.get("grid_resolution_m", 80),
                 weights=scenario.get("weights"),
             )
+            app.state.grids = _grids
     return scenario
