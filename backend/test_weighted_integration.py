@@ -116,13 +116,16 @@ def test_regression_old_bug_is_closed() -> None:
 
 def test_planner_responds_to_weight_profiles() -> None:
     resolution = 1000.0
-    elevation = np.zeros((7, 7), dtype=np.float64)
-    thermal = np.full((7, 7), 60.0, dtype=np.float64)
-    shadow = np.zeros((7, 7), dtype=np.float64)
+    # 15x15 grid gives the planner enough room to pick genuinely
+    # different routes when weights change.
+    elevation = np.zeros((15, 15), dtype=np.float64)
+    thermal = np.full((15, 15), 60.0, dtype=np.float64)
+    shadow = np.zeros((15, 15), dtype=np.float64)
 
-    # Short middle corridor: valid but risky.
-    thermal[2:5, 1:6] = -60.0
-    shadow[2:5, 1:6] = 1.0
+    # Wide risky corridor across the middle: still traversable but
+    # carries severe thermal + shadow penalty.
+    thermal[5:10, 2:13] = -60.0
+    shadow[5:10, 2:13] = 1.0
 
     traversable = np.ones_like(elevation, dtype=bool)
 
@@ -144,8 +147,8 @@ def test_planner_responds_to_weight_profiles() -> None:
     direct_cost = compute_cost_grid(slope, thermal, shadow, resolution, traversable=traversable, weights=direct_weights)
     safe_cost = compute_cost_grid(slope, thermal, shadow, resolution, traversable=traversable, weights=safe_weights)
 
-    start = (3, 0)
-    goal = (3, 6)
+    start = (7, 0)
+    goal = (7, 14)
 
     direct_pref = astar(
         {

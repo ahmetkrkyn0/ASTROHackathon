@@ -153,7 +153,7 @@ check("inner(-30)", surface_to_inner(-30), 30.0)
 check("inner(-100)", surface_to_inner(-100), -40.0)
 
 # Ideal zone should have low penalty
-print("  Ideal zone (T_surface=+60 → T_inner=+20)...", end=" ")
+print("  Ideal zone (T_surface=+60 -> T_inner=+20)...", end=" ")
 if f_thermal(60) < 0.05:
     PASS += 1
     print(f"PASS ({f_thermal(60):.4f})")
