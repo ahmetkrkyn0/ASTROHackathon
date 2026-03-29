@@ -9,6 +9,8 @@ from __future__ import annotations
 import sys
 import os
 
+import numpy as np
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 from app.serializer import (
@@ -82,6 +84,19 @@ def test_pixel_to_lonlat_center():
     check(isinstance(lat, float), "center: lat is float")
     check(lat < -80.0, f"center: lat {lat:.4f} is south of -80")
     check(-180.0 <= lon <= 180.0, f"center: lon {lon:.4f} is in [-180, 180]")
+
+
+def test_metadata_geometry_round_trip():
+    metadata = {
+        "origin": {"x": 176000.0, "y": 48000.0},
+        "resolution_m": 80.0,
+        "shape": [500, 500],
+    }
+    lon, lat = pixel_to_lonlat(250, 250, metadata)
+    check(abs(lon - 70.8664) < 0.01, f"metadata lon {lon:.4f} matches expected window")
+    check(abs(lat - (-83.1665)) < 0.01, f"metadata lat {lat:.4f} matches expected window")
+    row, col = lonlat_to_pixel(lon, lat, metadata)
+    check((row, col) == (250, 250), "metadata round-trip recovers original pixel")
 
 
 def test_pixel_to_lonlat_corners():
@@ -163,7 +178,7 @@ def test_waypoints_fields():
     required_keys = (
         "step", "lon", "lat", "battery_pct", "risk_level",
         "slope_deg", "surface_temp_c", "shadow_ratio", "node_cost",
-        "elapsed_hours", "distance_m", "step_energy_wh",
+        "elapsed_hours", "distance_m", "step_energy_wh", "altitude_m",
     )
     for key in required_keys:
         check(key in wp, f"waypoint has key '{key}'")
@@ -183,13 +198,24 @@ def test_waypoints_coord_is_valid():
     check(wp["lat"] < -80.0, "waypoint lat in south pole region")
 
 
+def test_waypoints_include_altitude_from_elevation_grid():
+    states = [_make_state(row=4, col=7)]
+    elevation = np.zeros((20, 20), dtype=np.float64)
+    elevation[4, 7] = -1972.7
+
+    wp = states_to_waypoints(states, elevation_grid=elevation)[0]
+    check(wp["altitude_m"] == -1972.7, "waypoint altitude comes from elevation grid")
+
+
 # ── build_plan_response ───────────────────────────────────────────────────────
 
 def test_build_plan_response_with_simulation():
     states = [_make_state(step=i, col=250 + i) for i in range(3)]
     summary = {"waypoint_count": 3, "total_distance_km": 0.16}
     astar = _dummy_astar_result()
-    resp = build_plan_response(astar, states, summary, include_simulation=True)
+    elevation = np.zeros((GRID_ROWS, GRID_COLS), dtype=np.float64)
+    elevation[250, 250] = -123.45
+    resp = build_plan_response(astar, states, summary, include_simulation=True, elevation_grid=elevation)
 
     check(resp["status"] == "success", "status is success")
     check("astar_metrics" in resp, "response has astar_metrics")
@@ -198,6 +224,7 @@ def test_build_plan_response_with_simulation():
     check("waypoints" in resp, "response has waypoints (include_simulation=True)")
     check(resp["astar_metrics"] is astar["metrics"], "astar_metrics is the metrics dict")
     check(resp["summary"] is summary, "summary is passed through")
+    check(resp["waypoints"][0]["altitude_m"] == -123.45, "plan response waypoint includes altitude")
 
 
 def test_build_plan_response_without_simulation():
@@ -224,6 +251,7 @@ def test_build_plan_response_astar_metrics_separate():
 if __name__ == "__main__":
     tests = [
         test_pixel_to_lonlat_center,
+        test_metadata_geometry_round_trip,
         test_pixel_to_lonlat_corners,
         test_pixel_to_lonlat_sanity_check,
         test_round_trip,
@@ -234,6 +262,7 @@ if __name__ == "__main__":
         test_waypoints_fields,
         test_waypoints_step_index,
         test_waypoints_coord_is_valid,
+        test_waypoints_include_altitude_from_elevation_grid,
         test_build_plan_response_with_simulation,
         test_build_plan_response_without_simulation,
         test_build_plan_response_astar_metrics_separate,

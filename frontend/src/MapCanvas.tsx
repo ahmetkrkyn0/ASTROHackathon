@@ -34,6 +34,7 @@ interface Props {
   viewMode: MapViewMode
   resolutionM: number
   onCellClick: (row: number, col: number) => void
+  onAnimationStepChange?: (step: number | null) => void
 }
 
 export interface MapCanvasHandle {
@@ -52,6 +53,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     viewMode,
     resolutionM,
     onCellClick,
+    onAnimationStepChange,
   },
   ref,
 ) {
@@ -111,6 +113,10 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       stopAnimation()
     }
   }, [stopAnimation, waypoints])
+
+  useEffect(() => {
+    onAnimationStepChange?.(animStep)
+  }, [animStep, onAnimationStepChange])
 
   const startAnimation = useCallback(() => {
     if (!waypoints || waypoints.length === 0) {

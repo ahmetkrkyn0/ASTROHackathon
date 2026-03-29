@@ -24,7 +24,7 @@ from .scenarios import (
     list_scenarios,
     load_scenario,
 )
-from .serializer import build_plan_response, lonlat_to_pixel
+from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
 from .simulation import simulate_path, summarize_simulation
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,16 @@ def _grids_with_weights(base_grids: dict, weights: dict[str, float] | None) -> d
     return {**base_grids, "cost": new_cost}
 
 
-def _to_pixel(coord: "StartGoalPixel | StartGoalGeo", label: str) -> tuple[int, int]:
+def _read_grid_value(grid: np.ndarray, row: int, col: int) -> float | None:
+    value = grid[row, col]
+    return float(value) if np.isfinite(value) else None
+
+
+def _to_pixel(
+    coord: "StartGoalPixel | StartGoalGeo",
+    label: str,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[int, int]:
     """Normalise a start/goal input to (row, col).
 
     Raises HTTPException(422) if a geo coordinate cannot be mapped to the grid.
@@ -132,7 +141,7 @@ def _to_pixel(coord: "StartGoalPixel | StartGoalGeo", label: str) -> tuple[int, 
     if isinstance(coord, StartGoalPixel):
         return coord.row, coord.col
     try:
-        return lonlat_to_pixel(coord.lon, coord.lat)
+        return lonlat_to_pixel(coord.lon, coord.lat, metadata)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"{label}: {exc}") from exc
 
@@ -241,6 +250,34 @@ def load_dem(req: LoadDEMRequest):
     return {"status": "loaded", "metadata": meta}
 
 
+@app.get("/api/cell-telemetry")
+def get_cell_telemetry(row: int, col: int, request: Request):
+    grids = _active_grids(request)
+    metadata = grids["metadata"]
+    shape = metadata["shape"]
+    rows, cols = int(shape[0]), int(shape[1])
+
+    if not (0 <= row < rows and 0 <= col < cols):
+        raise HTTPException(
+            status_code=422,
+            detail=f"({row}, {col}) is outside the {rows}x{cols} grid.",
+        )
+
+    lon, lat = pixel_to_lonlat(row, col, metadata)
+    resolution_m = float(metadata["resolution_m"])
+
+    return {
+        "row": row,
+        "col": col,
+        "lon": round(lon, 6),
+        "lat": round(lat, 6),
+        "altitude_m": _read_grid_value(grids["elevation"], row, col),
+        "thermal_c": _read_grid_value(grids["thermal"], row, col),
+        "resolution_m": resolution_m,
+        "span_km": round((rows * resolution_m) / 1000.0, 4),
+    }
+
+
 @app.post("/api/plan")
 def plan(req: PlanRequest, request: Request):
     """Plan a single route with physics simulation.
@@ -255,8 +292,9 @@ def plan(req: PlanRequest, request: Request):
     grids = _active_grids(request)
 
     # 1. Normalise coordinates
-    start = _to_pixel(req.start, "start")
-    goal = _to_pixel(req.goal, "goal")
+    metadata = grids["metadata"]
+    start = _to_pixel(req.start, "start", metadata)
+    goal = _to_pixel(req.goal, "goal", metadata)
 
     # 2. Bounds and traversability checks
     shape = grids["metadata"]["shape"]
@@ -315,7 +353,14 @@ def plan(req: PlanRequest, request: Request):
 
     # 6. Serialise and return
     try:
-        return build_plan_response(astar_result, states, summary, req.include_simulation)
+        return build_plan_response(
+            astar_result,
+            states,
+            summary,
+            req.include_simulation,
+            metadata,
+            grids["elevation"],
+        )
     except Exception:
         logger.error("Response serialization failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal serialization error.")

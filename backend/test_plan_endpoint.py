@@ -23,6 +23,7 @@ os.environ["LUNAPATH_SKIP_STARTUP"] = "YES"  # harmless — startup still runs b
 from fastapi.testclient import TestClient
 import app.main as _main_module
 from app.main import app
+from app.serializer import pixel_to_lonlat
 
 SHAPE = (20, 20)
 _ROWS, _COLS = SHAPE
@@ -186,6 +187,34 @@ def test_goal_out_of_bounds():
     check(r.status_code == 422, "goal out of bounds returns 422")
 
 
+def test_cell_telemetry_returns_backend_values():
+    grids = _make_grids(temp_val=-84.7)
+    grids["elevation"][7, 8] = -1972.7
+    _inject_grids(grids)
+
+    r = client.get("/api/cell-telemetry?row=7&col=8")
+    check(r.status_code == 200, "GET /api/cell-telemetry returns 200")
+    body = r.json()
+    check(body["row"] == 7 and body["col"] == 8, "telemetry returns requested row/col")
+    check(math.isclose(body["altitude_m"], -1972.7, rel_tol=0, abs_tol=1e-6), "altitude comes from backend elevation grid")
+    check(math.isclose(body["thermal_c"], -84.7, rel_tol=0, abs_tol=1e-6), "temperature comes from backend thermal grid")
+    check(math.isclose(body["span_km"], 1.6, rel_tol=0, abs_tol=1e-6), "span_km uses backend shape metadata")
+
+
+def test_geo_input_with_metadata_origin_accepted():
+    grids = _make_grids()
+    grids["metadata"]["origin"] = {"x": 176000.0, "y": 48000.0}
+    start_lon, start_lat = pixel_to_lonlat(3, 4, grids["metadata"])
+    goal_lon, goal_lat = pixel_to_lonlat(8, 9, grids["metadata"])
+    _inject_grids(grids)
+
+    r = client.post("/api/plan", json={
+        "start": {"lon": start_lon, "lat": start_lat},
+        "goal": {"lon": goal_lon, "lat": goal_lat},
+    })
+    check(r.status_code == 200, "geo plan uses metadata-aware coordinate transform")
+
+
 # ── Traversability checks ─────────────────────────────────────────────────────
 
 def test_impassable_start_returns_422():
@@ -229,6 +258,7 @@ def test_successful_plan_response_structure():
     check("summary" in body, "response has summary")
     check("geojson" in body, "response has geojson")
     check("waypoints" in body, "response has waypoints (include_simulation=True)")
+    check("altitude_m" in body["waypoints"][0], "waypoints include altitude telemetry")
 
     geojson = body["geojson"]
     check(geojson["type"] == "Feature", "geojson.type == Feature")
@@ -281,6 +311,8 @@ if __name__ == "__main__":
         test_geo_out_of_range_returns_422,
         test_start_out_of_bounds,
         test_goal_out_of_bounds,
+        test_cell_telemetry_returns_backend_values,
+        test_geo_input_with_metadata_origin_accepted,
         test_impassable_start_returns_422,
         test_impassable_goal_returns_422,
         test_successful_plan_response_structure,

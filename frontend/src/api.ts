@@ -8,6 +8,7 @@ export interface Waypoint {
   col: number
   lon: number
   lat: number
+  altitude_m: number | null
   battery_pct: number
   risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
   slope_deg: number
@@ -75,6 +76,17 @@ export interface ProfileEntry {
   color: string
 }
 
+export interface FocusTelemetryResponse {
+  row: number
+  col: number
+  lon: number
+  lat: number
+  altitude_m: number | null
+  thermal_c: number | null
+  resolution_m: number
+  span_km: number
+}
+
 // ── API calls ──────────────────────────────────────────────────────────────────
 
 export async function fetchLayer(
@@ -113,6 +125,22 @@ export async function fetchProfiles(): Promise<ProfileEntry[]> {
   if (!r.ok) throw new Error('Failed to fetch profiles')
   const data = await r.json() as Record<string, Omit<ProfileEntry, 'id'>>
   return Object.entries(data).map(([id, profile]) => ({ id, ...profile }))
+}
+
+export async function fetchCellTelemetry(
+  row: number,
+  col: number,
+): Promise<FocusTelemetryResponse> {
+  const query = new URLSearchParams({
+    row: String(row),
+    col: String(col),
+  })
+  const r = await fetch(`${BASE}/cell-telemetry?${query.toString()}`)
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }))
+    throw new Error((err as { detail?: string }).detail ?? 'Cell telemetry request failed')
+  }
+  return r.json() as Promise<FocusTelemetryResponse>
 }
 
 export async function checkHealth(): Promise<{ dem_loaded: boolean }> {

@@ -100,6 +100,7 @@ def load_preprocessed_grids(
         cost_weights = stored_weights or resolved
 
     result["metadata"] = {
+        "origin": metadata.get("origin"),
         "resolution_m": float(metadata["resolution_m"]),
         "shape": metadata["shape"],
         "crs": metadata.get("crs", "unknown"),
@@ -184,6 +185,10 @@ def load_and_preprocess_dem(
         "cost": cost,
         "traversable": traversable,
         "metadata": {
+            "origin": {
+                "x": float(transform.c),
+                "y": float(transform.f),
+            },
             "resolution_m": float(actual_resolution),
             "shape": list(elevation.shape),
             "crs": str(crs),

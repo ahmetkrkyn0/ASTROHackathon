@@ -9,17 +9,19 @@ import MapCanvas, {
 } from './MapCanvas'
 import {
   checkHealth,
+  fetchCellTelemetry,
   fetchLayer,
   fetchProfiles,
   loadPreprocessed,
   planRoute,
+  type FocusTelemetryResponse,
   type LayerResponse,
   type PlanResponse,
   type PlanWeights,
   type ProfileEntry,
   type Waypoint,
 } from './api'
-import { batteryToHex, pixelToApproxLonLat, riskToHex } from './colormap'
+import { batteryToHex, riskToHex } from './colormap'
 
 const DEFAULT_WEIGHTS: PlanWeights = {
   w_slope: 0.409,
@@ -95,6 +97,17 @@ interface FocusTelemetry {
   spanKm: number
 }
 
+const DEFAULT_FOCUS_TELEMETRY: FocusTelemetry = {
+  row: DEFAULT_POINT[0],
+  col: DEFAULT_POINT[1],
+  lat: Number.NaN,
+  lon: Number.NaN,
+  altitudeM: null,
+  thermalC: null,
+  resolutionM: 80,
+  spanKm: 40,
+}
+
 interface WaypointPreviewItem {
   key: string
   label: string
@@ -127,6 +140,8 @@ export default function App() {
   const [planResult, setPlanResult] = useState<PlanResponse | null>(null)
   const [planning, setPlanning] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
+  const [focusTelemetry, setFocusTelemetry] = useState<FocusTelemetry>(DEFAULT_FOCUS_TELEMETRY)
+  const [routePlaybackStep, setRoutePlaybackStep] = useState<number | null>(null)
 
   const mapRef = useRef<MapCanvasHandle>(null)
 
@@ -233,6 +248,7 @@ export default function App() {
       }
       setPlanResult(null)
       setPlanError(null)
+      setRoutePlaybackStep(null)
     },
     [availableProfiles],
   )
@@ -241,6 +257,7 @@ export default function App() {
     (row: number, col: number) => {
       setPlanResult(null)
       setPlanError(null)
+      setRoutePlaybackStep(null)
 
       if (clickMode === 'start') {
         setStart([row, col])
@@ -261,6 +278,7 @@ export default function App() {
     setPlanning(true)
     setPlanError(null)
     setPlanResult(null)
+    setRoutePlaybackStep(null)
 
     try {
       const result = await planRoute(start, goal, weights)
@@ -279,12 +297,66 @@ export default function App() {
     setPlanResult(null)
     setPlanError(null)
     setClickMode('idle')
+    setRoutePlaybackStep(null)
   }
 
-  const focusTelemetry = buildFocusTelemetry(goal ?? start ?? DEFAULT_POINT, elevationLayer, thermalLayer)
+  const hasData = Boolean(elevationLayer && thermalLayer && traversableLayer)
+  const focusPoint = goal ?? start ?? DEFAULT_POINT
+  const waypoints = planResult?.waypoints ?? []
+
+  useEffect(() => {
+    if (routePlaybackStep !== null) {
+      return
+    }
+
+    if (!hasData) {
+      setFocusTelemetry(DEFAULT_FOCUS_TELEMETRY)
+      return
+    }
+
+    let cancelled = false
+
+    async function syncFocusTelemetry(point: [number, number]) {
+      try {
+        const telemetry = await fetchCellTelemetry(point[0], point[1])
+        if (cancelled) {
+          return
+        }
+
+        setFocusTelemetry(mapFocusTelemetryResponse(telemetry))
+      } catch {
+        if (!cancelled) {
+          setFocusTelemetry((current) => ({
+            ...current,
+            row: point[0],
+            col: point[1],
+          }))
+        }
+      }
+    }
+
+    void syncFocusTelemetry(focusPoint)
+
+    return () => {
+      cancelled = true
+    }
+  }, [focusPoint, hasData, routePlaybackStep])
+
+  useEffect(() => {
+    if (routePlaybackStep === null) {
+      return
+    }
+
+    const activeWaypoint = waypoints[routePlaybackStep]
+    if (!activeWaypoint) {
+      return
+    }
+
+    setFocusTelemetry((current) => mapWaypointToFocusTelemetry(activeWaypoint, current))
+  }, [routePlaybackStep, waypoints])
+
   const summary = planResult?.summary
   const metrics = planResult?.astar_metrics
-  const waypoints = planResult?.waypoints ?? []
   const riskCounts = countRiskLevels(waypoints)
   const totalRiskSamples = RISK_LEVELS.reduce((sum, level) => sum + riskCounts[level], 0)
   const waypointPreview = buildWaypointPreview(waypoints)
@@ -307,7 +379,6 @@ export default function App() {
           ? 'Route ready'
           : 'Standby'
 
-  const hasData = Boolean(elevationLayer && thermalLayer && traversableLayer)
   const missionStatus = layerError ? 'ATTN' : planning ? 'PLANNING' : planResult ? 'LOCKED' : 'NOMINAL'
   const appIsVisible = phase === 'app'
 
@@ -507,6 +578,7 @@ export default function App() {
                 viewMode={viewMode}
                 resolutionM={focusTelemetry.resolutionM}
                 onCellClick={handleCellClick}
+                onAnimationStepChange={setRoutePlaybackStep}
               />
             </div>
 
@@ -678,55 +750,30 @@ function TelemetryWell({
   )
 }
 
-function buildFocusTelemetry(
-  point: [number, number],
-  elevationLayer: LayerResponse | null,
-  thermalLayer: LayerResponse | null,
-): FocusTelemetry {
-  const row = point[0]
-  const col = point[1]
-  const metadata = (elevationLayer?.metadata ?? thermalLayer?.metadata ?? {}) as {
-    origin?: { x?: number; y?: number }
-    resolution_m?: number
-    shape?: [number, number]
-  }
-
-  const resolutionM = metadata.resolution_m ?? 80
-  const shape = Array.isArray(metadata.shape) ? metadata.shape : [500, 500]
-  const originX = metadata.origin?.x ?? 176000
-  const originY = metadata.origin?.y ?? 48000
-  const coords = pixelToApproxLonLat(row, col, {
-    originX,
-    originY,
-    resolutionM,
-  })
-
+function mapFocusTelemetryResponse(response: FocusTelemetryResponse): FocusTelemetry {
   return {
-    row,
-    col,
-    lat: coords.lat,
-    lon: coords.lon,
-    altitudeM: readLayerValue(elevationLayer, row, col),
-    thermalC: readLayerValue(thermalLayer, row, col),
-    resolutionM,
-    spanKm: (shape[0] * resolutionM) / 1000,
+    row: response.row,
+    col: response.col,
+    lat: response.lat,
+    lon: response.lon,
+    altitudeM: response.altitude_m,
+    thermalC: response.thermal_c,
+    resolutionM: response.resolution_m,
+    spanKm: response.span_km,
   }
 }
 
-function readLayerValue(
-  layer: LayerResponse | null,
-  row: number,
-  col: number,
-): number | null {
-  if (!layer || layer.data.length === 0 || layer.data[0].length === 0) {
-    return null
+function mapWaypointToFocusTelemetry(waypoint: Waypoint, current: FocusTelemetry): FocusTelemetry {
+  return {
+    row: waypoint.row,
+    col: waypoint.col,
+    lat: waypoint.lat,
+    lon: waypoint.lon,
+    altitudeM: waypoint.altitude_m,
+    thermalC: waypoint.surface_temp_c,
+    resolutionM: current.resolutionM,
+    spanKm: current.spanKm,
   }
-
-  const dataRow = clamp(Math.floor(row / DOWNSAMPLE), 0, layer.data.length - 1)
-  const dataCol = clamp(Math.floor(col / DOWNSAMPLE), 0, layer.data[0].length - 1)
-  const value = layer.data[dataRow]?.[dataCol]
-
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function countRiskLevels(waypoints: Waypoint[]): Record<RiskLevel, number> {
@@ -808,11 +855,17 @@ function buildWaypointPreview(waypoints: Waypoint[]): WaypointPreviewItem[] {
 }
 
 function formatLatitude(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '--'
+  }
   const hemisphere = value >= 0 ? 'N' : 'S'
   return `${Math.abs(value).toFixed(4)} deg ${hemisphere}`
 }
 
 function formatLongitude(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '--'
+  }
   const hemisphere = value >= 0 ? 'E' : 'W'
   return `${Math.abs(value).toFixed(4)} deg ${hemisphere}`
 }

@@ -8,9 +8,9 @@ No web-framework dependencies — fully standalone and testable.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List
-
+import math
 import os
+from typing import TYPE_CHECKING, Any, List
 
 # PROJ enforces celestial-body matching by default; override for Moon→WGS84.
 os.environ.setdefault("PROJ_IGNORE_CELESTIAL_BODY", "YES")
@@ -43,9 +43,34 @@ _inv: Transformer = Transformer.from_crs("EPSG:4326", _PROJ_MOON_SP, always_xy=T
 _LAT_SOUTH_THRESHOLD: float = -80.0
 
 
+def _resolve_grid_geometry(metadata: dict[str, Any] | None = None) -> tuple[float, float, float, int, int]:
+    origin = metadata.get("origin") if metadata else None
+    origin_x = float(origin.get("x", ORIGIN_X_M)) if isinstance(origin, dict) else ORIGIN_X_M
+    origin_y = float(origin.get("y", ORIGIN_Y_M)) if isinstance(origin, dict) else ORIGIN_Y_M
+    resolution_m = float(metadata.get("resolution_m", RESOLUTION_M)) if metadata else RESOLUTION_M
+
+    shape = metadata.get("shape") if metadata else None
+    if (
+        isinstance(shape, (list, tuple))
+        and len(shape) >= 2
+        and all(isinstance(value, (int, float)) for value in shape[:2])
+    ):
+        rows = int(shape[0])
+        cols = int(shape[1])
+    else:
+        rows = GRID_ROWS
+        cols = GRID_COLS
+
+    return origin_x, origin_y, resolution_m, rows, cols
+
+
 # ── Coordinate transforms ─────────────────────────────────────────────────────
 
-def pixel_to_lonlat(row: int, col: int) -> tuple[float, float]:
+def pixel_to_lonlat(
+    row: int,
+    col: int,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[float, float]:
     """Convert grid (row, col) to WGS84 (lon, lat).
 
     Returns
@@ -59,8 +84,9 @@ def pixel_to_lonlat(row: int, col: int) -> tuple[float, float]:
         If the resulting latitude is north of -80° (not in the lunar south
         pole region), indicating a bad origin constant or out-of-range pixel.
     """
-    x_m = ORIGIN_X_M + col * RESOLUTION_M
-    y_m = ORIGIN_Y_M + row * RESOLUTION_M
+    origin_x, origin_y, resolution_m, _, _ = _resolve_grid_geometry(metadata)
+    x_m = origin_x + col * resolution_m
+    y_m = origin_y + row * resolution_m
     lon, lat = _fwd.transform(x_m, y_m)
     if lat > _LAT_SOUTH_THRESHOLD:
         raise ValueError(
@@ -71,7 +97,11 @@ def pixel_to_lonlat(row: int, col: int) -> tuple[float, float]:
     return float(lon), float(lat)
 
 
-def lonlat_to_pixel(lon: float, lat: float) -> tuple[int, int]:
+def lonlat_to_pixel(
+    lon: float,
+    lat: float,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[int, int]:
     """Convert WGS84 (lon, lat) to the nearest grid (row, col).
 
     Used to map a Leaflet map click to grid coordinates.
@@ -81,22 +111,26 @@ def lonlat_to_pixel(lon: float, lat: float) -> tuple[int, int]:
     ValueError
         If the point falls outside the 500x500 grid boundary.
     """
+    origin_x, origin_y, resolution_m, rows, cols = _resolve_grid_geometry(metadata)
     x_m, y_m = _inv.transform(lon, lat)
-    col_f = (x_m - ORIGIN_X_M) / RESOLUTION_M
-    row_f = (y_m - ORIGIN_Y_M) / RESOLUTION_M
+    col_f = (x_m - origin_x) / resolution_m
+    row_f = (y_m - origin_y) / resolution_m
     row_i = int(round(row_f))
     col_i = int(round(col_f))
-    if not (0 <= row_i < GRID_ROWS and 0 <= col_i < GRID_COLS):
+    if not (0 <= row_i < rows and 0 <= col_i < cols):
         raise ValueError(
             f"({lon:.6f}, {lat:.6f}) maps to ({row_i}, {col_i}), "
-            f"which is outside the {GRID_ROWS}x{GRID_COLS} grid."
+            f"which is outside the {rows}x{cols} grid."
         )
     return row_i, col_i
 
 
 # ── Simulation serializers ────────────────────────────────────────────────────
 
-def states_to_geojson(states: "List[RoverState]") -> dict:
+def states_to_geojson(
+    states: "List[RoverState]",
+    metadata: dict[str, Any] | None = None,
+) -> dict:
     """Serialize a simulated path to a GeoJSON Feature (LineString).
 
     Coordinates follow the Leaflet/GeoJSON standard: [longitude, latitude].
@@ -108,7 +142,7 @@ def states_to_geojson(states: "List[RoverState]") -> dict:
     """
     coordinates = []
     for s in states:
-        lon, lat = pixel_to_lonlat(s.row, s.col)
+        lon, lat = pixel_to_lonlat(s.row, s.col, metadata)
         coordinates.append([round(lon, 6), round(lat, 6)])
 
     total_cost = round(states[-1].cumulative_cost, 4) if states else 0.0
@@ -126,7 +160,11 @@ def states_to_geojson(states: "List[RoverState]") -> dict:
     }
 
 
-def states_to_waypoints(states: "List[RoverState]") -> list[dict]:
+def states_to_waypoints(
+    states: "List[RoverState]",
+    metadata: dict[str, Any] | None = None,
+    elevation_grid: Any | None = None,
+) -> list[dict]:
     """Serialize each RoverState to a flat dict for frontend animation.
 
     The returned list is index-aligned with the path: ``waypoints[i]``
@@ -139,13 +177,19 @@ def states_to_waypoints(states: "List[RoverState]") -> list[dict]:
     """
     waypoints: list[dict] = []
     for s in states:
-        lon, lat = pixel_to_lonlat(s.row, s.col)
+        lon, lat = pixel_to_lonlat(s.row, s.col, metadata)
+        altitude_m = None
+        if elevation_grid is not None:
+            altitude_value = float(elevation_grid[s.row, s.col])
+            if math.isfinite(altitude_value):
+                altitude_m = round(altitude_value, 2)
         waypoints.append({
             "step": s.step,
             "row": s.row,
             "col": s.col,
             "lon": round(lon, 6),
             "lat": round(lat, 6),
+            "altitude_m": altitude_m,
             "battery_pct": round(s.battery_pct, 2),
             "risk_level": s.risk_level,
             "slope_deg": round(s.slope_deg, 2),
@@ -164,6 +208,8 @@ def build_plan_response(
     states: "List[RoverState]",
     summary: dict,
     include_simulation: bool = True,
+    metadata: dict[str, Any] | None = None,
+    elevation_grid: Any | None = None,
 ) -> dict:
     """Assemble the final API response for a single plan request.
 
@@ -190,8 +236,8 @@ def build_plan_response(
         "status": "success",
         "astar_metrics": astar_result.get("metrics", {}),
         "summary": summary,
-        "geojson": states_to_geojson(states),
+        "geojson": states_to_geojson(states, metadata),
     }
     if include_simulation:
-        response["waypoints"] = states_to_waypoints(states)
+        response["waypoints"] = states_to_waypoints(states, metadata, elevation_grid)
     return response
