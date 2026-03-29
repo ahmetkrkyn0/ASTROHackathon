@@ -47,6 +47,8 @@ export interface PlanResponse {
   summary: SimSummary
   geojson: object
   waypoints: Waypoint[]
+  rover_id?: string
+  rover_name?: string
 }
 
 export interface LayerResponse {
@@ -70,14 +72,89 @@ export interface ProfileEntry {
   color: string
 }
 
+export interface RoverEntry {
+  name: string
+  mass_kg: number
+  v_max_ms: number
+  e_cap_wh: number
+  slope_max_deg: number
+  w_slope: number
+  w_energy: number
+  w_shadow: number
+  w_thermal: number
+}
+
+export interface RoversResponse {
+  default: string
+  rovers: Record<string, RoverEntry>
+}
+
+type ProfileMapEntry = {
+  name?: string
+  weights: PlanWeights
+  color?: string
+}
+
+const FALLBACK_ROVERS: RoversResponse = {
+  default: 'lpr_1',
+  rovers: {
+    lpr_1: {
+      name: 'LPR-1 (Default)',
+      mass_kg: 450,
+      v_max_ms: 0.2,
+      e_cap_wh: 5420,
+      slope_max_deg: 25,
+      w_slope: 0.409,
+      w_energy: 0.259,
+      w_shadow: 0.142,
+      w_thermal: 0.190,
+    },
+  },
+}
+
+function normalizeProfiles(
+  payload: ProfileEntry[] | Record<string, ProfileMapEntry>,
+): ProfileEntry[] {
+  if (Array.isArray(payload)) return payload
+  return Object.entries(payload).map(([id, profile]) => ({
+    id,
+    name: profile.name ?? id,
+    weights: profile.weights,
+    color: profile.color ?? '#64748B',
+  }))
+}
+
+async function readErrorDetail(
+  response: Response,
+  fallback: string,
+): Promise<string> {
+  try {
+    const payload = await response.clone().json() as { detail?: string }
+    if (typeof payload.detail === 'string' && payload.detail.trim()) {
+      return payload.detail
+    }
+  } catch {
+    // Vite proxy failures can come back as plain text instead of JSON.
+  }
+
+  const text = (await response.text()).trim()
+  if (text) return text.slice(0, 280)
+  return fallback
+}
+
 // ── API calls ──────────────────────────────────────────────────────────────────
 
 export async function fetchLayer(
   name: string,
   downsample = 2,
+  roverId?: string,
 ): Promise<LayerResponse> {
-  const r = await fetch(`${BASE}/layers/${name}?downsample=${downsample}`)
-  if (!r.ok) throw new Error(`Layer fetch failed: ${name} (${r.status})`)
+  const params = new URLSearchParams({ downsample: String(downsample) })
+  if (roverId) params.set('rover_id', roverId)
+  const r = await fetch(`${BASE}/layers/${name}?${params}`)
+  if (!r.ok) {
+    throw new Error(await readErrorDetail(r, `Layer fetch failed: ${name} (${r.status})`))
+  }
   return r.json() as Promise<LayerResponse>
 }
 
@@ -85,6 +162,7 @@ export async function planRoute(
   start: [number, number],
   goal: [number, number],
   weights: PlanWeights,
+  roverId?: string,
 ): Promise<PlanResponse> {
   const r = await fetch(`${BASE}/plan`, {
     method: 'POST',
@@ -94,37 +172,46 @@ export async function planRoute(
       goal: { row: goal[0], col: goal[1] },
       weights,
       include_simulation: true,
+      rover_id: roverId || null,
     }),
   })
   if (!r.ok) {
-    const err = await r.json().catch(() => ({ detail: r.statusText }))
-    throw new Error((err as { detail?: string }).detail ?? 'Plan request failed')
+    throw new Error(await readErrorDetail(r, 'Plan request failed'))
   }
   return r.json() as Promise<PlanResponse>
 }
 
-export async function fetchProfiles(): Promise<ProfileEntry[]> {
-  const r = await fetch(`${BASE}/profiles`)
-  if (!r.ok) throw new Error('Failed to fetch profiles')
-  return r.json() as Promise<ProfileEntry[]>
+export async function fetchProfiles(roverId?: string): Promise<ProfileEntry[]> {
+  const params = roverId ? `?rover_id=${roverId}` : ''
+  const r = await fetch(`${BASE}/profiles${params}`)
+  if (!r.ok) throw new Error(await readErrorDetail(r, 'Failed to fetch profiles'))
+  const payload = await r.json() as ProfileEntry[] | Record<string, ProfileMapEntry>
+  return normalizeProfiles(payload)
+}
+
+export async function fetchRovers(): Promise<RoversResponse> {
+  const r = await fetch(`${BASE}/rovers`)
+  if (r.status === 404) {
+    console.warn('GET /api/rovers not found; falling back to the default single-rover mode.')
+    return FALLBACK_ROVERS
+  }
+  if (!r.ok) throw new Error(await readErrorDetail(r, 'Failed to fetch rovers'))
+  return r.json() as Promise<RoversResponse>
 }
 
 export async function checkHealth(): Promise<{ dem_loaded: boolean }> {
   const r = await fetch(`${BASE}/health`)
-  if (!r.ok) throw new Error('Health check failed')
+  if (!r.ok) throw new Error(await readErrorDetail(r, 'Health check failed'))
   return r.json() as Promise<{ dem_loaded: boolean }>
 }
 
-export async function loadPreprocessed(): Promise<void> {
+export async function loadPreprocessed(roverId?: string): Promise<void> {
   const r = await fetch(`${BASE}/load-preprocessed`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ rover_id: roverId || null }),
   })
   if (!r.ok) {
-    const err = await r.json().catch(() => ({ detail: r.statusText }))
-    throw new Error(
-      (err as { detail?: string }).detail ?? 'Load preprocessed failed',
-    )
+    throw new Error(await readErrorDetail(r, 'Load preprocessed failed'))
   }
 }

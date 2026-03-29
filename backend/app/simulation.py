@@ -3,6 +3,7 @@
 Consumes A* output and simulates rover traversal step-by-step,
 tracking battery, energy consumption, thermal exposure, and risk.
 
+All rover-specific constants are read from rover_config dict.
 No web framework dependencies — fully standalone and testable.
 """
 
@@ -14,17 +15,9 @@ from typing import List
 
 import numpy as np
 
-# ── LPR-1 rover constants (v3.2, frozen) ──────────────────────────────────────
-BATTERY_CAPACITY_WH: float = 5420.0
-DRIVE_POWER_W: float = 200.0
-IDLE_POWER_W: float = 40.0
-HEATER_POWER_W: float = 25.0
-NOMINAL_SPEED_MS: float = 0.2
-PIXEL_SIZE_M: float = 80.0
+from .constants import get_rover
 
-_DIAG_DIST_M: float = PIXEL_SIZE_M * math.sqrt(2)
-
-# ── Slope energy multiplier — piecewise linear (LPR-1 table) ──────────────────
+# ── Slope energy multiplier — piecewise linear ──────────────────────────────
 # Each entry: (deg_lo, deg_hi, mult_lo, mult_hi)
 _SLOPE_BREAKPOINTS: tuple[tuple[float, float, float, float], ...] = (
     (0.0,  10.0, 1.0, 1.6),
@@ -99,6 +92,7 @@ def simulate_path(
     slope_grid: np.ndarray,
     thermal_grid: np.ndarray,
     shadow_grid: np.ndarray,
+    rover_config: dict | None = None,
 ) -> List[RoverState]:
     """Simulate rover traversal over an A* path.
 
@@ -106,25 +100,22 @@ def simulate_path(
     ----------
     astar_result : dict
         Output from pathfinder.astar() with keys: path_pixels, metrics, error.
-    cost_grid : ndarray (500, 500) float32
-        Pre-computed multi-criteria cell costs from cost_engine.
-    slope_grid : ndarray (500, 500) float32
-        Slope in degrees.
-    thermal_grid : ndarray (500, 500) float32
-        Surface temperature in Celsius.
-    shadow_grid : ndarray (500, 500) float32
-        Shadow ratio in [0.0, 1.0].
+    cost_grid, slope_grid, thermal_grid, shadow_grid : ndarray
+        Pre-computed grid layers.
+    rover_config : dict | None
+        Rover configuration from ROVERS registry. Uses default if None.
 
     Returns
     -------
     List[RoverState]
-        One RoverState per path node, in traversal order.
 
     Raises
     ------
     ValueError
         If astar_result contains a non-None error, or path_pixels is empty.
     """
+    rc = rover_config or get_rover()
+
     if astar_result.get("error") is not None:
         raise ValueError(f"A* result contains error: {astar_result['error']}")
 
@@ -132,8 +123,17 @@ def simulate_path(
     if not path_pixels:
         raise ValueError("path_pixels is empty — nothing to simulate")
 
+    # Read rover parameters
+    battery_capacity = rc["e_cap_wh"]
+    drive_power = rc["p_base_w"]
+    idle_power = rc["p_idle_w"]
+    heater_power = rc.get("p_heater_w") or 0.0
+    nominal_speed = rc["v_max_ms"]
+    pixel_size = 80.0  # grid resolution, always 80 m
+    diag_dist = pixel_size * math.sqrt(2)
+
     states: List[RoverState] = []
-    battery_wh = BATTERY_CAPACITY_WH
+    battery_wh = battery_capacity
     cumulative_dist_m = 0.0
     elapsed_hours = 0.0
     cumulative_cost = 0.0
@@ -148,7 +148,7 @@ def simulate_path(
             prev = path_pixels[i - 1]
             pr, pc = int(prev[0]), int(prev[1])
             manhattan = abs(r - pr) + abs(c - pc)
-            step_dist = _DIAG_DIST_M if manhattan == 2 else PIXEL_SIZE_M
+            step_dist = diag_dist if manhattan == 2 else pixel_size
 
         # 2. Slope energy multiplier
         slope_deg = float(slope_grid[r, c])
@@ -156,7 +156,7 @@ def simulate_path(
 
         # 3. Actual speed
         speed_factor = max(0.2, 1.0 - slope_deg / 50.0)
-        actual_speed = NOMINAL_SPEED_MS * speed_factor
+        actual_speed = nominal_speed * speed_factor
 
         # 4. Step time (hours); zero for first node
         if i == 0:
@@ -166,14 +166,14 @@ def simulate_path(
 
         # 5. Energy consumption
         shadow_ratio = float(shadow_grid[r, c])
-        drive_energy = DRIVE_POWER_W * slope_mult * step_time_h
-        heater_energy = HEATER_POWER_W * shadow_ratio * step_time_h
-        idle_energy = IDLE_POWER_W * step_time_h
+        drive_energy = drive_power * slope_mult * step_time_h
+        heater_energy = heater_power * shadow_ratio * step_time_h
+        idle_energy = idle_power * step_time_h
         step_energy = drive_energy + heater_energy + idle_energy
 
         # 6. Battery state
         battery_wh = max(0.0, battery_wh - step_energy)
-        battery_pct = battery_wh / BATTERY_CAPACITY_WH * 100.0
+        battery_pct = battery_wh / battery_capacity * 100.0
 
         # 7. Risk level
         risk = _risk_level(battery_pct)
@@ -206,22 +206,14 @@ def simulate_path(
 
 # ── summarize_simulation ───────────────────────────────────────────────────────
 
-def summarize_simulation(states: List[RoverState]) -> dict:
-    """Produce aggregate statistics from a simulated state sequence.
+def summarize_simulation(
+    states: List[RoverState],
+    rover_config: dict | None = None,
+) -> dict:
+    """Produce aggregate statistics from a simulated state sequence."""
+    rc = rover_config or get_rover()
+    nominal_speed = rc["v_max_ms"]
 
-    Parameters
-    ----------
-    states : List[RoverState]
-        Output from simulate_path().
-
-    Returns
-    -------
-    dict
-        Keys: total_distance_km, total_elapsed_hours, final_battery_pct,
-        min_battery_pct, max_slope_deg, total_energy_consumed_wh,
-        total_shadow_exposure, critical_steps_count,
-        high_or_above_steps_count, waypoint_count.
-    """
     if not states:
         return {
             "total_distance_km": 0.0,
@@ -238,8 +230,6 @@ def summarize_simulation(states: List[RoverState]) -> dict:
 
     last = states[-1]
 
-    # Reconstruct step_time_h per step to compute shadow exposure.
-    # step_dist = distance delta between consecutive states.
     total_shadow_exposure = 0.0
     for i in range(1, len(states)):
         s = states[i]
@@ -247,7 +237,7 @@ def summarize_simulation(states: List[RoverState]) -> dict:
         if step_dist <= 0.0:
             continue
         speed_factor = max(0.2, 1.0 - s.slope_deg / 50.0)
-        actual_speed = NOMINAL_SPEED_MS * speed_factor
+        actual_speed = nominal_speed * speed_factor
         step_time_h = step_dist / actual_speed / 3600.0
         total_shadow_exposure += s.shadow_ratio * step_time_h
 

@@ -4,26 +4,24 @@ import {
   checkHealth,
   fetchLayer,
   fetchProfiles,
+  fetchRovers,
   loadPreprocessed,
   planRoute,
   type LayerResponse,
   type PlanResponse,
   type PlanWeights,
   type ProfileEntry,
+  type RoverEntry,
 } from './api'
 import { batteryToHex, riskToHex } from './colormap'
-
-// ── Default AHP weights (v3.2 frozen) ─────────────────────────────────────────
-const DEFAULT_WEIGHTS: PlanWeights = {
-  w_slope:   0.409,
-  w_energy:  0.259,
-  w_shadow:  0.142,
-  w_thermal: 0.190,
-}
 
 // ── App ────────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  // Rover selection
+  const [rovers, setRovers] = useState<Record<string, RoverEntry>>({})
+  const [selectedRover, setSelectedRover] = useState<string>('lpr_1')
+
   // Grid layers
   const [slopeLayer,  setSlopeLayer]  = useState<LayerResponse | null>(null)
   const [travLayer,   setTravLayer]   = useState<LayerResponse | null>(null)
@@ -39,7 +37,9 @@ export default function App() {
   const [goal,  setGoal]  = useState<[number, number] | null>(null)
 
   // Weights (editable via sliders)
-  const [weights, setWeights] = useState<PlanWeights>(DEFAULT_WEIGHTS)
+  const [weights, setWeights] = useState<PlanWeights>({
+    w_slope: 0.409, w_energy: 0.259, w_shadow: 0.142, w_thermal: 0.190,
+  })
 
   // Plan result
   const [planResult, setPlanResult] = useState<PlanResponse | null>(null)
@@ -48,7 +48,7 @@ export default function App() {
 
   const mapRef = useRef<MapCanvasHandle>(null)
 
-  // ── Load layers on mount ─────────────────────────────────────────────────
+  // ── Load layers + rovers on mount ───────────────────────────────────────
 
   useEffect(() => {
     async function init() {
@@ -57,20 +57,67 @@ export default function App() {
         if (!health.dem_loaded) {
           await loadPreprocessed()
         }
-        const [slope, trav, profs] = await Promise.all([
+        const [slope, trav, profs, roversResp] = await Promise.all([
           fetchLayer('slope', DOWNSAMPLE),
           fetchLayer('traversable', DOWNSAMPLE),
           fetchProfiles(),
+          fetchRovers(),
         ])
         setSlopeLayer(slope)
         setTravLayer(trav)
         setProfiles(profs)
+        setRovers(roversResp.rovers)
+        setSelectedRover(roversResp.default)
+
+        // Set initial weights from default rover
+        const defaultRover = roversResp.rovers[roversResp.default]
+        if (defaultRover) {
+          setWeights({
+            w_slope: defaultRover.w_slope,
+            w_energy: defaultRover.w_energy,
+            w_shadow: defaultRover.w_shadow,
+            w_thermal: defaultRover.w_thermal,
+          })
+        }
       } catch (e) {
         setLayerError((e as Error).message)
       }
     }
     void init()
   }, [])
+
+  // ── Rover change → reload layers + profiles ──────────────────────────────
+
+  const handleRoverChange = async (roverId: string) => {
+    setSelectedRover(roverId)
+    setPlanResult(null)
+    setPlanError(null)
+
+    const rover = rovers[roverId]
+    if (rover) {
+      setWeights({
+        w_slope: rover.w_slope,
+        w_energy: rover.w_energy,
+        w_shadow: rover.w_shadow,
+        w_thermal: rover.w_thermal,
+      })
+    }
+
+    try {
+      // Load grids for the new rover
+      await loadPreprocessed(roverId)
+      const [slope, trav, profs] = await Promise.all([
+        fetchLayer('slope', DOWNSAMPLE, roverId),
+        fetchLayer('traversable', DOWNSAMPLE, roverId),
+        fetchProfiles(roverId),
+      ])
+      setSlopeLayer(slope)
+      setTravLayer(trav)
+      setProfiles(profs)
+    } catch (e) {
+      setLayerError((e as Error).message)
+    }
+  }
 
   // ── Profile selection syncs weights ─────────────────────────────────────
 
@@ -100,9 +147,8 @@ export default function App() {
     setPlanError(null)
     setPlanResult(null)
     try {
-      const result = await planRoute(start, goal, weights)
+      const result = await planRoute(start, goal, weights, selectedRover)
       setPlanResult(result)
-      // Auto-start animation after path loads
       setTimeout(() => mapRef.current?.startAnimation(), 100)
     } catch (e) {
       setPlanError((e as Error).message)
@@ -125,6 +171,7 @@ export default function App() {
 
   const summary = planResult?.summary
   const metrics = planResult?.astar_metrics
+  const currentRover = rovers[selectedRover]
 
   return (
     <div style={styles.root}>
@@ -132,7 +179,7 @@ export default function App() {
       {/* Header */}
       <div style={styles.header}>
         <span style={styles.headerTitle}>LUNAPATH</span>
-        <span style={styles.headerSub}>Lunar Rover Route Planner — Lunar South Pole · 500×500 · 80 m/px</span>
+        <span style={styles.headerSub}>Lunar Rover Route Planner — Lunar South Pole · 500x500 · 80 m/px</span>
       </div>
 
       {/* Body */}
@@ -167,6 +214,33 @@ export default function App() {
               </span>
             ))}
           </div>
+
+          {/* Rover selector */}
+          <div style={styles.row}>
+            <span style={styles.label}>Rover:</span>
+            <select
+              style={styles.select}
+              value={selectedRover}
+              onChange={e => handleRoverChange(e.target.value)}
+            >
+              {Object.entries(rovers).map(([id, r]) => (
+                <option key={id} value={id}>{r.name}</option>
+              ))}
+              {Object.keys(rovers).length === 0 && (
+                <option value="lpr_1">LPR-1 (default)</option>
+              )}
+            </select>
+          </div>
+
+          {/* Rover specs */}
+          {currentRover && (
+            <div style={styles.roverSpecs}>
+              <span>Mass: {currentRover.mass_kg} kg</span>
+              <span>Speed: {currentRover.v_max_ms} m/s</span>
+              <span>Battery: {currentRover.e_cap_wh} Wh</span>
+              <span>Max slope: {currentRover.slope_max_deg}°</span>
+            </div>
+          )}
 
           {/* Coordinate controls */}
           <div style={styles.coordRow}>
@@ -245,6 +319,13 @@ export default function App() {
         {/* Right: metrics panel */}
         <div style={styles.rightPanel}>
           <div style={styles.panelTitle}>Mission Telemetry</div>
+
+          {/* Active rover indicator */}
+          {planResult?.rover_name && (
+            <div style={styles.roverBadge}>
+              Rover: {planResult.rover_name}
+            </div>
+          )}
 
           {!summary && !planning && (
             <div style={styles.emptyState}>
@@ -382,12 +463,12 @@ function RiskBar({
 // ── Static data ────────────────────────────────────────────────────────────────
 
 const LEGEND_ITEMS = [
-  { label: 'Flat (0–5°)',     color: '#1e5546' },
-  { label: 'Mild (5–10°)',    color: '#509640' },
-  { label: 'Moderate (10–15°)', color: '#beb414' },
-  { label: 'Steep (15–20°)', color: '#d26e00' },
-  { label: 'Near-limit (20–25°)', color: '#be2800' },
-  { label: 'Blocked (≥25°)', color: '#5a0505' },
+  { label: 'Flat (0-5°)',     color: '#1e5546' },
+  { label: 'Mild (5-10°)',    color: '#509640' },
+  { label: 'Moderate (10-15°)', color: '#beb414' },
+  { label: 'Steep (15-20°)', color: '#d26e00' },
+  { label: 'Near-limit (20-25°)', color: '#be2800' },
+  { label: 'Blocked (>=25°)', color: '#5a0505' },
 ]
 
 const FALLBACK_PROFILES = [
@@ -524,6 +605,22 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontFamily: 'monospace',
     cursor: 'pointer',
+  },
+  roverSpecs: {
+    display: 'flex',
+    gap: 16,
+    fontSize: 10,
+    color: '#505080',
+    padding: '4px 0',
+    flexWrap: 'wrap',
+  },
+  roverBadge: {
+    fontSize: 11,
+    color: '#8080c0',
+    padding: '4px 8px',
+    border: '1px solid #2a2a5a',
+    marginBottom: 12,
+    display: 'inline-block',
   },
   sliders: {
     display: 'flex',

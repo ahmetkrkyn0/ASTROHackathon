@@ -1,4 +1,4 @@
-"""DEM → grid pipeline with .npy caching, plus direct P1 grid loading."""
+"""DEM -> grid pipeline with .npy caching, plus direct P1 grid loading."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import numpy as np
 import rasterio
 from scipy.ndimage import uniform_filter
 
-from .constants import DEFAULT_TARGET_RESOLUTION_M
+from .constants import DEFAULT_TARGET_RESOLUTION_M, get_rover
 from .cost_engine import compute_cost_grid, resolve_weights
 from .thermal_grid import generate_thermal_grid
 from .traversability import compute_traversability_bool
@@ -39,6 +39,7 @@ _GRID_KEYS: tuple[str, ...] = (
 def load_preprocessed_grids(
     processed_dir: str | None = None,
     weights: dict[str, float] | None = None,
+    rover_config: dict | None = None,
 ) -> dict[str, Any]:
     """Load pre-computed .npy grids produced by the P1 pipeline.
 
@@ -47,8 +48,9 @@ def load_preprocessed_grids(
     duplicate DEM processing.
 
     If *weights* differ from the stored cost weights the cost grid is
-    recomputed on the fly (cheap, <1 s for 500×500).
+    recomputed on the fly (cheap, <1 s for 500x500).
     """
+    rc = rover_config or get_rover()
     d = processed_dir or _P1_PROCESSED_DIR
 
     meta_path = os.path.join(d, "metadata.json")
@@ -60,7 +62,6 @@ def load_preprocessed_grids(
     with open(meta_path, encoding="utf-8") as f:
         metadata = json.load(f)
 
-    # Map between .npy file stem and the key used in the grids dict
     _FILE_TO_KEY = {
         "elevation_grid": "elevation",
         "slope_grid": "slope",
@@ -82,10 +83,15 @@ def load_preprocessed_grids(
         else:
             result[key] = arr.astype(np.float64)
 
-    resolved = resolve_weights(weights)
+    # Recompute traversability for the selected rover (slope_max may differ)
+    result["traversable"] = compute_traversability_bool(
+        result["slope"], result["thermal"], result["elevation"], rc,
+    )
+
+    resolved = resolve_weights(weights, rc)
     stored_weights = metadata.get("cost_weights", {})
 
-    # Recompute cost grid if requested weights differ from what P1 used
+    # Always recompute cost grid for non-default rovers or different weights
     if weights is not None and resolved != stored_weights:
         result["cost"] = compute_cost_grid(
             result["slope"],
@@ -94,10 +100,21 @@ def load_preprocessed_grids(
             float(metadata["resolution_m"]),
             traversable=result["traversable"],
             weights=resolved,
+            rover_config=rc,
         )
         cost_weights = resolved
     else:
-        cost_weights = stored_weights or resolved
+        # Recompute for non-default rover even with default weights
+        result["cost"] = compute_cost_grid(
+            result["slope"],
+            result["thermal"],
+            result["shadow_ratio"],
+            float(metadata["resolution_m"]),
+            traversable=result["traversable"],
+            weights=resolved,
+            rover_config=rc,
+        )
+        cost_weights = resolved
 
     result["metadata"] = {
         "resolution_m": float(metadata["resolution_m"]),
@@ -117,13 +134,15 @@ def load_and_preprocess_dem(
     target_resolution_m: float = DEFAULT_TARGET_RESOLUTION_M,
     use_cache: bool = True,
     weights: dict[str, float] | None = None,
+    rover_config: dict | None = None,
 ) -> dict[str, Any]:
     """Load raw DEM and produce all grid layers.
 
     Returns dict with keys:
         elevation, slope, aspect, thermal, shadow_ratio, cost, traversable, metadata
     """
-    resolved_weights = resolve_weights(weights)
+    rc = rover_config or get_rover()
+    resolved_weights = resolve_weights(weights, rc)
     cache_key = _cache_key(dem_path, target_resolution_m, resolved_weights)
     if use_cache:
         cached = _load_cache(cache_key)
@@ -136,7 +155,6 @@ def load_and_preprocess_dem(
         crs = src.crs
         native_resolution = abs(transform.a)
 
-    # Downsampling for performance
     if native_resolution < target_resolution_m:
         factor = max(1, int(target_resolution_m / native_resolution))
         elevation = uniform_filter(elevation_raw, size=factor)[::factor, ::factor]
@@ -147,25 +165,19 @@ def load_and_preprocess_dem(
 
     elevation = np.where(elevation < -1e6, np.nan, elevation)
 
-    # Slope (degrees)
     dy, dx = np.gradient(elevation, actual_resolution)
     slope = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
-
-    # Aspect (degrees, 0°=North clockwise)
     aspect = np.degrees(np.arctan2(-dx, dy))
     aspect = (aspect + 360) % 360
 
-    # Synthetic thermal grid
     thermal = generate_thermal_grid(elevation, slope, aspect, actual_resolution)
 
-    # Shadow proxy (elevation-based)
     elev_min = np.nanmin(elevation)
     elev_max = np.nanmax(elevation)
     elev_norm = (elevation - elev_min) / (elev_max - elev_min + 1e-10)
     shadow_ratio = (1.0 - elev_norm).astype(np.float32)
 
-    # Traversability (canonical logic from traversability module)
-    traversable = compute_traversability_bool(slope, thermal, elevation)
+    traversable = compute_traversability_bool(slope, thermal, elevation, rc)
     cost = compute_cost_grid(
         slope,
         thermal,
@@ -173,6 +185,7 @@ def load_and_preprocess_dem(
         actual_resolution,
         traversable=traversable,
         weights=resolved_weights,
+        rover_config=rc,
     )
 
     result: dict[str, Any] = {

@@ -1,4 +1,4 @@
-"""High-performance A* pathfinder for the LunaPath lunar rover.
+"""High-performance A* pathfinder for LunaPath lunar rovers.
 
 Two-phase design:
   1. Precompute per-cell cost grid via cost_engine.compute_cost_grid()
@@ -6,17 +6,11 @@ Two-phase design:
   2. Run A* with trapezoidal edge interpolation over the cost grid.
 
 Edge cost formula:
-  cost(u→v) = distance(u,v) * (1 + (cost_grid[u] + cost_grid[v]) / 2)
+  cost(u->v) = distance(u,v) * (1 + (cost_grid[u] + cost_grid[v]) / 2)
 
 Heuristic: Octile distance scaled by (1 + MIN_COST) — admissible & consistent.
 
-Optimisations:
-  - NumPy float32/bool/int32 arrays for g_score, closed, came_from
-  - heapq with lazy duplicate strategy (no decrease-key)
-  - Precomputed 8-direction offset table
-  - Diagonal corner-cutting safety checks
-  - Tie-breaking: (f, h, counter) — prefer nodes closer to goal
-  - Early exit on goal expansion
+All rover-specific parameters are read from the rover_config dict.
 """
 
 from __future__ import annotations
@@ -28,24 +22,8 @@ from typing import Any
 
 import numpy as np
 
+from .constants import get_rover
 from .cost_engine import compute_cost_grid, f_thermal
-
-# ── Grid resolution (metres per cell) ──────────────────────────────────────
-_CELL_M = 80.0  # 80 m per grid cell (cardinal)
-_DIAG_M = _CELL_M * math.sqrt(2)  # ≈ 113.14 m (diagonal)
-
-# ── 8-direction offsets: (dr, dc, distance_m, is_diagonal) ─────────────────
-# Precomputed tuple — zero per-iteration allocation.
-_OFFSETS: tuple[tuple[int, int, float, bool], ...] = (
-    (-1,  0, _CELL_M, False),   # N
-    ( 1,  0, _CELL_M, False),   # S
-    ( 0, -1, _CELL_M, False),   # W
-    ( 0,  1, _CELL_M, False),   # E
-    (-1, -1, _DIAG_M, True),    # NW
-    (-1,  1, _DIAG_M, True),    # NE
-    ( 1, -1, _DIAG_M, True),    # SW
-    ( 1,  1, _DIAG_M, True),    # SE
-)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -58,6 +36,7 @@ def astar(
     goal: tuple[int, int],
     weights: dict[str, float] | None = None,
     constraints: dict | None = None,
+    rover_config: dict | None = None,
 ) -> dict:
     """Run optimised A* and return path + metrics.
 
@@ -70,11 +49,13 @@ def astar(
     weights : optional AHP weight overrides
     constraints : optional constraint overrides (unused in fast mode,
                   kept for API compat)
+    rover_config : optional rover configuration dict
 
     Returns
     -------
     dict with keys: path_pixels, metrics, error
     """
+    rc = rover_config or get_rover()
     t0 = time.perf_counter()
 
     # ── Unpack grids ────────────────────────────────────────────────────
@@ -102,19 +83,19 @@ def astar(
         return _empty_result("Goal is not traversable")
 
     # ── Phase 1: Precompute cost grid ───────────────────────────────────
-    # Each traversable cell → [0.01, ∞), blocked cells → inf.
     cost_grid = compute_cost_grid(
         slope_grid, thermal_grid, shadow_grid,
         resolution_m=resolution,
         traversable=traversable,
         weights=weights,
+        rover_config=rc,
     ).astype(np.float32)
 
     # Derive MIN_COST for heuristic scaling (admissibility guarantee)
     finite_mask = np.isfinite(cost_grid)
     if not np.any(finite_mask):
         return _empty_result("No traversable cells")
-    min_cost = float(np.min(cost_grid[finite_mask]))  # ≥ 0.01
+    min_cost = float(np.min(cost_grid[finite_mask]))  # >= 0.01
 
     # ── Phase 2: A* search ──────────────────────────────────────────────
     result = _astar_core(
@@ -131,7 +112,7 @@ def astar(
     # ── Post-process metrics ────────────────────────────────────────────
     metrics = _compute_path_metrics(
         path_pixels, elevation, thermal_grid, cost_grid, resolution, comp_ms,
-        nodes_expanded,
+        nodes_expanded, rc,
     )
 
     return {
@@ -175,14 +156,13 @@ def _astar_core(
         ( 1,  1, diagonal_dist, True),
     )
 
-    # ── Heuristic: octile distance × (1 + min_cost) ────────────────────
+    # ── Heuristic: octile distance x (1 + min_cost) ────────────────────
     gr, gc = goal
     h_scale = 1.0 + min_cost  # admissible scaling factor
 
     def heuristic(r: int, c: int) -> float:
         dr = abs(r - gr)
         dc = abs(c - gc)
-        # octile = cardinal_dist * (dr+dc) + (diagonal_dist - 2*cardinal_dist) * min(dr,dc)
         return h_scale * (
             cardinal_dist * (dr + dc)
             + (diagonal_dist - 2.0 * cardinal_dist) * min(dr, dc)
@@ -202,8 +182,6 @@ def _astar_core(
     g_score[start_idx] = 0.0
     h_start = heuristic(start[0], start[1])
 
-    # Priority queue: (f_score, h_score, counter, flat_index)
-    # Tie-break: lower h preferred (closer to goal)
     counter = 0
     open_heap: list[tuple[float, float, int, int]] = []
     heapq.heappush(open_heap, (h_start, h_start, counter, start_idx))
@@ -217,13 +195,11 @@ def _astar_core(
     while open_heap:
         f_cur, _, _, cur_idx = heapq.heappop(open_heap)
 
-        # Lazy duplicate skip
         if closed[cur_idx]:
             continue
         closed[cur_idx] = True
         nodes_expanded += 1
 
-        # Early exit
         if cur_idx == goal_idx:
             return _reconstruct_path(came_from, goal_idx, cols), nodes_expanded
 
@@ -236,25 +212,20 @@ def _astar_core(
             nr = cur_r + dr
             nc = cur_c + dc
 
-            # Bounds check
             if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
                 continue
 
             n_idx = nr * cols + nc
 
-            # Skip closed or non-traversable
             if closed[n_idx] or not trav_flat[n_idx]:
                 continue
 
-            # ── Diagonal corner-cutting safety ──────────────────────
             if is_diag:
-                # Both adjacent cardinal cells must be traversable
-                adj1_idx = cur_r * cols + nc  # (cur_r, nc)
-                adj2_idx = nr * cols + cur_c  # (nr, cur_c)
+                adj1_idx = cur_r * cols + nc
+                adj2_idx = nr * cols + cur_c
                 if not trav_flat[adj1_idx] or not trav_flat[adj2_idx]:
                     continue
 
-            # ── Trapezoidal edge cost ───────────────────────────────
             n_cost = float(cost_flat[n_idx])
             edge_cost = dist * (1.0 + (cur_cost + n_cost) * 0.5)
 
@@ -271,7 +242,7 @@ def _astar_core(
                 (tentative_g + h_val, h_val, counter, n_idx),
             )
 
-    return None  # No path found
+    return None
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -283,7 +254,7 @@ def _reconstruct_path(
     goal_idx: int,
     cols: int,
 ) -> list[list[int]]:
-    """Walk came_from chain backwards and return [[row,col], ...] start→goal."""
+    """Walk came_from chain backwards and return [[row,col], ...] start->goal."""
     path: list[list[int]] = []
     idx = goal_idx
     while idx != -1:
@@ -307,8 +278,11 @@ def _compute_path_metrics(
     resolution: float,
     comp_ms: float,
     nodes_expanded: int,
+    rover_config: dict | None = None,
 ) -> dict:
     """Compute post-hoc path metrics for API response."""
+    rc = rover_config or get_rover()
+
     if len(path_pixels) < 2:
         return _zero_metrics(comp_ms, nodes_expanded)
 
@@ -330,7 +304,6 @@ def _compute_path_metrics(
         total_distance += math.sqrt(d_horiz ** 2 + dz ** 2)
         max_slope = max(max_slope, seg_slope)
 
-        # Accumulate trapezoidal cost
         c_prev = float(cost_grid[pr, pc])
         c_cur = float(cost_grid[r, c])
         total_weighted_cost += d_horiz * (1.0 + (c_prev + c_cur) * 0.5)
@@ -339,11 +312,11 @@ def _compute_path_metrics(
 
     return {
         "total_distance_m": round(total_distance, 2),
-        "total_energy_wh": 0.0,  # Not tracked in fast mode
-        "total_shadow_hours": 0.0,  # Not tracked in fast mode
+        "total_energy_wh": 0.0,
+        "total_shadow_hours": 0.0,
         "max_slope_deg": round(max_slope, 2),
         "max_thermal_risk": round(
-            max(f_thermal(t) for t in path_temps), 4
+            max(f_thermal(t, rc) for t in path_temps), 4
         ),
         "min_surface_temp_c": round(min(path_temps), 2),
         "total_weighted_cost": round(total_weighted_cost, 4),
