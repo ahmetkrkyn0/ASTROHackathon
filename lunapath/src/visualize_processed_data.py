@@ -17,9 +17,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import LightSource, LinearSegmentedColormap
+
+try:
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LightSource, LinearSegmentedColormap
+except ModuleNotFoundError as exc:
+    if exc.name and exc.name.startswith("matplotlib"):
+        raise SystemExit(
+            "matplotlib kurulu degil. Bu script'i calistiracagin ortamda "
+            "`python -m pip install -r ..\\requirements.txt` komutunu calistir."
+        ) from exc
+    raise
 
 # --- Yollar ------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
