@@ -425,8 +425,15 @@ def compare(req: CompareRequest):
 
 
 @app.get("/api/layers/{layer_name}")
-def get_layer(layer_name: str, downsample: int = 1):
-    grids = _get_grids()
+def get_layer(
+    layer_name: str,
+    downsample: int = 1,
+    w_slope: float | None = None,
+    w_energy: float | None = None,
+    w_shadow: float | None = None,
+    w_thermal: float | None = None,
+):
+    base_grids = _get_grids()
     valid_layers = (
         "elevation",
         "slope",
@@ -438,6 +445,26 @@ def get_layer(layer_name: str, downsample: int = 1):
     )
     if layer_name not in valid_layers:
         raise HTTPException(status_code=400, detail=f"Layer must be one of {valid_layers}")
+
+    weight_overrides = {
+        key: value
+        for key, value in {
+            "w_slope": w_slope,
+            "w_energy": w_energy,
+            "w_shadow": w_shadow,
+            "w_thermal": w_thermal,
+        }.items()
+        if value is not None
+    }
+
+    grids = (
+        _grids_with_weights(base_grids, weight_overrides)
+        if layer_name == "cost" and weight_overrides
+        else base_grids
+    )
+    metadata = dict(grids["metadata"])
+    if layer_name == "cost" and weight_overrides:
+        metadata["cost_weights"] = resolve_weights(weight_overrides)
 
     layer = grids[layer_name]
     if downsample > 1:
@@ -451,7 +478,7 @@ def get_layer(layer_name: str, downsample: int = 1):
     return {
         "layer": layer_name,
         "shape": list(layer.shape),
-        "metadata": grids["metadata"],
+        "metadata": metadata,
         "data": serializable,
     }
 

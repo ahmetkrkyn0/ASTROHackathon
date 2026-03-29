@@ -1,14 +1,51 @@
 export type RGB = [number, number, number]
 
-const THERMAL_STOPS: RGB[] = [
-  [23, 68, 77],
-  [42, 108, 99],
-  [104, 144, 79],
-  [183, 187, 61],
-  [226, 173, 31],
-  [213, 103, 18],
-  [185, 48, 11],
-  [122, 13, 8],
+const COOLWARM_STOPS: RGB[] = [
+  [59, 76, 192],
+  [98, 130, 234],
+  [141, 176, 254],
+  [184, 208, 249],
+  [221, 221, 221],
+  [243, 199, 166],
+  [237, 156, 122],
+  [214, 96, 77],
+  [180, 4, 38],
+]
+
+const MAGMA_STOPS: RGB[] = [
+  [0, 0, 4],
+  [27, 16, 69],
+  [80, 18, 123],
+  [129, 37, 129],
+  [181, 54, 122],
+  [229, 80, 100],
+  [251, 135, 97],
+  [254, 194, 135],
+  [252, 253, 191],
+]
+
+const VIRIDIS_STOPS: RGB[] = [
+  [68, 1, 84],
+  [71, 44, 122],
+  [59, 81, 139],
+  [44, 113, 142],
+  [33, 144, 141],
+  [39, 173, 129],
+  [92, 200, 99],
+  [170, 220, 50],
+  [253, 231, 37],
+]
+
+const RDYLGN_STOPS: RGB[] = [
+  [165, 0, 38],
+  [215, 48, 39],
+  [244, 109, 67],
+  [253, 174, 97],
+  [254, 224, 139],
+  [217, 239, 139],
+  [166, 217, 106],
+  [102, 189, 99],
+  [26, 150, 65],
 ]
 
 const REGOLITH_STOPS: RGB[] = [
@@ -64,7 +101,7 @@ export function thermalToRgb(value: number | null, min: number, max: number, lut
   const t = lut
     ? lookupEqualized(value, min, max, lut)
     : normalize(value, min, max)
-  return sampleStops(THERMAL_STOPS, t)
+  return sampleStops(COOLWARM_STOPS, t)
 }
 
 export function elevationToRegolith(t: number, lut?: number[], min?: number, max?: number): RGB {
@@ -91,6 +128,49 @@ export function tintRgb(base: RGB, overlay: RGB, strength: number): RGB {
     Math.round(base[1] + (overlay[1] - base[1]) * clamp01(strength)),
     Math.round(base[2] + (overlay[2] - base[2]) * clamp01(strength)),
   ]
+}
+
+export function lunarRegolithToRgb(value: number | null, min: number, max: number): RGB {
+  if (value === null || !Number.isFinite(value)) {
+    return [8, 8, 11]
+  }
+  return sampleStops(REGOLITH_STOPS, normalize(value, min, max))
+}
+
+export function magmaToRgb(value: number | null, min: number, max: number): RGB {
+  if (value === null || !Number.isFinite(value)) {
+    return [8, 8, 11]
+  }
+  return sampleStops(MAGMA_STOPS, normalize(value, min, max))
+}
+
+export function viridisToRgb(value: number | null, min: number, max: number): RGB {
+  if (value === null || !Number.isFinite(value)) {
+    return [8, 8, 11]
+  }
+  return sampleStops(VIRIDIS_STOPS, normalize(value, min, max))
+}
+
+export function rdYlGnToRgb(value: number | null, min: number, max: number): RGB {
+  if (value === null || !Number.isFinite(value)) {
+    return [8, 8, 11]
+  }
+  return sampleStops(RDYLGN_STOPS, normalize(value, min, max))
+}
+
+export function grayReverseToRgb(value: number | null, min: number, max: number): RGB {
+  if (value === null || !Number.isFinite(value)) {
+    return [8, 8, 11]
+  }
+  const channel = Math.round(255 * (1 - clamp01(normalize(value, min, max))))
+  return [channel, channel, channel]
+}
+
+export function aspectToRgb(value: number | null): RGB {
+  if (value === null || !Number.isFinite(value)) {
+    return [8, 8, 11]
+  }
+  return hsvToRgb(((value % 360) + 360) % 360, 1, 1)
 }
 
 export function computeHillshade(
@@ -216,6 +296,43 @@ function sampleStops(stops: RGB[], t: number): RGB {
     Math.round(stops[lowerIndex][0] + (stops[upperIndex][0] - stops[lowerIndex][0]) * blend),
     Math.round(stops[lowerIndex][1] + (stops[upperIndex][1] - stops[lowerIndex][1]) * blend),
     Math.round(stops[lowerIndex][2] + (stops[upperIndex][2] - stops[lowerIndex][2]) * blend),
+  ]
+}
+
+function hsvToRgb(h: number, s: number, v: number): RGB {
+  const c = v * s
+  const hh = (h / 60) % 6
+  const x = c * (1 - Math.abs((hh % 2) - 1))
+
+  let r = 0
+  let g = 0
+  let b = 0
+
+  if (hh >= 0 && hh < 1) {
+    r = c
+    g = x
+  } else if (hh < 2) {
+    r = x
+    g = c
+  } else if (hh < 3) {
+    g = c
+    b = x
+  } else if (hh < 4) {
+    g = x
+    b = c
+  } else if (hh < 5) {
+    r = x
+    b = c
+  } else {
+    r = c
+    b = x
+  }
+
+  const m = v - c
+  return [
+    Math.round((r + m) * 255),
+    Math.round((g + m) * 255),
+    Math.round((b + m) * 255),
   ]
 }
 

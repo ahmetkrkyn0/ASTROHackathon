@@ -92,8 +92,22 @@ export interface FocusTelemetryResponse {
 export async function fetchLayer(
   name: string,
   downsample = 2,
+  options?: {
+    weights?: PlanWeights
+    signal?: AbortSignal
+  },
 ): Promise<LayerResponse> {
-  const r = await fetch(`${BASE}/layers/${name}?downsample=${downsample}`)
+  const query = new URLSearchParams({ downsample: String(downsample) })
+  if (options?.weights) {
+    query.set('w_slope', String(options.weights.w_slope))
+    query.set('w_energy', String(options.weights.w_energy))
+    query.set('w_shadow', String(options.weights.w_shadow))
+    query.set('w_thermal', String(options.weights.w_thermal))
+  }
+
+  const r = await fetch(`${BASE}/layers/${name}?${query.toString()}`, {
+    signal: options?.signal,
+  })
   if (!r.ok) throw new Error(`Layer fetch failed: ${name} (${r.status})`)
   return r.json() as Promise<LayerResponse>
 }

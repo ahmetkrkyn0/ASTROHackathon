@@ -81,6 +81,19 @@ const LOADING_STEPS = [
   { delayMs: 640, progress: 56, message: 'Resolving thermal field...' },
   { delayMs: 1120, progress: 82, message: 'Calibrating rover constraints...' },
 ] as const
+const MAP_VIEW_OPTIONS: Array<{
+  id: MapViewMode
+  label: string
+  title: string
+}> = [
+  { id: 'surface', label: 'Surface', title: 'Lunar Surface DEM' },
+  { id: 'thermal', label: 'Thermal', title: 'Surface Temperature' },
+  { id: 'cost', label: 'Cost', title: 'Weighted Cost Grid' },
+  { id: 'shadow', label: 'Shadow', title: 'Shadow Ratio' },
+  { id: 'traversability', label: 'Traverse', title: 'Traversability Grid' },
+  { id: 'slope', label: 'Slope', title: 'Slope Grid' },
+  { id: 'aspect', label: 'Aspect', title: 'Aspect Grid' },
+] as const
 
 type RiskLevel = (typeof RISK_LEVELS)[number]
 type BootstrapState = 'loading' | 'ready' | 'error'
@@ -124,7 +137,11 @@ export default function App() {
   const [loadingFloorReached, setLoadingFloorReached] = useState(false)
 
   const [elevationLayer, setElevationLayer] = useState<LayerResponse | null>(null)
+  const [slopeLayer, setSlopeLayer] = useState<LayerResponse | null>(null)
+  const [aspectLayer, setAspectLayer] = useState<LayerResponse | null>(null)
+  const [shadowLayer, setShadowLayer] = useState<LayerResponse | null>(null)
   const [thermalLayer, setThermalLayer] = useState<LayerResponse | null>(null)
+  const [costLayer, setCostLayer] = useState<LayerResponse | null>(null)
   const [traversableLayer, setTraversableLayer] = useState<LayerResponse | null>(null)
   const [layerError, setLayerError] = useState<string | null>(null)
 
@@ -155,15 +172,23 @@ export default function App() {
           await loadPreprocessed()
         }
 
-        const [elevation, thermal, traversable, fetchedProfiles] = await Promise.all([
+        const [elevation, slope, aspect, shadow, thermal, cost, traversable, fetchedProfiles] = await Promise.all([
           fetchLayer('elevation', DOWNSAMPLE),
+          fetchLayer('slope', DOWNSAMPLE),
+          fetchLayer('aspect', DOWNSAMPLE),
+          fetchLayer('shadow_ratio', DOWNSAMPLE),
           fetchLayer('thermal', DOWNSAMPLE),
+          fetchLayer('cost', DOWNSAMPLE, { weights }),
           fetchLayer('traversable', DOWNSAMPLE),
           fetchProfiles(),
         ])
 
         setElevationLayer(elevation)
+        setSlopeLayer(slope)
+        setAspectLayer(aspect)
+        setShadowLayer(shadow)
         setThermalLayer(thermal)
+        setCostLayer(cost)
         setTraversableLayer(traversable)
         setProfiles(fetchedProfiles)
         setBootstrapState('ready')
@@ -254,6 +279,34 @@ export default function App() {
     [availableProfiles],
   )
 
+  useEffect(() => {
+    if (bootstrapState === 'loading') {
+      return
+    }
+
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      try {
+        const nextCostLayer = await fetchLayer('cost', DOWNSAMPLE, {
+          weights,
+          signal: controller.signal,
+        })
+        setCostLayer(nextCostLayer)
+        setLayerError(null)
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return
+        }
+        setLayerError((error as Error).message)
+      }
+    }, 120)
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [bootstrapState, weights])
+
   const handleCellClick = useCallback(
     (row: number, col: number) => {
       setPlanResult(null)
@@ -302,10 +355,19 @@ export default function App() {
     setRoutePlaybackStep(null)
   }
 
-  const hasData = Boolean(elevationLayer && thermalLayer && traversableLayer)
+  const hasData = Boolean(
+    elevationLayer &&
+    slopeLayer &&
+    aspectLayer &&
+    shadowLayer &&
+    thermalLayer &&
+    costLayer &&
+    traversableLayer,
+  )
   const focusPoint = goal ?? start ?? DEFAULT_POINT
   const telemetryPoint = hoverPoint ?? focusPoint
   const waypoints = planResult?.waypoints ?? []
+  const activeMapView = MAP_VIEW_OPTIONS.find((option) => option.id === viewMode) ?? MAP_VIEW_OPTIONS[0]
 
   useEffect(() => {
     if (hoverPoint === null && routePlaybackStep !== null) {
@@ -558,24 +620,20 @@ export default function App() {
 
             <div className="map-overlay-top-right">
               <div className="map-switch">
-                <button
-                  type="button"
-                  className={viewMode === 'surface' ? 'is-active' : ''}
-                  onClick={() => setViewMode('surface')}
-                >
-                  Surface
-                </button>
-                <button
-                  type="button"
-                  className={viewMode === 'thermal' ? 'is-active' : ''}
-                  onClick={() => setViewMode('thermal')}
-                >
-                  Thermal
-                </button>
+                {MAP_VIEW_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={viewMode === option.id ? 'is-active' : ''}
+                    onClick={() => setViewMode(option.id)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
               </div>
               <div className="map-mode-card">
                 <span className="eyebrow tight">View</span>
-                <strong>{viewMode === 'surface' ? 'Regolith Hillshade' : 'Thermal Field'}</strong>
+                <strong>{activeMapView.title}</strong>
               </div>
             </div>
 
@@ -583,7 +641,11 @@ export default function App() {
               <MapCanvas
                 ref={mapRef}
                 elevationGrid={elevationLayer?.data ?? null}
+                slopeGrid={slopeLayer?.data ?? null}
+                aspectGrid={aspectLayer?.data ?? null}
+                shadowGrid={shadowLayer?.data ?? null}
                 thermalGrid={thermalLayer?.data ?? null}
+                costGrid={costLayer?.data ?? null}
                 traversableGrid={traversableLayer?.data ?? null}
                 waypoints={planResult?.waypoints ?? null}
                 start={start}

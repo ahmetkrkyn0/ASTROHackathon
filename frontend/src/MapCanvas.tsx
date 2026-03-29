@@ -8,24 +8,38 @@ import React, {
 } from 'react'
 import type { Waypoint } from './api'
 import {
-  buildEqualizationLut,
+  aspectToRgb,
   computeHillshade,
+  grayReverseToRgb,
+  lunarRegolithToRgb,
+  magmaToRgb,
   riskToHex,
+  rdYlGnToRgb,
   shadeRegolith,
   thermalToRgb,
-  tintRgb,
-  elevationToRegolith,
+  viridisToRgb,
 } from './colormap'
 
 const CANVAS_SIZE = 500
 const DOWNSAMPLE = 2
 
 export type ClickMode = 'start' | 'goal' | 'idle'
-export type MapViewMode = 'surface' | 'thermal'
+export type MapViewMode =
+  | 'surface'
+  | 'thermal'
+  | 'cost'
+  | 'shadow'
+  | 'traversability'
+  | 'slope'
+  | 'aspect'
 
 interface Props {
   elevationGrid: (number | null)[][] | null
+  slopeGrid: (number | null)[][] | null
+  aspectGrid: (number | null)[][] | null
+  shadowGrid: (number | null)[][] | null
   thermalGrid: (number | null)[][] | null
+  costGrid: (number | null)[][] | null
   traversableGrid: (number | null)[][] | null
   waypoints: Waypoint[] | null
   start: [number, number] | null
@@ -45,7 +59,11 @@ export interface MapCanvasHandle {
 const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   {
     elevationGrid,
+    slopeGrid,
+    aspectGrid,
+    shadowGrid,
     thermalGrid,
+    costGrid,
     traversableGrid,
     waypoints,
     start,
@@ -87,14 +105,18 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       ctx,
       viewMode,
       elevationGrid,
+      slopeGrid,
+      aspectGrid,
+      shadowGrid,
       thermalGrid,
+      costGrid,
       traversableGrid,
       resolutionM,
     })
 
     baseImageRef.current = imageData
     redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell)
-  }, [elevationGrid, resolutionM, thermalGrid, traversableGrid, viewMode])
+  }, [aspectGrid, costGrid, elevationGrid, resolutionM, shadowGrid, slopeGrid, thermalGrid, traversableGrid, viewMode])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -199,9 +221,14 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     clickMode === 'goal' ? 'Click to set GOAL' :
     ''
 
-  const loading = viewMode === 'surface'
-    ? !elevationGrid || !traversableGrid
-    : !thermalGrid || !traversableGrid
+  const loading =
+    viewMode === 'surface' ? !elevationGrid :
+    viewMode === 'thermal' ? !thermalGrid :
+    viewMode === 'cost' ? !costGrid :
+    viewMode === 'shadow' ? !shadowGrid :
+    viewMode === 'traversability' ? !traversableGrid :
+    viewMode === 'slope' ? !slopeGrid :
+    !aspectGrid
 
   return (
     <div
@@ -228,7 +255,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
           background: '#030408',
           boxShadow: '0 24px 64px rgba(0, 0, 0, 0.45)',
           cursor: clickMode === 'idle' ? 'default' : 'crosshair',
-          imageRendering: viewMode === 'surface' ? 'auto' : 'pixelated',
+          imageRendering: viewMode === 'traversability' || viewMode === 'cost' ? 'pixelated' : 'auto',
         }}
       />
 
@@ -399,55 +426,90 @@ function buildBaseImage({
   ctx,
   viewMode,
   elevationGrid,
+  slopeGrid,
+  aspectGrid,
+  shadowGrid,
   thermalGrid,
+  costGrid,
   traversableGrid,
   resolutionM,
 }: {
   ctx: CanvasRenderingContext2D
   viewMode: MapViewMode
   elevationGrid: (number | null)[][] | null
+  slopeGrid: (number | null)[][] | null
+  aspectGrid: (number | null)[][] | null
+  shadowGrid: (number | null)[][] | null
   thermalGrid: (number | null)[][] | null
+  costGrid: (number | null)[][] | null
   traversableGrid: (number | null)[][] | null
   resolutionM: number
 }): ImageData | null {
-  if (!traversableGrid || traversableGrid.length === 0 || traversableGrid[0].length === 0) {
-    return null
+  switch (viewMode) {
+    case 'surface':
+      return buildSurfaceImage(ctx, elevationGrid, resolutionM)
+    case 'thermal':
+      return buildScalarImage(ctx, thermalGrid, (value, range) => thermalToRgb(value, range.min, range.max))
+    case 'cost':
+      return buildScalarImage(ctx, costGrid, (value, range) => viridisToRgb(value, range.min, range.max))
+    case 'shadow':
+      return buildScalarImage(ctx, shadowGrid, (value, range) => grayReverseToRgb(value, range.min, range.max))
+    case 'traversability':
+      return buildTraversabilityImage(ctx, traversableGrid)
+    case 'slope':
+      return buildScalarImage(ctx, slopeGrid, (value, range) => magmaToRgb(value, range.min, range.max))
+    case 'aspect':
+      return buildAspectImage(ctx, aspectGrid)
+    default:
+      return null
   }
-
-  if (viewMode === 'surface') {
-    return buildSurfaceImage(ctx, elevationGrid, traversableGrid, resolutionM)
-  }
-
-  return buildThermalImage(ctx, thermalGrid, traversableGrid)
 }
 
-function buildThermalImage(
+function buildScalarImage(
   ctx: CanvasRenderingContext2D,
-  thermalGrid: (number | null)[][] | null,
-  traversableGrid: (number | null)[][],
+  grid: (number | null)[][] | null,
+  colorize: (value: number | null, range: { min: number; max: number }) => [number, number, number],
 ): ImageData | null {
-  if (!thermalGrid || thermalGrid.length === 0 || thermalGrid[0].length === 0) {
+  if (!grid || grid.length === 0 || grid[0].length === 0) {
     return null
   }
 
   const imageData = ctx.createImageData(CANVAS_SIZE, CANVAS_SIZE)
-  const range = getFiniteRange(thermalGrid)
-  const lut = buildEqualizationLut(thermalGrid, range.min, range.max)
-  const rows = thermalGrid.length
-  const cols = thermalGrid[0].length
+  const range = getFiniteRange(grid)
+  const rows = grid.length
   const cellPx = CANVAS_SIZE / rows
 
   for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      const value = thermalGrid[row][col]
-      const traversable = traversableGrid[row]?.[col]
+    for (let col = 0; col < grid[row].length; col += 1) {
+      paintCell(imageData, row, col, cellPx, colorize(grid[row][col], range))
+    }
+  }
 
-      let color = thermalToRgb(value, range.min, range.max, lut)
-      if (traversable !== 1) {
-        color = tintRgb(color, [96, 14, 10], 0.24)
-      }
+  return imageData
+}
 
-      paintCell(imageData, row, col, cellPx, color)
+function buildTraversabilityImage(
+  ctx: CanvasRenderingContext2D,
+  traversableGrid: (number | null)[][] | null,
+): ImageData | null {
+  return buildScalarImage(ctx, traversableGrid, (value) => rdYlGnToRgb(value, 0, 1))
+}
+
+function buildAspectImage(
+  ctx: CanvasRenderingContext2D,
+  aspectGrid: (number | null)[][] | null,
+): ImageData | null {
+  if (!aspectGrid || aspectGrid.length === 0 || aspectGrid[0].length === 0) {
+    return null
+  }
+
+  const imageData = ctx.createImageData(CANVAS_SIZE, CANVAS_SIZE)
+  const rows = aspectGrid.length
+  const cellPx = CANVAS_SIZE / rows
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < aspectGrid[row].length; col += 1) {
+      paintCell(imageData, row, col, cellPx, aspectToRgb(aspectGrid[row][col]))
     }
   }
 
@@ -457,7 +519,6 @@ function buildThermalImage(
 function buildSurfaceImage(
   ctx: CanvasRenderingContext2D,
   elevationGrid: (number | null)[][] | null,
-  traversableGrid: (number | null)[][],
   resolutionM: number,
 ): ImageData | null {
   if (!elevationGrid || elevationGrid.length === 0 || elevationGrid[0].length === 0) {
@@ -466,30 +527,17 @@ function buildSurfaceImage(
 
   const imageData = ctx.createImageData(CANVAS_SIZE, CANVAS_SIZE)
   const range = getFiniteRange(elevationGrid)
-  const lut = buildEqualizationLut(elevationGrid, range.min, range.max)
   const rows = elevationGrid.length
-  const cols = elevationGrid[0].length
   const cellPx = CANVAS_SIZE / rows
   const effectiveResolution = resolutionM * DOWNSAMPLE
 
   for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
+    for (let col = 0; col < elevationGrid[row].length; col += 1) {
       const value = elevationGrid[row][col]
-      const traversable = traversableGrid[row]?.[col]
-
-      let color: [number, number, number]
-
-      if (typeof value === 'number' && Number.isFinite(value)) {
-        const base = elevationToRegolith(value, lut, range.min, range.max)
-        const shade = computeHillshade(elevationGrid, row, col, effectiveResolution)
-        color = shadeRegolith(base, shade)
-      } else {
-        color = [8, 8, 11]
-      }
-
-      if (traversable !== 1) {
-        color = tintRgb(color, [18, 18, 24], 0.22)
-      }
+      const color =
+        typeof value === 'number' && Number.isFinite(value)
+          ? shadeRegolith(lunarRegolithToRgb(value, range.min, range.max), computeHillshade(elevationGrid, row, col, effectiveResolution))
+          : ([8, 8, 11] as [number, number, number])
 
       paintCell(imageData, row, col, cellPx, color)
     }

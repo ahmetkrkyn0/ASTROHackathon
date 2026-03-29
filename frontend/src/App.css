@@ -736,6 +736,7 @@ select {
 .map-switch {
   padding: 6px;
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   background: rgba(13, 13, 22, 0.72);
   border: 1px solid rgba(70, 70, 81, 0.4);
@@ -743,7 +744,7 @@ select {
 }
 
 .map-switch button {
-  min-width: 118px;
+  min-width: 0;
   padding: 0 12px;
   background: transparent;
   border: 1px solid transparent;
@@ -1147,6 +1148,10 @@ select {
     right: 16px;
   }
 
+  .map-switch {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .map-overlay-bottom-left {
     bottom: 16px;
   }
@@ -1162,6 +1167,12 @@ select {
 
   .map-canvas-shell {
     width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .map-switch {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

@@ -201,6 +201,33 @@ def test_cell_telemetry_returns_backend_values():
     check(math.isclose(body["span_km"], 1.6, rel_tol=0, abs_tol=1e-6), "span_km uses backend shape metadata")
 
 
+def test_cost_layer_respects_weight_overrides():
+    grids = _make_grids(slope_val=12.0, temp_val=-120.0, shadow_val=0.35)
+    _inject_grids(grids)
+
+    baseline = client.get("/api/layers/cost?downsample=1")
+    override = client.get(
+        "/api/layers/cost?downsample=1&w_slope=0.8&w_energy=0.1&w_shadow=0.9&w_thermal=0.2"
+    )
+
+    check(baseline.status_code == 200, "baseline cost layer returns 200")
+    check(override.status_code == 200, "weighted cost layer returns 200")
+
+    baseline_value = baseline.json()["data"][0][0]
+    override_body = override.json()
+    override_value = override_body["data"][0][0]
+
+    check(baseline_value == 0.5, "baseline cost layer uses stored preprocessed cost grid")
+    check(
+        isinstance(override_value, float) and not math.isclose(override_value, baseline_value, rel_tol=0, abs_tol=1e-9),
+        "weighted cost layer recomputes grid for requested weights",
+    )
+    check(
+        math.isclose(override_body["metadata"]["cost_weights"]["w_shadow"], 0.9, rel_tol=0, abs_tol=1e-9),
+        "weighted cost layer metadata reflects override weights",
+    )
+
+
 def test_geo_input_with_metadata_origin_accepted():
     grids = _make_grids()
     grids["metadata"]["origin"] = {"x": 176000.0, "y": 48000.0}
@@ -312,6 +339,7 @@ if __name__ == "__main__":
         test_start_out_of_bounds,
         test_goal_out_of_bounds,
         test_cell_telemetry_returns_backend_values,
+        test_cost_layer_respects_weight_overrides,
         test_geo_input_with_metadata_origin_accepted,
         test_impassable_start_returns_422,
         test_impassable_goal_returns_422,
