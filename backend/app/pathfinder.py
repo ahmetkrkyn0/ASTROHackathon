@@ -29,6 +29,7 @@ from typing import Any
 import numpy as np
 
 from .cost_engine import compute_cost_grid, f_thermal
+from .constants import get_rover
 
 # ── Grid resolution (metres per cell) ──────────────────────────────────────
 _CELL_M = 80.0  # 80 m per grid cell (cardinal)
@@ -58,6 +59,7 @@ def astar(
     goal: tuple[int, int],
     weights: dict[str, float] | None = None,
     constraints: dict | None = None,
+    rover: dict[str, Any] | None = None,
 ) -> dict:
     """Run optimised A* and return path + metrics.
 
@@ -103,11 +105,13 @@ def astar(
 
     # ── Phase 1: Precompute cost grid ───────────────────────────────────
     # Each traversable cell → [0.01, ∞), blocked cells → inf.
+    rover_cfg = get_rover() if rover is None else rover
     cost_grid = compute_cost_grid(
         slope_grid, thermal_grid, shadow_grid,
         resolution_m=resolution,
         traversable=traversable,
         weights=weights,
+        rover=rover_cfg,
     ).astype(np.float32)
 
     # Derive MIN_COST for heuristic scaling (admissibility guarantee)

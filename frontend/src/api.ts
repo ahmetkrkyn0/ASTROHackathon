@@ -56,6 +56,10 @@ export interface PlanResponse {
   summary: SimSummary
   geojson: object
   waypoints: Waypoint[]
+  rover?: {
+    id: string
+    name: string
+  }
 }
 
 export interface LayerResponse {
@@ -90,6 +94,22 @@ export interface FocusTelemetryResponse {
   span_km: number
 }
 
+export interface RoverEntry {
+  id: string
+  name: string
+  mass_kg: number
+  v_max_ms: number
+  e_cap_wh: number
+  slope_max_deg: number
+  h_max_shadow_h: number
+  default_weights: PlanWeights
+}
+
+export interface RoverCatalogResponse {
+  default_rover_id: string
+  rovers: RoverEntry[]
+}
+
 // ── API calls ──────────────────────────────────────────────────────────────────
 
 export async function fetchLayer(
@@ -97,10 +117,14 @@ export async function fetchLayer(
   downsample = 2,
   options?: {
     weights?: PlanWeights
+    roverId?: string
     signal?: AbortSignal
   },
 ): Promise<LayerResponse> {
   const query = new URLSearchParams({ downsample: String(downsample) })
+  if (options?.roverId) {
+    query.set('rover_id', options.roverId)
+  }
   if (options?.weights) {
     query.set('w_slope', String(options.weights.w_slope))
     query.set('w_energy', String(options.weights.w_energy))
@@ -119,6 +143,7 @@ export async function planRoute(
   start: [number, number],
   goal: [number, number],
   weights: PlanWeights,
+  roverId: string,
 ): Promise<PlanResponse> {
   const r = await fetch(`${BASE}/plan`, {
     method: 'POST',
@@ -126,6 +151,7 @@ export async function planRoute(
     body: JSON.stringify({
       start: { row: start[0], col: start[1] },
       goal: { row: goal[0], col: goal[1] },
+      rover_id: roverId,
       weights,
       include_simulation: true,
     }),
@@ -142,6 +168,12 @@ export async function fetchProfiles(): Promise<ProfileEntry[]> {
   if (!r.ok) throw new Error('Failed to fetch profiles')
   const data = await r.json() as Record<string, Omit<ProfileEntry, 'id'>>
   return Object.entries(data).map(([id, profile]) => ({ id, ...profile }))
+}
+
+export async function fetchRovers(): Promise<RoverCatalogResponse> {
+  const r = await fetch(`${BASE}/rovers`)
+  if (!r.ok) throw new Error('Failed to fetch rovers')
+  return r.json() as Promise<RoverCatalogResponse>
 }
 
 export async function fetchCellTelemetry(

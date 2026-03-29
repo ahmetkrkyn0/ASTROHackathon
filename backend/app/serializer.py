@@ -212,6 +212,8 @@ def build_plan_response(
     include_simulation: bool = True,
     metadata: dict[str, Any] | None = None,
     elevation_grid: Any | None = None,
+    rover_id: str | None = None,
+    rover_name: str | None = None,
 ) -> dict:
     """Assemble the final API response for a single plan request.
 
@@ -240,6 +242,11 @@ def build_plan_response(
         "summary": summary,
         "geojson": states_to_geojson(states, metadata),
     }
+    if rover_id is not None:
+        response["rover"] = {
+            "id": rover_id,
+            "name": rover_name or rover_id,
+        }
     if include_simulation:
         response["waypoints"] = states_to_waypoints(states, metadata, elevation_grid)
     return response

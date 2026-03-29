@@ -218,7 +218,15 @@ def test_build_plan_response_with_simulation():
     astar = _dummy_astar_result()
     elevation = np.zeros((GRID_ROWS, GRID_COLS), dtype=np.float64)
     elevation[250, 250] = -123.45
-    resp = build_plan_response(astar, states, summary, include_simulation=True, elevation_grid=elevation)
+    resp = build_plan_response(
+        astar,
+        states,
+        summary,
+        include_simulation=True,
+        elevation_grid=elevation,
+        rover_id="lpr_1",
+        rover_name="LPR-1 (Varsayilan)",
+    )
 
     check(resp["status"] == "success", "status is success")
     check("astar_metrics" in resp, "response has astar_metrics")
@@ -228,6 +236,7 @@ def test_build_plan_response_with_simulation():
     check(resp["astar_metrics"] is astar["metrics"], "astar_metrics is the metrics dict")
     check(resp["summary"] is summary, "summary is passed through")
     check(resp["waypoints"][0]["altitude_m"] == -123.45, "plan response waypoint includes altitude")
+    check(resp["rover"]["id"] == "lpr_1", "plan response includes rover id")
 
 
 def test_build_plan_response_without_simulation():

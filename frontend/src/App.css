@@ -525,6 +525,72 @@ select {
   gap: 6px;
 }
 
+.rover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rover-card {
+  width: 100%;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface-lowest);
+  border: 1px solid rgba(70, 70, 81, 0.34);
+  border-radius: 14px;
+  color: rgba(199, 197, 211, 0.82);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.rover-card:hover {
+  border-color: rgba(173, 198, 255, 0.28);
+  transform: translateY(-1px);
+}
+
+.rover-card.is-active {
+  background: rgba(160, 160, 255, 0.1);
+  border-color: rgba(160, 160, 255, 0.36);
+}
+
+.rover-card-head,
+.rover-card-specs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rover-card-head strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.rover-card-head span,
+.rover-card-specs span {
+  font-family: var(--font-data);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rover-card-head span {
+  color: rgba(173, 198, 255, 0.74);
+}
+
+.rover-card-specs span {
+  color: rgba(199, 197, 211, 0.58);
+}
+
+.rover-summary-grid {
+  margin-top: 10px;
+}
+
 .profile-button {
   width: 100%;
   padding: 10px 12px;
@@ -1369,6 +1435,12 @@ select {
 }
 
 @media (max-width: 640px) {
+  .rover-card-head,
+  .rover-card-specs {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .map-switch {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

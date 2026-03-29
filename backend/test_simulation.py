@@ -26,6 +26,7 @@ from app.simulation import (
     simulate_path,
     summarize_simulation,
 )
+from app.constants import get_rover
 
 GRID_SHAPE = (50, 50)
 
@@ -161,6 +162,22 @@ def test_shadow_heater_contribution():
         + IDLE_POWER_W
     ) * step_time_h
     check(abs(s1.step_energy_wh - expected_energy) < 1e-6, "heater energy included")
+
+
+def test_custom_rover_changes_energy_and_speed():
+    rover = get_rover("luvmi_m")
+    grids = _flat_grids(slope=0.0, shadow=0.0)
+    path = [[0, 0], [0, 1]]
+    states = simulate_path(_astar_result(path), *grids, rover=rover)
+    s1 = states[1]
+
+    expected_time_h = PIXEL_SIZE_M / float(rover["v_max_ms"]) / 3600.0
+    expected_energy = (float(rover["p_base_w"]) + float(rover["p_idle_w"])) * expected_time_h
+    expected_battery = float(rover["e_cap_wh"]) - expected_energy
+
+    check(abs(s1.elapsed_hours - expected_time_h) < 1e-9, "custom rover speed affects elapsed time")
+    check(abs(s1.step_energy_wh - expected_energy) < 1e-6, "custom rover power affects energy use")
+    check(abs(s1.battery_wh - expected_battery) < 1e-6, "custom rover battery capacity is used")
 
 
 # ── simulate_path — battery floor ─────────────────────────────────────────────
@@ -305,6 +322,7 @@ if __name__ == "__main__":
         test_cardinal_step,
         test_diagonal_step,
         test_shadow_heater_contribution,
+        test_custom_rover_changes_energy_and_speed,
         test_battery_does_not_go_negative,
         test_battery_recharges_to_full_when_depleted,
         test_cumulative_distance_monotone,

@@ -11,12 +11,14 @@ import {
   checkHealth,
   fetchCellTelemetry,
   fetchLayer,
+  fetchRovers,
   loadPreprocessed,
   planRoute,
   type FocusTelemetryResponse,
   type LayerResponse,
   type PlanResponse,
   type PlanWeights,
+  type RoverEntry,
   type Waypoint,
 } from './api'
 import { batteryToHex, riskToHex } from './colormap'
@@ -125,6 +127,8 @@ export default function App() {
   const [start, setStart] = useState<[number, number] | null>(null)
   const [goal, setGoal] = useState<[number, number] | null>(null)
   const [weights, setWeights] = useState<PlanWeights>(DEFAULT_WEIGHTS)
+  const [rovers, setRovers] = useState<RoverEntry[]>([])
+  const [selectedRoverId, setSelectedRoverId] = useState('lpr_1')
 
   const [planResult, setPlanResult] = useState<PlanResponse | null>(null)
   const [planning, setPlanning] = useState(false)
@@ -188,16 +192,25 @@ export default function App() {
           await loadPreprocessed()
         }
 
+        const roverCatalog = await fetchRovers()
+        const initialRoverId = roverCatalog.default_rover_id
+        const initialRover =
+          roverCatalog.rovers.find((entry) => entry.id === initialRoverId) ?? roverCatalog.rovers[0]
+        const initialWeights = initialRover?.default_weights ?? DEFAULT_WEIGHTS
+
         const [elevation, slope, aspect, shadow, thermal, cost, traversable] = await Promise.all([
-          fetchLayer('elevation', DOWNSAMPLE),
-          fetchLayer('slope', DOWNSAMPLE),
-          fetchLayer('aspect', DOWNSAMPLE),
-          fetchLayer('shadow_ratio', DOWNSAMPLE),
-          fetchLayer('thermal', DOWNSAMPLE),
-          fetchLayer('cost', DOWNSAMPLE, { weights }),
-          fetchLayer('traversable', DOWNSAMPLE),
+          fetchLayer('elevation', DOWNSAMPLE, { roverId: initialRoverId }),
+          fetchLayer('slope', DOWNSAMPLE, { roverId: initialRoverId }),
+          fetchLayer('aspect', DOWNSAMPLE, { roverId: initialRoverId }),
+          fetchLayer('shadow_ratio', DOWNSAMPLE, { roverId: initialRoverId }),
+          fetchLayer('thermal', DOWNSAMPLE, { roverId: initialRoverId }),
+          fetchLayer('cost', DOWNSAMPLE, { weights: initialWeights, roverId: initialRoverId }),
+          fetchLayer('traversable', DOWNSAMPLE, { roverId: initialRoverId }),
         ])
 
+        setRovers(roverCatalog.rovers)
+        setSelectedRoverId(initialRoverId)
+        setWeights(initialWeights)
         setElevationLayer(elevation)
         setSlopeLayer(slope)
         setAspectLayer(aspect)
@@ -266,10 +279,41 @@ export default function App() {
     }
 
     const controller = new AbortController()
+
+    async function syncTraversability() {
+      try {
+        const nextTraversableLayer = await fetchLayer('traversable', DOWNSAMPLE, {
+          roverId: selectedRoverId,
+          signal: controller.signal,
+        })
+        setTraversableLayer(nextTraversableLayer)
+        setLayerError(null)
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return
+        }
+        setLayerError((error as Error).message)
+      }
+    }
+
+    void syncTraversability()
+
+    return () => {
+      controller.abort()
+    }
+  }, [bootstrapState, selectedRoverId])
+
+  useEffect(() => {
+    if (bootstrapState === 'loading') {
+      return
+    }
+
+    const controller = new AbortController()
     const timer = window.setTimeout(async () => {
       try {
         const nextCostLayer = await fetchLayer('cost', DOWNSAMPLE, {
           weights,
+          roverId: selectedRoverId,
           signal: controller.signal,
         })
         setCostLayer(nextCostLayer)
@@ -286,7 +330,7 @@ export default function App() {
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [bootstrapState, weights])
+  }, [bootstrapState, selectedRoverId, weights])
 
   const handleCellClick = useCallback(
     (row: number, col: number) => {
@@ -305,6 +349,18 @@ export default function App() {
     [clickMode],
   )
 
+  const handleRoverSelect = useCallback((rover: RoverEntry) => {
+    if (rover.id === selectedRoverId) {
+      return
+    }
+
+    setSelectedRoverId(rover.id)
+    setWeights(rover.default_weights)
+    setPlanResult(null)
+    setPlanError(null)
+    setRoutePlaybackStep(null)
+  }, [selectedRoverId])
+
   const handlePlan = async () => {
     if (!start || !goal) {
       return
@@ -316,7 +372,7 @@ export default function App() {
     setRoutePlaybackStep(null)
 
     try {
-      const result = await planRoute(start, goal, weights)
+      const result = await planRoute(start, goal, weights, selectedRoverId)
       setPlanResult(result)
       window.setTimeout(() => mapRef.current?.startAnimation(), 100)
     } catch (error) {
@@ -349,6 +405,7 @@ export default function App() {
   const telemetryPoint = hoverPoint ?? focusPoint
   const waypoints = planResult?.waypoints ?? []
   const activeMapView = MAP_VIEW_OPTIONS.find((option) => option.id === viewMode) ?? MAP_VIEW_OPTIONS[0]
+  const selectedRover = rovers.find((entry) => entry.id === selectedRoverId) ?? null
 
   useEffect(() => {
     if (hoverPoint === null && routePlaybackStep !== null) {
@@ -510,6 +567,49 @@ export default function App() {
                   </p>
                 </div>
               </div>
+            </section>
+
+            <section className="rail-section">
+              <p className="eyebrow">Active Rover</p>
+              <p className="section-note">
+                One rover is used per route. Changing rover refreshes traversability and energy cost.
+              </p>
+              <div className="rover-list">
+                {rovers.map((rover) => (
+                  <button
+                    key={rover.id}
+                    type="button"
+                    className={`rover-card ${selectedRoverId === rover.id ? 'is-active' : ''}`}
+                    onClick={() => handleRoverSelect(rover)}
+                  >
+                    <div className="rover-card-head">
+                      <strong>{rover.name}</strong>
+                      <span>{selectedRoverId === rover.id ? 'Selected' : 'Available'}</span>
+                    </div>
+                    <div className="rover-card-specs">
+                      <span>{rover.e_cap_wh.toFixed(0)} Wh</span>
+                      <span>{rover.v_max_ms.toFixed(2)} m/s</span>
+                      <span>max {rover.slope_max_deg.toFixed(0)} deg</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {selectedRover && (
+                <div className="coord-readout rover-summary-grid">
+                  <div className="coord-card">
+                    <span className="coord-label">Battery / Shadow</span>
+                    <strong className="coord-value">
+                      {selectedRover.e_cap_wh.toFixed(0)} Wh / {selectedRover.h_max_shadow_h.toFixed(0)} h
+                    </strong>
+                  </div>
+                  <div className="coord-card">
+                    <span className="coord-label">Mass / Speed</span>
+                    <strong className="coord-value">
+                      {selectedRover.mass_kg.toFixed(0)} kg / {selectedRover.v_max_ms.toFixed(2)} m/s
+                    </strong>
+                  </div>
+                </div>
+              )}
             </section>
 
             <section className="rail-section">

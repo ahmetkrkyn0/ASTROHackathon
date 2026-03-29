@@ -97,6 +97,14 @@ def test_health():
     check(r.json()["status"] == "ok", "health.status == ok")
 
 
+def test_rovers_returns_catalog():
+    r = client.get("/api/rovers")
+    check(r.status_code == 200, "GET /api/rovers returns 200")
+    body = r.json()
+    check(body["default_rover_id"] == "lpr_1", "default rover id is exposed")
+    check(any(entry["id"] == "nasa_viper" for entry in body["rovers"]), "catalog includes NASA VIPER")
+
+
 # ── 503 when no grids loaded ──────────────────────────────────────────────────
 
 def test_plan_503_when_no_grids():
@@ -228,6 +236,29 @@ def test_cost_layer_respects_weight_overrides():
     )
 
 
+def test_rover_specific_traversability_changes_with_slope_limit():
+    grids = _make_grids(slope_val=23.0)
+    _inject_grids(grids)
+
+    default_plan = client.post("/api/plan", json={
+        "start": {"row": 0, "col": 0},
+        "goal": {"row": 0, "col": 1},
+        "rover_id": "lpr_1",
+    })
+    viper_plan = client.post("/api/plan", json={
+        "start": {"row": 0, "col": 0},
+        "goal": {"row": 0, "col": 1},
+        "rover_id": "nasa_viper",
+    })
+    viper_layer = client.get("/api/layers/traversable?downsample=1&rover_id=nasa_viper")
+
+    check(default_plan.status_code == 200, "default rover can traverse 23deg slope cell")
+    check(viper_plan.status_code == 422, "VIPER blocks 23deg slope cell")
+    check("not traversable" in viper_plan.json()["detail"].lower(), "VIPER plan explains traversability")
+    check(viper_layer.status_code == 200, "rover-aware traversability layer returns 200")
+    check(viper_layer.json()["data"][0][0] == 0, "VIPER traversability layer blocks steep cell")
+
+
 def test_geo_input_with_metadata_origin_accepted():
     grids = _make_grids()
     grids["metadata"]["origin"] = {"x": 176000.0, "y": 48000.0}
@@ -333,6 +364,7 @@ def test_astar_metrics_and_summary_are_separate():
 if __name__ == "__main__":
     tests = [
         test_health,
+        test_rovers_returns_catalog,
         test_plan_503_when_no_grids,
         test_weights_out_of_range,
         test_weights_default_accepted,
@@ -343,6 +375,7 @@ if __name__ == "__main__":
         test_goal_out_of_bounds,
         test_cell_telemetry_returns_backend_values,
         test_cost_layer_respects_weight_overrides,
+        test_rover_specific_traversability_changes_with_slope_limit,
         test_geo_input_with_metadata_origin_accepted,
         test_impassable_start_returns_422,
         test_impassable_goal_returns_422,
