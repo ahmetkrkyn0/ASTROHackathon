@@ -1,0 +1,32 @@
+{
+  "origin": {
+    "x": 176000.0,
+    "y": 48000.0
+  },
+  "resolution_m": 80.0,
+  "shape": [
+    500,
+    500
+  ],
+  "crs": "PROJCS[\"Moon (2015) - Sphere / Ocentric / South Polar\",GEOGCS[\"Moon (2015) - Sphere / Ocentric\",DATUM[\"Moon (2015) - Sphere\",SPHEROID[\"Moon (2015) - Sphere\",1737400,0]],PRIMEM[\"Reference Meridian\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]]],PROJECTION[\"Polar_Stereographic\"],PARAMETER[\"latitude_of_origin\",-90],PARAMETER[\"central_meridian\",0],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1],AXIS[\"Easting\",NORTH],AXIS[\"Northing\",NORTH]]",
+  "window_offset": {
+    "row": 3200,
+    "col": 6000
+  },
+  "grids": [
+    "elevation_grid",
+    "slope_grid",
+    "aspect_grid",
+    "shadow_ratio_grid",
+    "thermal_grid",
+    "traversability_grid",
+    "cost_grid"
+  ],
+  "cost_weights": {
+    "w_slope": 0.409,
+    "w_energy": 0.259,
+    "w_shadow": 0.142,
+    "w_thermal": 0.19
+  },
+  "cost_model": "weighted_cell_cost_without_barrier"
+}
