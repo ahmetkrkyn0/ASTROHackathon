@@ -49,12 +49,12 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
-      alpha: false,
+      alpha: true,
       powerPreference: 'high-performance',
     })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.4))
     renderer.setSize(container.clientWidth, container.clientHeight, false)
-    renderer.setClearColor(0x020308, 1)
+    renderer.setClearColor(0x000000, 0)
     renderer.outputColorSpace = THREE.SRGBColorSpace
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.2
@@ -72,9 +72,7 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
     fillLight.position.set(-4.5, -1.6, -3.3)
     scene.add(ambientLight, hemisphereLight, keyLight, fillLight)
 
-    const starField = createStarField(5600, 32, 92, 0.038, [0xfafcff, 0x9db0ff, 0xd7dceb])
-    const starFieldFar = createStarField(2600, 52, 128, 0.07, [0xffffff, 0xc8d1ff])
-    scene.add(starField, starFieldFar)
+    // Stars come from the background image, no programmatic star fields needed
 
     const moonGroup = new THREE.Group()
     moonGroup.position.set(0.12, 0.02, 0)
@@ -242,9 +240,6 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
       keyLight.position.x = 4.4 + Math.sin(elapsed * 0.18) * 0.12
       keyLight.position.y = 1.6 + Math.cos(elapsed * 0.14) * 0.06
       fillLight.position.x = -4.5 + Math.cos(elapsed * 0.16) * 0.08
-      starField.rotation.y += 0.00006
-      starFieldFar.rotation.y += 0.00002
-
       renderer.render(scene, camera)
     }
 
@@ -267,8 +262,6 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
       moonMaterial.dispose()
       rimMaterial.dispose()
       glowMaterial.dispose()
-      disposePoints(starField)
-      disposePoints(starFieldFar)
       renderer.dispose()
 
       if (container.contains(renderer.domElement)) {
@@ -416,61 +409,6 @@ function createMoonCanvasTexture(image: HTMLImageElement | ImageBitmap): THREE.C
   texture.magFilter = THREE.LinearFilter
   texture.needsUpdate = true
   return texture
-}
-
-function createStarField(
-  count: number,
-  innerRadius: number,
-  outerRadius: number,
-  pointSize: number,
-  palette: number[],
-) {
-  const geometry = new THREE.BufferGeometry()
-  const positions = new Float32Array(count * 3)
-  const colors = new Float32Array(count * 3)
-
-  for (let i = 0; i < count; i += 1) {
-    const radius = innerRadius + Math.random() * (outerRadius - innerRadius)
-    const theta = Math.random() * Math.PI * 2
-    const phi = Math.acos(2 * Math.random() - 1)
-    const sinPhi = Math.sin(phi)
-    const color = new THREE.Color(palette[Math.floor(Math.random() * palette.length)])
-
-    positions[i * 3] = radius * sinPhi * Math.cos(theta)
-    positions[i * 3 + 1] = radius * Math.cos(phi)
-    positions[i * 3 + 2] = radius * sinPhi * Math.sin(theta)
-
-    colors[i * 3] = color.r
-    colors[i * 3 + 1] = color.g
-    colors[i * 3 + 2] = color.b
-  }
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-
-  return new THREE.Points(
-    geometry,
-    new THREE.PointsMaterial({
-      size: pointSize,
-      transparent: true,
-      opacity: 0.82,
-      sizeAttenuation: true,
-      vertexColors: true,
-      depthWrite: false,
-    }),
-  )
-}
-
-function disposePoints(points: THREE.Points) {
-  points.geometry.dispose()
-
-  const material = points.material
-  if (Array.isArray(material)) {
-    material.forEach((entry) => entry.dispose())
-    return
-  }
-
-  material.dispose()
 }
 
 function clamp01(value: number) {
