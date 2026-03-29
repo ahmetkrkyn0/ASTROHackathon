@@ -21,7 +21,7 @@ import {
 } from './colormap'
 
 const CANVAS_SIZE = 500
-const DOWNSAMPLE = 2
+const DOWNSAMPLE = 1
 
 export type ClickMode = 'start' | 'goal' | 'idle'
 export type MapViewMode =
