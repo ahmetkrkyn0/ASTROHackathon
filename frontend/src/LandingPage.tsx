@@ -5,7 +5,7 @@ interface LandingPageProps {
   onExplore: () => void
 }
 
-const BASE_CAMERA_DISTANCE = 3.42
+const BASE_CAMERA_DISTANCE = 5.8
 const EXPLORE_DURATION_MS = 1350
 const MOON_TEXTURE_PATH = '/textures/moon-lroc-wac-global-1024.jpg'
 
@@ -183,7 +183,7 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
       }
 
       event.preventDefault()
-      state.targetDistance = THREE.MathUtils.clamp(state.targetDistance + event.deltaY * 0.0032, 2.26, 5.35)
+      state.targetDistance = THREE.MathUtils.clamp(state.targetDistance + event.deltaY * 0.0032, 3.2, 8.0)
     }
 
     const resize = () => {
@@ -220,7 +220,7 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
       if (exploringRef.current) {
         state.exploreProgress = Math.min(1, state.exploreProgress + 0.018)
         const eased = 1 - (1 - state.exploreProgress) ** 3
-        state.targetDistance = THREE.MathUtils.lerp(BASE_CAMERA_DISTANCE, 1.46, eased)
+        state.targetDistance = THREE.MathUtils.lerp(BASE_CAMERA_DISTANCE, 2.4, eased)
         moonMesh.rotation.y += 0.011
         moonMesh.rotation.x = THREE.MathUtils.lerp(moonMesh.rotation.x, 0.1, 0.026)
         glowMaterial.opacity = 0.36 + state.exploreProgress * 0.14
