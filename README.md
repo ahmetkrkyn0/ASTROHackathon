@@ -1,4 +1,3 @@
 # ASTROHackathon
 
-Tuna
-Ahmet
+
