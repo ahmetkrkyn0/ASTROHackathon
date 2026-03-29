@@ -523,6 +523,9 @@ export default function App() {
   const missionStatus = layerError ? 'ATTN' : planning ? 'PLANNING' : planResult ? 'LOCKED' : 'NOMINAL'
   const appIsVisible = phase === 'app'
 
+  const [leftOpen, setLeftOpen] = useState(true)
+  const [rightOpen, setRightOpen] = useState(true)
+
   return (
     <>
       {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
@@ -553,145 +556,102 @@ export default function App() {
         </div>
       </header>
 
-      <main className="content-grid">
-        <aside className="left-rail">
-          <div className="rail-scroll">
-            <section className="rail-section">
-              <div className="rail-section-header">
-                <div className="avatar-tile">MC</div>
-                <div>
-                  <p className="panel-kicker">Mission Workspace</p>
-                  <h2 className="panel-title">South Pole Route Planner</h2>
-                  <p className="panel-description">
-                    Review terrain, place mission points, and generate a safer rover corridor.
+      <main className={`content-grid ${!leftOpen ? 'left-collapsed' : ''} ${!rightOpen ? 'right-collapsed' : ''}`}>
+        <aside className={`left-rail ${!leftOpen ? 'is-collapsed' : ''}`}>
+          <button type="button" className="rail-toggle rail-toggle--left" onClick={() => setLeftOpen((v) => !v)} aria-label={leftOpen ? 'Collapse left panel' : 'Expand left panel'}>
+            {leftOpen ? '\u2039' : '\u203A'}
+          </button>
+          {leftOpen && (
+            <>
+              <div className="rail-scroll">
+                <section className="rail-section">
+                  <div className="rail-section-header">
+                    <div className="avatar-tile">MC</div>
+                    <div>
+                      <p className="panel-kicker">Mission Workspace</p>
+                      <h2 className="panel-title">South Pole Route Planner</h2>
+                      <p className="panel-description">
+                        Review terrain, place mission points, and generate a safer rover corridor.
+                      </p>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rail-section">
+                  <p className="eyebrow">Active Rover</p>
+                  <p className="section-note">
+                    One rover is used per route. Changing rover refreshes traversability and energy cost.
                   </p>
-                </div>
-              </div>
-            </section>
-
-            <section className="rail-section">
-              <p className="eyebrow">Active Rover</p>
-              <p className="section-note">
-                One rover is used per route. Changing rover refreshes traversability and energy cost.
-              </p>
-              <div className="rover-list">
-                {rovers.map((rover) => (
-                  <button
-                    key={rover.id}
-                    type="button"
-                    className={`rover-card ${selectedRoverId === rover.id ? 'is-active' : ''}`}
-                    onClick={() => handleRoverSelect(rover)}
-                  >
-                    <div className="rover-card-head">
-                      <strong>{rover.name}</strong>
-                      <span>{selectedRoverId === rover.id ? 'Selected' : 'Available'}</span>
-                    </div>
-                    <div className="rover-card-specs">
-                      <span>{rover.e_cap_wh.toFixed(0)} Wh</span>
-                      <span>{rover.v_max_ms.toFixed(2)} m/s</span>
-                      <span>max {rover.slope_max_deg.toFixed(0)} deg</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-              {selectedRover && (
-                <div className="coord-readout rover-summary-grid">
-                  <div className="coord-card">
-                    <span className="coord-label">Battery / Shadow</span>
-                    <strong className="coord-value">
-                      {selectedRover.e_cap_wh.toFixed(0)} Wh / {selectedRover.h_max_shadow_h.toFixed(0)} h
-                    </strong>
+                  <div className="rover-list">
+                    {rovers.map((rover) => (
+                      <button
+                        key={rover.id}
+                        type="button"
+                        className={`rover-card ${selectedRoverId === rover.id ? 'is-active' : ''}`}
+                        onClick={() => handleRoverSelect(rover)}
+                      >
+                        <div className="rover-card-head">
+                          <strong>{rover.name}</strong>
+                          <span>{selectedRoverId === rover.id ? 'Selected' : 'Available'}</span>
+                        </div>
+                        <div className="rover-card-specs">
+                          <span>{rover.e_cap_wh.toFixed(0)} Wh</span>
+                          <span>{rover.v_max_ms.toFixed(2)} m/s</span>
+                          <span>max {rover.slope_max_deg.toFixed(0)} deg</span>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                  <div className="coord-card">
-                    <span className="coord-label">Mass / Speed</span>
-                    <strong className="coord-value">
-                      {selectedRover.mass_kg.toFixed(0)} kg / {selectedRover.v_max_ms.toFixed(2)} m/s
-                    </strong>
+                  {selectedRover && (
+                    <div className="coord-readout rover-summary-grid">
+                      <div className="coord-card">
+                        <span className="coord-label">Battery / Shadow</span>
+                        <strong className="coord-value">
+                          {selectedRover.e_cap_wh.toFixed(0)} Wh / {selectedRover.h_max_shadow_h.toFixed(0)} h
+                        </strong>
+                      </div>
+                      <div className="coord-card">
+                        <span className="coord-label">Mass / Speed</span>
+                        <strong className="coord-value">
+                          {selectedRover.mass_kg.toFixed(0)} kg / {selectedRover.v_max_ms.toFixed(2)} m/s
+                        </strong>
+                      </div>
+                    </div>
+                  )}
+                </section>
+
+                <section className="rail-section">
+                  <p className="eyebrow">Route Priorities</p>
+                  <p className="section-note">
+                    Increase a priority to make the planner avoid that condition more aggressively.
+                  </p>
+                  <div className="slider-stack">
+                    {WEIGHT_CONTROLS.map(({ key, label }) => (
+                      <label key={key} className="slider-row">
+                        <span className="slider-head">
+                          <span className="slider-name">{label}</span>
+                          <span className="slider-value">{weights[key].toFixed(3)}</span>
+                        </span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={2}
+                          step={0.01}
+                          value={weights[key]}
+                          onChange={(event) => {
+                            const nextValue = Number.parseFloat(event.target.value)
+                            setWeights((current) => ({ ...current, [key]: nextValue }))
+                            setPlanResult(null)
+                            setPlanError(null)
+                          }}
+                        />
+                      </label>
+                    ))}
                   </div>
-                </div>
-              )}
-            </section>
-
-            <section className="rail-section">
-              <p className="eyebrow">Route Control</p>
-              <div className={`status-pill status-pill--${mapStatusTone}`}>{mapStatus}</div>
-              <p className="section-note">{routeGuidance}</p>
-              <div className="coord-chip-grid">
-                <button
-                  type="button"
-                  className={`coord-chip ${clickMode === 'start' ? 'is-start' : ''}`}
-                  onClick={() => setClickMode(clickMode === 'start' ? 'idle' : 'start')}
-                >
-                  {start ? `START ${start[0]},${start[1]}` : 'Select Start'}
-                </button>
-                <button
-                  type="button"
-                  className={`coord-chip ${clickMode === 'goal' ? 'is-goal' : ''}`}
-                  onClick={() => setClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
-                >
-                  {goal ? `GOAL ${goal[0]},${goal[1]}` : 'Select Goal'}
-                </button>
+                </section>
               </div>
-              <div className="coord-readout">
-                <div className="coord-card">
-                  <span className="coord-label">Lat / Lon</span>
-                  <strong className="coord-value">
-                    {formatLatitude(focusTelemetry.lat)} / {formatLongitude(focusTelemetry.lon)}
-                  </strong>
-                </div>
-                <div className="coord-card">
-                  <span className="coord-label">Alt / Temp</span>
-                  <strong className="coord-value">
-                    {formatAltitude(focusTelemetry.altitudeM)} / {formatTemperature(focusTelemetry.thermalC)}
-                  </strong>
-                </div>
-              </div>
-            </section>
-
-            <section className="rail-section">
-              <p className="eyebrow">Route Priorities</p>
-              <p className="section-note">
-                Increase a priority to make the planner avoid that condition more aggressively.
-              </p>
-              <div className="slider-stack">
-                {WEIGHT_CONTROLS.map(({ key, label }) => (
-                  <label key={key} className="slider-row">
-                    <span className="slider-head">
-                      <span className="slider-name">{label}</span>
-                      <span className="slider-value">{weights[key].toFixed(3)}</span>
-                    </span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={2}
-                      step={0.01}
-                      value={weights[key]}
-                      onChange={(event) => {
-                        const nextValue = Number.parseFloat(event.target.value)
-                        setWeights((current) => ({ ...current, [key]: nextValue }))
-                        setPlanResult(null)
-                        setPlanError(null)
-                      }}
-                    />
-                  </label>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <div className="left-actions">
-            <button type="button" className="ghost-btn" onClick={handleReset}>
-              Clear Points
-            </button>
-            <button
-              type="button"
-              className="primary-btn"
-              onClick={handlePlan}
-              disabled={!start || !goal || planning}
-            >
-              {planning ? 'Generating route...' : 'Generate Route'}
-            </button>
-          </div>
+            </>
+          )}
         </aside>
 
         <section className="center-stage">
@@ -706,6 +666,40 @@ export default function App() {
                 <span className="map-data-value">{formatAltitude(focusTelemetry.altitudeM)}</span>
                 <span className="map-data-label">TMP</span>
                 <span className="map-data-value">{formatTemperature(focusTelemetry.thermalC)}</span>
+              </div>
+
+              <div className="route-control-inline">
+                <div className={`status-pill status-pill--${mapStatusTone}`}>{mapStatus}</div>
+                <p className="section-note">{routeGuidance}</p>
+                <div className="coord-chip-grid">
+                  <button
+                    type="button"
+                    className={`coord-chip ${clickMode === 'start' ? 'is-start' : ''}`}
+                    onClick={() => setClickMode(clickMode === 'start' ? 'idle' : 'start')}
+                  >
+                    {start ? `START ${start[0]},${start[1]}` : 'Select Start'}
+                  </button>
+                  <button
+                    type="button"
+                    className={`coord-chip ${clickMode === 'goal' ? 'is-goal' : ''}`}
+                    onClick={() => setClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
+                  >
+                    {goal ? `GOAL ${goal[0]},${goal[1]}` : 'Select Goal'}
+                  </button>
+                </div>
+                <div className="route-control-actions">
+                  <button type="button" className="ghost-btn" onClick={handleReset}>
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    onClick={handlePlan}
+                    disabled={!start || !goal || planning}
+                  >
+                    {planning ? 'Planning...' : 'Generate Route'}
+                  </button>
+                </div>
               </div>
             </div>
             <div className="map-overlay-top-right">
@@ -767,7 +761,12 @@ export default function App() {
           </div>
         </section>
 
-        <aside className="right-rail">
+        <aside className={`right-rail ${!rightOpen ? 'is-collapsed' : ''}`}>
+          <button type="button" className="rail-toggle rail-toggle--right" onClick={() => setRightOpen((v) => !v)} aria-label={rightOpen ? 'Collapse right panel' : 'Expand right panel'}>
+            {rightOpen ? '\u203A' : '\u2039'}
+          </button>
+          {rightOpen && (
+            <>
           <div className="telemetry-header">
             <div>
               <p className="panel-kicker">Mission Snapshot</p>
@@ -905,6 +904,8 @@ export default function App() {
               </div>
             </section>
           </div>
+            </>
+          )}
         </aside>
       </main>
 
