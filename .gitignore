@@ -32,3 +32,29 @@ data/processed/
 .DS_Store
 Thumbs.db
 *.log
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+
+# Environment files
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Frontend dependencies and caches
+frontend/node_modules/
+frontend/.vite/
+
+# Frontend build output
+frontend/dist/
+frontend/coverage/
+
+# Package manager logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
