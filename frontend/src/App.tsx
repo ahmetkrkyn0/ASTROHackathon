@@ -32,6 +32,7 @@ const DEFAULT_POINT: [number, number] = [250, 250]
 const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
 const BATTERY_RADIUS = 58
 const BATTERY_CIRCUMFERENCE = 2 * Math.PI * BATTERY_RADIUS
+const TOAST_DURATION_MS = 5200
 const LOADING_STEPS = [
   { delayMs: 160, progress: 28, message: 'Loading terrain matrices...' },
   { delayMs: 640, progress: 56, message: 'Resolving thermal field...' },
@@ -94,6 +95,14 @@ interface WaypointPreviewItem {
   accent: string
 }
 
+interface ToastItem {
+  id: number
+  title: string
+  message: string
+  detail?: string
+  tone: 'warning' | 'error'
+}
+
 export default function App() {
   const [phase, setPhase] = useState<AppPhase>('landing')
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>('loading')
@@ -123,8 +132,52 @@ export default function App() {
   const [focusTelemetry, setFocusTelemetry] = useState<FocusTelemetry>(DEFAULT_FOCUS_TELEMETRY)
   const [routePlaybackStep, setRoutePlaybackStep] = useState<number | null>(null)
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null)
+  const [toasts, setToasts] = useState<ToastItem[]>([])
 
   const mapRef = useRef<MapCanvasHandle>(null)
+  const toastIdRef = useRef(0)
+  const toastTimersRef = useRef<number[]>([])
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id))
+  }, [])
+
+  const pushToast = useCallback(
+    (toast: Omit<ToastItem, 'id'>) => {
+      const id = toastIdRef.current + 1
+      toastIdRef.current = id
+
+      setToasts((current) => [...current, { ...toast, id }])
+
+      const timer = window.setTimeout(() => {
+        dismissToast(id)
+      }, TOAST_DURATION_MS)
+      toastTimersRef.current.push(timer)
+    },
+    [dismissToast],
+  )
+
+  useEffect(() => {
+    return () => {
+      toastTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!layerError) {
+      return
+    }
+
+    pushToast(buildToastNotice('layer', layerError))
+  }, [layerError, pushToast])
+
+  useEffect(() => {
+    if (!planError) {
+      return
+    }
+
+    pushToast(buildToastNotice('plan', planError))
+  }, [planError, pushToast])
 
   useEffect(() => {
     async function init() {
@@ -524,9 +577,6 @@ export default function App() {
                 ))}
               </div>
             </section>
-
-            {layerError && <div className="alert-card">{layerError}</div>}
-            {planError && <div className="alert-card">{planError}</div>}
           </div>
 
           <div className="left-actions">
@@ -741,6 +791,26 @@ export default function App() {
           </div>
         </aside>
       </main>
+
+      <div className="toast-stack" aria-live="polite" aria-atomic="true">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast-card toast-card--${toast.tone}`} role="status">
+            <div className="toast-copy">
+              <strong className="toast-title">{toast.title}</strong>
+              <p className="toast-message">{toast.message}</p>
+              {toast.detail && <span className="toast-detail">{toast.detail}</span>}
+            </div>
+            <button
+              type="button"
+              className="toast-dismiss"
+              onClick={() => dismissToast(toast.id)}
+              aria-label="Dismiss notification"
+            >
+              Close
+            </button>
+          </div>
+        ))}
+      </div>
       </div>
     </>
   )
@@ -905,6 +975,39 @@ function formatTemperature(value: number | null): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
+}
+
+function buildToastNotice(source: 'layer' | 'plan', detail: string): Omit<ToastItem, 'id'> {
+  const normalizedDetail = detail.trim()
+  const lowerDetail = normalizedDetail.toLowerCase()
+
+  if (lowerDetail.includes('not traversable')) {
+    return {
+      tone: 'warning',
+      title: 'Selected point is unavailable',
+      message:
+        'That cell cannot be used for routing. Pick a nearby area with safer slope or temperature.',
+      detail: normalizedDetail,
+    }
+  }
+
+  if (source === 'plan') {
+    return {
+      tone: 'warning',
+      title: 'Route could not be generated',
+      message:
+        'The planner could not connect the selected points. Adjust the start, goal, or route priorities and try again.',
+      detail: normalizedDetail,
+    }
+  }
+
+  return {
+    tone: 'error',
+    title: 'Terrain data warning',
+    message:
+      'Some terrain data could not be refreshed. The current view may be temporarily out of date.',
+    detail: normalizedDetail,
+  }
 }
 
 const LEGEND_ITEMS = [
