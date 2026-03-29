@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
+import LandingPage from './LandingPage'
 import MapCanvas, {
   type ClickMode,
   DOWNSAMPLE,
@@ -73,8 +74,15 @@ const DEFAULT_POINT: [number, number] = [250, 250]
 const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
 const BATTERY_RADIUS = 58
 const BATTERY_CIRCUMFERENCE = 2 * Math.PI * BATTERY_RADIUS
+const LOADING_STEPS = [
+  { delayMs: 160, progress: 28, message: 'Loading terrain matrices...' },
+  { delayMs: 640, progress: 56, message: 'Resolving thermal field...' },
+  { delayMs: 1120, progress: 82, message: 'Calibrating rover constraints...' },
+] as const
 
 type RiskLevel = (typeof RISK_LEVELS)[number]
+type BootstrapState = 'loading' | 'ready' | 'error'
+type AppPhase = 'landing' | 'loading' | 'app'
 
 interface FocusTelemetry {
   row: number
@@ -96,6 +104,12 @@ interface WaypointPreviewItem {
 }
 
 export default function App() {
+  const [phase, setPhase] = useState<AppPhase>('landing')
+  const [bootstrapState, setBootstrapState] = useState<BootstrapState>('loading')
+  const [loadingProgress, setLoadingProgress] = useState(0)
+  const [loadingMessage, setLoadingMessage] = useState('Initializing navigation systems...')
+  const [loadingFloorReached, setLoadingFloorReached] = useState(false)
+
   const [elevationLayer, setElevationLayer] = useState<LayerResponse | null>(null)
   const [thermalLayer, setThermalLayer] = useState<LayerResponse | null>(null)
   const [traversableLayer, setTraversableLayer] = useState<LayerResponse | null>(null)
@@ -118,6 +132,7 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
+      setBootstrapState('loading')
       try {
         const health = await checkHealth()
         if (!health.dem_loaded) {
@@ -135,8 +150,10 @@ export default function App() {
         setThermalLayer(thermal)
         setTraversableLayer(traversable)
         setProfiles(fetchedProfiles)
+        setBootstrapState('ready')
       } catch (error) {
         setLayerError((error as Error).message)
+        setBootstrapState('error')
       }
     }
 
@@ -161,6 +178,51 @@ export default function App() {
     availableProfiles.find((profile) => profile.id === selectedProfile) ??
     availableProfiles[0] ??
     FALLBACK_PROFILES[0]
+
+  const handleEnterMission = useCallback(() => {
+    setPhase('loading')
+  }, [])
+
+  useEffect(() => {
+    if (phase !== 'loading') {
+      return
+    }
+
+    setLoadingProgress(8)
+    setLoadingMessage('Initializing navigation systems...')
+    setLoadingFloorReached(false)
+
+    const timers = LOADING_STEPS.map(({ delayMs, progress, message }) =>
+      window.setTimeout(() => {
+        setLoadingProgress(progress)
+        setLoadingMessage(message)
+      }, delayMs),
+    )
+
+    const floorTimer = window.setTimeout(() => {
+      setLoadingFloorReached(true)
+    }, 1500)
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer))
+      window.clearTimeout(floorTimer)
+    }
+  }, [phase])
+
+  useEffect(() => {
+    if (phase !== 'loading' || !loadingFloorReached || bootstrapState === 'loading') {
+      return
+    }
+
+    setLoadingProgress(100)
+    setLoadingMessage(layerError ? 'Mission control online with warnings' : 'Mission ready')
+
+    const timer = window.setTimeout(() => {
+      setPhase('app')
+    }, 420)
+
+    return () => window.clearTimeout(timer)
+  }, [bootstrapState, layerError, loadingFloorReached, phase])
 
   const handleProfileChange = useCallback(
     (profileId: string) => {
@@ -247,10 +309,27 @@ export default function App() {
 
   const hasData = Boolean(elevationLayer && thermalLayer && traversableLayer)
   const missionStatus = layerError ? 'ATTN' : planning ? 'PLANNING' : planResult ? 'LOCKED' : 'NOMINAL'
+  const appIsVisible = phase === 'app'
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
+    <>
+      {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
+
+      <div className={`loading-screen ${phase === 'loading' ? 'is-active' : ''}`}>
+        <div className="loading-frame">
+          <span className="loading-brand">LUNAPATH</span>
+          <div className="loading-bar-track">
+            <div className="loading-bar-fill" style={{ width: `${loadingProgress}%` }} />
+          </div>
+          <div className="loading-copy-row">
+            <span className="loading-copy">{loadingMessage}</span>
+            <span className="loading-percent">{Math.round(loadingProgress)}%</span>
+          </div>
+        </div>
+      </div>
+
+      <div className={`app-shell ${appIsVisible ? 'is-visible' : 'is-hidden'}`}>
+        <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-mark">LUNAPATH</span>
         </div>
@@ -577,7 +656,8 @@ export default function App() {
           <span className="footer-copy">{focusTelemetry.resolutionM.toFixed(0)} M/PIX</span>
         </div>
       </footer>
-    </div>
+      </div>
+    </>
   )
 }
 
