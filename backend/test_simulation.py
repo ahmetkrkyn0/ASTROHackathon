@@ -164,7 +164,7 @@ def test_shadow_heater_contribution():
 # ── simulate_path — battery floor ─────────────────────────────────────────────
 
 def test_battery_does_not_go_negative():
-    # Very steep + many steps: battery should floor at 0
+    # Very steep + many steps: battery should never go negative
     grids = _flat_grids(slope=24.0, shadow=1.0)
     # Build a path that stays within GRID_SHAPE (50x50)
     path = [[0, i] for i in range(GRID_SHAPE[1])]
@@ -172,6 +172,23 @@ def test_battery_does_not_go_negative():
     for s in states:
         check(s.battery_wh >= 0.0, f"battery_wh >= 0 at step {s.step}")
         check(s.battery_pct >= 0.0, f"battery_pct >= 0 at step {s.step}")
+
+
+def test_battery_recharges_to_full_when_depleted():
+    grids = _flat_grids(slope=24.0, shadow=1.0)
+    path = [[0, i] for i in range(GRID_SHAPE[1])]
+    states = simulate_path(_astar_result(path), *grids)
+
+    recharge_steps = [
+        i for i in range(1, len(states))
+        if states[i].battery_pct > states[i - 1].battery_pct + 1e-6
+    ]
+
+    check(len(recharge_steps) > 0, "battery recharge happens on long traversal")
+    check(
+        any(abs(states[i].battery_pct - 100.0) < 1e-6 for i in recharge_steps),
+        "recharged state returns to 100%",
+    )
 
 
 # ── simulate_path — cumulative fields ────────────────────────────────────────
@@ -281,6 +298,7 @@ if __name__ == "__main__":
         test_diagonal_step,
         test_shadow_heater_contribution,
         test_battery_does_not_go_negative,
+        test_battery_recharges_to_full_when_depleted,
         test_cumulative_distance_monotone,
         test_cumulative_cost_matches_sum,
         test_to_dict_rounds_floats,

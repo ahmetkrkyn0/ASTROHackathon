@@ -118,7 +118,9 @@ def simulate_path(
     Returns
     -------
     List[RoverState]
-        One RoverState per path node, in traversal order.
+        One RoverState per path node, in traversal order. If the battery is
+        depleted mid-mission, it is instantly restored to 100% and the
+        simulation continues.
 
     Raises
     ------
@@ -172,7 +174,11 @@ def simulate_path(
         step_energy = drive_energy + heater_energy + idle_energy
 
         # 6. Battery state
-        battery_wh = max(0.0, battery_wh - step_energy)
+        battery_wh -= step_energy
+        if i > 0 and battery_wh <= 0.0:
+            # Mission rule: if the pack is depleted, it is immediately
+            # restored to full charge and traversal continues.
+            battery_wh = BATTERY_CAPACITY_WH
         battery_pct = battery_wh / BATTERY_CAPACITY_WH * 100.0
 
         # 7. Risk level
