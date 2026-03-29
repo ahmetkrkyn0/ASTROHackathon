@@ -142,6 +142,7 @@ export default function App() {
   const [planError, setPlanError] = useState<string | null>(null)
   const [focusTelemetry, setFocusTelemetry] = useState<FocusTelemetry>(DEFAULT_FOCUS_TELEMETRY)
   const [routePlaybackStep, setRoutePlaybackStep] = useState<number | null>(null)
+  const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null)
 
   const mapRef = useRef<MapCanvasHandle>(null)
 
@@ -297,15 +298,17 @@ export default function App() {
     setPlanResult(null)
     setPlanError(null)
     setClickMode('idle')
+    setHoverPoint(null)
     setRoutePlaybackStep(null)
   }
 
   const hasData = Boolean(elevationLayer && thermalLayer && traversableLayer)
   const focusPoint = goal ?? start ?? DEFAULT_POINT
+  const telemetryPoint = hoverPoint ?? focusPoint
   const waypoints = planResult?.waypoints ?? []
 
   useEffect(() => {
-    if (routePlaybackStep !== null) {
+    if (hoverPoint === null && routePlaybackStep !== null) {
       return
     }
 
@@ -314,17 +317,22 @@ export default function App() {
       return
     }
 
+    const controller = new AbortController()
     let cancelled = false
+    const delayMs = hoverPoint ? 90 : 0
 
     async function syncFocusTelemetry(point: [number, number]) {
       try {
-        const telemetry = await fetchCellTelemetry(point[0], point[1])
+        const telemetry = await fetchCellTelemetry(point[0], point[1], controller.signal)
         if (cancelled) {
           return
         }
 
         setFocusTelemetry(mapFocusTelemetryResponse(telemetry))
       } catch {
+        if (controller.signal.aborted) {
+          return
+        }
         if (!cancelled) {
           setFocusTelemetry((current) => ({
             ...current,
@@ -335,15 +343,19 @@ export default function App() {
       }
     }
 
-    void syncFocusTelemetry(focusPoint)
+    const timer = window.setTimeout(() => {
+      void syncFocusTelemetry(telemetryPoint)
+    }, delayMs)
 
     return () => {
       cancelled = true
+      controller.abort()
+      window.clearTimeout(timer)
     }
-  }, [focusPoint, hasData, routePlaybackStep])
+  }, [hasData, hoverPoint, routePlaybackStep, telemetryPoint])
 
   useEffect(() => {
-    if (routePlaybackStep === null) {
+    if (hoverPoint !== null || routePlaybackStep === null) {
       return
     }
 
@@ -353,7 +365,7 @@ export default function App() {
     }
 
     setFocusTelemetry((current) => mapWaypointToFocusTelemetry(activeWaypoint, current))
-  }, [routePlaybackStep, waypoints])
+  }, [hoverPoint, routePlaybackStep, waypoints])
 
   const summary = planResult?.summary
   const metrics = planResult?.astar_metrics
@@ -371,7 +383,9 @@ export default function App() {
 
   const riskState = resolveRiskState(riskCounts)
   const mapStatus =
-    clickMode === 'start'
+    hoverPoint
+      ? 'Inspecting cell'
+      : clickMode === 'start'
       ? 'Select START on map'
       : clickMode === 'goal'
         ? 'Select GOAL on map'
@@ -579,6 +593,7 @@ export default function App() {
                 resolutionM={focusTelemetry.resolutionM}
                 onCellClick={handleCellClick}
                 onAnimationStepChange={setRoutePlaybackStep}
+                onHoverCellChange={setHoverPoint}
               />
             </div>
 

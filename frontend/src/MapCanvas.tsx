@@ -35,6 +35,7 @@ interface Props {
   resolutionM: number
   onCellClick: (row: number, col: number) => void
   onAnimationStepChange?: (step: number | null) => void
+  onHoverCellChange?: (cell: [number, number] | null) => void
 }
 
 export interface MapCanvasHandle {
@@ -54,6 +55,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     resolutionM,
     onCellClick,
     onAnimationStepChange,
+    onHoverCellChange,
   },
   ref,
 ) {
@@ -61,6 +63,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   const baseImageRef = useRef<ImageData | null>(null)
   const animationTimerRef = useRef<number | null>(null)
   const [animStep, setAnimStep] = useState<number | null>(null)
+  const [hoverCell, setHoverCell] = useState<[number, number] | null>(null)
 
   const stopAnimation = useCallback(() => {
     if (animationTimerRef.current !== null) {
@@ -90,7 +93,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     })
 
     baseImageRef.current = imageData
-    redraw(ctx, imageData, waypoints, start, goal, animStep)
+    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell)
   }, [elevationGrid, resolutionM, thermalGrid, traversableGrid, viewMode])
 
   useEffect(() => {
@@ -104,8 +107,8 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       return
     }
 
-    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep)
-  }, [animStep, goal, start, waypoints])
+    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell)
+  }, [animStep, goal, hoverCell, start, waypoints])
 
   useEffect(() => {
     if (!waypoints || waypoints.length === 0) {
@@ -117,6 +120,10 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   useEffect(() => {
     onAnimationStepChange?.(animStep)
   }, [animStep, onAnimationStepChange])
+
+  useEffect(() => {
+    onHoverCellChange?.(hoverCell)
+  }, [hoverCell, onHoverCellChange])
 
   const startAnimation = useCallback(() => {
     if (!waypoints || waypoints.length === 0) {
@@ -150,29 +157,42 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
-      if (clickMode === 'idle') {
-        return
-      }
-
       const canvas = canvasRef.current
       if (!canvas) {
         return
       }
 
-      const rect = canvas.getBoundingClientRect()
-      const scaleX = CANVAS_SIZE / rect.width
-      const scaleY = CANVAS_SIZE / rect.height
-      const col = Math.floor((event.clientX - rect.left) * scaleX)
-      const row = Math.floor((event.clientY - rect.top) * scaleY)
-
-      if (col < 0 || col >= CANVAS_SIZE || row < 0 || row >= CANVAS_SIZE) {
+      const cell = getCanvasCell(canvas, event.clientX, event.clientY)
+      if (!cell || clickMode === 'idle') {
         return
       }
 
-      onCellClick(row, col)
+      onCellClick(cell[0], cell[1])
     },
     [clickMode, onCellClick],
   )
+
+  const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) {
+      return
+    }
+
+    const nextCell = getCanvasCell(canvas, event.clientX, event.clientY)
+    setHoverCell((current) => {
+      if (!nextCell) {
+        return null
+      }
+      if (current && current[0] === nextCell[0] && current[1] === nextCell[1]) {
+        return current
+      }
+      return nextCell
+    })
+  }, [])
+
+  const handleMouseLeave = useCallback(() => {
+    setHoverCell(null)
+  }, [])
 
   const cursorLabel =
     clickMode === 'start' ? 'Click to set START' :
@@ -199,6 +219,8 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
         width={CANVAS_SIZE}
         height={CANVAS_SIZE}
         onClick={handleClick}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
         style={{
           width: '100%',
           height: '100%',
@@ -264,6 +286,7 @@ function redraw(
   start: [number, number] | null,
   goal: [number, number] | null,
   currentStep: number | null,
+  hoverCell: [number, number] | null,
 ) {
   if (baseImage) {
     ctx.putImageData(baseImage, 0, 0)
@@ -313,6 +336,63 @@ function redraw(
 
   drawMarker(ctx, start, '#00e676', 'S')
   drawMarker(ctx, goal, '#ff1744', 'G')
+  drawHoverCrosshair(ctx, hoverCell)
+}
+
+function getCanvasCell(
+  canvas: HTMLCanvasElement,
+  clientX: number,
+  clientY: number,
+): [number, number] | null {
+  const rect = canvas.getBoundingClientRect()
+  const scaleX = CANVAS_SIZE / rect.width
+  const scaleY = CANVAS_SIZE / rect.height
+  const col = Math.floor((clientX - rect.left) * scaleX)
+  const row = Math.floor((clientY - rect.top) * scaleY)
+
+  if (col < 0 || col >= CANVAS_SIZE || row < 0 || row >= CANVAS_SIZE) {
+    return null
+  }
+
+  return [row, col]
+}
+
+function drawHoverCrosshair(
+  ctx: CanvasRenderingContext2D,
+  hoverCell: [number, number] | null,
+) {
+  if (!hoverCell) {
+    return
+  }
+
+  const [row, col] = hoverCell
+  const x = col + 0.5
+  const y = row + 0.5
+
+  ctx.save()
+  ctx.strokeStyle = 'rgba(196, 203, 255, 0.18)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(x, 0)
+  ctx.lineTo(x, CANVAS_SIZE)
+  ctx.moveTo(0, y)
+  ctx.lineTo(CANVAS_SIZE, y)
+  ctx.stroke()
+
+  ctx.strokeStyle = 'rgba(245, 247, 255, 0.92)'
+  ctx.lineWidth = 1.2
+  ctx.beginPath()
+  ctx.moveTo(x - 8, y)
+  ctx.lineTo(x + 8, y)
+  ctx.moveTo(x, y - 8)
+  ctx.lineTo(x, y + 8)
+  ctx.stroke()
+
+  ctx.fillStyle = '#f5f7ff'
+  ctx.beginPath()
+  ctx.arc(x, y, 1.8, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
 }
 
 function buildBaseImage({

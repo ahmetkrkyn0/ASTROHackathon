@@ -130,12 +130,13 @@ export async function fetchProfiles(): Promise<ProfileEntry[]> {
 export async function fetchCellTelemetry(
   row: number,
   col: number,
+  signal?: AbortSignal,
 ): Promise<FocusTelemetryResponse> {
   const query = new URLSearchParams({
     row: String(row),
     col: String(col),
   })
-  const r = await fetch(`${BASE}/cell-telemetry?${query.toString()}`)
+  const r = await fetch(`${BASE}/cell-telemetry?${query.toString()}`, { signal })
   if (!r.ok) {
     const err = await r.json().catch(() => ({ detail: r.statusText }))
     throw new Error((err as { detail?: string }).detail ?? 'Cell telemetry request failed')
