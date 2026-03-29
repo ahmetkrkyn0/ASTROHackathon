@@ -1,234 +1,384 @@
-"""Multi-criteria A* planner over a weighted lunar grid."""
+"""High-performance A* pathfinder for the LunaPath lunar rover.
+
+Two-phase design:
+  1. Precompute per-cell cost grid via cost_engine.compute_cost_grid()
+     (multi-criteria: slope, energy, shadow, thermal + AHP weights).
+  2. Run A* with trapezoidal edge interpolation over the cost grid.
+
+Edge cost formula:
+  cost(u→v) = distance(u,v) * (1 + (cost_grid[u] + cost_grid[v]) / 2)
+
+Heuristic: Octile distance scaled by (1 + MIN_COST) — admissible & consistent.
+
+Optimisations:
+  - NumPy float32/bool/int32 arrays for g_score, closed, came_from
+  - heapq with lazy duplicate strategy (no decrease-key)
+  - Precomputed 8-direction offset table
+  - Diagonal corner-cutting safety checks
+  - Tie-breaking: (f, h, counter) — prefer nodes closer to goal
+  - Early exit on goal expansion
+"""
 
 from __future__ import annotations
 
 import heapq
 import math
 import time
+from typing import Any
 
 import numpy as np
 
-from . import constants as C
-from .cost_engine import (
-    edge_energy_wh,
-    edge_shadow_hours,
-    f_thermal,
-    resolve_weights,
-    total_edge_cost,
+from .cost_engine import compute_cost_grid, f_thermal
+
+# ── Grid resolution (metres per cell) ──────────────────────────────────────
+_CELL_M = 80.0  # 80 m per grid cell (cardinal)
+_DIAG_M = _CELL_M * math.sqrt(2)  # ≈ 113.14 m (diagonal)
+
+# ── 8-direction offsets: (dr, dc, distance_m, is_diagonal) ─────────────────
+# Precomputed tuple — zero per-iteration allocation.
+_OFFSETS: tuple[tuple[int, int, float, bool], ...] = (
+    (-1,  0, _CELL_M, False),   # N
+    ( 1,  0, _CELL_M, False),   # S
+    ( 0, -1, _CELL_M, False),   # W
+    ( 0,  1, _CELL_M, False),   # E
+    (-1, -1, _DIAG_M, True),    # NW
+    (-1,  1, _DIAG_M, True),    # NE
+    ( 1, -1, _DIAG_M, True),    # SW
+    ( 1,  1, _DIAG_M, True),    # SE
 )
 
-_NEIGHBORS: tuple[tuple[int, int, float], ...] = (
-    (-1, 0, 1.0),
-    (1, 0, 1.0),
-    (0, -1, 1.0),
-    (0, 1, 1.0),
-    (-1, -1, math.sqrt(2)),
-    (-1, 1, math.sqrt(2)),
-    (1, -1, math.sqrt(2)),
-    (1, 1, math.sqrt(2)),
-)
 
+# ════════════════════════════════════════════════════════════════════════════
+#  PUBLIC API
+# ════════════════════════════════════════════════════════════════════════════
 
 def astar(
-    grids: dict,
+    grids: dict[str, Any],
     start: tuple[int, int],
     goal: tuple[int, int],
     weights: dict[str, float] | None = None,
     constraints: dict | None = None,
 ) -> dict:
-    """Run weighted A* and return path plus metrics."""
+    """Run optimised A* and return path + metrics.
+
+    Parameters
+    ----------
+    grids : dict
+        Must contain keys: elevation, slope (or slope_grid), thermal,
+        shadow_ratio, traversable, metadata (with resolution_m).
+    start, goal : (row, col)
+    weights : optional AHP weight overrides
+    constraints : optional constraint overrides (unused in fast mode,
+                  kept for API compat)
+
+    Returns
+    -------
+    dict with keys: path_pixels, metrics, error
+    """
     t0 = time.perf_counter()
 
-    elevation = np.asarray(grids["elevation"], dtype=np.float64)
-    thermal = np.asarray(grids["thermal"], dtype=np.float64)
-    shadow_ratio = np.asarray(grids["shadow_ratio"], dtype=np.float64)
+    # ── Unpack grids ────────────────────────────────────────────────────
     traversable = np.asarray(grids["traversable"], dtype=bool)
+    rows, cols = traversable.shape
     resolution = float(grids["metadata"]["resolution_m"])
 
-    rows, cols = elevation.shape
-    resolved_weights = resolve_weights(weights)
-    cons = {
-        "max_shadow_h": C.H_MAX_SHADOW_H,
-        "max_slope_deg": C.SLOPE_MAX_DEG,
-        "max_energy_wh": C.E_CAP_WH * 0.74,
-        "min_soc": C.SOC_MIN_PCT,
-    }
-    if constraints:
-        cons.update(constraints)
+    # Slope grid — accept both naming conventions
+    slope_grid = np.asarray(
+        grids.get("slope", grids.get("slope_grid", np.zeros((rows, cols)))),
+        dtype=np.float64,
+    )
+    thermal_grid = np.asarray(grids["thermal"], dtype=np.float64)
+    shadow_grid = np.asarray(grids["shadow_ratio"], dtype=np.float64)
+    elevation = np.asarray(grids["elevation"], dtype=np.float64)
 
-    if not _in_bounds(start, rows, cols):
+    # ── Bounds / traversability pre-checks ──────────────────────────────
+    if not _in_bounds(start[0], start[1], rows, cols):
         return _empty_result("Start out of bounds")
-    if not _in_bounds(goal, rows, cols):
+    if not _in_bounds(goal[0], goal[1], rows, cols):
         return _empty_result("Goal out of bounds")
     if not traversable[start]:
         return _empty_result("Start is not traversable")
     if not traversable[goal]:
         return _empty_result("Goal is not traversable")
 
-    def heuristic(row: int, col: int) -> float:
-        # Minimum edge cost floor in cost_engine is 0.01.
-        return math.hypot(goal[0] - row, goal[1] - col) * 0.01
+    # ── Phase 1: Precompute cost grid ───────────────────────────────────
+    # Each traversable cell → [0.01, ∞), blocked cells → inf.
+    cost_grid = compute_cost_grid(
+        slope_grid, thermal_grid, shadow_grid,
+        resolution_m=resolution,
+        traversable=traversable,
+        weights=weights,
+    ).astype(np.float32)
 
-    open_set: list[tuple[float, int, int, int]] = []
-    counter = 0
-    heapq.heappush(open_set, (heuristic(*start), counter, start[0], start[1]))
+    # Derive MIN_COST for heuristic scaling (admissibility guarantee)
+    finite_mask = np.isfinite(cost_grid)
+    if not np.any(finite_mask):
+        return _empty_result("No traversable cells")
+    min_cost = float(np.min(cost_grid[finite_mask]))  # ≥ 0.01
 
-    g_score = np.full((rows, cols), np.inf, dtype=np.float64)
-    g_score[start] = 0.0
-    energy_acc = np.full((rows, cols), np.inf, dtype=np.float64)
-    energy_acc[start] = 0.0
-    shadow_acc = np.full((rows, cols), np.inf, dtype=np.float64)
-    shadow_acc[start] = 0.0
-    came_from = np.full((rows, cols, 2), -1, dtype=np.int32)
-    closed = np.zeros((rows, cols), dtype=bool)
+    # ── Phase 2: A* search ──────────────────────────────────────────────
+    result = _astar_core(
+        cost_grid, traversable, elevation, thermal_grid,
+        start, goal, rows, cols, resolution, min_cost,
+    )
 
-    found = False
+    comp_ms = (time.perf_counter() - t0) * 1000.0
+    if result is None:
+        return _empty_result("No path found", comp_ms)
 
-    while open_set:
-        _, _, cur_r, cur_c = heapq.heappop(open_set)
+    path_pixels, nodes_expanded = result
 
-        if closed[cur_r, cur_c]:
-            continue
-        closed[cur_r, cur_c] = True
-
-        if (cur_r, cur_c) == goal:
-            found = True
-            break
-
-        cur_energy = float(energy_acc[cur_r, cur_c])
-        cur_shadow = float(shadow_acc[cur_r, cur_c])
-
-        for d_row, d_col, distance_mult in _NEIGHBORS:
-            next_r = cur_r + d_row
-            next_c = cur_c + d_col
-            if not _in_bounds((next_r, next_c), rows, cols):
-                continue
-            if closed[next_r, next_c] or not traversable[next_r, next_c]:
-                continue
-
-            d_horiz = resolution * distance_mult
-            dz = float(elevation[next_r, next_c] - elevation[cur_r, cur_c])
-            edge_slope = math.degrees(math.atan2(abs(dz), d_horiz))
-            if edge_slope > min(C.SLOPE_MAX_DEG, float(cons["max_slope_deg"])):
-                continue
-
-            edge_energy = edge_energy_wh(edge_slope, d_horiz)
-            if math.isinf(edge_energy):
-                continue
-            new_energy = cur_energy + edge_energy
-            if new_energy > float(cons["max_energy_wh"]):
-                continue
-
-            soc = 1.0 - new_energy / C.E_CAP_WH
-            if soc < float(cons["min_soc"]):
-                continue
-
-            edge_shadow = edge_shadow_hours(
-                float(shadow_ratio[next_r, next_c]),
-                edge_slope,
-                d_horiz,
-            )
-            if math.isinf(edge_shadow):
-                continue
-            new_shadow = cur_shadow + edge_shadow
-            if new_shadow > float(cons["max_shadow_h"]):
-                continue
-
-            edge_cost = total_edge_cost(
-                edge_slope,
-                d_horiz,
-                new_shadow,
-                float(thermal[next_r, next_c]),
-                weights=resolved_weights,
-                soc=soc,
-            )
-            if math.isinf(edge_cost):
-                continue
-
-            tentative_g = float(g_score[cur_r, cur_c]) + edge_cost
-            if tentative_g >= g_score[next_r, next_c]:
-                continue
-
-            g_score[next_r, next_c] = tentative_g
-            energy_acc[next_r, next_c] = new_energy
-            shadow_acc[next_r, next_c] = new_shadow
-            came_from[next_r, next_c, 0] = cur_r
-            came_from[next_r, next_c, 1] = cur_c
-            counter += 1
-            heapq.heappush(
-                open_set,
-                (tentative_g + heuristic(next_r, next_c), counter, next_r, next_c),
-            )
-
-    comp_time_ms = (time.perf_counter() - t0) * 1000.0
-    if not found:
-        return _empty_result("No path found", comp_time_ms)
-
-    path_pixels = _reconstruct_path(came_from, goal)
-    max_slope = 0.0
-    total_distance = 0.0
-    path_temperatures: list[float] = []
-
-    for row, col in path_pixels:
-        path_temperatures.append(float(thermal[row, col]))
-
-    for idx in range(1, len(path_pixels)):
-        prev_r, prev_c = path_pixels[idx - 1]
-        cur_r, cur_c = path_pixels[idx]
-        distance_mult = math.sqrt(2) if abs(cur_r - prev_r) + abs(cur_c - prev_c) == 2 else 1.0
-        d_horiz = resolution * distance_mult
-        dz = float(elevation[cur_r, cur_c] - elevation[prev_r, prev_c])
-        seg_slope = math.degrees(math.atan2(abs(dz), d_horiz))
-        total_distance += math.sqrt(d_horiz**2 + dz**2)
-        max_slope = max(max_slope, seg_slope)
+    # ── Post-process metrics ────────────────────────────────────────────
+    metrics = _compute_path_metrics(
+        path_pixels, elevation, thermal_grid, cost_grid, resolution, comp_ms,
+        nodes_expanded,
+    )
 
     return {
         "path_pixels": path_pixels,
-        "metrics": {
-            "total_distance_m": round(total_distance, 2),
-            "total_energy_wh": round(float(energy_acc[goal]), 2),
-            "total_shadow_hours": round(float(shadow_acc[goal]), 4),
-            "max_slope_deg": round(max_slope, 2),
-            "max_thermal_risk": round(max(f_thermal(temp) for temp in path_temperatures), 4),
-            "min_surface_temp_c": round(min(path_temperatures), 2),
-            "total_weighted_cost": round(float(g_score[goal]), 4),
-            "path_length_nodes": len(path_pixels),
-            "computation_time_ms": round(comp_time_ms, 1),
-        },
+        "metrics": metrics,
         "error": None,
     }
 
 
-def _empty_result(error: str, comp_time_ms: float = 0.0) -> dict:
-    return {
-        "path_pixels": [],
-        "metrics": {
-            "total_distance_m": 0.0,
-            "total_energy_wh": 0.0,
-            "total_shadow_hours": 0.0,
-            "max_slope_deg": 0.0,
-            "max_thermal_risk": 0.0,
-            "min_surface_temp_c": 0.0,
-            "total_weighted_cost": 0.0,
-            "path_length_nodes": 0,
-            "computation_time_ms": round(comp_time_ms, 1),
-        },
-        "error": error,
-    }
+# ════════════════════════════════════════════════════════════════════════════
+#  A* CORE — tight inner loop
+# ════════════════════════════════════════════════════════════════════════════
+
+def _astar_core(
+    cost_grid: np.ndarray,
+    traversable: np.ndarray,
+    elevation: np.ndarray,
+    thermal: np.ndarray,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    rows: int,
+    cols: int,
+    resolution: float,
+    min_cost: float,
+) -> tuple[list[list[int]], int] | None:
+    """Inner A* loop. Returns (path_pixels, nodes_expanded) or None."""
+
+    # Distance multipliers relative to resolution
+    cardinal_dist = resolution
+    diagonal_dist = resolution * math.sqrt(2)
+
+    # Update offsets with actual resolution
+    offsets = (
+        (-1,  0, cardinal_dist, False),
+        ( 1,  0, cardinal_dist, False),
+        ( 0, -1, cardinal_dist, False),
+        ( 0,  1, cardinal_dist, False),
+        (-1, -1, diagonal_dist, True),
+        (-1,  1, diagonal_dist, True),
+        ( 1, -1, diagonal_dist, True),
+        ( 1,  1, diagonal_dist, True),
+    )
+
+    # ── Heuristic: octile distance × (1 + min_cost) ────────────────────
+    gr, gc = goal
+    h_scale = 1.0 + min_cost  # admissible scaling factor
+
+    def heuristic(r: int, c: int) -> float:
+        dr = abs(r - gr)
+        dc = abs(c - gc)
+        # octile = cardinal_dist * (dr+dc) + (diagonal_dist - 2*cardinal_dist) * min(dr,dc)
+        return h_scale * (
+            cardinal_dist * (dr + dc)
+            + (diagonal_dist - 2.0 * cardinal_dist) * min(dr, dc)
+        )
+
+    # ── NumPy-backed storage ────────────────────────────────────────────
+    total_cells = rows * cols
+
+    g_score = np.full(total_cells, np.inf, dtype=np.float32)
+    closed = np.zeros(total_cells, dtype=np.bool_)
+    came_from = np.full(total_cells, -1, dtype=np.int32)
+
+    # Flatten helpers
+    start_idx = start[0] * cols + start[1]
+    goal_idx = goal[0] * cols + goal[1]
+
+    g_score[start_idx] = 0.0
+    h_start = heuristic(start[0], start[1])
+
+    # Priority queue: (f_score, h_score, counter, flat_index)
+    # Tie-break: lower h preferred (closer to goal)
+    counter = 0
+    open_heap: list[tuple[float, float, int, int]] = []
+    heapq.heappush(open_heap, (h_start, h_start, counter, start_idx))
+
+    nodes_expanded = 0
+
+    # ── Flat cost/traversable views for fast indexing ───────────────────
+    cost_flat = cost_grid.ravel()
+    trav_flat = traversable.ravel()
+
+    while open_heap:
+        f_cur, _, _, cur_idx = heapq.heappop(open_heap)
+
+        # Lazy duplicate skip
+        if closed[cur_idx]:
+            continue
+        closed[cur_idx] = True
+        nodes_expanded += 1
+
+        # Early exit
+        if cur_idx == goal_idx:
+            return _reconstruct_path(came_from, goal_idx, cols), nodes_expanded
+
+        cur_r = cur_idx // cols
+        cur_c = cur_idx % cols
+        cur_g = float(g_score[cur_idx])
+        cur_cost = float(cost_flat[cur_idx])
+
+        for dr, dc, dist, is_diag in offsets:
+            nr = cur_r + dr
+            nc = cur_c + dc
+
+            # Bounds check
+            if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
+                continue
+
+            n_idx = nr * cols + nc
+
+            # Skip closed or non-traversable
+            if closed[n_idx] or not trav_flat[n_idx]:
+                continue
+
+            # ── Diagonal corner-cutting safety ──────────────────────
+            if is_diag:
+                # Both adjacent cardinal cells must be traversable
+                adj1_idx = cur_r * cols + nc  # (cur_r, nc)
+                adj2_idx = nr * cols + cur_c  # (nr, cur_c)
+                if not trav_flat[adj1_idx] or not trav_flat[adj2_idx]:
+                    continue
+
+            # ── Trapezoidal edge cost ───────────────────────────────
+            n_cost = float(cost_flat[n_idx])
+            edge_cost = dist * (1.0 + (cur_cost + n_cost) * 0.5)
+
+            tentative_g = cur_g + edge_cost
+            if tentative_g >= g_score[n_idx]:
+                continue
+
+            g_score[n_idx] = tentative_g
+            came_from[n_idx] = cur_idx
+            h_val = heuristic(nr, nc)
+            counter += 1
+            heapq.heappush(
+                open_heap,
+                (tentative_g + h_val, h_val, counter, n_idx),
+            )
+
+    return None  # No path found
 
 
-def _reconstruct_path(came_from: np.ndarray, goal: tuple[int, int]) -> list[list[int]]:
+# ════════════════════════════════════════════════════════════════════════════
+#  PATH RECONSTRUCTION
+# ════════════════════════════════════════════════════════════════════════════
+
+def _reconstruct_path(
+    came_from: np.ndarray,
+    goal_idx: int,
+    cols: int,
+) -> list[list[int]]:
+    """Walk came_from chain backwards and return [[row,col], ...] start→goal."""
     path: list[list[int]] = []
-    row, col = goal
-    while row != -1 and col != -1:
-        path.append([int(row), int(col)])
-        prev_row = int(came_from[row, col, 0])
-        prev_col = int(came_from[row, col, 1])
-        row, col = prev_row, prev_col
+    idx = goal_idx
+    while idx != -1:
+        r = idx // cols
+        c = idx % cols
+        path.append([r, c])
+        idx = int(came_from[idx])
     path.reverse()
     return path
 
 
-def _in_bounds(node: tuple[int, int], rows: int, cols: int) -> bool:
-    row, col = node
-    return 0 <= row < rows and 0 <= col < cols
+# ════════════════════════════════════════════════════════════════════════════
+#  METRICS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _compute_path_metrics(
+    path_pixels: list[list[int]],
+    elevation: np.ndarray,
+    thermal: np.ndarray,
+    cost_grid: np.ndarray,
+    resolution: float,
+    comp_ms: float,
+    nodes_expanded: int,
+) -> dict:
+    """Compute post-hoc path metrics for API response."""
+    if len(path_pixels) < 2:
+        return _zero_metrics(comp_ms, nodes_expanded)
+
+    total_distance = 0.0
+    max_slope = 0.0
+    total_weighted_cost = 0.0
+    path_temps: list[float] = []
+
+    for i, (r, c) in enumerate(path_pixels):
+        path_temps.append(float(thermal[r, c]))
+        if i == 0:
+            continue
+
+        pr, pc = path_pixels[i - 1]
+        is_diag = abs(r - pr) + abs(c - pc) == 2
+        d_horiz = resolution * (math.sqrt(2) if is_diag else 1.0)
+        dz = float(elevation[r, c] - elevation[pr, pc])
+        seg_slope = math.degrees(math.atan2(abs(dz), d_horiz))
+        total_distance += math.sqrt(d_horiz ** 2 + dz ** 2)
+        max_slope = max(max_slope, seg_slope)
+
+        # Accumulate trapezoidal cost
+        c_prev = float(cost_grid[pr, pc])
+        c_cur = float(cost_grid[r, c])
+        total_weighted_cost += d_horiz * (1.0 + (c_prev + c_cur) * 0.5)
+
+    goal_r, goal_c = path_pixels[-1]
+
+    return {
+        "total_distance_m": round(total_distance, 2),
+        "total_energy_wh": 0.0,  # Not tracked in fast mode
+        "total_shadow_hours": 0.0,  # Not tracked in fast mode
+        "max_slope_deg": round(max_slope, 2),
+        "max_thermal_risk": round(
+            max(f_thermal(t) for t in path_temps), 4
+        ),
+        "min_surface_temp_c": round(min(path_temps), 2),
+        "total_weighted_cost": round(total_weighted_cost, 4),
+        "path_length_nodes": len(path_pixels),
+        "computation_time_ms": round(comp_ms, 1),
+        "nodes_expanded": nodes_expanded,
+    }
+
+
+def _zero_metrics(comp_ms: float = 0.0, nodes_expanded: int = 0) -> dict:
+    return {
+        "total_distance_m": 0.0,
+        "total_energy_wh": 0.0,
+        "total_shadow_hours": 0.0,
+        "max_slope_deg": 0.0,
+        "max_thermal_risk": 0.0,
+        "min_surface_temp_c": 0.0,
+        "total_weighted_cost": 0.0,
+        "path_length_nodes": 0,
+        "computation_time_ms": round(comp_ms, 1),
+        "nodes_expanded": nodes_expanded,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  HELPERS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _empty_result(error: str, comp_time_ms: float = 0.0) -> dict:
+    return {
+        "path_pixels": [],
+        "metrics": _zero_metrics(comp_time_ms),
+        "error": error,
+    }
+
+
+def _in_bounds(r: int, c: int, rows: int, cols: int) -> bool:
+    return 0 <= r < rows and 0 <= c < cols
