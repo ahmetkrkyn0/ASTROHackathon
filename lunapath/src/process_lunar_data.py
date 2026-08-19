@@ -42,11 +42,33 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- Dosya ve sabitler -------------------------------------------------------
-LDEM_FILE = RAW_DIR / "LDEM_80S_80MPP_ADJ.tiff"
-
-WINDOW_SIZE = 500
-RESOLUTION_M = 80.0
+DEFAULT_WINDOW_SIZE = 500
 SLOPE_MAX_DEG = 25.0
+
+
+def find_dem_file(custom_path: str | None = None) -> Path:
+    """Işlenecek DEM dosyasını bulur."""
+    if custom_path:
+        p = Path(custom_path)
+        if p.exists():
+            return p
+        raise FileNotFoundError(f"Belirtilen DEM dosyasi bulunamadi: {p}")
+
+    candidates = [
+        RAW_DIR / "Site01_final_adj_5mpp_surf.tif",
+        RAW_DIR / "Site01_final_adj_5mpp_surf.tiff",
+        RAW_DIR / "LDEM_80S_80MPP_ADJ.tiff",
+        RAW_DIR / "LDEM_80S_80MPP_ADJ.tif",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+
+    tif_files = sorted(list(RAW_DIR.glob("*.tif")) + list(RAW_DIR.glob("*.tiff")))
+    if tif_files:
+        return tif_files[0]
+
+    raise FileNotFoundError(f"'{RAW_DIR}' dizininde herhangi bir .tif / .tiff DEM dosyasi bulunamadi!")
 
 
 # =============================================================================
@@ -55,12 +77,13 @@ SLOPE_MAX_DEG = 25.0
 
 def find_action_window(
     dem_ds: rasterio.DatasetReader,
-    window_size: int = WINDOW_SIZE,
+    resolution_m: float,
+    window_size: int = DEFAULT_WINDOW_SIZE,
     sample_step: int = 100,
 ) -> Window:
-    """Yukseklik farki x egim varyansi acisindan en yogun 500x500 bolgeyi bulur."""
+    """Yukseklik farki x egim varyansi acisindan en yogun window_size x window_size bolgeyi bulur."""
     h, w = dem_ds.height, dem_ds.width
-    print(f"Raster boyutu: {w} x {h} piksel")
+    print(f"Raster boyutu: {w} x {h} piksel | Cozunurluk: {resolution_m:.2f} m/px")
 
     if h < window_size or w < window_size:
         raise ValueError(
@@ -80,7 +103,7 @@ def find_action_window(
         dem_overview[dem_overview == nodata] = np.nan
 
     # Dusuk cozunurluklu egim tahmini (pencere secimi icin yeterli)
-    dy, dx = np.gradient(dem_overview, RESOLUTION_M * overview_factor)
+    dy, dx = np.gradient(dem_overview, resolution_m * overview_factor)
     slope_overview = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
 
     ov_ws = window_size // overview_factor
@@ -126,6 +149,17 @@ def make_elevation_grid(dem_ds: rasterio.DatasetReader, win: Window) -> np.ndarr
     nodata = dem_ds.nodata
     if nodata is not None:
         data[data == nodata] = np.nan
+
+    # Eger NaN pikseller varsa, komsuluk enterpolasyonu ile temizle
+    if np.isnan(data).any():
+        nan_mask = np.isnan(data)
+        if (~nan_mask).any():
+            from scipy.ndimage import distance_transform_edt
+            indices = distance_transform_edt(nan_mask, return_distances=False, return_indices=True)
+            data = data[tuple(indices)]
+        else:
+            data = np.nan_to_num(data, nan=0.0)
+
     return data
 
 
@@ -296,44 +330,50 @@ def print_validation(
 # 5) ANA ISLEM AKISI
 # =============================================================================
 
-def main(weights: dict[str, float] | None = None) -> None:
+def main(
+    weights: dict[str, float] | None = None,
+    dem_path: str | None = None,
+    window_size: int = DEFAULT_WINDOW_SIZE,
+) -> None:
     print("=" * 60)
     print("  LunaPath P1 v2.0 — Ay Yuzey Verisi Isleme")
     print("=" * 60)
 
-    # -- Dosya kontrolu -------------------------------------------------------
-    if not LDEM_FILE.exists():
-        print(f"HATA: DEM dosyasi bulunamadi: {LDEM_FILE}")
-        sys.exit(1)
-    print(f"\n  Ham veri  : {RAW_DIR}")
-    print(f"  Cikti     : {PROCESSED_DIR}\n")
+    # -- Dosya bulma ----------------------------------------------------------
+    dem_file = find_dem_file(dem_path)
+    print(f"\n  DEM Dosyasi: {dem_file.name}")
+    print(f"  Ham veri   : {RAW_DIR}")
+    print(f"  Cikti      : {PROCESSED_DIR}\n")
 
     resolved_weights = resolve_weights(weights)
     print("  Cost agirliklari:")
     for key, value in resolved_weights.items():
         print(f"    {key:<10s}= {value:.3f}")
 
-    # -- 1. DEM okuma ---------------------------------------------------------
-    dem_ds = rasterio.open(LDEM_FILE)
-    print(f"LDEM: {dem_ds.width} x {dem_ds.height}, "
-          f"CRS={dem_ds.crs}, dtype={dem_ds.dtypes[0]}")
+    # -- 1. DEM okuma & Cozunurluk Algilama ------------------------------------
+    dem_ds = rasterio.open(dem_file)
+    resolution_m = abs(float(dem_ds.transform.a))
+    print(f"\nLDEM Bilgisi:")
+    print(f"  Boyut      : {dem_ds.width} x {dem_ds.height} piksel")
+    print(f"  Cozunurluk : {resolution_m:.2f} metre/piksel")
+    print(f"  CRS        : {dem_ds.crs}")
 
     # -- 2. Pencere secimi ----------------------------------------------------
-    print("\n--- Aksiyonlu Bolge Araniyor ---")
-    win = find_action_window(dem_ds)
+    print(f"\n--- Aksiyonlu Bolge Araniyor ({window_size}x{window_size}) ---")
+    win = find_action_window(dem_ds, resolution_m=resolution_m, window_size=window_size)
 
     # -- 3. Grid uretimi (7 katman) -------------------------------------------
     print("\n--- Grid Uretimi (7 katman) ---")
 
     elevation_grid = make_elevation_grid(dem_ds, win)
-    print(f"  elevation_grid  : min={np.nanmin(elevation_grid):.1f}, "
-          f"max={np.nanmax(elevation_grid):.1f}")
+    print(f"  elevation_grid  : min={np.nanmin(elevation_grid):.1f} m, "
+          f"max={np.nanmax(elevation_grid):.1f} m")
 
-    slope_grid = make_slope_grid(elevation_grid, RESOLUTION_M)
+    slope_grid = make_slope_grid(elevation_grid, resolution_m)
     print(f"  slope_grid      : min={np.nanmin(slope_grid):.2f} deg, "
           f"max={np.nanmax(slope_grid):.2f} deg")
 
-    aspect_grid = make_aspect_grid(elevation_grid, RESOLUTION_M)
+    aspect_grid = make_aspect_grid(elevation_grid, resolution_m)
     print(f"  aspect_grid     : min={np.nanmin(aspect_grid):.2f} deg, "
           f"max={np.nanmax(aspect_grid):.2f} deg")
 
@@ -342,7 +382,7 @@ def main(weights: dict[str, float] | None = None) -> None:
           f"max={np.nanmax(shadow_ratio_grid):.3f}")
 
     thermal_grid = make_thermal_grid(
-        elevation_grid, slope_grid, aspect_grid, RESOLUTION_M,
+        elevation_grid, slope_grid, aspect_grid, resolution_m,
     )
     print(f"  thermal_grid    : min={np.nanmin(thermal_grid):.2f} C, "
           f"max={np.nanmax(thermal_grid):.2f} C")
@@ -355,7 +395,7 @@ def main(weights: dict[str, float] | None = None) -> None:
         slope_grid,
         thermal_grid,
         shadow_ratio_grid,
-        RESOLUTION_M,
+        resolution_m,
         traversability_grid,
         resolved_weights,
     )
@@ -394,8 +434,8 @@ def main(weights: dict[str, float] | None = None) -> None:
         out_dir=PROCESSED_DIR,
         origin_x=origin_x,
         origin_y=origin_y,
-        resolution=RESOLUTION_M,
-        shape=(WINDOW_SIZE, WINDOW_SIZE),
+        resolution=resolution_m,
+        shape=(window_size, window_size),
         crs=str(dem_ds.crs),
         window_row_off=win.row_off,
         window_col_off=win.col_off,
@@ -413,6 +453,18 @@ def main(weights: dict[str, float] | None = None) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="LunaPath weighted grid generator")
+    parser.add_argument(
+        "--dem-path",
+        type=str,
+        default=None,
+        help="Islenecek ham DEM GeoTIFF dosyasinin yolu.",
+    )
+    parser.add_argument(
+        "--window-size",
+        type=int,
+        default=DEFAULT_WINDOW_SIZE,
+        help=f"Uretilecek grid pencere boyutu (varsayilan: {DEFAULT_WINDOW_SIZE}).",
+    )
     parser.add_argument(
         "--weights-json",
         help=(
@@ -437,4 +489,9 @@ def parse_weight_overrides(raw: str | None) -> dict[str, float] | None:
 
 if __name__ == "__main__":
     args = parse_args()
-    main(parse_weight_overrides(args.weights_json))
+    main(
+        weights=parse_weight_overrides(args.weights_json),
+        dem_path=args.dem_path,
+        window_size=args.window_size,
+    )
+

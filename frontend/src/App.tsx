@@ -85,8 +85,8 @@ const DEFAULT_FOCUS_TELEMETRY: FocusTelemetry = {
   lon: Number.NaN,
   altitudeM: null,
   thermalC: null,
-  resolutionM: 80,
-  spanKm: 40,
+  resolutionM: 5,
+  spanKm: 2.5,
 }
 
 interface WaypointPreviewItem {

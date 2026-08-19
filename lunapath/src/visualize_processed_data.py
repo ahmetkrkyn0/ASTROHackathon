@@ -292,7 +292,7 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
         ("Merkez Y", f"{origin_y:,.0f} m"),
         ("Cozunurluk", f"{res:.0f} m/px"),
         ("Grid", f"{rows} x {cols}"),
-        ("Alan", f"{total_km:.0f} x {total_km:.0f} km"),
+        ("Alan", f"{total_km:.1f} x {total_km:.1f} km"),
         ("Yuk. min", f"{np.nanmin(elev):+.1f} m"),
         ("Yuk. max", f"{np.nanmax(elev):+.1f} m"),
         ("Egim min", f"{np.nanmin(slope):.2f} deg"),
