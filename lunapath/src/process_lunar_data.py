@@ -108,7 +108,7 @@ def window_center_latlon(
 
     rows, cols = shape
     center_x = origin_x + 0.5 * cols * resolution_m
-    center_y = origin_y + 0.5 * rows * resolution_m
+    center_y = origin_y - 0.5 * rows * resolution_m
     transformer = Transformer.from_crs(crs_wkt, "EPSG:4326", always_xy=True)
     lon_deg, lat_deg = transformer.transform(center_x, center_y)
     return float(lat_deg), float(lon_deg)
@@ -236,6 +236,17 @@ def make_shadow_ratio_grid(
     from app.ephemeris import sun_track
 
     try:
+        # sun_track first: it's the cheap call and the one that actually
+        # raises when SPICE kernels are missing. Failing here first avoids
+        # paying for the expensive horizon_map ray-marching only to throw
+        # the result away.
+        samples = sun_track(
+            SUN_TRACK_START_UTC,
+            SUN_TRACK_END_UTC,
+            SUN_TRACK_SAMPLES,
+            lat_deg,
+            lon_deg,
+        )
         horizon = horizon_map(
             elevation,
             resolution,
@@ -243,13 +254,6 @@ def make_shadow_ratio_grid(
             max_range_m=HORIZON_MAX_RANGE_M,
             max_steps=HORIZON_MAX_STEPS,
             progress=True,
-        )
-        samples = sun_track(
-            SUN_TRACK_START_UTC,
-            SUN_TRACK_END_UTC,
-            SUN_TRACK_SAMPLES,
-            lat_deg,
-            lon_deg,
         )
         frac = illumination_fraction(horizon, samples)
         return shadow_ratio_from_illumination(frac).astype(np.float64), "DERIVED"
