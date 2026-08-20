@@ -7,6 +7,7 @@ Run once:  python lunapath/src/fetch_kernels.py
 
 from __future__ import annotations
 
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -16,7 +17,7 @@ KERNELS: tuple[tuple[str, str], ...] = (
     (f"{NAIF}/lsk/naif0012.tls", "naif0012.tls"),
     (f"{NAIF}/spk/planets/de440s.bsp", "de440s.bsp"),
     (f"{NAIF}/pck/moon_pa_de440_200625.bpc", "moon_pa_de440_200625.bpc"),
-    (f"{NAIF}/fk/satellites/moon_de440_220930.tf", "moon_de440_220930.tf"),
+    (f"{NAIF}/fk/satellites/moon_de440_250416.tf", "moon_de440_250416.tf"),
 )
 
 META_KERNEL_TEMPLATE = """\\begindata
@@ -39,8 +40,18 @@ def main() -> None:
             print(f"  skip (exists): {name}")
             continue
         print(f"  downloading: {name} ...", flush=True)
-        urllib.request.urlretrieve(url, target)
-        print(f"  done: {name} ({target.stat().st_size / 1e6:.1f} MB)")
+        try:
+            urllib.request.urlretrieve(url, target)
+            print(f"  done: {name} ({target.stat().st_size / 1e6:.1f} MB)")
+        except urllib.error.HTTPError as e:
+            if target.exists():
+                target.unlink()
+            print(
+                f"  failed to download {name}: HTTP {e.code}\n"
+                f"  NAIF path/filename may have changed. Consider checking:\n"
+                f"    {url}"
+            )
+            raise
 
     entries = "\n".join(f"    '$K/{name}'" for _, name in KERNELS)
     meta = META_KERNEL_TEMPLATE.format(
