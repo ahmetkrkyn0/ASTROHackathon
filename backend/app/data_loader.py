@@ -35,6 +35,16 @@ _GRID_KEYS: tuple[str, ...] = (
     "cost",
 )
 
+_VALIDITY_LAYERS: tuple[str, ...] = (
+    "elevation",
+    "slope",
+    "aspect",
+    "shadow_ratio",
+    "thermal",
+    "traversable",
+    "cost",
+)
+
 
 def load_preprocessed_grids(
     processed_dir: str | None = None,
@@ -109,6 +119,10 @@ def load_preprocessed_grids(
         "default_rover_id": metadata.get("default_rover_id", DEFAULT_ROVER_ID),
         "cost_weights": cost_weights,
         "cost_model": metadata.get("cost_model", "weighted_cell_cost_without_barrier"),
+        "layer_validity": {
+            layer: str(metadata.get("layer_validity", {}).get(layer, "UNKNOWN"))
+            for layer in _VALIDITY_LAYERS
+        },
     }
 
     return result

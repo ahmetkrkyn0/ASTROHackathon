@@ -27,7 +27,16 @@ if _BACKEND_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_ROOT)
 
 from app.cost_engine import compute_cost_grid, resolve_weights  # noqa: E402
-from app.thermal_grid import generate_thermal_grid  # noqa: E402
+from app.horizon import horizon_map  # noqa: E402
+from app.illumination import (  # noqa: E402
+    illumination_fraction,
+    shadow_ratio_from_illumination,
+)
+from app.thermal_model import (  # noqa: E402
+    Heat1DModel,
+    SyntheticModel,
+    build_thermal_grid,
+)
 from app.traversability import compute_traversability  # noqa: E402
 
 # --- Proje dizinleri --------------------------------------------------------
@@ -44,6 +53,13 @@ PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 # --- Dosya ve sabitler -------------------------------------------------------
 DEFAULT_WINDOW_SIZE = 500
 SLOPE_MAX_DEG = 25.0
+HORIZON_N_AZIMUTH = 72
+HORIZON_MAX_RANGE_M = 10000.0
+HORIZON_MAX_STEPS = 200  # adım sayısı sabit -> hesap yuku cozunurlukten bagimsiz
+# Bir Ay gunu boyunca saatlik ornekleme
+SUN_TRACK_START_UTC = "2026-11-15T00:00:00"
+SUN_TRACK_END_UTC = "2026-12-13T00:00:00"
+SUN_TRACK_SAMPLES = 168
 
 
 def find_dem_file(custom_path: str | None = None) -> Path:
@@ -69,6 +85,33 @@ def find_dem_file(custom_path: str | None = None) -> Path:
         return tif_files[0]
 
     raise FileNotFoundError(f"'{RAW_DIR}' dizininde herhangi bir .tif / .tiff DEM dosyasi bulunamadi!")
+
+
+def window_center_latlon(
+    origin_x: float,
+    origin_y: float,
+    resolution_m: float,
+    shape: tuple[int, int],
+    crs_wkt: str,
+) -> tuple[float, float]:
+    """Pencerenin merkez noktasinin (lat, lon) WGS84 koordinatlari.
+
+    Sabit bir guney-kutbu varsayimi yerine, hangi DEM yuklenirse
+    yuklensin dogru enlem/boylami CRS'ten turetir -- heat1d LUT'u ve
+    gunes izi bu deger uzerinden calisir. serializer.py'deki
+    pixel_to_lonlat ile ayni pyproj deseni.
+    """
+    import os
+
+    os.environ.setdefault("PROJ_IGNORE_CELESTIAL_BODY", "YES")
+    from pyproj import Transformer
+
+    rows, cols = shape
+    center_x = origin_x + 0.5 * cols * resolution_m
+    center_y = origin_y + 0.5 * rows * resolution_m
+    transformer = Transformer.from_crs(crs_wkt, "EPSG:4326", always_xy=True)
+    lon_deg, lat_deg = transformer.transform(center_x, center_y)
+    return float(lat_deg), float(lon_deg)
 
 
 # =============================================================================
@@ -179,13 +222,43 @@ def make_aspect_grid(elevation: np.ndarray, resolution: float) -> np.ndarray:
     return aspect
 
 
-def make_shadow_ratio_grid(elevation: np.ndarray) -> np.ndarray:
-    """Yukseklige bagli golge proxy'si [0, 1]. 0=aydinlik, 1=karanlik."""
-    e_min = np.nanmin(elevation)
-    e_max = np.nanmax(elevation)
-    elev_norm = (elevation - e_min) / (e_max - e_min + 1e-10)
-    shadow_ratio = 1.0 - elev_norm
-    return shadow_ratio
+def make_shadow_ratio_grid(
+    elevation: np.ndarray, resolution: float, lat_deg: float, lon_deg: float
+) -> tuple[np.ndarray, str]:
+    """Golge orani [0, 1]. 0=aydinlik, 1=karanlik.
+
+    Gercek yol: topografik ufuk haritasi + SPICE gunes izi. SPICE
+    cekirdekleri yoksa yukseklik proxy'sine duser ve bunu bildirir.
+    lat_deg/lon_deg window_center_latlon()'dan gelir -- sabit degil.
+
+    Donus: (shadow_ratio_grid, validity)
+    """
+    from app.ephemeris import sun_track
+
+    try:
+        horizon = horizon_map(
+            elevation,
+            resolution,
+            n_azimuth=HORIZON_N_AZIMUTH,
+            max_range_m=HORIZON_MAX_RANGE_M,
+            max_steps=HORIZON_MAX_STEPS,
+            progress=True,
+        )
+        samples = sun_track(
+            SUN_TRACK_START_UTC,
+            SUN_TRACK_END_UTC,
+            SUN_TRACK_SAMPLES,
+            lat_deg,
+            lon_deg,
+        )
+        frac = illumination_fraction(horizon, samples)
+        return shadow_ratio_from_illumination(frac).astype(np.float64), "DERIVED"
+    except (RuntimeError, OSError) as exc:
+        print(f"  UYARI: gercek aydinlanma hesaplanamadi ({exc}); proxy kullaniliyor")
+        e_min = np.nanmin(elevation)
+        e_max = np.nanmax(elevation)
+        elev_norm = (elevation - e_min) / (e_max - e_min + 1e-10)
+        return (1.0 - elev_norm), "SYNTHETIC"
 
 
 def make_thermal_grid(
@@ -193,13 +266,21 @@ def make_thermal_grid(
     slope: np.ndarray,
     aspect: np.ndarray,
     resolution: float,
-) -> np.ndarray:
-    """Sentetik yuzey sicaklik grid'i (Celsius).
+    lat_deg: float,
+) -> tuple[np.ndarray, str]:
+    """Yuzey sicaklik grid'i (Celsius) + validity etiketi.
 
-    Hesaplama backend/app/thermal_grid.py modulunden gelir (tek kaynak).
-    Sonuc float64'e donusturulur (P1 grid standardi).
+    heat1d kuruluysa gercek termal difuzyon modeli, degilse sentetik
+    proxy. lat_deg window_center_latlon()'dan gelir -- sabit degil.
     """
-    return generate_thermal_grid(elevation, slope, aspect, resolution).astype(np.float64)
+    if Heat1DModel.available():
+        model = Heat1DModel()
+    else:
+        print("  UYARI: heat1d bulunamadi; sentetik termal model kullaniliyor")
+        model = SyntheticModel(elevation=elevation, resolution_m=resolution)
+
+    grid = build_thermal_grid(model, slope, aspect, lat_deg)
+    return grid.astype(np.float64), model.validity
 
 
 def make_traversability_grid(
@@ -252,6 +333,7 @@ def save_metadata(
     window_row_off: int,
     window_col_off: int,
     cost_weights: dict[str, float],
+    layer_validity: dict[str, str],
 ) -> Path:
     """Grid metadata'sini JSON olarak diske yazar."""
     meta = {
@@ -271,6 +353,7 @@ def save_metadata(
         ],
         "cost_weights": cost_weights,
         "cost_model": "weighted_cell_cost_without_barrier",
+        "layer_validity": layer_validity,
     }
     path = out_dir / "metadata.json"
     path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -334,6 +417,8 @@ def main(
     weights: dict[str, float] | None = None,
     dem_path: str | None = None,
     window_size: int = DEFAULT_WINDOW_SIZE,
+    row_offset: int | None = None,
+    col_offset: int | None = None,
 ) -> None:
     print("=" * 60)
     print("  LunaPath P1 v2.0 — Ay Yuzey Verisi Isleme")
@@ -359,8 +444,19 @@ def main(
     print(f"  CRS        : {dem_ds.crs}")
 
     # -- 2. Pencere secimi ----------------------------------------------------
-    print(f"\n--- Aksiyonlu Bolge Araniyor ({window_size}x{window_size}) ---")
-    win = find_action_window(dem_ds, resolution_m=resolution_m, window_size=window_size)
+    if row_offset is not None and col_offset is not None:
+        print(f"\n--- Belirtilen Pencere Secildi ({window_size}x{window_size}, row={row_offset}, col={col_offset}) ---")
+        win = Window(col_offset, row_offset, window_size, window_size)
+    else:
+        print(f"\n--- Aksiyonlu Bolge Araniyor ({window_size}x{window_size}) ---")
+        win = find_action_window(dem_ds, resolution_m=resolution_m, window_size=window_size)
+
+    win_transform = rasterio.windows.transform(win, dem_ds.transform)
+    origin_x, origin_y = win_transform.c, win_transform.f
+    lat_deg, lon_deg = window_center_latlon(
+        origin_x, origin_y, resolution_m, (window_size, window_size), str(dem_ds.crs)
+    )
+    print(f"  Pencere merkezi : {lat_deg:.3f} N, {lon_deg:.3f} E (yaklasik)")
 
     # -- 3. Grid uretimi (7 katman) -------------------------------------------
     print("\n--- Grid Uretimi (7 katman) ---")
@@ -377,13 +473,17 @@ def main(
     print(f"  aspect_grid     : min={np.nanmin(aspect_grid):.2f} deg, "
           f"max={np.nanmax(aspect_grid):.2f} deg")
 
-    shadow_ratio_grid = make_shadow_ratio_grid(elevation_grid)
+    shadow_ratio_grid, shadow_validity = make_shadow_ratio_grid(
+        elevation_grid, resolution_m, lat_deg, lon_deg
+    )
     print(f"  shadow_ratio    : min={np.nanmin(shadow_ratio_grid):.3f}, "
           f"max={np.nanmax(shadow_ratio_grid):.3f}")
 
-    thermal_grid = make_thermal_grid(
-        elevation_grid, slope_grid, aspect_grid, resolution_m,
+    thermal_grid, thermal_validity = make_thermal_grid(
+        elevation_grid, slope_grid, aspect_grid, resolution_m, lat_deg,
     )
+    print(f"  thermal validity: {thermal_validity}")
+    print(f"  shadow  validity: {shadow_validity}")
     print(f"  thermal_grid    : min={np.nanmin(thermal_grid):.2f} C, "
           f"max={np.nanmax(thermal_grid):.2f} C")
 
@@ -427,9 +527,6 @@ def main(
     print(f"  {len(grids)} adet .npy dosyasi kaydedildi")
 
     # -- 6. Metadata ----------------------------------------------------------
-    win_transform = rasterio.windows.transform(win, dem_ds.transform)
-    origin_x, origin_y = win_transform.c, win_transform.f
-
     save_metadata(
         out_dir=PROCESSED_DIR,
         origin_x=origin_x,
@@ -440,6 +537,15 @@ def main(
         window_row_off=win.row_off,
         window_col_off=win.col_off,
         cost_weights=resolved_weights,
+        layer_validity={
+            "elevation": "MEASURED",
+            "slope": "DERIVED",
+            "aspect": "DERIVED",
+            "shadow_ratio": shadow_validity,
+            "thermal": thermal_validity,
+            "traversable": "DERIVED",
+            "cost": "DERIVED",
+        },
     )
     print("  metadata.json kaydedildi")
 
@@ -472,6 +578,18 @@ def parse_args() -> argparse.Namespace:
             "Ornek: '{\"w_slope\":0.7,\"w_energy\":0.1,\"w_shadow\":0.1,\"w_thermal\":0.1}'"
         ),
     )
+    parser.add_argument(
+        "--row-offset",
+        type=int,
+        default=None,
+        help="DEM uzerinden secilecek pencerenin baslangic satir indeksi (row_off).",
+    )
+    parser.add_argument(
+        "--col-offset",
+        type=int,
+        default=None,
+        help="DEM uzerinden secilecek pencerenin baslangic sutun indeksi (col_off).",
+    )
     return parser.parse_args()
 
 
@@ -493,5 +611,7 @@ if __name__ == "__main__":
         weights=parse_weight_overrides(args.weights_json),
         dem_path=args.dem_path,
         window_size=args.window_size,
+        row_offset=args.row_offset,
+        col_offset=args.col_offset,
     )
 
