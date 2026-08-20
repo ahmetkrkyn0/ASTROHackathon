@@ -52,19 +52,54 @@ def test_azimuth_count_defines_first_axis():
     assert hz.dtype == np.float32
 
 
-def test_max_steps_bounds_the_effective_range_at_fine_resolution():
-    """At 5 m/px, a naive 10 km max_range_m would take 2000 steps.
-    max_steps caps this so runtime is resolution-independent."""
+def test_max_steps_blocks_distant_obstruction_but_higher_cap_does_not():
+    """max_steps cap prevents ray from seeing distant obstacles beyond its reach.
+
+    Unlike linear ramps (scale-invariant horizon angle), a tall spike/obstruction
+    proves the step-count cap is doing real work: same grid with tighter max_steps
+    means the ray can't see the spike (low horizon angle), but with higher max_steps
+    it does (high horizon angle).
+    """
     fine_res_m = 5.0
-    cols = np.arange(40, dtype=np.float64)
-    elevation = np.tile(cols * fine_res_m * np.tan(np.radians(10.0)), (40, 1))
-    hz = horizon_map(
+    grid_size = 40
+    elevation = np.zeros((grid_size, grid_size), dtype=np.float64)
+
+    # Place a tall spike at (20, 30): that's 150m east from column 0.
+    # At 5 m/px: 30 pixels = 150m.
+    spike_row, spike_col = 20, 30
+    spike_height = 500.0  # Tall enough to create ~73° horizon at 150m distance.
+    elevation[spike_row, spike_col] = spike_height
+
+    # With max_steps=20 (100m range), ray can't reach column 30 (150m away).
+    capped = horizon_map(
         elevation, fine_res_m, n_azimuth=4, max_range_m=10_000.0,
         max_steps=20, curvature=False,
     )
-    # With only 20 steps at 5 m/px, the effective range is 100 m -- far
-    # short of the 10 km nominal max_range_m.
-    assert hz.shape == (4, 40, 40)
+
+    # With max_steps=50 (250m range), ray CAN reach column 30.
+    uncapped = horizon_map(
+        elevation, fine_res_m, n_azimuth=4, max_range_m=10_000.0,
+        max_steps=50, curvature=False,
+    )
+
+    # From pixel (spike_row, 0) looking east (azimuth=1 at n_azimuth=4):
+    # - Capped: ray reaches column 20, misses spike at column 30 -> low horizon
+    # - Uncapped: ray reaches column 50, sees spike at column 30 -> high horizon
+
+    horizon_capped = capped[1, spike_row, 0]
+    horizon_uncapped = uncapped[1, spike_row, 0]
+
+    # Capped should be close to 0 (only sees flat terrain).
+    assert horizon_capped < 5.0, \
+        f"Capped ray (20 steps=100m) should not see spike at 150m, got {horizon_capped}°"
+
+    # Uncapped should be ~arctan(500/150) ≈ 73°.
+    assert horizon_uncapped > 60.0, \
+        f"Uncapped ray should see 500m spike at 150m distance (≈73°), got {horizon_uncapped}°"
+
+    # Also verify they differ significantly.
+    assert horizon_uncapped - horizon_capped > 50.0, \
+        f"Difference should be >50°: {horizon_uncapped}° - {horizon_capped}° = {horizon_uncapped - horizon_capped}°"
 
 
 def test_max_steps_does_not_affect_coarse_grids_within_budget():
