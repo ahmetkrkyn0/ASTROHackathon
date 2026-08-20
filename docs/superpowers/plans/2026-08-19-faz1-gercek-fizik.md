@@ -646,9 +646,11 @@ git commit -m "feat: add heat1d-backed surface thermal model with slope/aspect L
 - Create: `backend/app/horizon.py`
 - Test: `backend/test_horizon.py` (create)
 
+> ⚠️ **Çözünürlükten bağımsız tasarım.** Bu proje artık birden çok DEM çözünürlüğüyle çalışıyor — bugün depoda 5 m/px, 500×500 (2.5 km pencere) bir `Site01` grid'i var; önceki 80 m/px, 500×500 (40 km pencere) grid'i artık mevcut değil. `resolution_m` **her zaman** `metadata.json`'dan okunur, hiçbir yerde sabitlenmez. Sabit bir fiziksel `max_range_m` (ör. 10 km), 5 m/px'te 80 m/px'e göre 16× daha fazla adım gerektirir (`max_range_m / resolution_m`) — bu yüzden hesap yükü **fiziksel menzil yerine adım sayısı** ile sınırlanır (`max_steps`). Böylece fonksiyon hangi çözünürlükte veri yüklenirse yüklensin aynı hesap bütçesinde kalır.
+
 **Interfaces:**
 - Consumes: yalnızca NumPy
-- Produces: `horizon_map(elevation, resolution_m, n_azimuth=72, max_range_m=10000.0, moon_radius_m=1737400.0, curvature=True) -> np.ndarray` — `(n_azimuth, H, W)` float32, **derece**. Azimut konvansiyonu: indeks `i` → `360 * i / n_azimuth` derece, **0 = Kuzey (satır azalan yön), 90 = Doğu (sütun artan yön)** — `make_aspect_grid` ile aynı. Task 7 bunu tüketir.
+- Produces: `horizon_map(elevation, resolution_m, n_azimuth=72, max_range_m=10000.0, max_steps=200, moon_radius_m=1737400.0, curvature=True) -> np.ndarray` — `(n_azimuth, H, W)` float32, **derece**. Etkin menzil `min(max_range_m, max_steps * resolution_m)`'dir. Azimut konvansiyonu: indeks `i` → `360 * i / n_azimuth` derece, **0 = Kuzey (satır azalan yön), 90 = Doğu (sütun artan yön)** — `make_aspect_grid` ile aynı. Task 7 bunu tüketir.
 
 - [ ] **Step 1: Başarısız testleri yaz**
 
@@ -707,6 +709,36 @@ def test_azimuth_count_defines_first_axis():
     hz = horizon_map(elevation, RES_M, n_azimuth=12, max_range_m=240.0)
     assert hz.shape[0] == 12
     assert hz.dtype == np.float32
+
+
+def test_max_steps_bounds_the_effective_range_at_fine_resolution():
+    """At 5 m/px, a naive 10 km max_range_m would take 2000 steps.
+    max_steps caps this so runtime is resolution-independent."""
+    fine_res_m = 5.0
+    cols = np.arange(40, dtype=np.float64)
+    elevation = np.tile(cols * fine_res_m * np.tan(np.radians(10.0)), (40, 1))
+    hz = horizon_map(
+        elevation, fine_res_m, n_azimuth=4, max_range_m=10_000.0,
+        max_steps=20, curvature=False,
+    )
+    # With only 20 steps at 5 m/px, the effective range is 100 m -- far
+    # short of the 10 km nominal max_range_m.
+    assert hz.shape == (4, 40, 40)
+
+
+def test_max_steps_does_not_affect_coarse_grids_within_budget():
+    """At 80 m/px a 10 km range is only 125 steps -- max_steps=200 must
+    not change the result versus no cap at all."""
+    elevation = np.zeros((10, 10), dtype=np.float64)
+    capped = horizon_map(
+        elevation, RES_M, n_azimuth=4, max_range_m=800.0,
+        max_steps=200, curvature=False,
+    )
+    uncapped = horizon_map(
+        elevation, RES_M, n_azimuth=4, max_range_m=800.0,
+        max_steps=1_000_000, curvature=False,
+    )
+    assert np.array_equal(capped, uncapped)
 ```
 
 - [ ] **Step 2: Testleri çalıştır, başarısız olduklarını doğrula**
@@ -747,16 +779,20 @@ def horizon_map(
     resolution_m: float,
     n_azimuth: int = 72,
     max_range_m: float = 10000.0,
+    max_steps: int = 200,
     moon_radius_m: float = MOON_RADIUS_M,
     curvature: bool = True,
     progress: bool = False,
 ) -> np.ndarray:
     """Return (n_azimuth, H, W) float32 horizon elevation angles in degrees.
 
-    Runtime scales as ``n_azimuth * (max_range_m / resolution_m) * H * W``.
-    For the 500x500 / 80 m production grid with the defaults this is a
-    one-time offline computation of roughly 3-10 minutes; cache the result
-    as ``horizon_map.npy``.
+    Runtime scales as ``n_azimuth * n_steps * H * W``, where
+    ``n_steps = min(max_range_m / resolution_m, max_steps)``. The step
+    count -- not the physical range -- is what is capped, so the same
+    call costs the same regardless of whether *resolution_m* is a coarse
+    80 m grid or a fine 5 m grid: at 80 m/px, max_steps=200 gives a 16 km
+    effective range; at 5 m/px it gives 1 km. Cache the result as
+    ``horizon_map.npy`` -- it depends only on elevation, not on time.
     """
     elev = np.asarray(elevation, dtype=np.float64)
     if elev.ndim != 2:
@@ -764,6 +800,7 @@ def horizon_map(
     height, width = elev.shape
 
     n_steps = max(1, int(round(float(max_range_m) / float(resolution_m))))
+    n_steps = min(n_steps, int(max_steps))
     rows = np.arange(height, dtype=np.float64)[:, None]
     cols = np.arange(width, dtype=np.float64)[None, :]
 
@@ -804,7 +841,7 @@ def horizon_map(
 
 Run: `cd backend && pytest test_horizon.py -v`
 
-Expected: 5 test PASS.
+Expected: 7 test PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1435,6 +1472,10 @@ Run: `cd backend && pytest test_layer_validity.py -v`
 
 Expected: 2 test PASS.
 
+> ⚠️ **Bu görev, dosyanın kendisi bu planın yazılmasından SONRA ayrıca refactor edildiği için güncellendi.** `process_lunar_data.py` artık sabit bir `RESOLUTION_M`/`WINDOW_SIZE`/`LDEM_FILE` kullanmıyor — `find_dem_file()` ile hangi DEM varsa onu buluyor (bugün depoda 5 m/px `Site01_final_adj_5mpp_surf.tif` var, önceki 80 m/px LDEM'i yok) ve `resolution_m`'i dosyadan **çalışma zamanında** okuyor (`dem_ds.transform.a`). Aşağıdaki adımlar bu güncel dosya yapısına göre yazıldı. **Bu görevi Task 5 (`horizon.py`, `max_steps` parametresi) ve Task 6 (`ephemeris.py`) tamamlanmadan başlatma.**
+>
+> Ayrıca bu görev, orijinal tasarımdaki **`NOMINAL_LAT_DEG = -88.5` (sabit güney kutbu varsayımı) sabitini kaldırıyor.** Yeni DEM'in origin'i (`-15500, -4000`) eski güney kutbu penceresininkinden (`176000, 48000`) tamamen farklı bir konuma işaret ediyor — hangi coğrafi bölgeyi kapsadığı DEM dosyasına bağlı. Bu yüzden enlem/boylam artık sabit değil, pencere merkezinin CRS'inden **`pyproj` ile türetiliyor** (`serializer.py`'nin zaten kullandığı desenle aynı).
+
 - [ ] **Step 5: P1 hattını yeni fizik modüllerine bağla**
 
 `lunapath/src/process_lunar_data.py` içinde import bloğunu şu hâle getir:
@@ -1456,28 +1497,59 @@ from app.traversability import compute_traversability  # noqa: E402
 
 *(`from app.thermal_grid import generate_thermal_grid` satırını kaldır — artık `thermal_model` üzerinden çağrılıyor.)*
 
-Sabitler bloğuna ekle:
+`SLOPE_MAX_DEG = 25.0` satırının altına ekle (`DEFAULT_WINDOW_SIZE`/`SLOPE_MAX_DEG` sabitler bloğunun devamı — **çözünürlükten bağımsız**, artık `NOMINAL_LAT_DEG`/`LON` yok):
 
 ```python
-# Guney kutbu penceresinin nominal enlemi (heat1d LUT ve gunes izi icin)
-NOMINAL_LAT_DEG = -88.5
-NOMINAL_LON_DEG = 0.0
 HORIZON_N_AZIMUTH = 72
 HORIZON_MAX_RANGE_M = 10000.0
+HORIZON_MAX_STEPS = 200  # adım sayısı sabit -> hesap yuku cozunurlukten bagimsiz
 # Bir Ay gunu boyunca saatlik ornekleme
 SUN_TRACK_START_UTC = "2026-11-15T00:00:00"
 SUN_TRACK_END_UTC = "2026-12-13T00:00:00"
 SUN_TRACK_SAMPLES = 168
 ```
 
-`make_shadow_ratio_grid` fonksiyonunun **tamamını** şununla değiştir:
+`find_dem_file` fonksiyonunun kapanışı (`raise FileNotFoundError(f"'{RAW_DIR}' dizininde herhangi bir .tif / .tiff DEM dosyasi bulunamadi!")` satırı) ile `# 1) PENCERE SECIMI` bölüm başlığı arasına yeni bir yardımcı fonksiyon ekle:
 
 ```python
-def make_shadow_ratio_grid(elevation: np.ndarray, resolution: float) -> tuple[np.ndarray, str]:
+def window_center_latlon(
+    origin_x: float,
+    origin_y: float,
+    resolution_m: float,
+    shape: tuple[int, int],
+    crs_wkt: str,
+) -> tuple[float, float]:
+    """Pencerenin merkez noktasinin (lat, lon) WGS84 koordinatlari.
+
+    Sabit bir guney-kutbu varsayimi yerine, hangi DEM yuklenirse
+    yuklensin dogru enlem/boylami CRS'ten turetir -- heat1d LUT'u ve
+    gunes izi bu deger uzerinden calisir. serializer.py'deki
+    pixel_to_lonlat ile ayni pyproj deseni.
+    """
+    import os
+
+    os.environ.setdefault("PROJ_IGNORE_CELESTIAL_BODY", "YES")
+    from pyproj import Transformer
+
+    rows, cols = shape
+    center_x = origin_x + 0.5 * cols * resolution_m
+    center_y = origin_y + 0.5 * rows * resolution_m
+    transformer = Transformer.from_crs(crs_wkt, "EPSG:4326", always_xy=True)
+    lon_deg, lat_deg = transformer.transform(center_x, center_y)
+    return float(lat_deg), float(lon_deg)
+```
+
+`make_shadow_ratio_grid` fonksiyonunun **tamamını** (şu an `def make_shadow_ratio_grid(elevation: np.ndarray) -> np.ndarray:` ile başlayan, `return shadow_ratio` ile biten 7 satırlık fonksiyon) şununla değiştir:
+
+```python
+def make_shadow_ratio_grid(
+    elevation: np.ndarray, resolution: float, lat_deg: float, lon_deg: float
+) -> tuple[np.ndarray, str]:
     """Golge orani [0, 1]. 0=aydinlik, 1=karanlik.
 
-    Gercek yol: topografik ufuk haritasi + SPICE gunes izi.
-    SPICE cekirdekleri yoksa yukseklik proxy'sine duser ve bunu bildirir.
+    Gercek yol: topografik ufuk haritasi + SPICE gunes izi. SPICE
+    cekirdekleri yoksa yukseklik proxy'sine duser ve bunu bildirir.
+    lat_deg/lon_deg window_center_latlon()'dan gelir -- sabit degil.
 
     Donus: (shadow_ratio_grid, validity)
     """
@@ -1489,14 +1561,15 @@ def make_shadow_ratio_grid(elevation: np.ndarray, resolution: float) -> tuple[np
             resolution,
             n_azimuth=HORIZON_N_AZIMUTH,
             max_range_m=HORIZON_MAX_RANGE_M,
+            max_steps=HORIZON_MAX_STEPS,
             progress=True,
         )
         samples = sun_track(
             SUN_TRACK_START_UTC,
             SUN_TRACK_END_UTC,
             SUN_TRACK_SAMPLES,
-            NOMINAL_LAT_DEG,
-            NOMINAL_LON_DEG,
+            lat_deg,
+            lon_deg,
         )
         frac = illumination_fraction(horizon, samples)
         return shadow_ratio_from_illumination(frac).astype(np.float64), "DERIVED"
@@ -1508,7 +1581,7 @@ def make_shadow_ratio_grid(elevation: np.ndarray, resolution: float) -> tuple[np
         return (1.0 - elev_norm), "SYNTHETIC"
 ```
 
-`make_thermal_grid` fonksiyonunun **tamamını** şununla değiştir:
+`make_thermal_grid` fonksiyonunun **tamamını** (şu an `resolution: float,\n) -> np.ndarray:` ile biten imzaya sahip, `return generate_thermal_grid(...).astype(np.float64)` ile biten fonksiyon) şununla değiştir:
 
 ```python
 def make_thermal_grid(
@@ -1516,10 +1589,12 @@ def make_thermal_grid(
     slope: np.ndarray,
     aspect: np.ndarray,
     resolution: float,
+    lat_deg: float,
 ) -> tuple[np.ndarray, str]:
     """Yuzey sicaklik grid'i (Celsius) + validity etiketi.
 
-    heat1d kuruluysa gercek termal difuzyon modeli, degilse sentetik proxy.
+    heat1d kuruluysa gercek termal difuzyon modeli, degilse sentetik
+    proxy. lat_deg window_center_latlon()'dan gelir -- sabit degil.
     """
     if Heat1DModel.available():
         model = Heat1DModel()
@@ -1527,13 +1602,24 @@ def make_thermal_grid(
         print("  UYARI: heat1d bulunamadi; sentetik termal model kullaniliyor")
         model = SyntheticModel(elevation=elevation, resolution_m=resolution)
 
-    grid = build_thermal_grid(model, slope, aspect, NOMINAL_LAT_DEG)
+    grid = build_thermal_grid(model, slope, aspect, lat_deg)
     return grid.astype(np.float64), model.validity
 ```
 
-- [ ] **Step 6: `main()` akışını ve `save_metadata`'yı güncelle**
+- [ ] **Step 6: `main()` akışını güncelle — pencere merkezini erken hesapla**
 
-`main()` içinde şu iki çağrıyı değiştir:
+`main()` içinde pencere seçimi bloğunun hemen altında (`win = find_action_window(dem_ds, resolution_m=resolution_m, window_size=window_size)` satırının bulunduğu `else` dalının bitişi) ile `# -- 3. Grid uretimi (7 katman)` yorumu arasına şunu ekle — bu, `win_transform`/`origin_x`/`origin_y` hesabını (aşağıda Step 6'da metadata adımından buraya taşınıyor) grid üretiminden **önceye** alıyor, çünkü artık `lat_deg`/`lon_deg` grid üretimi için gerekli:
+
+```python
+    win_transform = rasterio.windows.transform(win, dem_ds.transform)
+    origin_x, origin_y = win_transform.c, win_transform.f
+    lat_deg, lon_deg = window_center_latlon(
+        origin_x, origin_y, resolution_m, (window_size, window_size), str(dem_ds.crs)
+    )
+    print(f"  Pencere merkezi : {lat_deg:.3f} N, {lon_deg:.3f} E (yaklasik)")
+```
+
+Sonra şu çağrıyı değiştir:
 
 ```python
     shadow_ratio_grid = make_shadow_ratio_grid(elevation_grid)
@@ -1541,7 +1627,7 @@ def make_thermal_grid(
 →
 ```python
     shadow_ratio_grid, shadow_validity = make_shadow_ratio_grid(
-        elevation_grid, RESOLUTION_M
+        elevation_grid, resolution_m, lat_deg, lon_deg
     )
 ```
 
@@ -1549,19 +1635,29 @@ ve
 
 ```python
     thermal_grid = make_thermal_grid(
-        elevation_grid, slope_grid, aspect_grid, RESOLUTION_M,
+        elevation_grid, slope_grid, aspect_grid, resolution_m,
     )
 ```
 →
 ```python
     thermal_grid, thermal_validity = make_thermal_grid(
-        elevation_grid, slope_grid, aspect_grid, RESOLUTION_M,
+        elevation_grid, slope_grid, aspect_grid, resolution_m, lat_deg,
     )
     print(f"  thermal validity: {thermal_validity}")
     print(f"  shadow  validity: {shadow_validity}")
 ```
 
-`main()` içindeki `save_metadata(...)` çağrısına şu argümanı ekle:
+`# -- 6. Metadata` bölümünde artık `win_transform`/`origin_x`/`origin_y` **tekrar** hesaplanmasın (yukarıda erkene taşındı) — şu iki satırı sil:
+
+```python
+    win_transform = rasterio.windows.transform(win, dem_ds.transform)
+    origin_x, origin_y = win_transform.c, win_transform.f
+
+```
+
+(`save_metadata(` çağrısının hemen üstündeki bu iki satır + boş satır siliniyor; `save_metadata(` çağrısı `origin_x`/`origin_y`'yi hâlâ kullanıyor, artık üst kapsamdan geliyor.)
+
+`save_metadata(...)` çağrısına, `cost_weights=resolved_weights,` satırının altına ekle:
 
 ```python
         layer_validity={
@@ -1575,13 +1671,13 @@ ve
         },
 ```
 
-`save_metadata` imzasına parametreyi ekle (son parametre olarak):
+`save_metadata` imzasına parametreyi ekle (`cost_weights: dict[str, float],` satırının altına, son parametre olarak):
 
 ```python
     layer_validity: dict[str, str],
 ```
 
-ve `meta` sözlüğüne `"cost_model"` satırının altına ekle:
+ve `meta` sözlüğü içinde `"cost_model": "weighted_cell_cost_without_barrier",` satırının altına ekle:
 
 ```python
         "layer_validity": layer_validity,
@@ -1594,9 +1690,9 @@ cd lunapath/src && python process_lunar_data.py
 python -c "import json; m=json.load(open('../data/processed/metadata.json')); print(m['layer_validity'])"
 ```
 
-Expected: yedi katmanın validity etiketi yazdırılıyor. `thermal` `MODEL` (heat1d kuruluysa) veya `SYNTHETIC`; `shadow_ratio` `DERIVED` (SPICE çekirdekleri varsa) veya `SYNTHETIC`.
+Expected: yedi katmanın validity etiketi yazdırılıyor. `thermal` `MODEL` (heat1d kuruluysa) veya `SYNTHETIC`; `shadow_ratio` `DERIVED` (SPICE çekirdekleri varsa) veya `SYNTHETIC`. Hangi DEM dosyası `data/raw/` altında bulunursa (bugün: 5 m/px `Site01`) onun üzerinde çalışır — çözünürlüğü koda yazmadın.
 
-*Not: ufuk hesabı 500×500 / 72 azimut / 125 adım için birkaç dakika sürer; `progress=True` ilerlemeyi yazdırır.*
+*Not: ufuk hesabı artık `HORIZON_MAX_STEPS=200` ile sınırlı; toplam iş yükü `n_azimuth × max_steps = 72 × 200 = 14400` vektörel adımdır ve **çözünürlükten bağımsızdır** (5 m/px'te de 80 m/px'te de aynı sürer). `progress=True` ilerlemeyi yazdırır.*
 
 - [ ] **Step 8: Uçtan uca regresyon**
 
@@ -1606,12 +1702,26 @@ python test_cost_engine.py
 python test_traversability.py
 uvicorn app.main:app --port 8000 &
 sleep 5
-curl -s -X POST http://127.0.0.1:8000/api/plan \
-  -H "Content-Type: application/json" \
-  -d '{"start":{"row":100,"col":100},"goal":{"row":400,"col":400}}' | head -c 400
+curl -s http://127.0.0.1:8000/api/layers/traversable | python -c "
+import sys, json
+d = json.load(sys.stdin)
+data = d['data']
+for r, row in enumerate(data):
+    for c, v in enumerate(row):
+        if v:
+            print(r, c); sys.exit(0)
+"
 ```
 
-Expected: pytest tamamı PASS; `/api/plan` bir rota döndürüyor (`path_pixels` boş değil).
+Yukarıdaki komut, gerçek yüklenen grid'de **geçilebilir bir piksel** bulur (üretilen grid'in hangi bölgeleri geçilebilir kıldığı DEM'e bağlı olduğundan sabit `(100,100)`/`(400,400)` koordinatları güvenli değildir). Bulunan satır/sütunla ve grid şeklinin karşıt köşesine yakın başka bir geçilebilir noktayla planla:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/plan \
+  -H "Content-Type: application/json" \
+  -d '{"start":{"row":<bulunan_row>,"col":<bulunan_col>},"goal":{"row":<baska_bir_gecilebilir_row>,"col":<baska_bir_gecilebilir_col>}}' | head -c 400
+```
+
+Expected: pytest tamamı PASS; `/api/plan` bir rota döndürüyor (`path_pixels` boş değil). İki geçilebilir nokta arasında rota bulunamazsa (izole bölgeler), grid üzerinde başka bir çift dene — bu bir hata değil, gerçek arazi verisinin bağlantılılık özelliğidir.
 
 - [ ] **Step 9: Commit**
 
