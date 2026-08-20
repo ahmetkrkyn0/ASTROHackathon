@@ -33,3 +33,6 @@ data/processed/
 Thumbs.db
 *.log
 node_modules
+
+# NAIF SPICE kernels (hundreds of MB, fetched by lunapath/src/fetch_kernels.py)
+kernels/

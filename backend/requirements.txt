@@ -25,3 +25,4 @@ heat1d @ git+https://github.com/phayne/heat1d@6b25d0f01f015ea815704a6cd0a67af3b9
 numba==0.67.0
 llvmlite==0.49.0
 astropy==8.0.1
+spiceypy==6.0.0
