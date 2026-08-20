@@ -109,16 +109,35 @@ class Heat1DModel:
          longer depends on that package; the two ``Planet`` classes are only
          coincidentally similar, not a documented-compatible substitute), so
          we import ``heat1d.planets`` instead;
-       - the package's own default ``solver="explicit"`` records every
-         CFL-limited step (~6.8 s/cell measured here); its much faster
-         ``solver="fourier-matrix"`` is documented by heat1d itself to
-         produce Gibbs-ringing artifacts *at the diurnal peak* for sloped
-         surfaces -- exactly the value this table reports -- so it is unsafe
-         for our purposes. We use ``solver="crank-nicolson"`` instead:
+       - its much faster ``solver="fourier-matrix"`` is documented by heat1d
+         itself to produce Gibbs-ringing artifacts *at the diurnal peak* for
+         sloped surfaces -- exactly the value this table reports -- so it is
+         unsafe for our purposes. We use ``solver="crank-nicolson"`` instead:
          unconditionally stable, second-order accurate, explicitly
-         recommended by heat1d's own docs for sloped output, matched
-         ``explicit``'s result to ~1 C in testing, and ran ~3x faster
-         (~1.5-2.4 s/cell).
+         recommended by heat1d's own docs for sloped output, and it matched
+         the package's default ``explicit`` solver's result to ~1 C in
+         testing (measured per-cell timing for either solver was in the
+         low single-digit seconds and did not show a consistent, reproducible
+         advantage for one over the other -- see task-4-report.md).
+
+    ``ndays`` (annual peak, not single-day) -- Task 4 review finding
+    ------------------------------------------------------------------
+    The table stores the *annual* peak surface temperature, not a single
+    diurnal cycle's peak: ``ndays=13`` (~1 lunar year) is passed to
+    ``heat1d.Model``, not ``ndays=1``. A single lunar day (~29.5 Earth days)
+    starting from Model's internal phase reference does not sample the part
+    of the year with the highest solar elevation at a given latitude --
+    measured at this class's default latitude a single-day flat-cell peak
+    landed ~81 C below the true annual peak (and the gap is itself
+    slope-dependent: ~81 C at 0 deg slope vs ~22 C at 10 deg sun-facing
+    slope, so a single day doesn't just offset the table, it distorts the
+    slope contrast the cost engine reads). ``ndays=13`` costs roughly 2x a
+    single day per cell (equilibration dominates the run, not the extra
+    simulated days), so a full default-sized table (13x16 = 208 cells) is a
+    one-time ~12-15 minute build per distinct latitude -- acceptable given
+    it is cached per ``Heat1DModel`` instance (``self._cache``, keyed by
+    latitude) and this table is a slow one-off construction, not something
+    on any request's hot path.
     """
 
     validity = "MODEL"
@@ -131,7 +150,15 @@ class Heat1DModel:
 
     @staticmethod
     def available() -> bool:
-        """True when heat1d is importable with a slope-capable Model."""
+        """True when heat1d is importable with a slope-capable Model.
+
+        Checks both APIs ``_lookup_table`` actually calls: ``Model`` (for
+        ``slope``/``slope_az``) and ``Configurator`` (for ``solver``, used
+        to select crank-nicolson). A build with slope support but a
+        differently-shaped ``Configurator`` would otherwise report
+        available() == True and then raise TypeError at grid-build time,
+        defeating the synthetic fallback this check exists to guarantee.
+        """
         try:
             import inspect
 
@@ -139,10 +166,11 @@ class Heat1DModel:
         except Exception:
             return False
         try:
-            params = inspect.signature(heat1d.Model.__init__).parameters
+            model_params = inspect.signature(heat1d.Model.__init__).parameters
+            config_params = inspect.signature(heat1d.Configurator).parameters
         except (TypeError, ValueError):
             return False
-        return "slope" in params
+        return "slope" in model_params and "solver" in config_params
 
     def _lookup_table(self, lat_deg: float) -> np.ndarray:
         """(n_slope_bins, n_aspect_bins) peak surface temperature in Celsius."""
@@ -167,15 +195,17 @@ class Heat1DModel:
                 model = heat1d.Model(
                     planet=heat1d_planets.Moon,
                     lat=np.deg2rad(lat_deg),
-                    ndays=1,
+                    ndays=13,  # ~1 lunar year: see class docstring "ndays" note
                     slope=np.deg2rad(slope_deg),
                     slope_az=np.deg2rad(aspect_deg),
                     config=config,
                 )
                 model.run()
                 surface_k = np.asarray(model.T)[:, 0]
-                # Peak diurnal surface temperature is the planning-relevant
+                # Peak *annual* surface temperature is the planning-relevant
                 # value: it bounds the warmest state the rover must survive.
+                # A single lunar day does not sample the highest-elevation
+                # part of the year at a given latitude (see docstring).
                 table[i, j] = float(np.nanmax(surface_k)) - 273.15
 
         table = np.clip(table, -250.0, 130.0)

@@ -14,3 +14,14 @@ pytest==8.3.4
 # the #subdirectory=python fragment below. Pinned to the commit verified
 # against this codebase; resolves cleanly against numpy==2.2.1 above.
 heat1d @ git+https://github.com/phayne/heat1d@6b25d0f01f015ea815704a6cd0a67af3b9fc0fb8#subdirectory=python
+# heat1d's transitive deps, pinned for reproducibility (every other line in
+# this file is ==-pinned; heat1d itself declares no version bounds on these,
+# and a future numba release could tighten its numpy range enough to make
+# this file unresolvable against numpy==2.2.1 above). Versions below are
+# exactly what resolved cleanly against numpy==2.2.1 in this environment.
+# astropy-iers-data (heat1d -> astropy -> astropy-iers-data) is deliberately
+# left unpinned: it is date-versioned and republishes ~weekly, so pinning it
+# would go stale almost immediately.
+numba==0.67.0
+llvmlite==0.49.0
+astropy==8.0.1
