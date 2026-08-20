@@ -30,7 +30,12 @@ def illuminated_mask(
             f"horizon_deg must be (n_azimuth, H, W), got shape {horizon.shape}"
         )
     bin_index = _azimuth_bin(sun_az_deg, horizon.shape[0])
-    return float(sun_elev_deg) > horizon[bin_index]
+    # The `> 0` floor matters at grid-edge cells: app.horizon writes a -90 deg
+    # sentinel where a ray left the DEM without finding any obstruction, which
+    # means "no data", not "flat". Without the floor, a Sun objectively BELOW
+    # the horizontal still reads as lit there, because -20 > -90.
+    # (Faz 1 final review, finding M1.)
+    return (float(sun_elev_deg) > horizon[bin_index]) & (float(sun_elev_deg) > 0.0)
 
 
 def illumination_fraction(

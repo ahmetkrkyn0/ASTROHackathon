@@ -212,6 +212,19 @@ def load_and_preprocess_dem(
             "default_rover_id": DEFAULT_ROVER_ID,
             "cost_weights": resolved_weights,
             "cost_model": "weighted_cell_cost_without_barrier",
+            # This path only ever produces the synthetic thermal grid and the
+            # elevation-proxy shadow ratio -- it does not touch the heat1d /
+            # horizon / SPICE machinery -- so the honest provenance is
+            # SYNTHETIC for those two layers. (Faz 1 final review, finding I4.)
+            "layer_validity": {
+                "elevation": "MEASURED",
+                "slope": "DERIVED",
+                "aspect": "DERIVED",
+                "shadow_ratio": "SYNTHETIC",
+                "thermal": "SYNTHETIC",
+                "traversable": "DERIVED",
+                "cost": "DERIVED",
+            },
         },
     }
 

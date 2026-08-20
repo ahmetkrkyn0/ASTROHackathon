@@ -164,21 +164,6 @@ def edge_energy_wh(
     return float(rover_cfg["p_base_w"]) * mu * t_s / 3600.0
 
 
-def edge_shadow_hours(
-    shadow_ratio: float,
-    theta_deg: float,
-    d_m: float,
-    rover: Mapping[str, Any] | None = None,
-) -> float:
-    """Approximate shadow exposure accrued on a single edge."""
-    if shadow_ratio <= 0:
-        return 0.0
-    t_s = edge_travel_time_s(theta_deg, d_m, rover)
-    if math.isinf(t_s):
-        return float("inf")
-    return max(0.0, shadow_ratio) * (t_s / 3600.0)
-
-
 def _thermal_penalty(
     value: float,
     low: float | None,

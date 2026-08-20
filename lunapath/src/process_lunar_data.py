@@ -87,6 +87,13 @@ def find_dem_file(custom_path: str | None = None) -> Path:
     raise FileNotFoundError(f"'{RAW_DIR}' dizininde herhangi bir .tif / .tiff DEM dosyasi bulunamadi!")
 
 
+# NOTE: backend/app/serializer.py::pixel_to_lonlat has the identical y-axis
+# sign convention issue this function's origin_y handling was fixed to avoid
+# (Faz 1 Task 8 review). Deliberately left unfixed there -- serializer.py is
+# shared production code behind every live API coordinate endpoint, and
+# fixing it is a separate, larger decision than this pipeline-local fix.
+# See docs/superpowers/plans/2026-08-19-faz1-gercek-fizik.md's ledger for
+# the full ruling.
 def window_center_latlon(
     origin_x: float,
     origin_y: float,
@@ -223,17 +230,26 @@ def make_aspect_grid(elevation: np.ndarray, resolution: float) -> np.ndarray:
 
 
 def make_shadow_ratio_grid(
-    elevation: np.ndarray, resolution: float, lat_deg: float, lon_deg: float
+    elevation: np.ndarray,
+    resolution: float,
+    lat_deg: float,
+    lon_deg: float,
+    crs_wkt: str,
 ) -> tuple[np.ndarray, str]:
     """Golge orani [0, 1]. 0=aydinlik, 1=karanlik.
 
     Gercek yol: topografik ufuk haritasi + SPICE gunes izi. SPICE
     cekirdekleri yoksa yukseklik proxy'sine duser ve bunu bildirir.
     lat_deg/lon_deg window_center_latlon()'dan gelir -- sabit degil.
+    crs_wkt gercek kuzey -> grid kuzeyi azimut donusumu icin gerekli.
 
     Donus: (shadow_ratio_grid, validity)
     """
-    from app.ephemeris import sun_track
+    from app.ephemeris import (
+        sun_track,
+        true_azimuth_to_grid_azimuth,
+        true_north_grid_azimuth,
+    )
 
     try:
         # sun_track first: it's the cheap call and the one that actually
@@ -247,6 +263,16 @@ def make_shadow_ratio_grid(
             lat_deg,
             lon_deg,
         )
+        # sun_track's azimuths are TRUE-north referenced; horizon_map's bins
+        # are GRID-north referenced (raster row/col directions). They coincide
+        # only on the projection's central meridian -- at this window's real
+        # longitude the offset is ~110 deg (~22 of 72 bins). Rotate before
+        # matching. (Faz 1 final review, finding C1.)
+        grid_north_az = true_north_grid_azimuth(lat_deg, lon_deg, crs_wkt)
+        grid_samples = [
+            (true_azimuth_to_grid_azimuth(az, grid_north_az), elev)
+            for az, elev in samples
+        ]
         horizon = horizon_map(
             elevation,
             resolution,
@@ -255,9 +281,16 @@ def make_shadow_ratio_grid(
             max_steps=HORIZON_MAX_STEPS,
             progress=True,
         )
-        frac = illumination_fraction(horizon, samples)
+        frac = illumination_fraction(horizon, grid_samples)
         return shadow_ratio_from_illumination(frac).astype(np.float64), "DERIVED"
-    except (RuntimeError, OSError) as exc:
+    except Exception as exc:
+        # Deliberately broad: this function's contract is "try real physics,
+        # fall back to the synthetic proxy on ANY failure, and say so".
+        # spiceypy maps SPICE errors onto assorted builtin exception types
+        # (SpiceNOSUCHFILE -> OSError, but out-of-coverage epochs and malformed
+        # meta-kernels surface as ValueError/TypeError/KeyError subclasses), so
+        # a narrow catch would let those kill the whole pipeline instead of
+        # degrading gracefully. (Faz 1 final review, finding I8.)
         print(f"  UYARI: gercek aydinlanma hesaplanamadi ({exc}); proxy kullaniliyor")
         e_min = np.nanmin(elevation)
         e_max = np.nanmax(elevation)
@@ -478,7 +511,7 @@ def main(
           f"max={np.nanmax(aspect_grid):.2f} deg")
 
     shadow_ratio_grid, shadow_validity = make_shadow_ratio_grid(
-        elevation_grid, resolution_m, lat_deg, lon_deg
+        elevation_grid, resolution_m, lat_deg, lon_deg, str(dem_ds.crs)
     )
     print(f"  shadow_ratio    : min={np.nanmin(shadow_ratio_grid):.3f}, "
           f"max={np.nanmax(shadow_ratio_grid):.3f}")

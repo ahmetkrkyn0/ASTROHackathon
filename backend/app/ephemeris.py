@@ -12,9 +12,17 @@ range [0, 360).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
-DEFAULT_META_KERNEL = "kernels/lunapath.tm"
+# backend/app/ephemeris.py -> backend/app -> backend -> repo root.
+# Resolved from __file__ rather than the CWD: the documented pipeline
+# invocation is `cd lunapath/src && python process_lunar_data.py`, under
+# which a CWD-relative "kernels/lunapath.tm" never resolves (fetch_kernels.py
+# writes to the REPO ROOT's kernels/). Same pattern fetch_kernels.py uses.
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_META_KERNEL = str(_REPO_ROOT / "kernels" / "lunapath.tm")
 _MOON_BODY_FRAME = "MOON_ME"
 
 
@@ -61,6 +69,46 @@ def sun_azel_from_vector(
     elevation_deg = float(np.degrees(np.arcsin(np.clip(u, -1.0, 1.0))))
     azimuth_deg = float(np.degrees(np.arctan2(e, n)) % 360.0)
     return azimuth_deg, elevation_deg
+
+
+def true_north_grid_azimuth(
+    lat_deg: float, lon_deg: float, crs_wkt: str, step_deg: float = 1e-4
+) -> float:
+    """Grid-frame azimuth (app.horizon convention: 0 = decreasing row/North,
+    90 = increasing column/East) that TRUE north points toward, at
+    (lat_deg, lon_deg) in the given projected CRS.
+
+    sun_azel_from_vector's azimuth is true-north-referenced (an ENU frame on
+    the body-fixed sphere); app.horizon's bins are grid-north-referenced
+    (raster row/column directions). These coincide only on the projection's
+    central meridian. Computed numerically via a short true-north step
+    projected through the real CRS, rather than an assumed closed-form
+    convergence formula, so this is correct for any CRS the pipeline loads,
+    not just the one active today.
+    """
+    import os
+
+    os.environ.setdefault("PROJ_IGNORE_CELESTIAL_BODY", "YES")
+    from pyproj import Transformer
+
+    to_proj = Transformer.from_crs("EPSG:4326", crs_wkt, always_xy=True)
+    x0, y0 = to_proj.transform(lon_deg, lat_deg)
+    x1, y1 = to_proj.transform(lon_deg, lat_deg + step_deg)
+    dx, dy = x1 - x0, y1 - y0
+    # Grid convention (derived from app.horizon + the Task 8 y-sign fix):
+    # +col <-> +x (East), +row <-> -y (row increases southward), so grid
+    # azimuth 0 (grid North = decreasing row) points along +y, and grid
+    # azimuth 90 (East = increasing column) points along +x. That is the
+    # standard atan2(dx, dy) compass-bearing form.
+    return float(np.degrees(np.arctan2(dx, dy)) % 360.0)
+
+
+def true_azimuth_to_grid_azimuth(
+    true_az_deg: float, true_north_grid_az_deg: float
+) -> float:
+    """Rotate a true-north-referenced azimuth (from sun_azel_from_vector /
+    sun_track) into app.horizon's grid-frame convention."""
+    return float((true_north_grid_az_deg + true_az_deg) % 360.0)
 
 
 def sun_vector_body(et: float, meta_kernel: str = DEFAULT_META_KERNEL) -> np.ndarray:
