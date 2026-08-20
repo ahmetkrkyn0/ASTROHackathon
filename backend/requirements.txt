@@ -6,3 +6,11 @@ scipy==1.15.0
 pyproj==3.7.2
 httpx>=0.27.0
 pytest==8.3.4
+# heat1d PyPI release (0.3.2 as of writing) has no slope/aspect support at
+# all -- see backend/app/thermal_model.py:Heat1DModel docstring and
+# .superpowers/sdd/2026-08-19-faz1-gercek-fizik/task-4-report.md for the
+# full investigation. The GitHub main branch (0.4.1) adds slope/slope_az
+# but its installable package root lives in a python/ subdirectory, hence
+# the #subdirectory=python fragment below. Pinned to the commit verified
+# against this codebase; resolves cleanly against numpy==2.2.1 above.
+heat1d @ git+https://github.com/phayne/heat1d@6b25d0f01f015ea815704a6cd0a67af3b9fc0fb8#subdirectory=python
