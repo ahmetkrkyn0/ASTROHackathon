@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from app.constants import get_rover
-from app.cost_engine import compute_cost_grid
+from app.cost_engine import compute_cost_grid, f_shadow_cell
 
 RESOLUTION_M = 80.0
 # -120 C keeps the cell traversable (> -150 C) while making f_thermal ~1.0,
@@ -45,3 +45,19 @@ def test_shadow_cost_is_monotonic():
     costs = [_cost_for_shadow_ratio(r) for r in (0.0, 0.25, 0.5, 0.75, 1.0)]
     assert costs == sorted(costs)
     assert costs[-1] > costs[0]
+
+
+def test_f_shadow_cell_endpoints():
+    """Fully lit -> 0, fully shadowed -> 1 (MRU normalisation)."""
+    assert f_shadow_cell(0.0) == pytest.approx(0.0, abs=1e-12)
+    assert f_shadow_cell(1.0) == pytest.approx(1.0, abs=1e-12)
+
+
+def test_f_shadow_cell_midpoint_matches_exponential_shape():
+    """Same exponential shape as f_shadow: (e^(3r) - 1) / (e^3 - 1)."""
+    assert f_shadow_cell(0.5) == pytest.approx(0.182426, abs=1e-6)
+
+
+def test_f_shadow_cell_clamps_out_of_range_input():
+    assert f_shadow_cell(-0.3) == pytest.approx(0.0, abs=1e-12)
+    assert f_shadow_cell(1.7) == pytest.approx(1.0, abs=1e-12)

@@ -91,6 +91,22 @@ def f_shadow(H_hours: float, rover: Mapping[str, Any] | None = None) -> float:
     )
 
 
+def f_shadow_cell(shadow_ratio: float) -> float:
+    """Cell-level shadow penalty in MRU [0, 1].
+
+    Unlike :func:`f_shadow`, which takes CUMULATIVE shadow hours and is
+    therefore path-dependent, this is a per-cell proxy for the static cost
+    grid. It applies the same exponential shape directly to the shadow
+    ratio so a fully shadowed cell costs 1.0 and a fully lit cell 0.0.
+
+    Feeding f_shadow a single-edge duration (~0.11 h) normalised against
+    h_max_shadow_h (50 h) collapsed the term to ~3e-4, which made the
+    0.142-weighted shadow criterion irrelevant to planning.
+    """
+    r = min(1.0, max(0.0, float(shadow_ratio)))
+    return (math.exp(_SHADOW_LAMBDA * r) - 1.0) / (math.exp(_SHADOW_LAMBDA) - 1.0)
+
+
 # ── 2.3.4  f_thermal — Dual-sigmoid thermal penalty ─────────────────────────
 
 def _sigmoid(x: float) -> float:
@@ -307,8 +323,9 @@ def compute_cost_grid(
     This is a *cell-level proxy* for the planner's full edge cost:
     - edge-based terms (`f_slope`, `f_energy`) use the local cell slope and one
       nominal grid step of length ``resolution_m``.
-    - the shadow term uses local shadow ratio multiplied by the traversal time
-      of one nominal step.
+    - the shadow term uses ``f_shadow_cell`` on the local shadow ratio; the
+      cumulative ``f_shadow`` belongs to the path-dependent planner, not to
+      this static grid.
     - the log-barrier term is intentionally omitted here because it depends on
       cumulative SOC / shadow history and therefore only makes sense during
       path planning.
@@ -338,14 +355,10 @@ def compute_cost_grid(
         if math.isnan(float(slope_deg)) or math.isnan(thermal_c) or math.isnan(shadow_ratio):
             continue
 
-        local_shadow_h = edge_shadow_hours(shadow_ratio, float(slope_deg), resolution_m, rover_cfg)
-        if math.isinf(local_shadow_h):
-            continue
-
         local_cost = (
             resolved["w_slope"] * f_slope(float(slope_deg), rover_cfg)
             + resolved["w_energy"] * f_energy(float(slope_deg), resolution_m, rover_cfg)
-            + resolved["w_shadow"] * f_shadow(local_shadow_h, rover_cfg)
+            + resolved["w_shadow"] * f_shadow_cell(shadow_ratio)
             + resolved["w_thermal"] * f_thermal(thermal_c, rover_cfg)
         )
         cost_grid[idx] = max(0.01, local_cost)
