@@ -73,6 +73,25 @@ class CostMap:
         out[self._invalid_mask(ctx)] = np.inf
         return out
 
+    @staticmethod
+    def _cell_context(row: int, col: int, ctx: PlanContext) -> PlanContext:
+        """A 1x1 view of *ctx* at (row, col).
+
+        Layers vectorise over the whole grid, so evaluating them on the full
+        context to read one cell costs O(H*W) -- 1.7 s on the 500x500
+        production grid. Slicing first keeps ``explain()`` O(1) in grid size
+        without changing the CostLayer protocol. (Faz 2 review, I1.)
+        """
+        cell = (slice(row, row + 1), slice(col, col + 1))
+        return PlanContext(
+            slope=np.asarray(ctx.slope)[cell],
+            thermal=np.asarray(ctx.thermal)[cell],
+            shadow_ratio=np.asarray(ctx.shadow_ratio)[cell],
+            traversable=np.asarray(ctx.traversable)[cell],
+            resolution_m=ctx.resolution_m,
+            rover=ctx.rover,
+        )
+
     def explain(self, row: int, col: int, ctx: PlanContext) -> dict[str, float | None]:
         """Weighted contribution of every layer at one cell, plus the total.
 
@@ -83,11 +102,13 @@ class CostMap:
         the convention the rest of this API already uses for unrepresentable
         cell values (see ``main._read_grid_value`` and ``main.get_layer``).
         """
+        cell_ctx = self._cell_context(row, col, ctx)
+
         breakdown: dict[str, float | None] = {}
         running = 0.0
         finite = True
         for layer in self.layers:
-            value = float(layer.weight * layer.contribution(ctx)[row, col])
+            value = float(layer.weight * layer.contribution(cell_ctx)[0, 0])
             if np.isfinite(value):
                 breakdown[layer.name] = value
                 running += value
@@ -95,7 +116,7 @@ class CostMap:
                 breakdown[layer.name] = None
                 finite = False
 
-        if finite and not bool(self._invalid_mask(ctx)[row, col]):
+        if finite and not bool(self._invalid_mask(cell_ctx)[0, 0]):
             breakdown["total"] = float(max(running, MIN_CELL_COST))
         else:
             breakdown["total"] = None

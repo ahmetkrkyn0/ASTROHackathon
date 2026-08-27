@@ -200,3 +200,45 @@ def test_explain_still_sums_correctly_on_finite_cells():
     breakdown = cost_map.explain(int(row), int(col), ctx)
     parts = sum(v for k, v in breakdown.items() if k != "total")
     assert breakdown["total"] == pytest.approx(max(parts, 0.01), abs=1e-9)
+
+
+# ── Faz 2 review fix: I1 -- explain() must be O(1) in grid size ──
+
+
+def test_explain_does_not_evaluate_the_whole_grid():
+    """explain() must be O(1) in grid size, not O(H*W)."""
+    rover = get_rover()
+    calls: list[tuple[int, ...]] = []
+
+    class _CountingLayer:
+        name = "counting"
+        validity = "MODEL"
+        weight = 1.0
+
+        def contribution(self, ctx: PlanContext) -> np.ndarray:
+            calls.append(np.asarray(ctx.slope).shape)
+            return np.zeros(np.asarray(ctx.slope).shape, dtype=np.float64)
+
+    shape = (200, 200)
+    ctx = PlanContext(
+        slope=np.full(shape, 5.0),
+        thermal=np.full(shape, -60.0),
+        shadow_ratio=np.full(shape, 0.3),
+        traversable=np.ones(shape, dtype=bool),
+        resolution_m=5.0,
+        rover=rover,
+    )
+    CostMap([_CountingLayer()]).explain(100, 100, ctx)
+    assert calls == [(1, 1)], f"layer saw {calls}, expected a single 1x1 slice"
+
+
+def test_explain_matches_full_grid_result():
+    """The 1x1 shortcut must not change any number."""
+    ctx = _random_context()
+    cost_map = default_cost_map(ctx.rover)
+    total_grid = cost_map.total(ctx)
+    for row, col in np.argwhere(np.isfinite(total_grid))[:5]:
+        breakdown = cost_map.explain(int(row), int(col), ctx)
+        assert breakdown["total"] == pytest.approx(
+            float(total_grid[row, col]), abs=1e-9
+        )
