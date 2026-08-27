@@ -478,7 +478,13 @@ def replan(req: ReplanRequest, request: Request):
 
 @app.post("/api/plan-4d")
 def plan_4d(req: Plan4DRequest, request: Request):
-    """Plan through space AND time, with an explicit WAIT decision."""
+    """Plan through space AND time, with an explicit WAIT decision.
+
+    Coordinate contract: ``path_pixels`` is in FINE grid pixels, matching
+    /api/plan, so the same origin/resolution conversion applies to both.
+    ``path_pixels_coarse`` and ``path_states`` are in the coarse planning
+    grid whose cell size is ``effective_resolution_m``.
+    """
     grids = _active_grids(request)
     rover = get_rover(req.rover_id)
     weights_dict = req.weights.model_dump()
@@ -494,6 +500,24 @@ def plan_4d(req: Plan4DRequest, request: Request):
 
     start = _to_pixel(req.start, "start", metadata)
     goal = _to_pixel(req.goal, "goal", metadata)
+
+    # Coarsening collapses blocks of fine cells onto one planner cell. If the
+    # caller's start and goal land in the same block there is nothing to plan:
+    # the planner would return a single-state "path", which reads as success
+    # but is not the route that was asked for (and build_corridor rejects a
+    # one-waypoint path anyway). Say so instead of returning it. (Faz 3 review,
+    # I2.)
+    coarse_start = (start[0] // req.coarsen, start[1] // req.coarsen)
+    coarse_goal = (goal[0] // req.coarsen, goal[1] // req.coarsen)
+    if coarse_start == coarse_goal:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"start {start} and goal {goal} fall in the same coarse cell "
+                f"{coarse_start} at coarsen={req.coarsen}; "
+                "lower coarsen or choose points further apart."
+            ),
+        )
 
     # Until the SPICE-driven illumination cube lands, hold shadow constant
     # across slices: the planner machinery is exercised, the physics is not
@@ -513,8 +537,8 @@ def plan_4d(req: Plan4DRequest, request: Request):
         cost_cube,
         wait_cube,
         coarsen_traversable(grids_for_plan["traversable"], req.coarsen),
-        start=(start[0] // req.coarsen, start[1] // req.coarsen),
-        goal=(goal[0] // req.coarsen, goal[1] // req.coarsen),
+        start=coarse_start,
+        goal=coarse_goal,
         resolution_m=float(metadata["resolution_m"]) * req.coarsen,
         slice_hours=req.slice_hours,
         rover=rover,
@@ -523,13 +547,27 @@ def plan_4d(req: Plan4DRequest, request: Request):
     if result["error"]:
         raise HTTPException(status_code=404, detail=result["error"])
 
+    # The planner solves on the coarse grid, but the caller asked in fine
+    # pixels and will convert the answer using the fine origin/resolution in
+    # metadata. Publishing coarse indices under the same field name /api/plan
+    # uses for fine ones is a silent factor-of-coarsen scale error; return the
+    # centre of each coarse block instead and keep the coarse path under a
+    # name that says what it is. (Faz 3 review, C2.)
+    offset = req.coarsen // 2
+    fine_pixels = [
+        (r * req.coarsen + offset, c * req.coarsen + offset)
+        for r, c in result["path_pixels"]
+    ]
+
     return {
-        "path_pixels": result["path_pixels"],
+        "path_pixels": fine_pixels,
+        "path_pixels_coarse": result["path_pixels"],
         "path_states": result["path_states"],
         "metrics": result["metrics"],
         "n_slices": req.n_slices,
         "slice_hours": req.slice_hours,
         "coarsen": req.coarsen,
+        "effective_resolution_m": float(metadata["resolution_m"]) * req.coarsen,
         "rover_id": req.rover_id,
     }
 

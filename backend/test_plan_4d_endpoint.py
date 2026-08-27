@@ -80,3 +80,59 @@ def test_plan_4d_echoes_time_configuration(client):
 def test_plan_4d_rejects_non_divisible_coarsen(client):
     response = client.post("/api/plan-4d", json=_body(coarsen=5))
     assert response.status_code == 422
+
+
+# ── Review findings: coordinate space and degenerate start/goal ───────────────
+
+
+def test_path_pixels_are_fine_grid_coordinates(client):
+    """``path_pixels`` must be in the same space as /api/plan.
+
+    The planner solves on a coarsened grid, but the caller asked in fine
+    pixels and a local planner will convert these with the fine
+    ``resolution_m``/``origin``. Returning coarse indices under the same
+    field name is a 4x scale error waiting to happen.
+    """
+    payload = client.post("/api/plan-4d", json=_body()).json()
+    rows, cols = SHAPE
+    for row, col in payload["path_pixels"]:
+        assert 0 <= row < rows
+        assert 0 <= col < cols
+    # A 16x16 grid at coarsen=4 has coarse indices 0..3; a fine path to
+    # (12, 12) must reach beyond that range.
+    assert max(max(r, c) for r, c in payload["path_pixels"]) > 3
+
+
+def test_path_pixels_end_near_the_requested_goal(client):
+    payload = client.post("/api/plan-4d", json=_body()).json()
+    last_row, last_col = payload["path_pixels"][-1]
+    # Within one coarse block of the requested (12, 12).
+    assert abs(last_row - 12) < 4
+    assert abs(last_col - 12) < 4
+
+
+def test_response_reports_the_effective_planning_resolution(client):
+    payload = client.post("/api/plan-4d", json=_body()).json()
+    assert payload["effective_resolution_m"] == pytest.approx(80.0 * 4)
+
+
+def test_coarse_path_is_still_available_under_its_own_name(client):
+    payload = client.post("/api/plan-4d", json=_body()).json()
+    assert payload["path_pixels_coarse"]
+    assert len(payload["path_pixels_coarse"]) == len(payload["path_pixels"])
+
+
+def test_start_and_goal_in_the_same_coarse_cell_is_rejected(client):
+    """(0,0) and (3,3) both collapse to coarse (0,0) at coarsen=4."""
+    response = client.post(
+        "/api/plan-4d", json=_body(goal={"row": 3, "col": 3})
+    )
+    assert response.status_code == 422
+    assert "coarse" in response.json()["detail"].lower()
+
+
+def test_identical_start_and_goal_is_rejected(client):
+    response = client.post(
+        "/api/plan-4d", json=_body(start={"row": 4, "col": 4}, goal={"row": 4, "col": 4})
+    )
+    assert response.status_code == 422
