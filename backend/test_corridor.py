@@ -134,3 +134,23 @@ def test_fallback_points_use_the_same_row_convention():
     corridor = build_corridor(path, _grids(), get_rover())
     for (_, y) in corridor.fallback_points:
         assert y <= 28000.0  # never north of the top edge
+
+
+# ── Faz 2 review fix: M1 -- Corridor must stay strict-JSON serialisable ──
+
+
+def test_energy_budget_stays_finite_on_absurd_slopes():
+    """edge_energy_wh returns inf at >=90 deg; that must not reach the JSON."""
+    grids = _grids()
+    grids["slope"] = np.full(SHAPE, 95.0)
+    corridor = build_corridor([(1, 1), (2, 2)], grids, get_rover())
+    assert all(np.isfinite(e) for e in corridor.energy_budget_wh)
+
+
+def test_corridor_is_strict_json_serialisable():
+    import json
+
+    grids = _grids()
+    grids["slope"] = np.full(SHAPE, 95.0)
+    corridor = build_corridor([(1, 1), (2, 2)], grids, get_rover())
+    json.dumps(corridor.model_dump(), allow_nan=False)

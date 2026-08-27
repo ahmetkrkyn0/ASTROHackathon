@@ -104,8 +104,17 @@ def build_corridor(
         segment_slope = float(max(slope[r0, c0], slope[r1, c1]))
         max_slope_deg.append(segment_slope)
 
+        energy_wh = edge_energy_wh(segment_slope, distance_m, rover)
+        # edge_energy_wh is inf for slopes >= 90 deg. Such a segment cannot be
+        # driven at all, but the Corridor is a JSON contract and inf is not
+        # valid JSON -- it would 500 /api/plan the same way inf in
+        # cost_breakdown did. Report the rover's full capacity instead: an
+        # unachievable budget the local planner will reject on its own.
+        # (Faz 2 review, M1.)
         energy_budget_wh.append(
-            float(edge_energy_wh(segment_slope, distance_m, rover))
+            float(energy_wh)
+            if math.isfinite(energy_wh)
+            else float(rover["e_cap_wh"])
         )
 
         travel_s = edge_travel_time_s(segment_slope, distance_m, rover)
