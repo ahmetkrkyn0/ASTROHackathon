@@ -32,6 +32,14 @@ _OFFSETS: tuple[tuple[int, int, bool], ...] = (
 
 
 def _empty(error: str, elapsed_ms: float = 0.0) -> dict[str, Any]:
+    """A failed plan.
+
+    ``total_cost`` is ``None``, not ``inf``: this dict is a candidate for
+    direct JSON serialisation and Starlette renders with ``allow_nan=False``,
+    so a bare ``inf`` turns the response into a 500. ``None`` is the
+    convention the rest of this API already uses for unrepresentable values
+    (``main._read_grid_value``, ``main.get_layer``, ``CostMap.explain``).
+    """
     return {
         "path_states": [],
         "path_pixels": [],
@@ -39,7 +47,7 @@ def _empty(error: str, elapsed_ms: float = 0.0) -> dict[str, Any]:
             "wait_steps": 0,
             "move_steps": 0,
             "arrival_slice": None,
-            "total_cost": float("inf"),
+            "total_cost": None,
             "nodes_expanded": 0,
             "computation_time_ms": round(elapsed_ms, 3),
         },
@@ -190,7 +198,7 @@ def astar_4d(
             "wait_steps": wait_steps,
             "move_steps": len(states) - 1 - wait_steps,
             "arrival_slice": goal_state[2],
-            "total_cost": round(g_score[goal_state], 6),
+            "total_cost": round(float(g_score[goal_state]), 6),
             "nodes_expanded": nodes_expanded,
             "computation_time_ms": round(elapsed_ms, 3),
         },

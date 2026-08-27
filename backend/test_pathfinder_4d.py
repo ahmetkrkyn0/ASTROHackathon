@@ -114,3 +114,34 @@ def test_planner_does_not_wait_when_there_is_nothing_to_gain():
     """A uniformly cheap cube must produce a straight, wait-free plan."""
     result = _run(*_uniform_case(n_slices=8))
     assert result["metrics"]["wait_steps"] == 0
+
+
+# ── Review findings: JSON safety and degenerate start/goal ────────────────────
+
+
+def test_error_result_is_strict_json_serialisable():
+    """``inf`` is not valid JSON; a caller that serialises an error result
+    directly must not get a 500. Same root cause as the Faz 2 C1 finding."""
+    import json
+
+    cost_cube, wait_cube, traversable = _uniform_case()
+    traversable[0, 3] = False
+    result = _run(cost_cube, wait_cube, traversable)
+
+    assert result["error"] is not None
+    json.dumps(result, allow_nan=False)
+
+
+def test_error_result_reports_total_cost_as_none():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    traversable[0, 3] = False
+    result = _run(cost_cube, wait_cube, traversable)
+    assert result["metrics"]["total_cost"] is None
+
+
+def test_successful_result_is_strict_json_serialisable():
+    import json
+
+    result = _run(*_uniform_case())
+    assert result["error"] is None
+    json.dumps(result, allow_nan=False)
