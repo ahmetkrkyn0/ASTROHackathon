@@ -74,3 +74,40 @@ def test_cost_cube_rejects_empty_series():
 def test_cost_cube_rejects_shape_mismatch():
     with pytest.raises(ValueError):
         build_cost_cube(_base_grids(), [np.zeros((4, 4))], get_rover())
+
+
+from app.cost_cube import build_wait_cost_cube, wait_cost
+from app.cost_engine import resolve_weights
+
+
+def test_waiting_in_full_sun_is_free():
+    """Solar input exceeds idle+heater draw -> no energy penalty."""
+    rover = get_rover()
+    weights = resolve_weights(None, rover)
+    assert wait_cost(1.0, 1.0, rover, weights) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_waiting_in_full_shadow_costs_more_than_in_sun():
+    rover = get_rover()
+    weights = resolve_weights(None, rover)
+    assert wait_cost(0.0, 1.0, rover, weights) > wait_cost(1.0, 1.0, rover, weights)
+
+
+def test_wait_cost_grows_with_duration():
+    rover = get_rover()
+    weights = resolve_weights(None, rover)
+    assert wait_cost(0.0, 2.0, rover, weights) > wait_cost(0.0, 1.0, rover, weights)
+
+
+def test_wait_cost_is_never_negative():
+    rover = get_rover()
+    weights = resolve_weights(None, rover)
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        assert wait_cost(frac, 1.0, rover, weights) >= 0.0
+
+
+def test_wait_cost_cube_shape_matches_series_and_coarsening():
+    series = [np.ones(SHAPE), np.zeros(SHAPE)]
+    cube = build_wait_cost_cube(series, get_rover(), dt_hours=1.0, coarsen=2)
+    assert cube.shape == (2, 4, 4)
+    assert (cube[1] > cube[0]).all()

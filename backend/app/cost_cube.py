@@ -98,3 +98,60 @@ def build_cost_cube(
         slices.append(cost_map.total(context))
 
     return np.stack(slices, axis=0)
+
+
+from .cost_engine import f_shadow_cell, resolve_weights
+
+
+def wait_cost(
+    illum_frac: float,
+    dt_hours: float,
+    rover: Mapping[str, Any],
+    weights: Mapping[str, float],
+) -> float:
+    """Cost of holding position for one time slice.
+
+    Waiting in sunlight recharges the battery and costs nothing on the
+    energy axis; waiting in shadow drains state of charge and accumulates
+    shadow exposure. Modelling this is what turns "go faster" into
+    "stop, let the Sun come, then cross".
+    """
+    frac = min(1.0, max(0.0, float(illum_frac)))
+    dt = max(0.0, float(dt_hours))
+
+    solar_in_w = float(rover["p_solar_w"]) * frac
+    idle_w = float(rover["p_idle_w"])
+    heater_w = float(rover["p_heater_w"])
+    net_w = solar_in_w - idle_w - heater_w
+
+    delta_soc = net_w * dt / float(rover["e_cap_wh"])
+    energy_penalty = max(0.0, -delta_soc)
+    shadow_penalty = f_shadow_cell(1.0 - frac) * dt
+
+    return float(
+        weights["w_energy"] * energy_penalty + weights["w_shadow"] * shadow_penalty
+    )
+
+
+def build_wait_cost_cube(
+    illum_frac_series: Sequence[np.ndarray],
+    rover: Mapping[str, Any],
+    dt_hours: float,
+    weights: Mapping[str, float] | None = None,
+    coarsen: int = 1,
+) -> np.ndarray:
+    """(T, H', W') cost of waiting one slice in each cell at each time."""
+    if len(illum_frac_series) == 0:
+        raise ValueError("illum_frac_series must contain at least one snapshot")
+
+    resolved = resolve_weights(weights, rover)
+    wait_cost_vec = np.vectorize(
+        lambda frac: wait_cost(frac, dt_hours, rover, resolved),
+        otypes=[np.float64],
+    )
+
+    slices = [
+        wait_cost_vec(coarsen_grid(np.asarray(frac, dtype=np.float64), coarsen))
+        for frac in illum_frac_series
+    ]
+    return np.stack(slices, axis=0)
