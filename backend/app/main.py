@@ -22,6 +22,7 @@ from .constants import (
     rover_catalog,
 )
 from .cost_engine import compute_cost_grid, resolve_weights
+from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .pathfinder import astar
@@ -389,6 +390,14 @@ def plan(req: PlanRequest, request: Request):
         raise HTTPException(status_code=500, detail="Internal simulation error.")
 
     try:
+        corridor_payload = build_corridor(
+            astar_result["path_pixels"], grids_for_plan, rover
+        ).model_dump()
+    except (ValueError, KeyError) as exc:
+        logger.warning("Corridor generation skipped: %s", exc)
+        corridor_payload = None
+
+    try:
         return build_plan_response(
             astar_result,
             states,
@@ -398,6 +407,7 @@ def plan(req: PlanRequest, request: Request):
             grids_for_plan["elevation"],
             rover_id=req.rover_id,
             rover_name=rover["name"],
+            corridor=corridor_payload,
         )
     except Exception:
         logger.error("Response serialization failed:\n%s", traceback.format_exc())

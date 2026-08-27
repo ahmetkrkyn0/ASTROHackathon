@@ -214,6 +214,7 @@ def build_plan_response(
     elevation_grid: Any | None = None,
     rover_id: str | None = None,
     rover_name: str | None = None,
+    corridor: dict[str, Any] | None = None,
 ) -> dict:
     """Assemble the final API response for a single plan request.
 
@@ -241,6 +242,7 @@ def build_plan_response(
         "astar_metrics": astar_result.get("metrics", {}),
         "summary": summary,
         "geojson": states_to_geojson(states, metadata),
+        "corridor": corridor,
     }
     if rover_id is not None:
         response["rover"] = {
