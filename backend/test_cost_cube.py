@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -111,3 +113,165 @@ def test_wait_cost_cube_shape_matches_series_and_coarsening():
     cube = build_wait_cost_cube(series, get_rover(), dt_hours=1.0, coarsen=2)
     assert cube.shape == (2, 4, 4)
     assert (cube[1] > cube[0]).all()
+
+
+# ── Review finding M3: time-invariant layers must not be recomputed ───────────
+
+
+def test_cost_cube_matches_a_per_slice_reference():
+    """The optimised builder must agree with the naive one, bit for bit."""
+    from app.costmap import PlanContext, default_cost_map
+
+    grids = _base_grids()
+    rover = get_rover()
+    series = [np.full(SHAPE, r) for r in (0.0, 0.35, 0.8, 1.0)]
+
+    cube = build_cost_cube(grids, series, rover)
+
+    cost_map = default_cost_map(rover)
+    for index, snapshot in enumerate(series):
+        reference = cost_map.total(
+            PlanContext(
+                slope=np.asarray(grids["slope"], dtype=np.float64),
+                thermal=np.asarray(grids["thermal"], dtype=np.float64),
+                shadow_ratio=np.asarray(snapshot, dtype=np.float64),
+                traversable=np.asarray(grids["traversable"], dtype=bool),
+                resolution_m=80.0,
+                rover=rover,
+            )
+        )
+        assert np.allclose(cube[index], reference, equal_nan=True)
+
+
+def test_cost_cube_matches_reference_with_coarsening_and_blocked_cells():
+    from app.costmap import PlanContext, default_cost_map
+
+    grids = _base_grids()
+    traversable = np.ones(SHAPE, dtype=bool)
+    traversable[0, 0] = False          # kills coarse block (0, 0)
+    grids["traversable"] = traversable
+    slope = np.asarray(grids["slope"], dtype=np.float64).copy()
+    slope[4, 4] = 30.0                 # non-uniform: exercises how="max"
+    grids["slope"] = slope
+
+    rover = get_rover()
+    series = [np.full(SHAPE, 0.2), np.full(SHAPE, 0.9)]
+    cube = build_cost_cube(grids, series, rover, coarsen=2)
+
+    from app.cost_cube import coarsen_grid, coarsen_traversable
+
+    cost_map = default_cost_map(rover)
+    for index, snapshot in enumerate(series):
+        reference = cost_map.total(
+            PlanContext(
+                slope=coarsen_grid(slope, 2, how="max"),
+                thermal=coarsen_grid(grids["thermal"], 2),
+                shadow_ratio=coarsen_grid(np.asarray(snapshot, float), 2),
+                traversable=coarsen_traversable(traversable, 2),
+                resolution_m=160.0,
+                rover=rover,
+            )
+        )
+        assert np.allclose(cube[index], reference, equal_nan=True)
+    assert np.isinf(cube[0, 0, 0])     # blocked block stays impassable
+
+
+def test_cost_cube_does_not_rebuild_invariant_layers_per_slice():
+    """Slope/energy/thermal do not vary with time; evaluating them once
+    per slice is what made a 168-slice cube take ~22 s. (Faz 3 review, M3.)"""
+    from app import cost_cube as module
+
+    calls = {"n": 0}
+    original = module.default_cost_map
+
+    class _CountingMap:
+        def __init__(self, inner):
+            self._inner = inner
+            self.layers = inner.layers
+
+        def total(self, ctx):
+            calls["n"] += 1
+            return self._inner.total(ctx)
+
+    module.default_cost_map = lambda *a, **k: _CountingMap(original(*a, **k))
+    try:
+        build_cost_cube(_base_grids(), [np.full(SHAPE, 0.3)] * 20, get_rover())
+    finally:
+        module.default_cost_map = original
+
+    assert calls["n"] <= 1, f"cost_map.total() ran {calls['n']}x for 20 slices"
+
+
+def test_wait_cost_cube_matches_scalar_wait_cost():
+    """The vectorised/cached cube must agree with the scalar formula."""
+    rover = get_rover()
+    weights = resolve_weights(None, rover)
+    series = [
+        np.array([[0.0, 0.25], [0.5, 1.0]]),
+        np.array([[1.0, 0.75], [0.1, 0.0]]),
+    ]
+    cube = build_wait_cost_cube(series, rover, dt_hours=1.5)
+    for t, snapshot in enumerate(series):
+        for r in range(2):
+            for c in range(2):
+                expected = wait_cost(snapshot[r, c], 1.5, rover, weights)
+                assert cube[t, r, c] == pytest.approx(expected)
+
+
+def test_wait_cost_cube_evaluates_each_distinct_value_once():
+    """Cost scales with DISTINCT illumination values, not with cube size.
+
+    A 168-slice cube used to evaluate wait_cost per cell per slice (~5 s);
+    illumination grids repeat heavily, so solving each distinct value once
+    makes the slice count almost free. (Faz 3 review, M3.)
+    """
+    import app.cost_cube as module
+
+    calls = {"n": 0}
+    original = module.wait_cost
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    module.wait_cost = counting
+    try:
+        # 40 slices x 15625 cells, but only 3 distinct illumination values.
+        grid = np.full((125, 125), 0.3)
+        grid[:10] = 0.8
+        grid[10:20] = 0.0
+        module.build_wait_cost_cube([grid] * 40, get_rover(), dt_hours=1.0)
+    finally:
+        module.wait_cost = original
+
+    assert calls["n"] == 3, f"wait_cost ran {calls['n']}x for 3 distinct values"
+
+
+def test_cost_cube_honours_shadow_reading_layers_regardless_of_name():
+    """A layer that reads shadow_ratio must stay time-varying even if it is
+    not called "shadow". Keying the optimisation off the layer name froze
+    such a layer at one value and produced a constant cube. (Faz 3 review, M3.)
+    """
+    import app.cost_cube as module
+    from app.costmap import CostMap
+
+    class _ShadowReadingLayer:
+        name = "custom_illumination"
+        validity = "MODEL"
+        weight = 1.0
+
+        def contribution(self, ctx):
+            return np.asarray(ctx.shadow_ratio, dtype=np.float64)
+
+    original = module.default_cost_map
+    module.default_cost_map = lambda *a, **k: CostMap([_ShadowReadingLayer()])
+    try:
+        cube = module.build_cost_cube(
+            _base_grids(), [np.zeros(SHAPE), np.ones(SHAPE)], get_rover()
+        )
+    finally:
+        module.default_cost_map = original
+
+    assert cube[1, 0, 0] > cube[0, 0, 0], "cube must vary with shadow"
+    assert cube[1, 0, 0] == pytest.approx(1.0)
+

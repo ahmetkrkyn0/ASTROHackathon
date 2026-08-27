@@ -18,7 +18,7 @@ from typing import Any
 
 import numpy as np
 
-from .costmap import PlanContext, default_cost_map
+from .costmap import MIN_CELL_COST, PlanContext, default_cost_map
 
 
 def coarsen_grid(grid: np.ndarray, factor: int, how: str = "mean") -> np.ndarray:
@@ -84,18 +84,55 @@ def build_cost_cube(
     resolution_c = resolution_m * max(1, int(coarsen))
 
     cost_map = default_cost_map(rover, weights)
-    slices: list[np.ndarray] = []
-    for snapshot in shadow_ratio_series:
-        shadow_c = coarsen_grid(np.asarray(snapshot, dtype=np.float64), coarsen)
-        context = PlanContext(
+
+    # Only layers that read shadow_ratio vary across slices; slope, energy and
+    # thermal read grids that are constant in time. Re-evaluating all four per
+    # slice made a 168-slice cube cost ~22 s -- the np.vectorize layers
+    # dominate. Evaluate the invariant layers once and add the varying ones
+    # per slice. (Faz 3 review, M3.)
+    #
+    # Which layers vary is PROBED, not assumed from the layer name: a layer
+    # that reads shadow_ratio under a different name would otherwise be
+    # silently frozen at one value, producing a time-invariant cube that looks
+    # correct. Probing keeps this honest as new CostLayers are added.
+    def _context(shadow: np.ndarray) -> PlanContext:
+        return PlanContext(
             slope=slope_c,
             thermal=thermal_c,
-            shadow_ratio=shadow_c,
+            shadow_ratio=shadow,
             traversable=traversable_c,
             resolution_m=resolution_c,
             rover=rover,
         )
-        slices.append(cost_map.total(context))
+
+    zeros = np.zeros_like(slope_c, dtype=np.float64)
+    ones = np.ones_like(slope_c, dtype=np.float64)
+
+    invariant = np.zeros_like(slope_c, dtype=np.float64)
+    varying: list[Any] = []
+    for layer in cost_map.layers:
+        at_zero = np.asarray(layer.contribution(_context(zeros)), dtype=np.float64)
+        at_one = np.asarray(layer.contribution(_context(ones)), dtype=np.float64)
+        if np.allclose(at_zero, at_one, equal_nan=True):
+            invariant = invariant + layer.weight * at_zero
+        else:
+            varying.append(layer)
+
+    # The invalid mask depends on shadow only through NaN, so it is rebuilt
+    # per slice; everything else in it is time-invariant.
+    base_invalid = ~traversable_c | np.isnan(slope_c) | np.isnan(thermal_c)
+
+    slices: list[np.ndarray] = []
+    for snapshot in shadow_ratio_series:
+        shadow_c = coarsen_grid(np.asarray(snapshot, dtype=np.float64), coarsen)
+        accumulator = invariant.copy()
+        for layer in varying:
+            accumulator = accumulator + layer.weight * layer.contribution(
+                _context(shadow_c)
+            )
+        out = np.maximum(accumulator, MIN_CELL_COST)
+        out[base_invalid | np.isnan(shadow_c)] = np.inf
+        slices.append(out)
 
     return np.stack(slices, axis=0)
 
@@ -145,13 +182,21 @@ def build_wait_cost_cube(
         raise ValueError("illum_frac_series must contain at least one snapshot")
 
     resolved = resolve_weights(weights, rover)
-    wait_cost_vec = np.vectorize(
-        lambda frac: wait_cost(frac, dt_hours, rover, resolved),
-        otypes=[np.float64],
-    )
 
-    slices = [
-        wait_cost_vec(coarsen_grid(np.asarray(frac, dtype=np.float64), coarsen))
+    # wait_cost is a pure scalar function of the illumination fraction, and
+    # illumination grids are highly repetitive (whole regions share a value,
+    # and the endpoint currently repeats one snapshot across every slice).
+    # Evaluating it per cell per slice cost ~5 s for a 168-slice cube; solving
+    # it once per DISTINCT value and gathering makes the cube size irrelevant.
+    # (Faz 3 review, M3.)
+    coarse = [
+        coarsen_grid(np.asarray(frac, dtype=np.float64), coarsen)
         for frac in illum_frac_series
     ]
-    return np.stack(slices, axis=0)
+    stacked = np.stack(coarse, axis=0)
+    unique, inverse = np.unique(stacked, return_inverse=True)
+    table = np.array(
+        [wait_cost(value, dt_hours, rover, resolved) for value in unique],
+        dtype=np.float64,
+    )
+    return table[inverse].reshape(stacked.shape)
