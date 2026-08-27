@@ -134,12 +134,20 @@ _f_shadow_cell_vec = np.vectorize(f_shadow_cell, otypes=[np.float64])
 _f_thermal_vec = np.vectorize(f_thermal, otypes=[np.float64], excluded={1})
 
 
+# Provenance is a property of the DATA, not of the class: the same layer
+# reads a real horizon/SPICE grid on the P1 path and an elevation proxy on
+# the load-dem path. Hardcoding validity here would let the layer advertise
+# physics it did not get -- exactly what layer_validity exists to prevent.
+# (Faz 2 review, I2.) The __init__ default preserves the previous behaviour
+# when no metadata mapping is passed.
+
+
 class SlopeLayer:
     name = "slope"
-    validity = "DERIVED"
 
-    def __init__(self, weight: float) -> None:
+    def __init__(self, weight: float, validity: str = "DERIVED") -> None:
         self.weight = float(weight)
+        self.validity = str(validity)
 
     def contribution(self, ctx: PlanContext) -> np.ndarray:
         return _f_slope_vec(ctx.slope, ctx.rover)
@@ -147,10 +155,12 @@ class SlopeLayer:
 
 class EnergyLayer:
     name = "energy"
-    validity = "MODEL"
 
-    def __init__(self, weight: float) -> None:
+    def __init__(self, weight: float, validity: str = "MODEL") -> None:
         self.weight = float(weight)
+        # Energy's contribution is a physics formula on slope + distance, not
+        # an input grid, so it is always MODEL regardless of metadata.
+        self.validity = str(validity)
 
     def contribution(self, ctx: PlanContext) -> np.ndarray:
         return _f_energy_vec(ctx.slope, ctx.resolution_m, ctx.rover)
@@ -158,10 +168,10 @@ class EnergyLayer:
 
 class ShadowLayer:
     name = "shadow"
-    validity = "DERIVED"
 
-    def __init__(self, weight: float) -> None:
+    def __init__(self, weight: float, validity: str = "DERIVED") -> None:
         self.weight = float(weight)
+        self.validity = str(validity)
 
     def contribution(self, ctx: PlanContext) -> np.ndarray:
         return _f_shadow_cell_vec(ctx.shadow_ratio)
@@ -169,10 +179,10 @@ class ShadowLayer:
 
 class ThermalLayer:
     name = "thermal"
-    validity = "MODEL"
 
-    def __init__(self, weight: float) -> None:
+    def __init__(self, weight: float, validity: str = "MODEL") -> None:
         self.weight = float(weight)
+        self.validity = str(validity)
 
     def contribution(self, ctx: PlanContext) -> np.ndarray:
         return _f_thermal_vec(ctx.thermal, ctx.rover)
@@ -181,14 +191,21 @@ class ThermalLayer:
 def default_cost_map(
     rover: Mapping[str, Any],
     weights: Mapping[str, float] | None = None,
+    layer_validity: Mapping[str, str] | None = None,
 ) -> CostMap:
-    """The four AHP criteria, wired to the rover's weight profile."""
+    """The four AHP criteria, wired to the rover's weight profile.
+
+    *layer_validity* is the ``metadata["layer_validity"]`` mapping; when
+    given, the shadow and thermal layers report the provenance of the grids
+    they actually read instead of an optimistic class default.
+    """
     resolved = resolve_weights(weights, rover)
+    validity = dict(layer_validity or {})
     return CostMap(
         [
-            SlopeLayer(resolved["w_slope"]),
-            EnergyLayer(resolved["w_energy"]),
-            ShadowLayer(resolved["w_shadow"]),
-            ThermalLayer(resolved["w_thermal"]),
+            SlopeLayer(resolved["w_slope"], validity.get("slope", "DERIVED")),
+            EnergyLayer(resolved["w_energy"], "MODEL"),
+            ShadowLayer(resolved["w_shadow"], validity.get("shadow_ratio", "DERIVED")),
+            ThermalLayer(resolved["w_thermal"], validity.get("thermal", "MODEL")),
         ]
     )

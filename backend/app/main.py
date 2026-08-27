@@ -316,7 +316,11 @@ def get_cell_telemetry(row: int, col: int, request: Request):
         resolution_m=resolution_m,
         rover=rover,
     )
-    cost_map = default_cost_map(rover, metadata.get("cost_weights"))
+    cost_map = default_cost_map(
+        rover,
+        metadata.get("cost_weights"),
+        metadata.get("layer_validity"),
+    )
     breakdown = cost_map.explain(row, col, context)
 
     return {

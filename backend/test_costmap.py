@@ -242,3 +242,28 @@ def test_explain_matches_full_grid_result():
         assert breakdown["total"] == pytest.approx(
             float(total_grid[row, col]), abs=1e-9
         )
+
+
+# ── Faz 2 review fix: I2 -- layer validity must follow the data, not the class ──
+
+
+def test_layer_validity_follows_metadata_when_supplied():
+    """A SYNTHETIC input layer must not be advertised as DERIVED/MODEL."""
+    cost_map = default_cost_map(
+        get_rover(),
+        layer_validity={"shadow_ratio": "SYNTHETIC", "thermal": "SYNTHETIC"},
+    )
+    by_name = {layer.name: layer.validity for layer in cost_map.layers}
+    assert by_name["shadow"] == "SYNTHETIC"
+    assert by_name["thermal"] == "SYNTHETIC"
+
+
+def test_layer_validity_defaults_are_unchanged_without_metadata():
+    """Omitting the mapping keeps the previous behaviour."""
+    by_name = {l.name: l.validity for l in default_cost_map(get_rover()).layers}
+    assert by_name == {
+        "slope": "DERIVED",
+        "energy": "MODEL",
+        "shadow": "DERIVED",
+        "thermal": "MODEL",
+    }
