@@ -72,3 +72,45 @@ def test_metrics_report_expansion_and_timing():
     assert result["metrics"]["computation_time_ms"] >= 0.0
     assert result["metrics"]["move_steps"] == 3
     assert result["metrics"]["arrival_slice"] >= 3
+
+
+def _shadow_then_sun_case():
+    """A 1x4 corridor whose middle is expensive until slice 3.
+
+    Sitting still at the start is nearly free (lit, charging), so the
+    cheapest plan is: wait for the Sun, then cross.
+    """
+    n_slices, shape = 8, (1, 4)
+    cost_cube = np.full((n_slices, *shape), 0.01, dtype=np.float64)
+    cost_cube[:3, 0, 1] = 40.0
+    cost_cube[:3, 0, 2] = 40.0
+    wait_cube = np.full((n_slices, *shape), 0.001, dtype=np.float64)
+    traversable = np.ones(shape, dtype=bool)
+    return cost_cube, wait_cube, traversable
+
+
+def test_planner_chooses_to_wait_for_the_sun():
+    result = _run(*_shadow_then_sun_case())
+    assert result["error"] is None
+    assert result["metrics"]["wait_steps"] > 0, "planner should hold for the Sun"
+    assert result["path_pixels"][-1] == (0, 3)
+
+
+def test_waiting_plan_is_cheaper_than_crossing_immediately():
+    """Sanity: the wait is an optimisation, not an artefact."""
+    cost_cube, wait_cube, traversable = _shadow_then_sun_case()
+    waited = _run(cost_cube, wait_cube, traversable)
+
+    # Same cube, but waiting is made prohibitively expensive.
+    expensive_wait = np.full_like(wait_cube, 1e6)
+    rushed = _run(cost_cube, expensive_wait, traversable)
+
+    assert waited["metrics"]["wait_steps"] > 0
+    assert rushed["metrics"]["wait_steps"] == 0
+    assert waited["metrics"]["total_cost"] < rushed["metrics"]["total_cost"]
+
+
+def test_planner_does_not_wait_when_there_is_nothing_to_gain():
+    """A uniformly cheap cube must produce a straight, wait-free plan."""
+    result = _run(*_uniform_case(n_slices=8))
+    assert result["metrics"]["wait_steps"] == 0
