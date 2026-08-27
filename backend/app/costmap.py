@@ -87,3 +87,74 @@ class CostMap:
         else:
             breakdown["total"] = float(max(running, MIN_CELL_COST))
         return breakdown
+
+
+from .cost_engine import f_energy, f_shadow_cell, f_slope, f_thermal, resolve_weights
+
+# The scalar penalties in cost_engine are the frozen, validated formulas.
+# np.vectorize keeps the layered path bit-identical to the legacy loop.
+# Optimising this (see spec: precomputation) is explicitly out of scope.
+_f_slope_vec = np.vectorize(f_slope, otypes=[np.float64], excluded={1})
+_f_energy_vec = np.vectorize(f_energy, otypes=[np.float64], excluded={1, 2})
+_f_shadow_cell_vec = np.vectorize(f_shadow_cell, otypes=[np.float64])
+_f_thermal_vec = np.vectorize(f_thermal, otypes=[np.float64], excluded={1})
+
+
+class SlopeLayer:
+    name = "slope"
+    validity = "DERIVED"
+
+    def __init__(self, weight: float) -> None:
+        self.weight = float(weight)
+
+    def contribution(self, ctx: PlanContext) -> np.ndarray:
+        return _f_slope_vec(ctx.slope, ctx.rover)
+
+
+class EnergyLayer:
+    name = "energy"
+    validity = "MODEL"
+
+    def __init__(self, weight: float) -> None:
+        self.weight = float(weight)
+
+    def contribution(self, ctx: PlanContext) -> np.ndarray:
+        return _f_energy_vec(ctx.slope, ctx.resolution_m, ctx.rover)
+
+
+class ShadowLayer:
+    name = "shadow"
+    validity = "DERIVED"
+
+    def __init__(self, weight: float) -> None:
+        self.weight = float(weight)
+
+    def contribution(self, ctx: PlanContext) -> np.ndarray:
+        return _f_shadow_cell_vec(ctx.shadow_ratio)
+
+
+class ThermalLayer:
+    name = "thermal"
+    validity = "MODEL"
+
+    def __init__(self, weight: float) -> None:
+        self.weight = float(weight)
+
+    def contribution(self, ctx: PlanContext) -> np.ndarray:
+        return _f_thermal_vec(ctx.thermal, ctx.rover)
+
+
+def default_cost_map(
+    rover: Mapping[str, Any],
+    weights: Mapping[str, float] | None = None,
+) -> CostMap:
+    """The four AHP criteria, wired to the rover's weight profile."""
+    resolved = resolve_weights(weights, rover)
+    return CostMap(
+        [
+            SlopeLayer(resolved["w_slope"]),
+            EnergyLayer(resolved["w_energy"]),
+            ShadowLayer(resolved["w_shadow"]),
+            ThermalLayer(resolved["w_thermal"]),
+        ]
+    )

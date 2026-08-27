@@ -84,3 +84,81 @@ def test_layer_names_are_exposed():
 def test_duplicate_layer_names_are_rejected():
     with pytest.raises(ValueError):
         CostMap([_ConstantLayer("a", 0.5, 0.4), _ConstantLayer("a", 0.5, 0.6)])
+
+
+from app.cost_engine import compute_cost_grid, resolve_weights
+from app.costmap import default_cost_map
+
+
+def _random_context(seed: int = 7, shape=(24, 24)) -> PlanContext:
+    rng = np.random.default_rng(seed)
+    slope = rng.uniform(0.0, 30.0, size=shape)      # spans the 25 deg limit
+    thermal = rng.uniform(-200.0, 40.0, size=shape)  # spans the -150 C limit
+    shadow = rng.uniform(0.0, 1.0, size=shape)
+    rover = get_rover()
+    traversable = (slope <= float(rover["slope_max_deg"])) & (thermal >= -150.0)
+    return PlanContext(
+        slope=slope,
+        thermal=thermal,
+        shadow_ratio=shadow,
+        traversable=traversable,
+        resolution_m=80.0,
+        rover=rover,
+    )
+
+
+def test_default_cost_map_matches_compute_cost_grid():
+    """The refactor must not move a single number."""
+    ctx = _random_context()
+    legacy = compute_cost_grid(
+        ctx.slope,
+        ctx.thermal,
+        ctx.shadow_ratio,
+        ctx.resolution_m,
+        traversable=ctx.traversable,
+        rover=ctx.rover,
+    )
+    layered = default_cost_map(ctx.rover).total(ctx)
+
+    assert legacy.shape == layered.shape
+    assert np.array_equal(np.isinf(legacy), np.isinf(layered))
+    finite = np.isfinite(legacy)
+    assert np.allclose(legacy[finite], layered[finite], rtol=0.0, atol=1e-9)
+
+
+def test_default_cost_map_honours_weight_overrides():
+    ctx = _random_context()
+    overrides = {"w_slope": 1.0, "w_energy": 0.0, "w_shadow": 0.0, "w_thermal": 0.0}
+    legacy = compute_cost_grid(
+        ctx.slope,
+        ctx.thermal,
+        ctx.shadow_ratio,
+        ctx.resolution_m,
+        traversable=ctx.traversable,
+        weights=overrides,
+        rover=ctx.rover,
+    )
+    layered = default_cost_map(ctx.rover, weights=overrides).total(ctx)
+    finite = np.isfinite(legacy)
+    assert np.allclose(legacy[finite], layered[finite], rtol=0.0, atol=1e-9)
+
+
+def test_default_cost_map_layer_names_and_validity():
+    cost_map = default_cost_map(get_rover())
+    assert cost_map.layer_names() == ["slope", "energy", "shadow", "thermal"]
+    assert {layer.validity for layer in cost_map.layers} <= {
+        "MEASURED",
+        "DERIVED",
+        "MODEL",
+        "SYNTHETIC",
+    }
+
+
+def test_explain_sums_to_total_on_a_real_cell():
+    ctx = _random_context()
+    cost_map = default_cost_map(ctx.rover)
+    total_grid = cost_map.total(ctx)
+    row, col = np.argwhere(np.isfinite(total_grid))[0]
+    breakdown = cost_map.explain(int(row), int(col), ctx)
+    parts = sum(v for k, v in breakdown.items() if k != "total")
+    assert breakdown["total"] == pytest.approx(max(parts, 0.01), abs=1e-9)
