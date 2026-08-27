@@ -21,9 +21,16 @@ from .constants import (
     get_rover,
     rover_catalog,
 )
+from .cost_cube import (
+    build_cost_cube,
+    build_wait_cost_cube,
+    coarsen_grid,
+    coarsen_traversable,
+)
 from .cost_engine import compute_cost_grid, resolve_weights
 from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
+from .pathfinder_4d import astar_4d
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .pathfinder import astar
 from .replan_triggers import evaluate_triggers
@@ -212,6 +219,16 @@ class ReplanRequest(BaseModel):
         description="Telemetry snapshot evaluated against the replan triggers.",
     )
     force: bool = False
+
+
+class Plan4DRequest(BaseModel):
+    start: Union[StartGoalPixel, StartGoalGeo]
+    goal: Union[StartGoalPixel, StartGoalGeo]
+    rover_id: str = DEFAULT_ROVER_ID
+    weights: PlanWeights = Field(default_factory=PlanWeights)
+    n_slices: int = Field(default=24, ge=2, le=168)
+    slice_hours: float = Field(default=1.0, gt=0.0, le=24.0)
+    coarsen: int = Field(default=4, ge=1, le=16)
 
 
 class PlanMultiRequest(BaseModel):
@@ -456,6 +473,64 @@ def replan(req: ReplanRequest, request: Request):
             {"trigger_id": t.trigger_id, "detail": t.detail} for t in fired
         ],
         "plan": payload,
+    }
+
+
+@app.post("/api/plan-4d")
+def plan_4d(req: Plan4DRequest, request: Request):
+    """Plan through space AND time, with an explicit WAIT decision."""
+    grids = _active_grids(request)
+    rover = get_rover(req.rover_id)
+    weights_dict = req.weights.model_dump()
+    grids_for_plan = _grids_for_rover(grids, req.rover_id, weights_dict)
+    metadata = grids_for_plan["metadata"]
+
+    rows, cols = int(metadata["shape"][0]), int(metadata["shape"][1])
+    if rows % req.coarsen or cols % req.coarsen:
+        raise HTTPException(
+            status_code=422,
+            detail=f"grid {rows}x{cols} is not divisible by coarsen={req.coarsen}",
+        )
+
+    start = _to_pixel(req.start, "start", metadata)
+    goal = _to_pixel(req.goal, "goal", metadata)
+
+    # Until the SPICE-driven illumination cube lands, hold shadow constant
+    # across slices: the planner machinery is exercised, the physics is not
+    # invented. Replace this series with app.illumination output per slice.
+    base_shadow = np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64)
+    shadow_series = [base_shadow] * req.n_slices
+    illum_series = [1.0 - base_shadow] * req.n_slices
+
+    cost_cube = build_cost_cube(
+        grids_for_plan, shadow_series, rover, weights_dict, coarsen=req.coarsen
+    )
+    wait_cube = build_wait_cost_cube(
+        illum_series, rover, req.slice_hours, weights_dict, coarsen=req.coarsen
+    )
+
+    result = astar_4d(
+        cost_cube,
+        wait_cube,
+        coarsen_traversable(grids_for_plan["traversable"], req.coarsen),
+        start=(start[0] // req.coarsen, start[1] // req.coarsen),
+        goal=(goal[0] // req.coarsen, goal[1] // req.coarsen),
+        resolution_m=float(metadata["resolution_m"]) * req.coarsen,
+        slice_hours=req.slice_hours,
+        rover=rover,
+        slope_grid=coarsen_grid(grids_for_plan["slope"], req.coarsen, how="max"),
+    )
+    if result["error"]:
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    return {
+        "path_pixels": result["path_pixels"],
+        "path_states": result["path_states"],
+        "metrics": result["metrics"],
+        "n_slices": req.n_slices,
+        "slice_hours": req.slice_hours,
+        "coarsen": req.coarsen,
+        "rover_id": req.rover_id,
     }
 
 
