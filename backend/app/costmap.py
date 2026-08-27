@@ -73,19 +73,32 @@ class CostMap:
         out[self._invalid_mask(ctx)] = np.inf
         return out
 
-    def explain(self, row: int, col: int, ctx: PlanContext) -> dict[str, float]:
-        """Weighted contribution of every layer at one cell, plus the total."""
-        breakdown: dict[str, float] = {}
+    def explain(self, row: int, col: int, ctx: PlanContext) -> dict[str, float | None]:
+        """Weighted contribution of every layer at one cell, plus the total.
+
+        Non-finite contributions are reported as ``None``, not ``inf``/``nan``:
+        this dict is serialised straight into an API response, and Starlette
+        renders JSON with ``allow_nan=False``, so a bare ``inf`` raises
+        ValueError and turns the whole request into a 500. ``None`` is also
+        the convention the rest of this API already uses for unrepresentable
+        cell values (see ``main._read_grid_value`` and ``main.get_layer``).
+        """
+        breakdown: dict[str, float | None] = {}
         running = 0.0
+        finite = True
         for layer in self.layers:
             value = float(layer.weight * layer.contribution(ctx)[row, col])
-            breakdown[layer.name] = value
-            running += value
+            if np.isfinite(value):
+                breakdown[layer.name] = value
+                running += value
+            else:
+                breakdown[layer.name] = None
+                finite = False
 
-        if bool(self._invalid_mask(ctx)[row, col]):
-            breakdown["total"] = float("inf")
-        else:
+        if finite and not bool(self._invalid_mask(ctx)[row, col]):
             breakdown["total"] = float(max(running, MIN_CELL_COST))
+        else:
+            breakdown["total"] = None
         return breakdown
 
 

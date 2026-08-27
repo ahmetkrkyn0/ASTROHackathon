@@ -73,7 +73,7 @@ def test_explain_returns_per_layer_weighted_contributions():
 def test_explain_reports_blocked_cells():
     cost_map = CostMap([_ConstantLayer("a", 1.0, 0.5)])
     breakdown = cost_map.explain(0, 0, _context(traversable_value=False))
-    assert np.isinf(breakdown["total"])
+    assert breakdown["total"] is None
 
 
 def test_layer_names_are_exposed():
@@ -159,6 +159,44 @@ def test_explain_sums_to_total_on_a_real_cell():
     cost_map = default_cost_map(ctx.rover)
     total_grid = cost_map.total(ctx)
     row, col = np.argwhere(np.isfinite(total_grid))[0]
+    breakdown = cost_map.explain(int(row), int(col), ctx)
+    parts = sum(v for k, v in breakdown.items() if k != "total")
+    assert breakdown["total"] == pytest.approx(max(parts, 0.01), abs=1e-9)
+
+
+# ── Faz 2 review fix: C1 -- non-finite contributions must not reach JSON ──
+
+
+def test_explain_reports_none_instead_of_infinity():
+    """inf is not valid JSON; explain must emit None so the API can serialise."""
+    ctx = _context(traversable_value=False)
+    breakdown = default_cost_map(ctx.rover).explain(0, 0, ctx)
+    assert breakdown["total"] is None
+    assert all(v is None or np.isfinite(v) for v in breakdown.values())
+
+
+def test_explain_reports_none_for_nan_inputs():
+    ctx = _context()
+    ctx.thermal[1, 1] = np.nan
+    breakdown = default_cost_map(ctx.rover).explain(1, 1, ctx)
+    assert breakdown["thermal"] is None
+    assert breakdown["total"] is None
+
+
+def test_explain_over_slope_limit_is_none_not_inf():
+    """f_slope returns inf above slope_max; that must not reach the response."""
+    ctx = _context()
+    ctx.slope[0, 0] = 40.0  # over the 25 deg limit
+    breakdown = default_cost_map(ctx.rover).explain(0, 0, ctx)
+    assert breakdown["slope"] is None
+    assert breakdown["total"] is None
+
+
+def test_explain_still_sums_correctly_on_finite_cells():
+    """The None path must not disturb ordinary cells."""
+    ctx = _random_context()
+    cost_map = default_cost_map(ctx.rover)
+    row, col = np.argwhere(np.isfinite(cost_map.total(ctx)))[0]
     breakdown = cost_map.explain(int(row), int(col), ctx)
     parts = sum(v for k, v in breakdown.items() if k != "total")
     assert breakdown["total"] == pytest.approx(max(parts, 0.01), abs=1e-9)
