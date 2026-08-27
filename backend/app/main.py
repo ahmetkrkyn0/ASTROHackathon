@@ -26,6 +26,7 @@ from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .pathfinder import astar
+from .replan_triggers import evaluate_triggers
 from .scenarios import (
     MISSION_PROFILES,
     compare_results,
@@ -199,6 +200,18 @@ class PlanRequest(BaseModel):
     rover_id: str = DEFAULT_ROVER_ID
     weights: PlanWeights = Field(default_factory=PlanWeights)
     include_simulation: bool = True
+
+
+class ReplanRequest(BaseModel):
+    current: Union[StartGoalPixel, StartGoalGeo]
+    goal: Union[StartGoalPixel, StartGoalGeo]
+    rover_id: str = DEFAULT_ROVER_ID
+    weights: PlanWeights = Field(default_factory=PlanWeights)
+    state: dict[str, float] = Field(
+        default_factory=dict,
+        description="Telemetry snapshot evaluated against the replan triggers.",
+    )
+    force: bool = False
 
 
 class PlanMultiRequest(BaseModel):
@@ -412,6 +425,34 @@ def plan(req: PlanRequest, request: Request):
     except Exception:
         logger.error("Response serialization failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal serialization error.")
+
+
+@app.post("/api/replan")
+def replan(req: ReplanRequest, request: Request):
+    """Re-plan from the rover's current position when a trigger fires."""
+    fired = evaluate_triggers(req.state)
+    if not fired and not req.force:
+        return {
+            "replanned": False,
+            "triggers": [],
+            "reason": "no replan trigger fired",
+        }
+
+    plan_request = PlanRequest(
+        start=req.current,
+        goal=req.goal,
+        rover_id=req.rover_id,
+        weights=req.weights,
+        include_simulation=True,
+    )
+    payload = plan(plan_request, request)
+    return {
+        "replanned": True,
+        "triggers": [
+            {"trigger_id": t.trigger_id, "detail": t.detail} for t in fired
+        ],
+        "plan": payload,
+    }
 
 
 @app.post("/api/plan-multi")
