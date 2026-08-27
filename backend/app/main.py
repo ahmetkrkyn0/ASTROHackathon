@@ -22,6 +22,7 @@ from .constants import (
     rover_catalog,
 )
 from .cost_engine import compute_cost_grid, resolve_weights
+from .costmap import PlanContext, default_cost_map
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .pathfinder import astar
 from .scenarios import (
@@ -292,6 +293,18 @@ def get_cell_telemetry(row: int, col: int, request: Request):
     lon, lat = pixel_to_lonlat(row, col, metadata)
     resolution_m = float(metadata["resolution_m"])
 
+    rover = get_rover(metadata.get("rover_id", metadata.get("default_rover_id")))
+    context = PlanContext(
+        slope=np.asarray(grids["slope"], dtype=np.float64),
+        thermal=np.asarray(grids["thermal"], dtype=np.float64),
+        shadow_ratio=np.asarray(grids["shadow_ratio"], dtype=np.float64),
+        traversable=np.asarray(grids["traversable"], dtype=bool),
+        resolution_m=resolution_m,
+        rover=rover,
+    )
+    cost_map = default_cost_map(rover, metadata.get("cost_weights"))
+    breakdown = cost_map.explain(row, col, context)
+
     return {
         "row": row,
         "col": col,
@@ -301,6 +314,8 @@ def get_cell_telemetry(row: int, col: int, request: Request):
         "thermal_c": _read_grid_value(grids["thermal"], row, col),
         "resolution_m": resolution_m,
         "span_km": round((rows * resolution_m) / 1000.0, 4),
+        "cost_breakdown": breakdown,
+        "layer_validity": metadata.get("layer_validity", {}),
     }
 
 
