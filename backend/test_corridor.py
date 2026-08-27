@@ -102,3 +102,35 @@ def test_fallback_points_exist_for_every_waypoint():
 def test_short_path_of_one_pixel_is_rejected():
     with pytest.raises(ValueError):
         build_corridor([(1, 1)], _grids(), get_rover())
+
+
+# ── Faz 2 review fix: C2 -- row axis must point south (1.23 km error) ──
+
+
+def test_waypoint_row_axis_points_south():
+    """origin_y is the raster's TOP edge; increasing row must DECREASE y.
+
+    Regression guard for the 1.23 km corridor placement error: the original
+    test only checked the column axis, so an inverted row axis passed.
+    """
+    path = [(0, 0), (1, 0)]
+    corridor = build_corridor(path, _grids(), get_rover())
+    _, y0 = corridor.waypoints[0]
+    _, y1 = corridor.waypoints[1]
+    assert y0 == pytest.approx(28000.0)
+    assert y1 - y0 == pytest.approx(-RES_M)
+
+
+def test_waypoint_row_axis_matches_pipeline_convention():
+    """corridor must agree with process_lunar_data.window_center_latlon."""
+    path = [(0, 0), (10, 0)]
+    corridor = build_corridor(path, _grids(), get_rover())
+    _, y_at_row_10 = corridor.waypoints[1]
+    assert y_at_row_10 == pytest.approx(28000.0 - 10 * RES_M)
+
+
+def test_fallback_points_use_the_same_row_convention():
+    path = [(0, 0), (1, 1), (2, 2)]
+    corridor = build_corridor(path, _grids(), get_rover())
+    for (_, y) in corridor.fallback_points:
+        assert y <= 28000.0  # never north of the top edge

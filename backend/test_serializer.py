@@ -95,10 +95,27 @@ def test_metadata_geometry_round_trip():
         "shape": [500, 500],
     }
     lon, lat = pixel_to_lonlat(250, 250, metadata)
-    check(abs(lon - 70.8664) < 0.01, f"metadata lon {lon:.4f} matches expected window")
-    check(abs(lat - (-83.1665)) < 0.01, f"metadata lat {lat:.4f} matches expected window")
+    # Values updated after the C2 y-axis sign fix (origin_y is the TOP edge,
+    # rows increase southward): row 250 is now south of the origin, not north.
+    check(abs(lon - 81.8699) < 0.01, f"metadata lon {lon:.4f} matches expected window")
+    check(abs(lat - (-83.4778)) < 0.01, f"metadata lat {lat:.4f} matches expected window")
     row, col = lonlat_to_pixel(lon, lat, metadata)
     check((row, col) == (250, 250), "metadata round-trip recovers original pixel")
+
+
+def test_row_axis_points_south():
+    """Increasing row must move south (more negative latitude)."""
+    metadata = {
+        "origin": {"x": 176000.0, "y": 48000.0},
+        "resolution_m": 80.0,
+        "shape": [500, 500],
+    }
+    _, lat_top = pixel_to_lonlat(0, 250, metadata)
+    _, lat_bottom = pixel_to_lonlat(400, 250, metadata)
+    check(
+        lat_bottom < lat_top,
+        f"row 400 (lat {lat_bottom:.4f}) is south of row 0 (lat {lat_top:.4f})",
+    )
 
 
 def test_pixel_to_lonlat_corners():

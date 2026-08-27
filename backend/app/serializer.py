@@ -86,7 +86,11 @@ def pixel_to_lonlat(
     """
     origin_x, origin_y, resolution_m, _, _ = _resolve_grid_geometry(metadata)
     x_m = origin_x + col * resolution_m
-    y_m = origin_y + row * resolution_m
+    # origin_y is the top edge of the window and rows increase southward, so
+    # the row term is subtracted -- the same convention as
+    # process_lunar_data.window_center_latlon and corridor._pixel_to_metres.
+    # (Faz 2 review, C2. Faz 1 had flagged this line as a known-unfixed bug.)
+    y_m = origin_y - row * resolution_m
     lon, lat = _fwd.transform(x_m, y_m)
     if lat > _LAT_SOUTH_THRESHOLD:
         raise ValueError(
@@ -114,7 +118,8 @@ def lonlat_to_pixel(
     origin_x, origin_y, resolution_m, rows, cols = _resolve_grid_geometry(metadata)
     x_m, y_m = _inv.transform(lon, lat)
     col_f = (x_m - origin_x) / resolution_m
-    row_f = (y_m - origin_y) / resolution_m
+    # Inverse of pixel_to_lonlat's y_m = origin_y - row * resolution_m.
+    row_f = (origin_y - y_m) / resolution_m
     row_i = int(round(row_f))
     col_i = int(round(col_f))
     if not (0 <= row_i < rows and 0 <= col_i < cols):

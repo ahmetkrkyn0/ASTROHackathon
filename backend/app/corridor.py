@@ -25,7 +25,14 @@ def clearance_map(traversable: np.ndarray, resolution_m: float) -> np.ndarray:
 def _pixel_to_metres(
     row: int, col: int, origin_x: float, origin_y: float, resolution_m: float
 ) -> tuple[float, float]:
-    return (origin_x + col * resolution_m, origin_y + row * resolution_m)
+    """Pixel centre in projected CRS metres.
+
+    ``origin_y`` is the raster window's TOP edge (rasterio ``transform.f``)
+    and rows increase southward, so the row term is subtracted. This matches
+    ``process_lunar_data.window_center_latlon``; the ``+`` form placed
+    waypoints up to 1.23 km off on the production grid. (Faz 2 review, C2.)
+    """
+    return (origin_x + col * resolution_m, origin_y - row * resolution_m)
 
 
 def _safe_haven_indices(
