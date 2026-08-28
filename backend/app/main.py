@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import traceback
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
@@ -22,6 +23,7 @@ from .constants import (
     rover_catalog,
 )
 from .cost_cube import (
+    auto_slice_hours,
     build_cost_cube,
     build_wait_cost_cube,
     coarsen_grid,
@@ -57,6 +59,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# A 4-D cube is (T, H', W') float64 twice over; at a physical slice length a
+# week-long horizon is thousands of slices. Cap the slice count so a request
+# cannot ask the server to allocate gigabytes. (Faz 3 review, C1.)
+MAX_PLAN_4D_SLICES = 1000
+DEFAULT_PLAN_4D_SLICES = 24
 
 _grids: dict | None = None
 
@@ -226,8 +234,15 @@ class Plan4DRequest(BaseModel):
     goal: Union[StartGoalPixel, StartGoalGeo]
     rover_id: str = DEFAULT_ROVER_ID
     weights: PlanWeights = Field(default_factory=PlanWeights)
-    n_slices: int = Field(default=24, ge=2, le=168)
-    slice_hours: float = Field(default=1.0, gt=0.0, le=24.0)
+    # n_slices bounds the cube; horizon_hours states the mission window and
+    # lets the slice count follow from the slice length. Give one or neither.
+    n_slices: Optional[int] = Field(default=None, ge=2, le=MAX_PLAN_4D_SLICES)
+    horizon_hours: Optional[float] = Field(default=None, gt=0.0, le=168.0)
+    # Omitted by default: a fixed 1 h slice was longer than any real edge
+    # traversal, so every move rounded up to exactly one slice and the time
+    # axis counted steps instead of hours. When absent the slice is derived
+    # from the grid via cost_cube.auto_slice_hours. (Faz 3 review, C1.)
+    slice_hours: Optional[float] = Field(default=None, gt=0.0, le=24.0)
     coarsen: int = Field(default=4, ge=1, le=16)
 
 
@@ -484,6 +499,12 @@ def plan_4d(req: Plan4DRequest, request: Request):
     /api/plan, so the same origin/resolution conversion applies to both.
     ``path_pixels_coarse`` and ``path_states`` are in the coarse planning
     grid whose cell size is ``effective_resolution_m``.
+
+    Time contract: a slice is sized to one cell crossing unless
+    ``slice_hours`` is given, so ``arrival_slice`` is a clock rather than a
+    step count and ``arrival_hours`` reports it directly. State the window
+    as ``horizon_hours`` (slice count follows) or as ``n_slices`` (window
+    follows) -- not both.
     """
     grids = _active_grids(request)
     rover = get_rover(req.rover_id)
@@ -519,18 +540,58 @@ def plan_4d(req: Plan4DRequest, request: Request):
             ),
         )
 
+    # Size the time slice to a real cell crossing unless the caller pinned it.
+    # (Faz 3 review, C1.)
+    if req.slice_hours is None:
+        slice_hours = auto_slice_hours(
+            coarsen_grid(grids_for_plan["slope"], req.coarsen, how="max"),
+            coarsen_traversable(grids_for_plan["traversable"], req.coarsen),
+            resolution_m=float(metadata["resolution_m"]) * req.coarsen,
+            rover=rover,
+        )
+        slice_hours_source = "auto"
+    else:
+        slice_hours = float(req.slice_hours)
+        slice_hours_source = "request"
+
+    # n_slices and horizon_hours are two ways to say the same thing; taking
+    # both invites a silent disagreement about how far ahead we planned.
+    if req.n_slices is not None and req.horizon_hours is not None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "give either n_slices or horizon_hours, not both: "
+                "horizon_hours derives the slice count from the slice length."
+            ),
+        )
+
+    if req.horizon_hours is not None:
+        n_slices = int(math.ceil(req.horizon_hours / slice_hours))
+        if n_slices > MAX_PLAN_4D_SLICES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"horizon_hours={req.horizon_hours} at a {slice_hours:.4f} h "
+                    f"slice needs {n_slices} slices, over the {MAX_PLAN_4D_SLICES} "
+                    "cap; shorten the horizon, raise coarsen, or pin slice_hours."
+                ),
+            )
+        n_slices = max(2, n_slices)
+    else:
+        n_slices = req.n_slices or DEFAULT_PLAN_4D_SLICES
+
     # Until the SPICE-driven illumination cube lands, hold shadow constant
     # across slices: the planner machinery is exercised, the physics is not
     # invented. Replace this series with app.illumination output per slice.
     base_shadow = np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64)
-    shadow_series = [base_shadow] * req.n_slices
-    illum_series = [1.0 - base_shadow] * req.n_slices
+    shadow_series = [base_shadow] * n_slices
+    illum_series = [1.0 - base_shadow] * n_slices
 
     cost_cube = build_cost_cube(
         grids_for_plan, shadow_series, rover, weights_dict, coarsen=req.coarsen
     )
     wait_cube = build_wait_cost_cube(
-        illum_series, rover, req.slice_hours, weights_dict, coarsen=req.coarsen
+        illum_series, rover, slice_hours, weights_dict, coarsen=req.coarsen
     )
 
     result = astar_4d(
@@ -540,7 +601,7 @@ def plan_4d(req: Plan4DRequest, request: Request):
         start=coarse_start,
         goal=coarse_goal,
         resolution_m=float(metadata["resolution_m"]) * req.coarsen,
-        slice_hours=req.slice_hours,
+        slice_hours=slice_hours,
         rover=rover,
         slope_grid=coarsen_grid(grids_for_plan["slope"], req.coarsen, how="max"),
     )
@@ -559,13 +620,23 @@ def plan_4d(req: Plan4DRequest, request: Request):
         for r, c in result["path_pixels"]
     ]
 
+    # arrival_slice is only a clock when the slice length is physical; expose
+    # the hours directly so callers never have to rediscover that. (C1.)
+    metrics = dict(result["metrics"])
+    arrival = metrics.get("arrival_slice")
+    metrics["arrival_hours"] = (
+        None if arrival is None else float(arrival) * slice_hours
+    )
+
     return {
         "path_pixels": fine_pixels,
         "path_pixels_coarse": result["path_pixels"],
         "path_states": result["path_states"],
-        "metrics": result["metrics"],
-        "n_slices": req.n_slices,
-        "slice_hours": req.slice_hours,
+        "metrics": metrics,
+        "n_slices": n_slices,
+        "slice_hours": slice_hours,
+        "slice_hours_source": slice_hours_source,
+        "horizon_hours": n_slices * slice_hours,
         "coarsen": req.coarsen,
         "effective_resolution_m": float(metadata["resolution_m"]) * req.coarsen,
         "rover_id": req.rover_id,

@@ -13,6 +13,7 @@ time on a coarse grid is correct because illumination does not vary at
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -137,7 +138,7 @@ def build_cost_cube(
     return np.stack(slices, axis=0)
 
 
-from .cost_engine import f_shadow_cell, resolve_weights
+from .cost_engine import edge_travel_time_s, f_shadow_cell, resolve_weights
 
 
 def wait_cost(
@@ -200,3 +201,44 @@ def build_wait_cost_cube(
         dtype=np.float64,
     )
     return table[inverse].reshape(stacked.shape)
+
+
+def auto_slice_hours(
+    slope: np.ndarray,
+    traversable: np.ndarray,
+    resolution_m: float,
+    rover: Mapping[str, Any],
+    percentile: float = 50.0,
+) -> float:
+    """Time-slice length matched to how long crossing one cell actually takes.
+
+    The 4-D planner advances time in whole slices
+    (``d_slices = ceil(travel_time / slice_hours)``), so a slice much longer
+    than an edge traversal collapses every move to exactly one slice: the
+    time axis then counts STEPS rather than hours and the slope-dependent
+    travel time -- the whole reason ``edge_travel_time_s`` is consulted --
+    becomes invisible. On the production grid a 1 h slice did exactly that
+    at every resolution from 5 m to 320 m. (Faz 3 review, C1.)
+
+    Sizing a slice at the typical edge traversal keeps ``arrival_slice`` a
+    real clock and lets a steep edge cost more slices than a flat one.
+    Impassable cells are excluded: they routinely carry near-vertical
+    slopes that the rover will never drive and whose traversal time is
+    infinite.
+    """
+    slope_arr = np.asarray(slope, dtype=np.float64)
+    passable = np.asarray(traversable, dtype=bool)
+
+    candidates = slope_arr[passable & np.isfinite(slope_arr)]
+    if candidates.size == 0:
+        # Nothing drivable: fall back to a flat edge so the caller still gets
+        # a positive, finite slice length instead of a degenerate clock.
+        reference_slope = 0.0
+    else:
+        reference_slope = float(np.percentile(candidates, percentile))
+
+    travel_s = edge_travel_time_s(reference_slope, float(resolution_m), rover)
+    if not math.isfinite(travel_s) or travel_s <= 0.0:
+        travel_s = edge_travel_time_s(0.0, float(resolution_m), rover)
+
+    return float(travel_s / 3600.0)

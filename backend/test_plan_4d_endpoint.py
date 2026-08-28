@@ -136,3 +136,81 @@ def test_identical_start_and_goal_is_rejected(client):
         "/api/plan-4d", json=_body(start={"row": 4, "col": 4}, goal={"row": 4, "col": 4})
     )
     assert response.status_code == 422
+
+
+# ── Review finding C1: the time axis must advance in real hours ───────────────
+
+
+def test_slice_hours_is_derived_from_the_grid_when_omitted(client):
+    """Omitting slice_hours must produce a slice sized to one cell crossing,
+    not the 1 h default that collapsed every move to a single slice."""
+    body = _body()
+    body.pop("slice_hours")
+    payload = client.post("/api/plan-4d", json=body).json()
+
+    from app.cost_engine import edge_travel_time_s
+
+    rover = get_rover()
+    # 80 m fine cells at coarsen=4 -> 320 m coarse edges at slope 3 deg.
+    expected = edge_travel_time_s(3.0, 320.0, rover) / 3600.0
+    assert payload["slice_hours"] == pytest.approx(expected, rel=0.2)
+    assert payload["slice_hours_source"] == "auto"
+
+
+def test_explicit_slice_hours_is_still_honoured(client):
+    payload = client.post("/api/plan-4d", json=_body(slice_hours=2.0)).json()
+    assert payload["slice_hours"] == 2.0
+    assert payload["slice_hours_source"] == "request"
+
+
+def test_auto_slice_hours_makes_arrival_slice_a_clock(client):
+    """With an auto slice the horizon is real time, so the response can
+    report it in hours rather than in steps."""
+    body = _body()
+    body.pop("slice_hours")
+    payload = client.post("/api/plan-4d", json=body).json()
+
+    arrival = payload["metrics"]["arrival_slice"]
+    assert payload["metrics"]["arrival_hours"] == pytest.approx(
+        arrival * payload["slice_hours"]
+    )
+    assert payload["horizon_hours"] == pytest.approx(
+        payload["n_slices"] * payload["slice_hours"]
+    )
+
+
+def test_horizon_can_be_requested_in_hours(client):
+    """n_slices is a memory knob; the mission cares about hours. With an
+    auto slice a fixed slice count no longer means a fixed horizon."""
+    body = _body(horizon_hours=6.0)
+    body.pop("n_slices")
+    payload = client.post("/api/plan-4d", json=body).json()
+    assert payload["horizon_hours"] == pytest.approx(6.0, rel=0.05)
+    assert payload["n_slices"] > 1
+
+
+def test_horizon_hours_and_n_slices_are_mutually_exclusive(client):
+    response = client.post(
+        "/api/plan-4d", json=_body(horizon_hours=6.0, n_slices=24)
+    )
+    assert response.status_code == 422
+    assert "horizon_hours" in response.json()["detail"]
+
+
+def test_horizon_hours_is_capped_to_bound_memory(client):
+    """On a fine grid a physical slice is ~2 minutes, so a week-long horizon
+    is thousands of slices and two float64 cubes of hundreds of MB. The cap
+    must refuse rather than allocate. (Faz 3 review, C1.)"""
+    body = _body(horizon_hours=168.0, slice_hours=0.05)
+    body.pop("n_slices")
+    response = client.post("/api/plan-4d", json=body)
+    assert response.status_code == 422
+    assert "slices" in response.json()["detail"].lower()
+
+
+def test_horizon_within_the_cap_is_accepted(client):
+    body = _body(horizon_hours=20.0, slice_hours=0.05)
+    body.pop("n_slices")
+    payload = client.post("/api/plan-4d", json=body).json()
+    assert payload["n_slices"] == 400
+    assert payload["horizon_hours"] == pytest.approx(20.0)

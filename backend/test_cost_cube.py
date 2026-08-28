@@ -275,3 +275,67 @@ def test_cost_cube_honours_shadow_reading_layers_regardless_of_name():
     assert cube[1, 0, 0] > cube[0, 0, 0], "cube must vary with shadow"
     assert cube[1, 0, 0] == pytest.approx(1.0)
 
+
+
+# ── Review finding C1: the time axis must advance in real hours ───────────────
+
+
+def test_auto_slice_hours_matches_a_typical_edge_traversal():
+    """A slice should be about as long as crossing one cell takes.
+
+    With slice_hours=1.0 every move on any realistic grid rounded up to
+    exactly one slice, so arrival_slice counted STEPS, not hours, and the
+    slope-dependent travel time was invisible. (Faz 3 review, C1.)
+    """
+    from app.cost_cube import auto_slice_hours
+
+    rover = get_rover()
+    slope = np.full((8, 8), 19.0)
+    traversable = np.ones((8, 8), dtype=bool)
+
+    hours = auto_slice_hours(slope, traversable, resolution_m=20.0, rover=rover)
+
+    from app.cost_engine import edge_travel_time_s
+
+    expected = edge_travel_time_s(19.0, 20.0, rover) / 3600.0
+    assert hours == pytest.approx(expected, rel=0.1)
+
+
+def test_auto_slice_hours_scales_with_cell_size():
+    from app.cost_cube import auto_slice_hours
+
+    rover = get_rover()
+    slope = np.full((8, 8), 10.0)
+    traversable = np.ones((8, 8), dtype=bool)
+
+    small = auto_slice_hours(slope, traversable, resolution_m=20.0, rover=rover)
+    large = auto_slice_hours(slope, traversable, resolution_m=80.0, rover=rover)
+    assert large == pytest.approx(small * 4, rel=0.05)
+
+
+def test_auto_slice_hours_ignores_impassable_cells():
+    """Blocked cells often carry extreme slopes; they must not set the clock."""
+    from app.cost_cube import auto_slice_hours
+
+    rover = get_rover()
+    slope = np.full((8, 8), 10.0)
+    slope[0, :] = 89.0                       # near-vertical, and blocked
+    traversable = np.ones((8, 8), dtype=bool)
+    traversable[0, :] = False
+
+    hours = auto_slice_hours(slope, traversable, resolution_m=20.0, rover=rover)
+    reference = auto_slice_hours(
+        np.full((8, 8), 10.0), np.ones((8, 8), dtype=bool), 20.0, rover
+    )
+    assert hours == pytest.approx(reference)
+
+
+def test_auto_slice_hours_is_positive_when_nothing_is_traversable():
+    from app.cost_cube import auto_slice_hours
+
+    rover = get_rover()
+    hours = auto_slice_hours(
+        np.full((4, 4), 10.0), np.zeros((4, 4), dtype=bool), 20.0, rover
+    )
+    assert hours > 0.0
+    assert math.isfinite(hours)
