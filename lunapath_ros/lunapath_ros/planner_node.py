@@ -19,6 +19,7 @@ from app.corridor import build_corridor
 from app.cost_engine import resolve_weights
 from app.data_loader import load_preprocessed_grids
 from app.pathfinder import astar
+from app.rover_grids import grids_for_rover
 from app.simulation import simulate_path, summarize_simulation
 from lunapath_msgs.action import PlanTraverse
 from lunapath_ros.conversions import (
@@ -83,7 +84,6 @@ class LunaPathPlanner(Node):
 
     def _plan(self, goal_handle, result):
         request = goal_handle.request
-        metadata = self._grids["metadata"]
         started = time.perf_counter()
 
         # -- contract fields this phase does not implement (Task 3 note) ----
@@ -124,11 +124,25 @@ class LunaPathPlanner(Node):
                     result.INVALID_PLANNER,
                     f"weights outside [{WEIGHT_MIN}, {WEIGHT_MAX}]: {out_of_range}",
                 )
-            weights = resolve_weights(raw_weights, rover)
+            weights_input = raw_weights
         else:
             # An all-zero MissionWeights is the default-constructed message,
             # not a deliberate "everything costs nothing" request.
-            weights = resolve_weights(None, rover)
+            weights_input = None
+        weights = resolve_weights(weights_input, rover)
+
+        # -- rover-adapted grids ---------------------------------------------
+        # self._grids is only the base grids loaded once at startup, baked in
+        # under the default rover. Different rovers have different
+        # slope_max_deg (e.g. nasa_viper/cnsa_yutu_2 are 20 deg, lpr_1 is
+        # 25 deg), so a cell that is traversable for the default rover may
+        # not be for this request's rover -- grids_for_rover recomputes the
+        # traversable mask and cost grid for this rover/weights combination
+        # the same way the FastAPI shell's /api/plan does. Everything below
+        # this point plans against `grids`, not `self._grids`. (Faz 4
+        # final-review finding H1.)
+        grids = grids_for_rover(self._grids, request.rover_id or None, weights_input)
+        metadata = grids["metadata"]
 
         # -- start / goal ---------------------------------------------------
         try:
@@ -140,7 +154,7 @@ class LunaPathPlanner(Node):
         except ValueError as exc:
             return self._fail(goal_handle, result, result.GOAL_OUTSIDE_MAP, str(exc))
 
-        traversable = self._grids["traversable"]
+        traversable = grids["traversable"]
         if not bool(traversable[start]):
             return self._fail(
                 goal_handle, result, result.START_OCCUPIED, f"start {start} is not traversable"
@@ -155,7 +169,7 @@ class LunaPathPlanner(Node):
         goal_handle.publish_feedback(feedback)
 
         # -- plan -----------------------------------------------------------
-        plan = astar(self._grids, start, goal, weights=weights, rover=rover)
+        plan = astar(grids, start, goal, weights=weights, rover=rover)
         if plan.get("error"):
             return self._fail(goal_handle, result, result.NO_VALID_PATH, plan["error"])
 
@@ -173,7 +187,7 @@ class LunaPathPlanner(Node):
         corridor_err = None
         try:
             result.corridor = corridor_to_msg(
-                build_corridor(plan["path_pixels"], self._grids, rover).model_dump()
+                build_corridor(plan["path_pixels"], grids, rover).model_dump()
             )
         except (ValueError, KeyError) as exc:
             corridor_err = f"corridor skipped: {exc}"
@@ -190,10 +204,10 @@ class LunaPathPlanner(Node):
         try:
             states = simulate_path(
                 plan,
-                self._grids["cost"],
-                self._grids["slope"],
-                self._grids["thermal"],
-                self._grids["shadow_ratio"],
+                grids["cost"],
+                grids["slope"],
+                grids["thermal"],
+                grids["shadow_ratio"],
                 rover=rover,
                 pixel_size_m=float(metadata["resolution_m"]),
             )

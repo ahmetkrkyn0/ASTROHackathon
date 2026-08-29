@@ -31,13 +31,14 @@ from .cost_cube import (
     coarsen_grid,
     coarsen_traversable,
 )
-from .cost_engine import compute_cost_grid, edge_travel_time_s, resolve_weights
+from .cost_engine import edge_travel_time_s
 from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
 from .pathfinder_4d import astar_4d, bfs_move_count
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .pathfinder import astar
 from .replan_triggers import evaluate_triggers
+from .rover_grids import grids_for_rover
 from .scenarios import (
     MISSION_PROFILES,
     compare_results,
@@ -48,7 +49,6 @@ from .scenarios import (
 )
 from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
 from .simulation import simulate_path, summarize_simulation
-from .traversability import compute_traversability_bool
 
 logger = logging.getLogger(__name__)
 
@@ -128,57 +128,6 @@ def _active_grids(request: Request) -> dict:
             ),
         )
     return grids
-
-
-def _grids_for_rover(
-    base_grids: dict,
-    rover_id: str = DEFAULT_ROVER_ID,
-    weights: dict[str, float] | None = None,
-) -> dict:
-    """Return grids adapted for the selected rover and weights."""
-    rover = get_rover(rover_id)
-    metadata = dict(base_grids.get("metadata", {}))
-    default_rover_id = metadata.get("default_rover_id", DEFAULT_ROVER_ID)
-    stored_weights = metadata.get("cost_weights", {})
-    resolved_weights = resolve_weights(weights, rover)
-
-    traversable = (
-        base_grids["traversable"]
-        if rover_id == default_rover_id
-        else compute_traversability_bool(
-            base_grids["slope"],
-            base_grids["thermal"],
-            base_grids.get("elevation"),
-            rover=rover,
-        )
-    )
-
-    needs_cost_recompute = rover_id != default_rover_id or resolved_weights != stored_weights
-    cost = (
-        compute_cost_grid(
-            base_grids["slope"],
-            base_grids["thermal"],
-            base_grids["shadow_ratio"],
-            float(metadata["resolution_m"]),
-            traversable=traversable,
-            weights=resolved_weights,
-            rover=rover,
-        )
-        if needs_cost_recompute
-        else base_grids["cost"]
-    )
-
-    metadata["cost_weights"] = resolved_weights
-    metadata["rover_id"] = rover_id
-    metadata["rover_name"] = rover["name"]
-    metadata["default_rover_id"] = default_rover_id
-
-    return {
-        **base_grids,
-        "traversable": traversable,
-        "cost": cost,
-        "metadata": metadata,
-    }
 
 
 def _read_grid_value(grid: np.ndarray, row: int, col: int) -> float | None:
@@ -390,7 +339,7 @@ def plan(req: PlanRequest, request: Request):
     grids = _active_grids(request)
     rover = get_rover(req.rover_id)
     weights_dict = req.weights.model_dump()
-    grids_for_plan = _grids_for_rover(grids, req.rover_id, weights_dict)
+    grids_for_plan = grids_for_rover(grids, req.rover_id, weights_dict)
 
     metadata = grids_for_plan["metadata"]
     start = _to_pixel(req.start, "start", metadata)
@@ -524,7 +473,7 @@ def plan_4d(req: Plan4DRequest, request: Request):
     grids = _active_grids(request)
     rover = get_rover(req.rover_id)
     weights_dict = req.weights.model_dump()
-    grids_for_plan = _grids_for_rover(grids, req.rover_id, weights_dict)
+    grids_for_plan = grids_for_rover(grids, req.rover_id, weights_dict)
     metadata = grids_for_plan["metadata"]
 
     rows, cols = int(metadata["shape"][0]), int(metadata["shape"][1])
@@ -764,7 +713,7 @@ def plan_multi(req: PlanMultiRequest):
                 }
             )
             continue
-        grids = _grids_for_rover(base_grids, req.rover_id, profile["weights"])
+        grids = grids_for_rover(base_grids, req.rover_id, profile["weights"])
         result = astar(
             grids,
             tuple(req.start),
@@ -786,7 +735,7 @@ def compare(req: CompareRequest):
     rover = get_rover(req.rover_id)
     results = []
     for profile_id, profile in MISSION_PROFILES.items():
-        grids = _grids_for_rover(base_grids, req.rover_id, profile["weights"])
+        grids = grids_for_rover(base_grids, req.rover_id, profile["weights"])
         result = astar(
             grids,
             tuple(req.start),
@@ -843,7 +792,7 @@ def get_layer(
 
     rover = get_rover(rover_id)
     grids = (
-        _grids_for_rover(base_grids, rover_id, weight_overrides or None)
+        grids_for_rover(base_grids, rover_id, weight_overrides or None)
         if layer_name in ("cost", "traversable") or rover_id != DEFAULT_ROVER_ID or weight_overrides
         else base_grids
     )
