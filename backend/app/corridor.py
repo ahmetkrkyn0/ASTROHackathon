@@ -10,6 +10,7 @@ import numpy as np
 from scipy.ndimage import distance_transform_edt
 
 from .cost_engine import edge_energy_wh, edge_travel_time_s, surface_to_inner
+from .grid_frame import pixel_to_map_xy
 from .schemas import Corridor
 
 DEFAULT_SAFE_SHADOW_RATIO: float = 0.2
@@ -27,12 +28,21 @@ def _pixel_to_metres(
 ) -> tuple[float, float]:
     """Pixel centre in projected CRS metres.
 
-    ``origin_y`` is the raster window's TOP edge (rasterio ``transform.f``)
-    and rows increase southward, so the row term is subtracted. This matches
-    ``process_lunar_data.window_center_latlon``; the ``+`` form placed
-    waypoints up to 1.23 km off on the production grid. (Faz 2 review, C2.)
+    Delegates to ``app.grid_frame.pixel_to_map_xy``, the single source of
+    truth for this conversion. Faz 2's C2 finding was this formula existing
+    in three places with one of them flipped; Faz 4 removes the duplication
+    rather than adding a fourth copy. The signature is kept so the existing
+    corridor tests keep exercising the same call.
     """
-    return (origin_x + col * resolution_m, origin_y - row * resolution_m)
+    return pixel_to_map_xy(
+        row,
+        col,
+        {
+            "origin": {"x": origin_x, "y": origin_y},
+            "resolution_m": resolution_m,
+            "shape": [0, 0],  # unused by pixel_to_map_xy
+        },
+    )
 
 
 def _safe_haven_indices(
