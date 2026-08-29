@@ -179,3 +179,19 @@ result field alongside `uint16 error_code`, and a `bool use_start` goal field
 ("If false, use current robot pose as path start, if true, use start above
 instead" — matches the plan's requirement that PlanTraverse only supports
 use_start=true, rejecting false with TF_ERROR).
+
+## Task 3: PlanTraverse hata kodu diff'i (Nav2 ile karşılaştırma)
+
+Command (WSL Ubuntu-24.04, ROS 2 Jazzy, `lunapath_msgs` derlendikten sonra, captured 2026-08-29):
+
+```
+diff <(ros2 interface show nav2_msgs/action/ComputePathToPose | grep -E '^uint16 [A-Z_]+=' | sort) \
+     <(ros2 interface show lunapath_msgs/action/PlanTraverse  | grep -E '^uint16 [A-Z_]+=' | sort)
+```
+
+Output: empty (no diff, exit code 0). `lunapath_msgs/action/PlanTraverse`'in on
+hata kodu (`NONE=0`, `UNKNOWN=200`, `INVALID_PLANNER=201`, `TF_ERROR=202`,
+`START_OUTSIDE_MAP=203`, `GOAL_OUTSIDE_MAP=204`, `START_OCCUPIED=205`,
+`GOAL_OCCUPIED=206`, `TIMEOUT=207`, `NO_VALID_PATH=208`) kurulu
+`nav2_msgs/action/ComputePathToPose` ile birebir aynı — ne eksik ne fazla kod
+var, hiçbir isim farklı sayı taşımıyor.

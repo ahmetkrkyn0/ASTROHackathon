@@ -7,6 +7,12 @@ find_package(builtin_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 
-# Task 3 buraya rosidl_generate_interfaces(...) ekleyecek.
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/MissionWeights.msg"
+  "msg/PlanMetrics.msg"
+  "msg/Corridor.msg"
+  "action/PlanTraverse.action"
+  DEPENDENCIES builtin_interfaces geometry_msgs nav_msgs
+)
 
 ament_package()
