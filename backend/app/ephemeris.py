@@ -111,6 +111,28 @@ def true_azimuth_to_grid_azimuth(
     return float((true_north_grid_az_deg + true_az_deg) % 360.0)
 
 
+def grid_azimuth_to_true_azimuth(
+    grid_az_deg: float | np.ndarray, true_north_grid_az_deg: float
+) -> float | np.ndarray:
+    """Inverse of :func:`true_azimuth_to_grid_azimuth`.
+
+    Rotates a grid-frame azimuth (app.horizon / make_aspect_grid convention:
+    0 = decreasing row, 90 = increasing column) into the true-north frame
+    that heat1d's ``slope_az`` and ``orbits.solarAzimuth`` expect (0 = true
+    North, clockwise) -- the same frame mismatch Faz 1's C1 finding fixed
+    for the shadow path (``true_azimuth_to_grid_azimuth``); the thermal path
+    still fed raw grid-frame aspect straight to heat1d (Faz 1-2-3 review,
+    M1).
+
+    Vectorised, unlike ``true_azimuth_to_grid_azimuth``: the shadow path
+    only ever rotates individual (az, elev) sun samples, but the thermal
+    path needs to rotate a whole (H, W) aspect grid in one call.
+    """
+    grid_az = np.asarray(grid_az_deg, dtype=np.float64)
+    rotated = np.mod(grid_az - float(true_north_grid_az_deg), 360.0)
+    return rotated if grid_az.ndim else float(rotated)
+
+
 def sun_vector_body(et: float, meta_kernel: str = DEFAULT_META_KERNEL) -> np.ndarray:
     """Sun position in MOON_ME at ephemeris time *et*. Requires NAIF kernels."""
     try:

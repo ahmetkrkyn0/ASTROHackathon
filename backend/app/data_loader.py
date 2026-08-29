@@ -15,7 +15,7 @@ from scipy.ndimage import uniform_filter
 from .constants import DEFAULT_ROVER_ID, DEFAULT_TARGET_RESOLUTION_M
 from .cost_engine import compute_cost_grid, resolve_weights
 from .thermal_grid import generate_thermal_grid
-from .traversability import compute_traversability_bool
+from .traversability import compute_traversability_bool, weakest_validity
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
@@ -216,14 +216,17 @@ def load_and_preprocess_dem(
             # elevation-proxy shadow ratio -- it does not touch the heat1d /
             # horizon / SPICE machinery -- so the honest provenance is
             # SYNTHETIC for those two layers. (Faz 1 final review, finding I4.)
+            # traversable/cost are computed FROM those SYNTHETIC layers, so
+            # they inherit the same weakest-link provenance rather than
+            # claiming an unconditional "DERIVED". (Faz 1-2-3 review, L5.)
             "layer_validity": {
                 "elevation": "MEASURED",
                 "slope": "DERIVED",
                 "aspect": "DERIVED",
                 "shadow_ratio": "SYNTHETIC",
                 "thermal": "SYNTHETIC",
-                "traversable": "DERIVED",
-                "cost": "DERIVED",
+                "traversable": weakest_validity("DERIVED", "SYNTHETIC"),
+                "cost": weakest_validity("DERIVED", "SYNTHETIC"),
             },
         },
     }

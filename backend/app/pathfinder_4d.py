@@ -18,6 +18,7 @@ from __future__ import annotations
 import heapq
 import math
 import time
+from collections import deque
 from collections.abc import Mapping
 from typing import Any
 
@@ -29,6 +30,59 @@ _OFFSETS: tuple[tuple[int, int, bool], ...] = (
     (-1, 0, False), (1, 0, False), (0, -1, False), (0, 1, False),
     (-1, -1, True), (-1, 1, True), (1, -1, True), (1, 1, True),
 )
+
+
+def bfs_move_count(
+    traversable: np.ndarray,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+) -> int | None:
+    """Minimum number of 8-connected MOVE steps from *start* to *goal*.
+
+    Unweighted and time-free -- it answers the same reachability question
+    ``astar_4d`` does, but cheaply enough to check before spending time
+    building a cost cube, and exactly enough to size a time horizon instead
+    of guessing a slice count. Returns ``None`` when *start* or *goal* is
+    out of bounds, either is blocked, or no route exists between them.
+
+    A fixed default slice count (the pre-fix behaviour) starved routes
+    whose start and goal were genuinely far apart on the production grid;
+    an unbounded default risked masking a start/goal that coarsening had
+    disconnected. This distinguishes the two cases up front instead of
+    letting ``astar_4d`` exhaust its search and report a single generic
+    "not found". (Faz 1-2-3 review, H1/H3.)
+    """
+    mask = np.asarray(traversable, dtype=bool)
+    height, width = mask.shape
+    if not (0 <= start[0] < height and 0 <= start[1] < width):
+        return None
+    if not (0 <= goal[0] < height and 0 <= goal[1] < width):
+        return None
+    if not mask[start] or not mask[goal]:
+        return None
+    if start == goal:
+        return 0
+
+    dist = np.full(mask.shape, -1, dtype=np.int64)
+    dist[start] = 0
+    queue: deque[tuple[int, int]] = deque([start])
+    offsets = [(d_row, d_col) for d_row, d_col, _ in _OFFSETS]
+
+    while queue:
+        row, col = queue.popleft()
+        if (row, col) == goal:
+            return int(dist[row, col])
+        for d_row, d_col in offsets:
+            nr, nc = row + d_row, col + d_col
+            if (
+                0 <= nr < height
+                and 0 <= nc < width
+                and mask[nr, nc]
+                and dist[nr, nc] < 0
+            ):
+                dist[nr, nc] = dist[row, col] + 1
+                queue.append((nr, nc))
+    return None
 
 
 def _empty(error: str, elapsed_ms: float = 0.0) -> dict[str, Any]:
@@ -102,11 +156,26 @@ def astar_4d(
     finite = cost[np.isfinite(cost)]
     min_cost = float(np.min(finite)) if finite.size else 0.01
     diag_m = resolution_m * math.sqrt(2.0)
+    # MOVE and WAIT edges must live in the same units to trade off against
+    # each other at all: MOVE used to cost distance_m * (1 + MRU) while WAIT
+    # costs dt_hours * MRU-ish, off by orders of magnitude on the real grid
+    # (measured: an average MOVE edge ~29, a dark WAIT step at the auto slice
+    # length ~0.0045 -- ~6500x apart, so the planner could never meaningfully
+    # choose to wait once the illumination cube stops being held constant
+    # across slices). Both now cost hours: MOVE via the same edge_travel_time_s
+    # the slice-count budget already uses, WAIT unchanged. The heuristic
+    # follows suit, using v_max_ms (the fastest the rover ever moves) as a
+    # divisor so distance/v_max stays a true lower bound on travel time for
+    # any slope -- admissibility is preserved, not just the ordering.
+    # (Faz 1-2-3 review, M2.)
+    v_max_ms = float(rover["v_max_ms"])
 
     def heuristic(r: int, c: int) -> float:
         dr, dc = abs(r - goal[0]), abs(c - goal[1])
         straight, diagonal = abs(dr - dc), min(dr, dc)
-        return (straight * resolution_m + diagonal * diag_m) * (1.0 + min_cost)
+        distance_m = straight * resolution_m + diagonal * diag_m
+        hours_lower_bound = distance_m / v_max_ms / 3600.0
+        return hours_lower_bound * (1.0 + min_cost)
 
     start_state = (start[0], start[1], 0)
     g_score: dict[tuple[int, int, int], float] = {start_state: 0.0}
@@ -166,7 +235,7 @@ def astar_4d(
             if not (math.isfinite(from_cost) and math.isfinite(to_cost)):
                 continue
 
-            step = distance_m * (1.0 + 0.5 * (from_cost + to_cost))
+            step = (travel_s / 3600.0) * (1.0 + 0.5 * (from_cost + to_cost))
             neighbour = (nr, nc, arrival)
             tentative = current_g + step
             if tentative < g_score.get(neighbour, math.inf):

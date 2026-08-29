@@ -33,12 +33,21 @@ def horizon_map(
     """Return (n_azimuth, H, W) float32 horizon elevation angles in degrees.
 
     Runtime scales as ``n_azimuth * n_steps * H * W``, where
-    ``n_steps = min(max_range_m / resolution_m, max_steps)``. The step
-    count -- not the physical range -- is what is capped, so the same
-    call costs the same regardless of whether *resolution_m* is a coarse
-    80 m grid or a fine 5 m grid: at 80 m/px, max_steps=200 gives a 16 km
-    effective range; at 5 m/px it gives 1 km. Cache the result as
-    ``horizon_map.npy`` -- it depends only on elevation, not on time.
+    ``n_steps = min(round(max_range_m / resolution_m), max_steps)`` --
+    whichever bound is tighter wins, so this is NOT a flat cost regardless
+    of resolution. With the defaults (``max_range_m=10000``,
+    ``max_steps=200``): at 80 m/px, ``n_steps = min(125, 200) = 125`` --
+    bounded by ``max_range_m`` (effective range stays the full 10 km); at
+    5 m/px, ``n_steps = min(2000, 200) = 200`` -- bounded by ``max_steps``
+    instead (effective range drops to 1 km, well short of the nominal
+    10 km). ``max_steps`` only becomes the active bound once
+    ``resolution_m < max_range_m / max_steps`` (50 m at the defaults);
+    coarser than that, ``max_range_m`` is what limits the cost, and the
+    cost genuinely does grow as resolution gets finer within that regime.
+    What ``max_steps`` guarantees is a hard ceiling: however fine
+    *resolution_m* gets, runtime never exceeds the ``max_steps`` case.
+    Cache the result as ``horizon_map.npy`` -- it depends only on
+    elevation, not on time.
     """
     elev = np.asarray(elevation, dtype=np.float64)
     if elev.ndim != 2:

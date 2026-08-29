@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from app.ephemeris import (
+    grid_azimuth_to_true_azimuth,
     sun_azel_from_vector,
     true_azimuth_to_grid_azimuth,
     true_north_grid_azimuth,
@@ -146,3 +147,43 @@ def test_true_azimuth_to_grid_azimuth_is_identity_on_central_meridian():
     """With no convergence, the conversion must be a no-op."""
     for true_az in (0.0, 45.0, 123.4, 359.9):
         assert true_azimuth_to_grid_azimuth(true_az, 0.0) == pytest.approx(true_az)
+
+
+# ── grid_azimuth_to_true_azimuth: the inverse rotation, for aspect grids ──────
+
+
+def test_grid_azimuth_to_true_azimuth_is_the_exact_inverse_roundtrip():
+    grid_north_az = 249.775141
+    for true_az in (0.0, 45.0, 123.4, 210.0, 359.9):
+        grid_az = true_azimuth_to_grid_azimuth(true_az, grid_north_az)
+        assert grid_azimuth_to_true_azimuth(grid_az, grid_north_az) == pytest.approx(
+            true_az
+        )
+
+
+def test_grid_azimuth_to_true_azimuth_wraps_past_zero():
+    # A grid azimuth smaller than the offset must wrap around 360, not go
+    # negative.
+    assert grid_azimuth_to_true_azimuth(10.0, 20.0) == pytest.approx(350.0)
+
+
+def test_grid_azimuth_to_true_azimuth_is_identity_on_central_meridian():
+    for grid_az in (0.0, 45.0, 123.4, 359.9):
+        assert grid_azimuth_to_true_azimuth(grid_az, 0.0) == pytest.approx(grid_az)
+
+
+def test_grid_azimuth_to_true_azimuth_returns_a_python_float_for_scalar_input():
+    out = grid_azimuth_to_true_azimuth(90.0, 249.775141)
+    assert isinstance(out, float)
+
+
+def test_grid_azimuth_to_true_azimuth_vectorises_over_an_aspect_grid():
+    """The thermal path needs to rotate a whole (H, W) aspect grid in one
+    call, unlike true_azimuth_to_grid_azimuth which only ever rotates
+    individual sun samples."""
+    grid_north_az = 249.775141
+    aspect_grid = np.array([[0.0, 90.0], [180.0, 270.0]])
+    out = grid_azimuth_to_true_azimuth(aspect_grid, grid_north_az)
+    assert out.shape == aspect_grid.shape
+    expected = np.mod(aspect_grid - grid_north_az, 360.0)
+    assert np.allclose(out, expected)

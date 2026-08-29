@@ -151,11 +151,25 @@ DEFAULT_ROVER_ID = "lpr_1"
 _REQUIRED_FIELDS = ("mass_kg", "p_base_w", "e_cap_wh", "v_max_ms", "f_net_n", "mu_coeff")
 
 
+class UnknownRoverError(KeyError):
+    """Raised by get_rover for an unregistered rover_id.
+
+    A plain KeyError from here reached FastAPI unhandled and turned a bad
+    ``rover_id`` in a request body into a 500 instead of a 422 -- the
+    caller's mistake, not a server error. Subclassing KeyError keeps any
+    existing ``except KeyError`` handling working, while giving main.py's
+    exception handler an exact type to route to a 422 response.
+    (Faz 1-2-3 review, L4.)
+    """
+
+
 def get_rover(rover_id: str | None = None) -> dict[str, Any]:
     """Return a rover config dict by ID."""
     rid = rover_id or DEFAULT_ROVER_ID
     if rid not in ROVERS:
-        raise KeyError(f"Unknown rover_id: {rid!r}. Available: {list(ROVERS.keys())}")
+        raise UnknownRoverError(
+            f"Unknown rover_id: {rid!r}. Available: {list(ROVERS.keys())}"
+        )
 
     cfg = dict(ROVERS[rid])
     for field in _REQUIRED_FIELDS:

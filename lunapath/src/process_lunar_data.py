@@ -37,7 +37,7 @@ from app.thermal_model import (  # noqa: E402
     SyntheticModel,
     build_thermal_grid,
 )
-from app.traversability import compute_traversability  # noqa: E402
+from app.traversability import compute_traversability, weakest_validity  # noqa: E402
 
 # --- Proje dizinleri --------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent          # lunapath/
@@ -87,13 +87,11 @@ def find_dem_file(custom_path: str | None = None) -> Path:
     raise FileNotFoundError(f"'{RAW_DIR}' dizininde herhangi bir .tif / .tiff DEM dosyasi bulunamadi!")
 
 
-# NOTE: backend/app/serializer.py::pixel_to_lonlat has the identical y-axis
+# NOTE: backend/app/serializer.py::pixel_to_lonlat had the identical y-axis
 # sign convention issue this function's origin_y handling was fixed to avoid
-# (Faz 1 Task 8 review). Deliberately left unfixed there -- serializer.py is
-# shared production code behind every live API coordinate endpoint, and
-# fixing it is a separate, larger decision than this pipeline-local fix.
-# See docs/superpowers/plans/2026-08-19-faz1-gercek-fizik.md's ledger for
-# the full ruling.
+# (Faz 1 Task 8 review). It was later corrected there too, in
+# backend/app/corridor.py's C2 fix (Faz 2 review) -- both now subtract the
+# row term consistently.
 def window_center_latlon(
     origin_x: float,
     origin_y: float,
@@ -304,19 +302,38 @@ def make_thermal_grid(
     aspect: np.ndarray,
     resolution: float,
     lat_deg: float,
+    lon_deg: float,
+    crs_wkt: str,
 ) -> tuple[np.ndarray, str]:
     """Yuzey sicaklik grid'i (Celsius) + validity etiketi.
 
     heat1d kuruluysa gercek termal difuzyon modeli, degilse sentetik
-    proxy. lat_deg window_center_latlon()'dan gelir -- sabit degil.
+    proxy. lat_deg/lon_deg window_center_latlon()'dan gelir -- sabit degil.
+    crs_wkt, Heat1DModel yoluna gonderilen aspect'i grid-kuzeyinden
+    gercek-kuzeye cevirmek icin gerekli.
+
+    ``aspect`` grid-kuzeyi referansli (make_aspect_grid konvansiyonu).
+    heat1d'nin ``slope_az``'i ise gercek-kuzey referansli (bkz.
+    ``heat1d.terrain.slope_incidence_cos`` docstring'i, ``orbits.solarAzimuth``
+    ile ayni cerceve). Golge yolu bu donusumu ``true_azimuth_to_grid_azimuth``
+    ile Faz 1 final review'da (bulgu C1) uyguladi; termal yol o zaman
+    uygulanmadan kalmisti (Faz 1-2-3 review, M1) -- Heat1DModel dalinda
+    burada duzeltiliyor. SyntheticModel dali dokunulmadan kaliyor: o,
+    grid-kuzeyi aspect uzerinde yazilip test edilmis kendi sezgisel
+    formulunu kullaniyor, gercek-kuzey kavramindan bagimsiz.
     """
     if Heat1DModel.available():
+        from app.ephemeris import grid_azimuth_to_true_azimuth, true_north_grid_azimuth
+
         model = Heat1DModel()
+        grid_north_az = true_north_grid_azimuth(lat_deg, lon_deg, crs_wkt)
+        aspect_for_model = grid_azimuth_to_true_azimuth(aspect, grid_north_az)
     else:
         print("  UYARI: heat1d bulunamadi; sentetik termal model kullaniliyor")
         model = SyntheticModel(elevation=elevation, resolution_m=resolution)
+        aspect_for_model = aspect
 
-    grid = build_thermal_grid(model, slope, aspect, lat_deg)
+    grid = build_thermal_grid(model, slope, aspect_for_model, lat_deg)
     return grid.astype(np.float64), model.validity
 
 
@@ -517,7 +534,8 @@ def main(
           f"max={np.nanmax(shadow_ratio_grid):.3f}")
 
     thermal_grid, thermal_validity = make_thermal_grid(
-        elevation_grid, slope_grid, aspect_grid, resolution_m, lat_deg,
+        elevation_grid, slope_grid, aspect_grid, resolution_m, lat_deg, lon_deg,
+        str(dem_ds.crs),
     )
     print(f"  thermal validity: {thermal_validity}")
     print(f"  shadow  validity: {shadow_validity}")
@@ -580,8 +598,16 @@ def main(
             "aspect": "DERIVED",
             "shadow_ratio": shadow_validity,
             "thermal": thermal_validity,
-            "traversable": "DERIVED",
-            "cost": "DERIVED",
+            # traversable depends only on slope + thermal (see
+            # compute_traversability); cost additionally reads shadow_ratio
+            # (ShadowLayer) and energy (always MODEL, never the weakest
+            # link). Both used to be hardcoded "DERIVED" regardless of what
+            # their inputs actually were, so a SYNTHETIC shadow_ratio (SPICE
+            # kernels missing) still produced a cost grid claiming a
+            # stronger provenance than its own weakest input.
+            # (Faz 1-2-3 review, L5.)
+            "traversable": weakest_validity("DERIVED", thermal_validity),
+            "cost": weakest_validity("DERIVED", shadow_validity, thermal_validity),
         },
     )
     print("  metadata.json kaydedildi")

@@ -11,10 +11,12 @@ from typing import Any, Optional, Union
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from .constants import (
     DEFAULT_ROVER_ID,
+    UnknownRoverError,
     W_ENERGY,
     W_SHADOW,
     W_SLOPE,
@@ -29,10 +31,10 @@ from .cost_cube import (
     coarsen_grid,
     coarsen_traversable,
 )
-from .cost_engine import compute_cost_grid, resolve_weights
+from .cost_engine import compute_cost_grid, edge_travel_time_s, resolve_weights
 from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
-from .pathfinder_4d import astar_4d
+from .pathfinder_4d import astar_4d, bfs_move_count
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .pathfinder import astar
 from .replan_triggers import evaluate_triggers
@@ -60,11 +62,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(UnknownRoverError)
+def _handle_unknown_rover(request: Request, exc: UnknownRoverError) -> JSONResponse:
+    """An unrecognised rover_id is the caller's mistake, not a server
+    error: without this handler it reached Starlette as a bare KeyError
+    and turned into an unhandled 500. (Faz 1-2-3 review, L4.)"""
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
 # A 4-D cube is (T, H', W') float64 twice over; at a physical slice length a
 # week-long horizon is thousands of slices. Cap the slice count so a request
 # cannot ask the server to allocate gigabytes. (Faz 3 review, C1.)
 MAX_PLAN_4D_SLICES = 1000
-DEFAULT_PLAN_4D_SLICES = 24
+# Extra slices added on top of the exact MOVE-only horizon (bfs_move_count *
+# worst-case slices-per-move) so the planner has room to choose to WAIT --
+# waiting costs time, not coarse distance, so it does not show up in the
+# BFS move count at all. (Faz 1-2-3 review, H1.)
+DEFAULT_HORIZON_WAIT_PAD_SLICES = 20
 
 _grids: dict | None = None
 
@@ -540,12 +555,59 @@ def plan_4d(req: Plan4DRequest, request: Request):
             ),
         )
 
+    # Computed once and reused for slice sizing, reachability, and the
+    # planner call itself -- coarsen_traversable/coarsen_grid are pure
+    # functions of the grid and coarsen factor, not of the request's start
+    # or goal, so recomputing them per use (the pre-fix code called
+    # coarsen_traversable twice) was wasted work, not a correctness issue.
+    coarse_traversable = coarsen_traversable(grids_for_plan["traversable"], req.coarsen)
+    coarse_slope = coarsen_grid(grids_for_plan["slope"], req.coarsen, how="max")
+
+    # coarsen_traversable is conservative (AND over every fine cell in a
+    # block), so a coarse cell it marks passable is guaranteed finite-cost:
+    # every fine cell inside satisfies slope <= slope_max_deg, which is the
+    # only source of infinite cost in the coarse cube (see SlopeLayer /
+    # f_slope). bfs_move_count is therefore both a reachability check AND an
+    # exact distance bound for the planner that follows -- no separate
+    # "usable" mask is needed. (Faz 1-2-3 review, H1/H3.)
+    move_count = bfs_move_count(coarse_traversable, coarse_start, coarse_goal)
+    if not bool(coarse_traversable[coarse_start]):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"start {start} falls in coarse block {coarse_start} at "
+                f"coarsen={req.coarsen}, which is not traversable: at least "
+                "one fine cell inside it exceeds the slope or thermal limit. "
+                "Lower coarsen or choose a different start."
+            ),
+        )
+    if not bool(coarse_traversable[coarse_goal]):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"goal {goal} falls in coarse block {coarse_goal} at "
+                f"coarsen={req.coarsen}, which is not traversable: at least "
+                "one fine cell inside it exceeds the slope or thermal limit. "
+                "Lower coarsen or choose a different goal."
+            ),
+        )
+    if move_count is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"start {start} and goal {goal} are not connected through "
+                f"passable coarse blocks at coarsen={req.coarsen}: terrain "
+                "hazards split the grid into disconnected regions here. "
+                "Lower coarsen or choose a different pair."
+            ),
+        )
+
     # Size the time slice to a real cell crossing unless the caller pinned it.
     # (Faz 3 review, C1.)
     if req.slice_hours is None:
         slice_hours = auto_slice_hours(
-            coarsen_grid(grids_for_plan["slope"], req.coarsen, how="max"),
-            coarsen_traversable(grids_for_plan["traversable"], req.coarsen),
+            coarse_slope,
+            coarse_traversable,
             resolution_m=float(metadata["resolution_m"]) * req.coarsen,
             rover=rover,
         )
@@ -577,8 +639,40 @@ def plan_4d(req: Plan4DRequest, request: Request):
                 ),
             )
         n_slices = max(2, n_slices)
+    elif req.n_slices is not None:
+        n_slices = req.n_slices
     else:
-        n_slices = req.n_slices or DEFAULT_PLAN_4D_SLICES
+        # No explicit horizon: a fixed DEFAULT_PLAN_4D_SLICES=24 starved
+        # routes whose start and goal were genuinely far apart on the real
+        # production grid -- 24 slices at an auto-derived ~0.03 h/slice
+        # covers only ~24 coarse cells, 480 m on a 2.5 km grid (measured:
+        # 10/12 random traversable pairs failed). Size the default to the
+        # EXACT worst case for the known shortest route: move_count moves,
+        # each costing up to the slowest possible edge (slope_max_deg,
+        # diagonal), plus a pad for an optional WAIT. This is provably
+        # sufficient whenever the route is reachable, not a guessed
+        # multiplier. (Faz 1-2-3 review, H1.)
+        diag_m = float(metadata["resolution_m"]) * req.coarsen * math.sqrt(2.0)
+        worst_edge_s = edge_travel_time_s(float(rover["slope_max_deg"]), diag_m, rover)
+        max_slices_per_move = (
+            max(1, int(math.ceil(worst_edge_s / 3600.0 / slice_hours)))
+            if math.isfinite(worst_edge_s)
+            else 1
+        )
+        default_n_slices = (
+            move_count * max_slices_per_move + DEFAULT_HORIZON_WAIT_PAD_SLICES
+        )
+        if default_n_slices > MAX_PLAN_4D_SLICES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"the shortest coarse route is {move_count} moves, needing "
+                    f"up to {default_n_slices} slices at a {slice_hours:.4f} h "
+                    f"slice -- over the {MAX_PLAN_4D_SLICES} cap; raise coarsen, "
+                    "or pin a shorter horizon_hours/n_slices/slice_hours."
+                ),
+            )
+        n_slices = max(2, default_n_slices)
 
     # Until the SPICE-driven illumination cube lands, hold shadow constant
     # across slices: the planner machinery is exercised, the physics is not
@@ -597,16 +691,24 @@ def plan_4d(req: Plan4DRequest, request: Request):
     result = astar_4d(
         cost_cube,
         wait_cube,
-        coarsen_traversable(grids_for_plan["traversable"], req.coarsen),
+        coarse_traversable,
         start=coarse_start,
         goal=coarse_goal,
         resolution_m=float(metadata["resolution_m"]) * req.coarsen,
         slice_hours=slice_hours,
         rover=rover,
-        slope_grid=coarsen_grid(grids_for_plan["slope"], req.coarsen, how="max"),
+        slope_grid=coarse_slope,
     )
     if result["error"]:
-        raise HTTPException(status_code=404, detail=result["error"])
+        # move_count is known reachable at this point (checked above), so
+        # this only fires when the caller pinned an n_slices/horizon_hours/
+        # slice_hours combination too tight for the route it asked for --
+        # tell them the exact number that would have worked.
+        detail = (
+            f"{result['error']} (the shortest coarse route needs at least "
+            f"{move_count} moves; raise n_slices or horizon_hours)"
+        )
+        raise HTTPException(status_code=404, detail=detail)
 
     # The planner solves on the coarse grid, but the caller asked in fine
     # pixels and will convert the answer using the fine origin/resolution in
