@@ -195,3 +195,18 @@ hata kodu (`NONE=0`, `UNKNOWN=200`, `INVALID_PLANNER=201`, `TF_ERROR=202`,
 `GOAL_OCCUPIED=206`, `TIMEOUT=207`, `NO_VALID_PATH=208`) kurulu
 `nav2_msgs/action/ComputePathToPose` ile birebir aynı — ne eksik ne fazla kod
 var, hiçbir isim farklı sayı taşımıyor.
+
+## Task 7: Foxglove bridge kuruldu mu?
+
+Atlandı. `sudo apt install -y ros-jazzy-foxglove-bridge` bu otomasyon ortamında
+etkileşimli `sudo` parolası olmadığı için çalıştırılamıyor. Kabul kriteri zaten
+`lunapath_ros/config/lunapath.rviz` (Task 7 Step 2) ile karşılanıyor — RViz2
+konfigürasyonu `moon_map` Fixed Frame'i, `/lunapath/grid_map`'i (`elevation`
+katmanı) ve bir `nav_msgs/Path` display'ini içeriyor, log tabanlı doğrulamayla
+(config parse/plugin-load hatası yok, çökme yok) teyit edildi. İnteraktif
+`sudo` erişimi olan biri isterse şunu çalıştırabilir:
+
+```bash
+sudo apt install -y ros-jazzy-foxglove-bridge
+ros2 launch foxglove_bridge foxglove_bridge_launch.xml
+```
