@@ -165,12 +165,19 @@ class LunaPathPlanner(Node):
         )
 
         # -- corridor -------------------------------------------------------
+        # error_code stays NONE on a corridor failure (the path itself is
+        # still valid) but the client needs an in-band signal instead of only
+        # a server-side log line it can never see, else "start == goal" (a
+        # realistic ValueError from build_corridor) produces a "successful"
+        # plan with a silently empty corridor. (Faz 4 review follow-up.)
+        corridor_err = None
         try:
             result.corridor = corridor_to_msg(
                 build_corridor(plan["path_pixels"], self._grids, rover).model_dump()
             )
         except (ValueError, KeyError) as exc:
-            self.get_logger().warning(f"corridor skipped: {exc}")
+            corridor_err = f"corridor skipped: {exc}"
+            self.get_logger().warning(corridor_err)
 
         # -- metrics --------------------------------------------------------
         # The physics summary is what PlanMetrics is shaped after; astar's own
@@ -178,6 +185,8 @@ class LunaPathPlanner(Node):
         # off astar's dict returned zeros for every battery/energy/time field.
         # (Faz 4 revision, R6.)
         search = plan.get("metrics", {})
+        metrics = result.metrics
+        sim_err = None
         try:
             states = simulate_path(
                 plan,
@@ -189,30 +198,41 @@ class LunaPathPlanner(Node):
                 pixel_size_m=float(metadata["resolution_m"]),
             )
             summary = summarize_simulation(states)
+            # Direct indexing (not .get(key, 0.0)) so a genuinely renamed or
+            # missing key in the core surfaces here as a KeyError -- caught
+            # below and reported via error_msg -- rather than as a silently
+            # zero field. This is PlanMetrics.msg's own stated contract: "a
+            # renamed key in the core shows up as a build/attribute error
+            # here rather than as a silently-zero field." (Faz 4 review
+            # follow-up to R6.)
+            metrics.total_distance_km = float(summary["total_distance_km"])
+            metrics.total_elapsed_hours = float(summary["total_elapsed_hours"])
+            metrics.final_battery_pct = float(summary["final_battery_pct"])
+            metrics.min_battery_pct = float(summary["min_battery_pct"])
+            metrics.max_slope_deg = float(summary["max_slope_deg"])
+            metrics.total_energy_consumed_wh = float(
+                summary["total_energy_consumed_wh"]
+            )
+            metrics.total_shadow_exposure = float(summary["total_shadow_exposure"])
+            metrics.waypoint_count = int(summary["waypoint_count"])
+            metrics.total_recharges = int(summary["total_recharges"])
+            metrics.critical_steps_count = int(summary["critical_steps_count"])
+            metrics.high_or_above_steps_count = int(
+                summary["high_or_above_steps_count"]
+            )
         except Exception as exc:  # noqa: BLE001
-            self.get_logger().warning(f"simulation skipped: {exc!r}")
-            summary = {}
+            # error_code stays NONE: a simulation failure shouldn't
+            # necessarily invalidate an otherwise-valid path. But leaving
+            # every summary-derived field at its zero-initialized default
+            # while reporting success is exactly the "plan looks successful,
+            # metrics are silently all-zero" failure mode R6 exists to
+            # prevent -- so say so in error_msg instead of only logging it
+            # server-side. (Faz 4 review follow-up to R6.)
+            sim_err = f"simulation skipped: {exc!r}"
+            self.get_logger().warning(sim_err)
+            metrics.max_slope_deg = float(search.get("max_slope_deg", 0.0))
+            metrics.waypoint_count = len(plan["path_pixels"])
 
-        metrics = result.metrics
-        metrics.total_distance_km = float(summary.get("total_distance_km", 0.0))
-        metrics.total_elapsed_hours = float(summary.get("total_elapsed_hours", 0.0))
-        metrics.final_battery_pct = float(summary.get("final_battery_pct", 0.0))
-        metrics.min_battery_pct = float(summary.get("min_battery_pct", 0.0))
-        metrics.max_slope_deg = float(
-            summary.get("max_slope_deg", search.get("max_slope_deg", 0.0))
-        )
-        metrics.total_energy_consumed_wh = float(
-            summary.get("total_energy_consumed_wh", 0.0)
-        )
-        metrics.total_shadow_exposure = float(summary.get("total_shadow_exposure", 0.0))
-        metrics.waypoint_count = int(
-            summary.get("waypoint_count", len(plan["path_pixels"]))
-        )
-        metrics.total_recharges = int(summary.get("total_recharges", 0))
-        metrics.critical_steps_count = int(summary.get("critical_steps_count", 0))
-        metrics.high_or_above_steps_count = int(
-            summary.get("high_or_above_steps_count", 0)
-        )
         metrics.nodes_expanded = int(search.get("nodes_expanded", 0))
         metrics.computation_time_ms = float(search.get("computation_time_ms", 0.0))
 
@@ -220,7 +240,7 @@ class LunaPathPlanner(Node):
         result.planning_time.sec = int(elapsed)
         result.planning_time.nanosec = int((elapsed % 1.0) * 1e9)
         result.error_code = result.NONE
-        result.error_msg = ""
+        result.error_msg = "; ".join(m for m in (corridor_err, sim_err) if m)
 
         feedback.progress = 1.0
         feedback.nodes_expanded = metrics.nodes_expanded
