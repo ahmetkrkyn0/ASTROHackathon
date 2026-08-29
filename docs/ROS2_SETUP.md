@@ -210,3 +210,15 @@ katmanı) ve bir `nav_msgs/Path` display'ini içeriyor, log tabanlı doğrulamay
 sudo apt install -y ros-jazzy-foxglove-bridge
 ros2 launch foxglove_bridge foxglove_bridge_launch.xml
 ```
+
+## Space ROS ve taşınabilirlik
+
+LunaPath'in planlama çekirdeği saf Python fonksiyonlarından oluşur ve I/O'dan
+ayrıktır (`backend/app/`; içinde tek bir `import rclpy` yoktur — Faz 4 kabul
+kriteri bunu doğrular). ROS 2 kabuğu (`lunapath_ros`) bu çekirdeği bir action
+server olarak servis eder. Space ROS, ROS 2 API'siyle uyumlu olduğu için bu
+kabuk, uçuş nitelemesi gereken bir bağlama taşındığında yeniden yazılmaz —
+yalnızca yeniden derlenir.
+
+Aynı gerekçe FastAPI kabuğu için de geçerlidir: iki kabuk aynı çekirdeği
+çağırır, hiçbiri diğerinin yerine geçmez.
