@@ -66,11 +66,11 @@ FAZ 1 — Gerçek fizik ve veri
 | **1** | [`faz1-gercek-fizik.md`](2026-08-19-faz1-gercek-fizik.md) | 8 | 5–7 gün | Gölge terimi düzeltilmiş, termal grid heat1d fiziğinde, ufuk/aydınlanma gerçek |
 | **2** | [`faz2-maliyet-mimarisi.md`](2026-08-19-faz2-maliyet-mimarisi.md) | 6 | 4–5 gün | `CostMap.explain()`, `Corridor` sözleşmesi, `/api/replan` |
 | **3** | [`faz3-zaman-ekseni.md`](2026-08-19-faz3-zaman-ekseni.md) | 5 | 5–7 gün | 4B A* + BEKLE kenarı; "planlayıcı beklemeyi seçti" demosu |
-| **4** | [`faz4-ros2.md`](2026-08-19-faz4-ros2.md) | 7 | 5–6 gün | `lunapath_ros` action server, `grid_map` yayını, rosbag2, Nav2 baseline |
+| **4** | [`faz4-ros2.md`](2026-08-19-faz4-ros2.md) | 8 | 7 gün | `lunapath_ros` action server, `grid_map` yayını, rosbag2, Nav2 baseline |
 | **5** | [`faz5-lidar.md`](2026-08-19-faz5-lidar.md) | 5 | 3 gün | LiDAR'lı/LiDAR'sız profil kıyası, sanal LiDAR, koridor arayüz testi |
 | **6** | [`faz6-dogrulama.md`](2026-08-19-faz6-dogrulama.md) | 4 | 3–4 gün | Yutu-2/Pragyan doğrulaması, rota istatistikleri, Diviner karşılaştırması |
 
-**Toplam: 35 görev, 25–33 gün** (tek geliştirici, seri). Faz 3 ⇄ Faz 2 ve Faz 4 ⇄ Faz 5 paralelleştirilirse ~19–23 gün.
+**Toplam: 36 görev, 27–34 gün** (tek geliştirici, seri). Faz 3 ⇄ Faz 2 ve Faz 4 ⇄ Faz 5 paralelleştirilirse ~21–24 gün.
 
 ---
 
@@ -92,7 +92,7 @@ Fazlar boyunca oluşturulacak ve değiştirilecek dosyalar. Her dosyanın **tek 
 | `replan_triggers.py` | 6 tetikleyicinin saf değerlendirme fonksiyonları | 2 |
 | `cost_cube.py` | Zaman dilimli maliyet küpü üretimi | 3 |
 | `pathfinder_4d.py` | `astar_4d` — (row, col, t) durum uzayı + BEKLE kenarı | 3 |
-| `grid_frame.py` | Grid ⇄ harita çerçevesi geometrisi (saf, `rclpy`'siz) | 4 |
+| `grid_frame.py` | Grid ⇄ harita çerçevesi geometrisi — **piksel ⇄ projekte metre dönüşümünün kanonik kaynağı**; `grid_map` yönelimi. Saf NumPy, ROS'suz; `corridor.py` buna delege eder | 4 |
 | `sensor_payload.py` | LiDAR taşımanın enerji/termal bütçe maliyeti | 5 |
 | `mission_reference.py` | Kaynak künyeli gerçek misyon verisi (Yutu-2, Pragyan) | 6 |
 | `route_analysis.py` | `PathAnalysis`'ten ilham rota istatistikleri | 6 |
@@ -120,11 +120,14 @@ Fazlar boyunca oluşturulacak ve değiştirilecek dosyalar. Her dosyanın **tek 
 
 | Dosya | Sorumluluk | Faz |
 |---|---|---|
-| `lunapath_ros/conversions.py` | `(row, col)` ⇄ ENU map frame; grid_map layout (saf, rclpy'siz) | 4 |
+| `lunapath_ros/conversions.py` | Yalnızca **mesaj montajı** — geometri `app.grid_frame`'de. `rclpy`'siz ama `*_msgs`'e bağımlı, dolayısıyla ROS kurulumu olmadan import edilemez; `colcon test` ile test edilir | 4 |
 | `lunapath_ros/grid_publisher.py` | Katmanları `grid_map_msgs/GridMap` olarak yayınla | 4 |
 | `lunapath_ros/planner_node.py` | `PlanTraverse` action server (ince kabuk) | 4 |
+| `lunapath_ros/test/test_conversions.py` | `conversions.py` birim testleri (`colcon test`) | 4 |
+| `lunapath_ros/launch/lunapath.launch.py` · `config/lunapath.rviz` | Tek komutla ayağa kaldırma + RViz sahnesi | 4 |
 | `lunapath_msgs/action/PlanTraverse.action` | Action arayüzü (Nav2 hata kodu semantiği) | 4 |
 | `lunapath_msgs/msg/{Corridor,PlanMetrics,MissionWeights}.msg` | Mesaj tanımları | 4 |
+| `docker/ros2-jazzy.Dockerfile` · `docs/ROS2_SETUP.md` | ROS 2 Jazzy ortamı (WSL2 veya Docker) + Space ROS konumlandırma notu | 4 |
 
 ### Değiştirilecek — mevcut dosyalar
 

@@ -608,7 +608,7 @@ git commit -m "feat: expose per-layer cost breakdown from cell-telemetry"
   - `schemas.Corridor` pydantic modeli (alanlar aşağıda)
   - `corridor.build_corridor(path_pixels, grids, rover, safe_shadow_ratio=0.2, max_half_width_m=400.0) -> Corridor`
   - `corridor.clearance_map(traversable, resolution_m) -> np.ndarray`
-  - Faz 4 (`corridor_publisher.py`) ve Faz 5 (sanal LiDAR tüketicisi) bunları kullanır
+  - Faz 4 (`planner_node.py`, `PlanTraverse` action Result'ının `corridor` alanı) ve Faz 5 (sanal LiDAR tüketicisi) bunları kullanır
 
 - [ ] **Step 1: Başarısız testleri yaz**
 
@@ -922,7 +922,7 @@ git commit -m "feat: build the Corridor contract for local planners"
 
 **Interfaces:**
 - Consumes: `build_corridor` (Task 4)
-- Produces: `/api/plan` yanıtına `corridor` alanı (Corridor serileştirilmiş hâli veya `None`). Faz 4 `corridor_publisher.py` bunu tüketir.
+- Produces: `/api/plan` yanıtına `corridor` alanı (Corridor serileştirilmiş hâli veya `None`). Faz 4'ün `planner_node.py`'si aynı `build_corridor` çıktısını `PlanTraverse` action Result'ının `corridor` alanı olarak döndürür (ayrı bir `corridor_publisher.py` üretilmiyor — gerekçe: Faz 4 planı Task 6).
 
 - [ ] **Step 1: Başarısız testi yaz**
 
