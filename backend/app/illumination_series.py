@@ -172,3 +172,78 @@ def _window_centre_latlon(metadata: dict[str, Any]) -> tuple[float, float]:
     col = int(shape[1]) // 2
     lon, lat = pixel_to_lonlat(row, col, metadata)
     return float(lat), float(lon)
+
+
+def sun_track_for_series(
+    metadata: dict[str, Any],
+    n_slices: int,
+    slice_hours: float,
+    start_utc: str,
+) -> list[dict[str, Any]]:
+    """Sun azimuth and elevation at each slice of a time series.
+
+    ``_spice_shadow_series`` already computes exactly this to decide which
+    cells are lit, and then discards it. A 3-D client needs the number
+    itself: the shadow raster says WHERE it is dark, the Sun angle says WHY,
+    and a directional light placed from anything else will disagree with the
+    shadows it is supposed to be casting.
+
+    Azimuth is reported in both frames. ``azimuth_true_deg`` is the physical
+    answer; ``azimuth_grid_deg`` is the one a viewer that thinks in rows and
+    columns needs, and on a polar stereographic grid the two differ by the
+    meridian convergence at the window centre -- which at this site is not a
+    rounding error.
+
+    Raises whatever spiceypy raises when kernels are missing; the caller
+    decides whether that is fatal. ``/api/illumination-series`` treats it the
+    way :func:`build_shadow_series` treats the same failure: degrade, and say
+    so, rather than take the endpoint down.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    import spiceypy as spice
+
+    from .ephemeris import (
+        DEFAULT_META_KERNEL,
+        _ensure_kernels,
+        sun_azel_from_vector,
+        sun_vector_body,
+        true_azimuth_to_grid_azimuth,
+        true_north_grid_azimuth,
+    )
+
+    # str2et needs the leapsecond kernel, and it is called BEFORE the first
+    # sun_vector_body -- which is what would otherwise have loaded the pool.
+    # In a cold process the first str2et therefore raises NOLEAPSECONDS.
+    # Load the pool explicitly rather than relying on call order.
+    _ensure_kernels(spice, DEFAULT_META_KERNEL)
+
+    lat_deg, lon_deg = _window_centre_latlon(metadata)
+    crs_wkt = metadata.get("crs")
+    north_grid_az = (
+        true_north_grid_azimuth(lat_deg, lon_deg, str(crs_wkt))
+        if crs_wkt and crs_wkt != "unknown"
+        else 0.0
+    )
+
+    start = datetime.fromisoformat(str(start_utc).replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+
+    track: list[dict[str, Any]] = []
+    for index in range(int(n_slices)):
+        moment = start + timedelta(hours=float(slice_hours) * index)
+        et = spice.str2et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
+        true_az, elev = sun_azel_from_vector(sun_vector_body(et), lat_deg, lon_deg)
+        track.append(
+            {
+                "index": index,
+                "utc": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "azimuth_true_deg": float(true_az) % 360.0,
+                "azimuth_grid_deg": float(
+                    true_azimuth_to_grid_azimuth(true_az, north_grid_az)
+                ) % 360.0,
+                "elevation_deg": float(elev),
+            }
+        )
+    return track

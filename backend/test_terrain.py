@@ -131,3 +131,37 @@ def test_manifest_binary_url_carries_the_caller_query():
     assert manifest["layers"]["cost"]["binary_url"] == (
         "/api/layers/cost?format=f32&rover_id=lpr_1&w_slope=0.5"
     )
+
+
+def test_sun_track_for_series_returns_one_entry_per_slice():
+    """The shadow raster says WHERE it is dark; the Sun angle says WHY.
+
+    A directional light placed from anything other than this series will
+    disagree with the shadows it is supposed to be casting.
+    """
+    from app.illumination_series import sun_track_for_series
+
+    metadata = {
+        "shape": [500, 500],
+        "resolution_m": 5.0,
+        "origin": {"x": -15500.0, "y": -4000.0},
+        "crs": "unknown",
+    }
+    try:
+        track = sun_track_for_series(metadata, 4, 6.0, "2026-09-01T00:00:00")
+    except Exception as exc:            # no NAIF kernels in this environment
+        pytest.skip(f"SPICE unavailable: {exc}")
+
+    assert len(track) == 4
+    assert [entry["index"] for entry in track] == [0, 1, 2, 3]
+    assert track[0]["utc"].startswith("2026-09-01T00:00:00")
+    assert track[1]["utc"].startswith("2026-09-01T06:00:00")
+    for entry in track:
+        assert 0.0 <= entry["azimuth_grid_deg"] < 360.0
+        assert 0.0 <= entry["azimuth_true_deg"] < 360.0
+        # A polar site: the Sun grazes the horizon, it never climbs.
+        assert -10.0 < entry["elevation_deg"] < 10.0
+
+    # The Sun moves. A track that reports the same azimuth for every slice
+    # would satisfy every assertion above and be useless.
+    assert len({round(e["azimuth_true_deg"], 3) for e in track}) == 4
