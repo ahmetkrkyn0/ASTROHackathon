@@ -9,11 +9,13 @@ canonical frame breaks these tests instead of silently disagreeing.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 from pydantic import ValidationError
 
 from app.ephemeris import grid_azimuth_to_true_azimuth, true_azimuth_to_grid_azimuth
-from app.pose import ABSOLUTE_SOURCES, PoseEstimate
+from app.pose import ABSOLUTE_SOURCES, PoseEstimate, quaternion_to_grid_heading_deg
 
 
 def _pose(**overrides) -> PoseEstimate:
@@ -131,10 +133,6 @@ def test_zero_uncertainty_is_allowed():
 
 
 # --- quaternion -> grid heading (the ROS boundary's geometry) --------------
-
-import math
-
-from app.pose import quaternion_to_grid_heading_deg
 
 
 def _yaw_quaternion(yaw_deg: float) -> tuple[float, float, float, float]:

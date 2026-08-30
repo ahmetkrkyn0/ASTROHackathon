@@ -7,6 +7,9 @@ and the Phase 7 plan makes reporting that uncertainty a hard requirement.
 
 from __future__ import annotations
 
+import json
+import pathlib
+
 import numpy as np
 import pytest
 
@@ -203,9 +206,6 @@ def test_the_fix_serialises_to_a_dict():
 
 
 # --- expected_sun_angles (requires NAIF kernels on disk) -------------------
-
-import json
-import pathlib
 
 _KERNELS = pathlib.Path(__file__).resolve().parent.parent / "kernels" / "lunapath.tm"
 _needs_kernels = pytest.mark.skipif(
