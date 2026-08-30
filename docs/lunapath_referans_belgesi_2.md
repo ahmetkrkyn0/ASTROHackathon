@@ -288,6 +288,32 @@ def f_thermal(T_surface_C):
 | -100°C | -40°C | 1.000 | Saturate (tehlike) |
 | -180°C | -120°C | 1.000 | Saturate (ölümcül) |
 
+> **Hangi sıcaklık? — iki uç, tek zarf (Tur 4, H-3).**
+> Bir hücrenin tek bir sıcaklığı yoktur; bir aralığı vardır. Üretimde iki
+> istatistik ayrı ayrı taşınır ve `f_thermal` **ikisini de** değerlendirip
+> **kötü olanı** alır — bir uçta hayatta kalınamayan hücre, diğer uçta rahat
+> olduğu için güvenli olmaz.
+>
+> | Alan | Nedir | Nerede kullanılır |
+> |---|---|---|
+> | `thermal_grid.npy` | Düzeltilmemiş **güneşli tepe** (depolanan tek istatistik) | Diğer ikisi bundan türetilir |
+> | `thermal` | **Yıllık tepe** (`annual_peak_c`) | Sıcak duvar; barrier'ın üst terimi |
+> | `thermal_min` | **Soğuk uç dengesi** (`shadowed_equilibrium_c`) | Geçilebilirlik kapısı; barrier'ın alt terimi |
+>
+> Tur 3 tek bir alan tutuyordu ve o alan dördüncü-kuvvet **zaman ortalamasıydı**,
+> ama `Heat1DModel` bir lunar yıl boyunca `np.nanmax` saklıyor — yani bir
+> **maksimum**. Zamanın dörtte birinde aydınlık bir hücre −78,3 °C
+> raporlanıyordu; oysa Güneş ufkunu her aştığında yine tepesine (~0 °C)
+> çıkıyor. Bir maksimuma zaman ortalaması uygulamak istatistik hatasıdır ve
+> bu sitede 115 K'ye kadar değer taşıyordu.
+>
+> **Regolit ataleti.** Anlık dilimlerde yüzey, `REGOLITH_THERMAL_TAU_S`
+> (~1 saat, `UNCALIBRATED` etiketli) ile birinci mertebe gecikmeyle hedefine
+> yaklaşır. Öncesinde dinamik yoktu: gölgeye giren hücre **aynı dilimde** PSR
+> tabanına düşüyor, yani −150 °C kapısının altına iniyor ve gölge ne kadar
+> kısa sürerse sürsün geçilemez oluyordu. Bu gridin dörtte üçü
+> `shadow_ratio > 0.5` bandında.
+
 #### 2.3.5 J_penalty — Log-Barrier (Katı Kısıtlar)
 
 ```python
