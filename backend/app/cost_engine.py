@@ -75,6 +75,45 @@ def f_energy(theta_deg: float, d_m: float, rover: Mapping[str, Any] | None = Non
     return E_wh / float(rover_cfg["e_cap_wh"])
 
 
+def f_energy_cell(
+    theta_deg: float, rover: Mapping[str, Any] | None = None
+) -> float:
+    """Cell-level energy penalty in MRU [0, 1].
+
+    Unlike :func:`f_energy`, which reports one edge's energy as a FRACTION OF
+    BATTERY CAPACITY, this reports how much MORE energy the slope costs than
+    flat ground, normalised so the rover's slope limit reads 1.0.
+
+    f_energy was mathematically correct and practically inert: one 5 m edge
+    draws ~1.4 Wh against a 5420 Wh battery, so the term stayed in
+    [0.00026, 0.00074] while slope/shadow/thermal ranged over [0.02, 1.0].
+    Weighted at 0.259 it contributed 0.04% of cell cost -- sweeping w_energy
+    from 0.0 to 2.0 returned the byte-identical route, so a quarter of the
+    AHP weight vector decided nothing. This is the same collapse
+    :func:`f_shadow_cell` documents for the shadow term, which was fixed
+    there and missed here. (Backend review, #1.)
+
+    The ratio E(theta)/E(0) is independent of edge length, so unlike
+    f_energy this does not silently rescale with grid resolution.
+    """
+    rover_cfg = _resolve_rover(rover)
+    slope_max = float(rover_cfg["slope_max_deg"])
+    if theta_deg > slope_max:
+        return float("inf")
+
+    # Any distance works -- the ratio cancels it -- so use a unit edge.
+    flat_wh = edge_energy_wh(0.0, 1.0, rover_cfg)
+    here_wh = edge_energy_wh(max(0.0, float(theta_deg)), 1.0, rover_cfg)
+    limit_wh = edge_energy_wh(slope_max, 1.0, rover_cfg)
+    if not math.isfinite(here_wh) or flat_wh <= 0.0:
+        return float("inf")
+
+    span = limit_wh / flat_wh - 1.0
+    if not math.isfinite(span) or span <= 0.0:
+        return 0.0
+    return min(1.0, max(0.0, (here_wh / flat_wh - 1.0) / span))
+
+
 # ── 2.3.3  f_shadow — Cumulative exponential shadow penalty ─────────────────
 
 _SHADOW_LAMBDA = 3.0
@@ -273,7 +312,7 @@ def total_edge_cost(
 
     cost = (
         w["w_slope"] * f_slope(slope_deg, rover_cfg)
-        + w["w_energy"] * f_energy(slope_deg, distance_m, rover_cfg)
+        + w["w_energy"] * f_energy_cell(slope_deg, rover_cfg)
         + w["w_shadow"] * f_shadow(H_cumulative_hours, rover_cfg)
         + w["w_thermal"] * f_thermal(T_surface_C, rover_cfg)
     )
@@ -306,8 +345,8 @@ def compute_cost_grid(
     """Compute a continuous weighted cost layer for each grid cell.
 
     This is a *cell-level proxy* for the planner's full edge cost:
-    - edge-based terms (`f_slope`, `f_energy`) use the local cell slope and one
-      nominal grid step of length ``resolution_m``.
+    - the slope and energy terms (`f_slope`, `f_energy_cell`) read the local
+      cell slope; both are MRU [0, 1] and independent of the step length.
     - the shadow term uses ``f_shadow_cell`` on the local shadow ratio; the
       cumulative ``f_shadow`` belongs to the path-dependent planner, not to
       this static grid.
@@ -342,7 +381,7 @@ def compute_cost_grid(
 
         local_cost = (
             resolved["w_slope"] * f_slope(float(slope_deg), rover_cfg)
-            + resolved["w_energy"] * f_energy(float(slope_deg), resolution_m, rover_cfg)
+            + resolved["w_energy"] * f_energy_cell(float(slope_deg), rover_cfg)
             + resolved["w_shadow"] * f_shadow_cell(shadow_ratio)
             + resolved["w_thermal"] * f_thermal(thermal_c, rover_cfg)
         )

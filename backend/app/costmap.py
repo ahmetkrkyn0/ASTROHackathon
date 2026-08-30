@@ -123,13 +123,13 @@ class CostMap:
         return breakdown
 
 
-from .cost_engine import f_energy, f_shadow_cell, f_slope, f_thermal, resolve_weights
+from .cost_engine import f_energy_cell, f_shadow_cell, f_slope, f_thermal, resolve_weights
 
 # The scalar penalties in cost_engine are the frozen, validated formulas.
 # np.vectorize keeps the layered path bit-identical to the legacy loop.
 # Optimising this (see spec: precomputation) is explicitly out of scope.
 _f_slope_vec = np.vectorize(f_slope, otypes=[np.float64], excluded={1})
-_f_energy_vec = np.vectorize(f_energy, otypes=[np.float64], excluded={1, 2})
+_f_energy_vec = np.vectorize(f_energy_cell, otypes=[np.float64], excluded={1})
 _f_shadow_cell_vec = np.vectorize(f_shadow_cell, otypes=[np.float64])
 _f_thermal_vec = np.vectorize(f_thermal, otypes=[np.float64], excluded={1})
 
@@ -163,7 +163,9 @@ class EnergyLayer:
         self.validity = str(validity)
 
     def contribution(self, ctx: PlanContext) -> np.ndarray:
-        return _f_energy_vec(ctx.slope, ctx.resolution_m, ctx.rover)
+        # Reads slope only: f_energy_cell is a resolution-independent ratio,
+        # so the layer no longer rescales with the grid step. (Review #1.)
+        return _f_energy_vec(ctx.slope, ctx.rover)
 
 
 class ShadowLayer:

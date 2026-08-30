@@ -14,6 +14,8 @@ shell never got the adaptation. It belongs here so both shells call it.)
 
 from __future__ import annotations
 
+import numpy as np
+
 from .constants import DEFAULT_ROVER_ID, get_rover
 from .cost_engine import compute_cost_grid, resolve_weights
 from .traversability import compute_traversability_bool
@@ -31,18 +33,43 @@ def grids_for_rover(
     stored_weights = metadata.get("cost_weights", {})
     resolved_weights = resolve_weights(weights, rover)
 
-    traversable = (
-        base_grids["traversable"]
-        if rover_id == default_rover_id
-        else compute_traversability_bool(
-            base_grids["slope"],
-            base_grids["thermal"],
-            base_grids.get("elevation"),
-            rover=rover,
-        )
+    # Recomputed unconditionally rather than trusting the stored mask when the
+    # ids happen to match. ``default_rover_id`` is only a LABEL in metadata.json
+    # -- nothing guarantees the mask on disk was actually built with that
+    # rover's slope_max_deg. When the label disagreed with the mask (a P1 run
+    # under a different rover, a hand-edited metadata.json), the planner was
+    # handed a mask that called 93,762 cells passable for nasa_viper that its
+    # 20 deg limit forbids, and routed over them. slope_max_deg is a safety
+    # limit, so it is recomputed from the grids every time -- measured at
+    # ~0.05 s on the 500x500 production grid, far below the cost of being
+    # wrong. (Backend review, #2.)
+    traversable = compute_traversability_bool(
+        base_grids["slope"],
+        base_grids["thermal"],
+        base_grids.get("elevation"),
+        rover=rover,
     )
 
-    needs_cost_recompute = rover_id != default_rover_id or resolved_weights != stored_weights
+    # The stored cost grid carries the same trust problem as the stored mask:
+    # it is only reusable if it was built with THIS rover, THESE weights, and
+    # a mask matching the one just recomputed. The id/weight check alone let a
+    # mislabelled grid through. Comparing the mask itself closes the gap --
+    # a cheap array comparison against a grid we already hold. (Review #2.)
+    mask_matches_stored = (
+        "traversable" in base_grids
+        and np.asarray(base_grids["traversable"], dtype=bool).shape == traversable.shape
+        and bool(
+            np.array_equal(
+                np.asarray(base_grids["traversable"], dtype=bool), traversable
+            )
+        )
+    )
+    needs_cost_recompute = (
+        rover_id != default_rover_id
+        or resolved_weights != stored_weights
+        or not mask_matches_stored
+        or "cost" not in base_grids
+    )
     cost = (
         compute_cost_grid(
             base_grids["slope"],

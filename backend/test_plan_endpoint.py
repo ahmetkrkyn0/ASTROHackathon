@@ -277,7 +277,11 @@ def test_geo_input_with_metadata_origin_accepted():
 
 def test_impassable_start_returns_422():
     grids = _make_grids()
-    grids["traversable"][0, 0] = False  # Block only start
+    # Block the start through the TERRAIN, not by hand-editing the mask.
+    # grids_for_rover now derives traversability from slope/thermal every
+    # time rather than trusting a stored mask, so a mask that contradicts
+    # its own grids no longer survives -- that is the point of review #2.
+    grids["slope"][0, 0] = 89.0  # far above every rover's slope_max_deg
     _inject_grids(grids)
     r = client.post("/api/plan", json={
         "start": {"row": 0, "col": 0},
@@ -289,7 +293,7 @@ def test_impassable_start_returns_422():
 
 def test_impassable_goal_returns_422():
     grids = _make_grids()
-    grids["traversable"][5, 5] = False  # Block only goal
+    grids["slope"][5, 5] = 89.0  # see test_impassable_start_returns_422
     _inject_grids(grids)
     r = client.post("/api/plan", json={
         "start": {"row": 0, "col": 0},

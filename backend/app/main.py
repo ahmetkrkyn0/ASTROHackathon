@@ -6,6 +6,7 @@ import logging
 import math
 import os
 import traceback
+from pathlib import Path
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -133,6 +134,25 @@ def _active_grids(request: Request) -> dict:
 def _read_grid_value(grid: np.ndarray, row: int, col: int) -> float | None:
     value = grid[row, col]
     return float(value) if np.isfinite(value) else None
+
+
+def _resolve_dem_path(dem_file: str) -> Path:
+    """Resolve *dem_file* inside the DEM directory, refusing to escape it.
+
+    ``os.path.join(DATA_DIR, "dem", dem_file)`` silently DISCARDS the first
+    two components when ``dem_file`` is absolute, so "C:/Windows/win.ini"
+    (or "/etc/shadow") resolved to that file itself rather than to anything
+    under DATA_DIR. ``..`` segments walked out just as freely. Resolving
+    both sides and checking containment closes both. (Backend review, #3.)
+    """
+    dem_root = Path(DATA_DIR, "dem").resolve()
+    candidate = (dem_root / dem_file).resolve()
+    if candidate != dem_root and dem_root not in candidate.parents:
+        raise HTTPException(
+            status_code=422,
+            detail="dem_file must name a file inside the DEM directory.",
+        )
+    return candidate
 
 
 def _to_pixel(
@@ -270,12 +290,12 @@ def load_preprocessed(req: LoadPreprocessedRequest):
 @app.post("/api/load-dem")
 def load_dem(req: LoadDEMRequest):
     global _grids
-    dem_path = os.path.join(DATA_DIR, "dem", req.dem_file)
-    if not os.path.exists(dem_path):
+    dem_path = _resolve_dem_path(req.dem_file)
+    if not dem_path.is_file():
         raise HTTPException(status_code=404, detail=f"DEM file not found: {req.dem_file}")
     try:
         _grids = load_and_preprocess_dem(
-            dem_path,
+            str(dem_path),
             req.target_resolution_m,
             use_cache=req.use_cache,
             weights=req.weights,
@@ -835,10 +855,10 @@ def load_scenario_endpoint(scenario_id: str):
 
     if "dem_file" in scenario:
         global _grids
-        dem_path = os.path.join(DATA_DIR, "dem", scenario["dem_file"])
-        if os.path.exists(dem_path):
+        dem_path = _resolve_dem_path(scenario["dem_file"])
+        if dem_path.is_file():
             _grids = load_and_preprocess_dem(
-                dem_path,
+                str(dem_path),
                 scenario.get("grid_resolution_m", 80),
                 weights=scenario.get("weights"),
             )
