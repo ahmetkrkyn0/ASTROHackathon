@@ -13,6 +13,19 @@ planner knows, travelled distance is something ``PoseEstimate`` reports,
 and a growing divergence between them means the wheels are digging in.
 That is why this module lives in Phase 7 rather than Phase 1.
 
+What is actually wired in
+-------------------------
+Only ``check_slip_accumulation`` is live: ``evaluate_pose`` runs it on
+every pose. ``effective_distance_m`` and ``slip_energy_multiplier`` are
+deliberately NOT called by the cost engine, the simulation, the corridor
+builder or the 4-D planner -- wiring an uncalibrated coefficient into
+the number that picks routes would change which route the planner
+chooses on the strength of a figure this module explicitly refuses to
+stand behind. So every energy figure in the product remains slip-free,
+and this module's correction is available for a caller who wants it
+under that label. Do not read the paragraph below as describing an
+applied correction. (Round 2 review, L-2.)
+
 Calibration status -- read this before quoting any number
 ---------------------------------------------------------
 ``I0`` and ``K`` are a rough literature-shaped approximation, NOT values
@@ -88,36 +101,46 @@ def slip_energy_multiplier(slope_deg: float) -> float:
 
 
 def check_slip_accumulation(
-    travelled_m: float,
-    commanded_m: float,
+    map_progress_m: float,
+    odometer_claim_m: float,
     threshold: float = SLIP_ACCUMULATION_THRESHOLD,
 ) -> TriggerResult:
-    """Fire when measured progress falls below *threshold* of commanded.
+    """Fire when ground actually gained falls below *threshold* of the
+    distance the estimator claims to have covered.
 
-    ``travelled_m`` is what odometry reports having covered;
-    ``commanded_m`` is what the planner asked for. A ratio well under 1
-    means the terrain is costing more than planned, and the remaining
-    route's energy and time budgets are no longer trustworthy.
+    ``map_progress_m`` is LunaPath's own measurement -- how far along the
+    corridor the projected pose has advanced. ``odometer_claim_m`` is
+    what the odometry stack says it travelled. Wheels turning further
+    than the body advances is exactly slip, so a ratio well under 1 means
+    the terrain is costing more than planned and the remaining route's
+    energy and time budgets are no longer trustworthy.
+
+    Neither quantity is a COMMANDED distance -- an earlier revision named
+    them ``travelled_m``/``commanded_m``, so the evidence string that
+    justified a replan described inputs that did not exist and an auditor
+    would have gone looking for a commanded distance nothing recorded.
+    (Round 2 review, M-5.)
     """
-    commanded = float(commanded_m)
-    travelled = float(travelled_m)
+    claim = float(odometer_claim_m)
+    progress = float(map_progress_m)
 
-    if commanded <= 0.0:
-        # No distance was commanded, so there is no ratio to judge. Report
+    if claim <= 0.0:
+        # Nothing was claimed, so there is no ratio to judge. Report
         # not-fired with the reason stated rather than dividing by zero or
         # returning a fired trigger on a vacuous comparison.
         return TriggerResult(
             "slip_accumulation",
             False,
-            "no commanded distance to compare against",
+            "no odometry distance claim to compare against",
         )
 
-    ratio = travelled / commanded
+    ratio = progress / claim
     fired = ratio < float(threshold)
     return TriggerResult(
         "slip_accumulation",
         fired,
-        f"travelled {travelled:.1f} m of {commanded:.1f} m commanded "
+        f"advanced {progress:.1f} m along the corridor while odometry "
+        f"claims {claim:.1f} m travelled "
         f"(ratio {ratio:.2f}, threshold {threshold:.2f}); "
         f"slip model is {SLIP_MODEL_VALIDITY}",
     )

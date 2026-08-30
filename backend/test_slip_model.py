@@ -99,13 +99,15 @@ def test_the_module_declares_itself_uncalibrated():
 
 
 def test_the_trigger_fires_when_progress_falls_short():
-    result = check_slip_accumulation(travelled_m=50.0, commanded_m=100.0)
+    result = check_slip_accumulation(map_progress_m=50.0, odometer_claim_m=100.0)
     assert result.triggered
     assert result.trigger_id == "slip_accumulation"
 
 
 def test_the_trigger_stays_quiet_when_progress_is_nominal():
-    assert not check_slip_accumulation(travelled_m=98.0, commanded_m=100.0).triggered
+    assert not check_slip_accumulation(
+        map_progress_m=98.0, odometer_claim_m=100.0
+    ).triggered
 
 
 def test_the_trigger_boundary_matches_the_declared_threshold():
@@ -113,16 +115,26 @@ def test_the_trigger_boundary_matches_the_declared_threshold():
     assert check_slip_accumulation(74.0, 100.0).triggered
 
 
-def test_a_zero_commanded_distance_does_not_divide_by_zero():
-    result = check_slip_accumulation(travelled_m=0.0, commanded_m=0.0)
+def test_the_detail_names_the_quantities_it_actually_compared():
+    """Neither input is a COMMANDED distance -- saying so sent an auditor
+    looking for a number nothing records. (Round 2 review, M-5.)"""
+    detail = check_slip_accumulation(map_progress_m=50.0, odometer_claim_m=100.0).detail
+    assert "commanded" not in detail
+    assert "odometry claims" in detail
+
+
+def test_a_zero_odometry_claim_does_not_divide_by_zero():
+    result = check_slip_accumulation(map_progress_m=0.0, odometer_claim_m=0.0)
     assert not result.triggered
-    assert "no commanded distance" in result.detail
+    assert "no odometry distance claim" in result.detail
 
 
-def test_overshooting_the_commanded_distance_does_not_fire():
-    """Travelling further than commanded is not slip; it should not be
-    reported as though the rover were bogging down."""
-    assert not check_slip_accumulation(travelled_m=120.0, commanded_m=100.0).triggered
+def test_advancing_further_than_the_odometer_claims_does_not_fire():
+    """Gaining more ground than odometry claims is not slip; it should not
+    be reported as though the rover were bogging down."""
+    assert not check_slip_accumulation(
+        map_progress_m=120.0, odometer_claim_m=100.0
+    ).triggered
 
 
 def test_the_trigger_detail_carries_the_calibration_label():

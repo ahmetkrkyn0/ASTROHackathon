@@ -67,6 +67,7 @@ class PoseMonitor(Node):
         self._corridor: Corridor | None = None
         self._travelled_m = 0.0
         self._last_xy: tuple[float, float] | None = None
+        self._last_along_track_m: float | None = None
 
         self._trigger_pub = self.create_publisher(
             ReplanTrigger, "replan_triggers", 10
@@ -94,6 +95,7 @@ class PoseMonitor(Node):
         # integral belongs to the corridor it was driven against.
         self._travelled_m = 0.0
         self._last_xy = None
+        self._last_along_track_m = None
         self.get_logger().info(
             f"active corridor set: {len(self._corridor.waypoints)} waypoints"
         )
@@ -128,7 +130,16 @@ class PoseMonitor(Node):
             self.get_logger().warning(f"dropping odometry message: {exc}")
             return
 
-        result = evaluate_pose(pose, self._corridor)
+        # The last segment is a progress prior: on a switchback the
+        # globally nearest segment can be the outbound leg running
+        # alongside, which teleports along-track and false-fires slip.
+        # (Round 2 review, M-4.)
+        result = evaluate_pose(
+            pose,
+            self._corridor,
+            previous_along_track_m=self._last_along_track_m,
+        )
+        self._last_along_track_m = result["corridor_fix"].along_track_m
 
         for trigger in result["fired"]:
             message_out = ReplanTrigger()

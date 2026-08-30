@@ -611,6 +611,18 @@ class PoseRequest(BaseModel):
         ),
     )
 
+    previous_along_track_m: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "How far along the corridor this rover was at the last update "
+            "-- echo back corridor_fix.along_track_m from the previous "
+            "/api/pose response. Used as a progress prior so a switchback's "
+            "outbound leg cannot capture a pose driving the return leg. "
+            "Omit on the first pose of a traverse."
+        ),
+    )
+
     _check_state = field_validator("state")(_reject_non_finite_telemetry)
 
 
@@ -636,7 +648,12 @@ def pose(req: PoseRequest, request: Request):
             ),
         )
 
-    result = evaluate_pose(req.pose, corridor, req.state)
+    result = evaluate_pose(
+        req.pose,
+        corridor,
+        req.state,
+        previous_along_track_m=req.previous_along_track_m,
+    )
     return {
         "corridor_fix": result["corridor_fix"].to_dict(),
         "pose_source": req.pose.source,

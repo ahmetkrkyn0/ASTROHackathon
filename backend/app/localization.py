@@ -66,13 +66,32 @@ def _project_point_on_segment(
     return t, math.hypot(px - cx, py - cy)
 
 
-def project_onto_corridor(pose: PoseEstimate, corridor: Corridor) -> CorridorFix:
+def project_onto_corridor(
+    pose: PoseEstimate,
+    corridor: Corridor,
+    previous_segment_index: int | None = None,
+    search_window_m: float = 250.0,
+    previous_along_track_m: float | None = None,
+) -> CorridorFix:
     """Locate *pose* against *corridor*.
 
     Picks the segment whose centreline the pose is closest to. Ties (a
     pose exactly equidistant from two segments, which happens at a corner)
     resolve to the earlier segment, so the answer is deterministic rather
     than dependent on floating-point noise.
+
+    *previous_along_track_m* (preferred) or *previous_segment_index* says
+    where the rover was at the last update. Given either, only positions
+    within *search_window_m* along the route are considered, which stops
+    a lookalike far segment (the outbound leg of a switchback) from
+    capturing a pose that is still on its own leg. Omit both for a
+    standalone fix with no history -- the search is then global and a
+    switchback can mis-snap, which is what these parameters exist to
+    prevent.
+
+    The default window is generous: at LPR-1's 0.2 m/s top speed, 250 m
+    is over 20 minutes of continuous driving, so it constrains only jumps
+    no rover could have made between two pose updates.
     """
     waypoints = corridor.waypoints
     if len(waypoints) < 2:
@@ -91,13 +110,66 @@ def project_onto_corridor(pose: PoseEstimate, corridor: Corridor) -> CorridorFix
         segment_lengths.append(math.hypot(bx - ax, by - ay))
     total_length = sum(segment_lengths)
 
+    # Segment search window. Without a prior, the globally nearest segment
+    # wins -- which on a switchback (the standard shape for climbing a
+    # lunar slope) snaps a pose on the return leg onto the outbound leg
+    # running a few tens of metres alongside, even while the pose is
+    # comfortably INSIDE its own segment's corridor. along_track_m then
+    # collapses by half the route and the slip check, which divides it by
+    # the odometer's claim, fires on a rover that is not slipping.
+    #
+    # The window is measured in ALONG-TRACK METRES, not in segment count:
+    # corridors carry one segment per pixel step, so a segment-count
+    # window is a different physical distance on every grid resolution --
+    # and on a short corridor it silently spans the whole route, leaving
+    # the prior doing nothing. Metres bound what the rover could actually
+    # have driven between two updates. (Round 2 review, M-4.)
+    n_segments = len(waypoints) - 1
+    segment_starts: list[float] = []
+    running = 0.0
+    for length in segment_lengths:
+        segment_starts.append(running)
+        running += length
+
+    # The anchor is the previous along-track POSITION, not the previous
+    # segment's start: a single segment can be longer than the window, so
+    # anchoring at its start would exclude the rover's own current
+    # location further along it.
+    anchor_along: float | None = None
+    if previous_along_track_m is not None:
+        anchor_along = float(previous_along_track_m)
+    elif previous_segment_index is not None:
+        anchor = min(max(int(previous_segment_index), 0), n_segments - 1)
+        # Midpoint: the best guess for "somewhere on that segment" when
+        # only the index is known.
+        anchor_along = segment_starts[anchor] + segment_lengths[anchor] / 2.0
+
     best_index = 0
     best_t = 0.0
     best_distance = float("inf")
     for i, ((ax, ay), (bx, by)) in enumerate(zip(waypoints[:-1], waypoints[1:])):
         t, distance = _project_point_on_segment(pose.x_m, pose.y_m, ax, ay, bx, by)
+        if anchor_along is not None:
+            along_here = segment_starts[i] + t * segment_lengths[i]
+            if abs(along_here - anchor_along) > float(search_window_m):
+                continue
         if distance < best_distance:
             best_index, best_t, best_distance = i, t, distance
+
+    if best_distance == float("inf"):
+        # Every segment fell outside the window -- the pose jumped further
+        # along the route than the window allows (a genuine teleport, a
+        # stale prior, or a corridor swapped underneath the caller).
+        # Fall back to the global search rather than returning nothing:
+        # a possibly-wrong fix that says where the rover is beats no fix.
+        for i, ((ax, ay), (bx, by)) in enumerate(
+            zip(waypoints[:-1], waypoints[1:])
+        ):
+            t, distance = _project_point_on_segment(
+                pose.x_m, pose.y_m, ax, ay, bx, by
+            )
+            if distance < best_distance:
+                best_index, best_t, best_distance = i, t, distance
 
     along_track_m = (
         sum(segment_lengths[:best_index]) + best_t * segment_lengths[best_index]
@@ -121,6 +193,7 @@ def trigger_state_from_pose(
     pose: PoseEstimate,
     corridor: Corridor,
     plan_state: dict[str, Any] | None = None,
+    fix: CorridorFix | None = None,
 ) -> dict[str, Any]:
     """Build the telemetry mapping ``evaluate_triggers`` consumes.
 
@@ -129,8 +202,14 @@ def trigger_state_from_pose(
     values win for the keys they own. Passing the fix's own numbers here
     is the whole point of Phase 7: ``corridor_violation`` and
     ``localization_uncertainty`` stop being hand-fed constants.
+
+    *fix* lets a caller that has already projected pass the result in,
+    rather than paying for a second identical projection -- and, more
+    importantly, guarantees the state describes the SAME fix the caller
+    is reporting. (Round 2 review, L-7.)
     """
-    fix = project_onto_corridor(pose, corridor)
+    if fix is None:
+        fix = project_onto_corridor(pose, corridor)
     state: dict[str, Any] = dict(plan_state or {})
     state.update(
         {
@@ -146,6 +225,8 @@ def evaluate_pose(
     pose: PoseEstimate,
     corridor: Corridor,
     plan_state: dict[str, Any] | None = None,
+    previous_segment_index: int | None = None,
+    previous_along_track_m: float | None = None,
 ) -> dict[str, Any]:
     """The full pose -> deviation -> trigger evaluation, shell-agnostic.
 
@@ -158,7 +239,12 @@ def evaluate_pose(
     On loose regolith the wheels turn further than the ground gained, so
     along-track falling well short of the claim is the slip signature.
     Absolute fixes carry no travelled distance to compare, so they are
-    not slip-checked.
+    not slip-checked -- and when the check does not run it is reported in
+    ``skipped``, not silently omitted from both lists.
+
+    *previous_along_track_m* / *previous_segment_index* are passed
+    through to the projection as a progress prior; see
+    :func:`project_onto_corridor`.
 
     ``recommended_action`` policy: a fired ``localization_uncertainty``
     outranks everything -- replanning from a pose wider than the corridor
@@ -168,16 +254,42 @@ def evaluate_pose(
     from .replan_triggers import evaluate_triggers_detailed
     from .slip_model import check_slip_accumulation
 
-    fix = project_onto_corridor(pose, corridor)
-    trigger_state = trigger_state_from_pose(pose, corridor, plan_state)
+    fix = project_onto_corridor(
+        pose,
+        corridor,
+        previous_segment_index=previous_segment_index,
+        previous_along_track_m=previous_along_track_m,
+    )
+    trigger_state = trigger_state_from_pose(pose, corridor, plan_state, fix=fix)
     evaluation = evaluate_triggers_detailed(trigger_state)
     fired = list(evaluation["fired"])
     evaluated = list(evaluation["evaluated"])
+    skipped = list(evaluation["skipped"])
 
-    if not pose.is_absolute_fix and pose.distance_travelled_m > 0.0:
+    if pose.is_absolute_fix:
+        # An absolute fix does not integrate motion, so there is no
+        # travelled-distance claim to compare against. Reported rather
+        # than omitted: "not checkable" must stay distinguishable from
+        # "checked and clear". (Round 2 review, L-8.)
+        skipped.append(
+            {
+                "trigger_id": "slip_accumulation",
+                "missing": ["distance_travelled_m"],
+                "reason": f"{pose.source} is an absolute fix; no odometry claim",
+            }
+        )
+    elif pose.distance_travelled_m <= 0.0:
+        skipped.append(
+            {
+                "trigger_id": "slip_accumulation",
+                "missing": ["distance_travelled_m"],
+                "reason": "no distance travelled to compare against",
+            }
+        )
+    else:
         slip = check_slip_accumulation(
-            travelled_m=fix.along_track_m,
-            commanded_m=pose.distance_travelled_m,
+            map_progress_m=fix.along_track_m,
+            odometer_claim_m=pose.distance_travelled_m,
         )
         evaluated.append(slip.trigger_id)
         if slip.triggered:
@@ -195,7 +307,7 @@ def evaluate_pose(
         "corridor_fix": fix,
         "fired": fired,
         "evaluated": evaluated,
-        "skipped": evaluation["skipped"],
+        "skipped": skipped,
         "trigger_state": trigger_state,
         "recommended_action": recommended_action,
     }

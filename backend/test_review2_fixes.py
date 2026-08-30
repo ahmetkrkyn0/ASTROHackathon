@@ -502,3 +502,185 @@ def test_l4_every_endpoint_reports_missing_grids_as_503():
                 assert response.status_code == 503, f"{path} -> {response.status_code}"
     finally:
         app.state.grids = previous
+
+
+# ── M-4: a switchback must not capture a pose from the return leg ─────────
+
+
+def _hairpin_corridor(spacing_m=30.0, half_width_m=20.0):
+    """Outbound east, hairpin, return west -- the shape a rover drives to
+    climb a slope, and the shape that breaks a global nearest-segment
+    search."""
+    from app.schemas import Corridor
+
+    waypoints = [(0.0, 0.0), (600.0, 0.0), (600.0, spacing_m), (0.0, spacing_m)]
+    segments = len(waypoints) - 1
+    return Corridor(
+        waypoints=waypoints,
+        half_width_m=[half_width_m] * segments,
+        max_slope_deg=[5.0] * segments,
+        energy_budget_wh=[50.0] * segments,
+        thermal_budget_K_s=[1000.0] * segments,
+        fallback_points=[(0.0, 0.0)] * len(waypoints),
+        crs="test",
+    )
+
+
+def _pose_at(x, y, **overrides):
+    from app.pose import PoseEstimate
+
+    body = {
+        "x_m": x,
+        "y_m": y,
+        "heading_deg": 270.0,
+        "covariance_m": 2.0,
+        "heading_covariance_deg": 1.0,
+        "timestamp_utc": "2026-08-30T12:00:00Z",
+        "source": "visual_odometry",
+        "distance_travelled_m": 1430.0,
+    }
+    body.update(overrides)
+    return PoseEstimate(**body)
+
+
+def test_m4_a_drifting_pose_on_the_return_leg_keeps_its_own_segment():
+    """Drifting 16 m toward the outbound leg -- still inside its own
+    corridor -- used to snap the fix onto that leg, collapsing
+    along_track_m from 1430 m to 200 m."""
+    from app.localization import project_onto_corridor
+
+    corridor = _hairpin_corridor()
+    on_leg = project_onto_corridor(_pose_at(200.0, 30.0), corridor)
+    drifted = project_onto_corridor(
+        _pose_at(200.0, 14.0), corridor, previous_segment_index=on_leg.segment_index
+    )
+    assert drifted.segment_index == on_leg.segment_index
+    assert drifted.along_track_m == pytest.approx(on_leg.along_track_m, abs=1.0)
+
+
+def test_m4_the_slip_trigger_does_not_fire_on_lateral_drift_alone():
+    """The along-track prior is what a real caller carries forward: the
+    ROS monitor and an /api/pose client both echo the previous fix."""
+    from app.localization import evaluate_pose, project_onto_corridor
+
+    corridor = _hairpin_corridor()
+    on_leg = project_onto_corridor(_pose_at(200.0, 30.0), corridor)
+    # An odometry claim consistent with the route actually driven, so any
+    # slip fired here would come from the projection, not from real slip.
+    claim = on_leg.along_track_m * 1.05
+    result = evaluate_pose(
+        _pose_at(200.0, 14.0, distance_travelled_m=claim),
+        corridor,
+        previous_along_track_m=on_leg.along_track_m,
+    )
+    fired = {t.trigger_id for t in result["fired"]}
+    assert "slip_accumulation" not in fired
+
+
+def test_m4_progress_does_not_jump_backwards_across_the_hairpin():
+    from app.localization import project_onto_corridor
+
+    corridor = _hairpin_corridor()
+    previous = None
+    progress = []
+    for x in (500.0, 400.0, 300.0, 200.0, 100.0):
+        fix = project_onto_corridor(
+            _pose_at(x, 29.0), corridor, previous_segment_index=previous
+        )
+        previous = fix.segment_index
+        progress.append(fix.progress_fraction)
+    assert progress == sorted(progress)
+
+
+def test_m4_without_a_prior_the_search_is_still_global():
+    """The prior is opt-in; a standalone fix with no history must still
+    find the globally nearest segment."""
+    from app.localization import project_onto_corridor
+
+    corridor = _hairpin_corridor()
+    fix = project_onto_corridor(_pose_at(200.0, 1.0), corridor)
+    assert fix.segment_index == 0
+
+
+def test_m4_the_prior_is_clamped_to_the_corridor():
+    """An out-of-range prior (a stale index from a longer previous route)
+    must not raise or silently select nothing."""
+    from app.localization import project_onto_corridor
+
+    corridor = _hairpin_corridor()
+    fix = project_onto_corridor(
+        _pose_at(200.0, 30.0), corridor, previous_segment_index=99
+    )
+    assert 0 <= fix.segment_index < len(corridor.half_width_m)
+
+
+# ── L-7 / L-8: one projection per call; skipped slip is reported ──────────
+
+
+def test_l7_the_state_describes_the_same_fix_that_is_returned():
+    from app.localization import evaluate_pose
+
+    corridor = _hairpin_corridor()
+    result = evaluate_pose(_pose_at(200.0, 14.0), corridor)
+    assert result["trigger_state"]["lateral_offset_m"] == pytest.approx(
+        result["corridor_fix"].lateral_offset_m
+    )
+    assert result["trigger_state"]["half_width_m"] == pytest.approx(
+        result["corridor_fix"].half_width_at_pose_m
+    )
+
+
+def test_l7_a_caller_can_supply_the_fix_instead_of_reprojecting():
+    from app.localization import project_onto_corridor, trigger_state_from_pose
+
+    corridor = _hairpin_corridor()
+    pose = _pose_at(200.0, 14.0)
+    fix = project_onto_corridor(pose, corridor)
+    state = trigger_state_from_pose(pose, corridor, fix=fix)
+    assert state["lateral_offset_m"] == pytest.approx(fix.lateral_offset_m)
+
+
+def test_l8_an_absolute_fix_reports_slip_as_skipped_not_absent():
+    """"Not checkable" must stay distinguishable from "checked and clear"
+    -- the distinction review #4 introduced the skipped list to keep."""
+    from app.localization import evaluate_pose
+
+    result = evaluate_pose(
+        _pose_at(200.0, 30.0, source="skyline_fix"), _hairpin_corridor()
+    )
+    assert "slip_accumulation" not in result["evaluated"]
+    entry = _skip_entry(result, "slip_accumulation")
+    assert "absolute fix" in entry["reason"]
+
+
+def test_l8_a_zero_distance_claim_reports_slip_as_skipped():
+    from app.localization import evaluate_pose
+
+    result = evaluate_pose(
+        _pose_at(200.0, 30.0, distance_travelled_m=0.0), _hairpin_corridor()
+    )
+    assert "slip_accumulation" not in result["evaluated"]
+    assert _skip_entry(result, "slip_accumulation")["reason"]
+
+
+def test_l8_a_checked_slip_appears_in_evaluated():
+    from app.localization import evaluate_pose
+
+    result = evaluate_pose(
+        _pose_at(200.0, 30.0, distance_travelled_m=100.0), _hairpin_corridor()
+    )
+    assert "slip_accumulation" in result["evaluated"]
+
+
+# ── M-6: the distance epoch is stated in the contract ────────────────────
+
+
+def test_m6_the_contract_states_the_distance_epoch():
+    """A caller feeding since-boot odometry against a freshly replanned
+    corridor gets a slip-fire loop; the field must say what it counts
+    from."""
+    from app.pose import PoseEstimate
+
+    description = PoseEstimate.model_fields["distance_travelled_m"].description
+    assert "ACTIVE CORRIDOR" in description
+    assert "reset" in description.lower()

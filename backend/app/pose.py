@@ -11,6 +11,16 @@ odometry node -- and checks it against the orbital DEM it already holds.
 Nothing in this module estimates a pose; it only states what an estimate
 must look like to be usable, and refuses the ones that are not.
 
+Distance epoch
+--------------
+``distance_travelled_m`` is counted from the start of the corridor the
+pose is being judged against, and resets on every new plan. The slip
+check divides advance along that corridor by this claim, so cumulative
+since-boot odometry against a freshly replanned corridor reads as near
+zero progress over a large claim and fires slip in a loop. The ROS
+monitor enforces the reset itself (a new corridor zeroes its integral);
+HTTP callers must do the same. (Round 2 review, M-6.)
+
 Heading convention
 ------------------
 ``heading_deg`` is a GRID azimuth, matching ``app.horizon`` and
@@ -79,9 +89,11 @@ class PoseEstimate(BaseModel):
     distance_travelled_m: float = Field(
         ge=0.0,
         description=(
-            "Distance the estimator CLAIMS to have covered -- odometry's own "
-            "measurement, not the commanded distance. The difference between "
-            "the two is slip (see app.slip_model)."
+            "Distance the estimator CLAIMS to have covered, measured FROM "
+            "THE START OF THE ACTIVE CORRIDOR -- reset it whenever a new "
+            "plan is issued. Odometry's own measurement, not a commanded "
+            "distance; the gap between it and actual advance along the "
+            "corridor is slip (see app.slip_model)."
         ),
     )
 
@@ -90,12 +102,24 @@ class PoseEstimate(BaseModel):
     def _wrap_heading(cls, value: float) -> float:
         """Normalise heading into [0, 360).
 
-        Accepted rather than rejected: -90, 270 and 630 all name the same
-        direction, and an odometry node emitting a wrapped or signed angle
-        is not making an error. Normalising once here means every consumer
-        downstream can compare headings arithmetically.
+        Wrapping is accepted rather than rejected: -90, 270 and 630 all
+        name the same direction, and an odometry node emitting a wrapped
+        or signed angle is not making an error. Normalising once here
+        means every consumer downstream can compare headings
+        arithmetically.
+
+        Non-finite values are rejected first. ``nan % 360`` is nan and
+        ``inf % 360`` is also nan, so without this check a non-finite
+        heading was accepted and stored as NaN -- inside the one module
+        that promises NaN is stopped at the boundary. Nothing consumes
+        heading yet, so it would have slept in a "validated" object until
+        the first consumer inherited a silent fail-open.
+        (Round 2 review, M-3.)
         """
-        return float(value) % 360.0
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError("must be a finite number")
+        return value % 360.0
 
     @field_validator("covariance_m", "heading_covariance_deg", "distance_travelled_m")
     @classmethod
@@ -111,7 +135,7 @@ class PoseEstimate(BaseModel):
         evaluate_triggers, so it is closed here at the boundary.
         """
         value = float(value)
-        if value != value or value in (float("inf"), float("-inf")):
+        if not math.isfinite(value):
             raise ValueError("must be a finite number")
         return value
 
@@ -119,7 +143,7 @@ class PoseEstimate(BaseModel):
     @classmethod
     def _reject_non_finite_position(cls, value: float) -> float:
         value = float(value)
-        if value != value or value in (float("inf"), float("-inf")):
+        if not math.isfinite(value):
             raise ValueError("must be a finite number")
         return value
 
