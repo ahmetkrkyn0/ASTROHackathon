@@ -10,11 +10,11 @@ from typing import Any
 
 import numpy as np
 import rasterio
-from scipy.ndimage import uniform_filter
 
 from .constants import DEFAULT_ROVER_ID, DEFAULT_TARGET_RESOLUTION_M
 from .cost_engine import COST_MODEL_ID, compute_cost_grid, resolve_weights
-from .thermal_grid import generate_thermal_grid
+from .thermal_grid import ELEV_REF_MAX_M, ELEV_REF_MIN_M, generate_thermal_grid
+from .thermal_model import couple_shadow_to_thermal
 from .traversability import compute_traversability_bool, weakest_validity
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
@@ -92,11 +92,45 @@ def load_preprocessed_grids(
         else:
             result[key] = arr.astype(np.float64)
 
+    stored_validity = dict(metadata.get("layer_validity", {}))
+
+    # ── Shadow coupling ──────────────────────────────────────────────────
+    # The thermal layer P1 writes is a (slope x aspect) lookup at fixed
+    # latitude: it never reads shadow_ratio, so a permanently shadowed cell
+    # could be reported at +42.6 C and the -150 C traversability gate blocked
+    # 150 cells out of 250 000. Couple the two layers here rather than only
+    # in the pipeline, so the fix reaches the grids already on disk without a
+    # re-run. Idempotent: a pipeline that already coupled them stamps
+    # `thermal_shadow_coupled` and this is skipped. (Round 3 review, H-3.)
+    thermal_validity = str(stored_validity.get("thermal", "UNKNOWN"))
+    shadow_validity = str(stored_validity.get("shadow_ratio", "UNKNOWN"))
+    already_coupled = bool(metadata.get("thermal_shadow_coupled", False))
+    if not already_coupled:
+        result["thermal"] = np.asarray(
+            couple_shadow_to_thermal(result["thermal"], result["shadow_ratio"]),
+            dtype=np.float64,
+        )
+        thermal_validity = weakest_validity(thermal_validity, shadow_validity)
+        # The stored mask was built against the UNCOUPLED thermal grid, so it
+        # calls cold traps passable. Rebuild it from the grid it is supposed
+        # to describe -- ~0.05 s on the production grid.
+        result["traversable"] = compute_traversability_bool(
+            result["slope"], result["thermal"], result["elevation"]
+        )
+
     resolved = resolve_weights(weights)
     stored_weights = metadata.get("cost_weights", {})
 
-    # Recompute cost grid if requested weights differ from what P1 used
-    if weights is not None and resolved != stored_weights:
+    # Recompute the cost grid when the weights differ from what P1 used, or
+    # when the thermal layer was just coupled -- the stored grid describes the
+    # uncoupled field either way. `cost_model` is stamped with THIS build's id
+    # afterwards: leaving the file's stored value meant a freshly computed
+    # grid was labelled stale and pathfinder recomputed it a second time.
+    # (Round 3 review, L-5.)
+    recomputed_cost = (weights is not None and resolved != stored_weights) or (
+        not already_coupled
+    )
+    if recomputed_cost:
         result["cost"] = compute_cost_grid(
             result["slope"],
             result["thermal"],
@@ -106,8 +140,26 @@ def load_preprocessed_grids(
             weights=resolved,
         )
         cost_weights = resolved
+        cost_model = COST_MODEL_ID
     else:
         cost_weights = stored_weights or resolved
+        # No default to the CURRENT model id: a P1 grid that predates
+        # cost_model must read as "unknown", not as "matches this build".
+        # (Review #5.)
+        cost_model = metadata.get("cost_model", "unknown")
+
+    validity = {
+        layer: str(stored_validity.get(layer, "UNKNOWN"))
+        for layer in _VALIDITY_LAYERS
+    }
+    validity["thermal"] = thermal_validity
+    if not already_coupled:
+        validity["traversable"] = weakest_validity(
+            validity.get("slope", "UNKNOWN"), thermal_validity
+        )
+        validity["cost"] = weakest_validity(
+            validity.get("slope", "UNKNOWN"), thermal_validity, shadow_validity
+        )
 
     result["metadata"] = {
         "origin": metadata.get("origin"),
@@ -118,14 +170,9 @@ def load_preprocessed_grids(
         "processed_dir": d,
         "default_rover_id": metadata.get("default_rover_id", DEFAULT_ROVER_ID),
         "cost_weights": cost_weights,
-        # No default to the CURRENT model id: a P1 grid that predates
-        # cost_model must read as "unknown", not as "matches this build".
-        # (Review #5.)
-        "cost_model": metadata.get("cost_model", "unknown"),
-        "layer_validity": {
-            layer: str(metadata.get("layer_validity", {}).get(layer, "UNKNOWN"))
-            for layer in _VALIDITY_LAYERS
-        },
+        "cost_model": cost_model,
+        "thermal_shadow_coupled": True,
+        "layer_validity": validity,
     }
 
     return result
@@ -150,21 +197,32 @@ def load_and_preprocess_dem(
             return cached
 
     with rasterio.open(dem_path) as src:
-        elevation_raw = src.read(1).astype(np.float32)
+        elevation_raw = src.read(1).astype(np.float64)
         transform = src.transform
         crs = src.crs
         native_resolution = abs(transform.a)
+        nodata = src.nodata
+
+    # No-data is masked BEFORE any filtering. The box filter used to run on
+    # the raw band and the sentinel was only removed afterwards, so a
+    # -3.4e38 fill smeared across a whole factor x factor block, and a
+    # moderate sentinel (-32768, which src.nodata knows about and the
+    # < -1e6 test does not) blended into a PLAUSIBLE BUT WRONG elevation
+    # that survived the test entirely. (Round 3 review, L-2.)
+    elevation_raw = np.where(elevation_raw < -1e6, np.nan, elevation_raw)
+    if nodata is not None and np.isfinite(nodata):
+        elevation_raw = np.where(
+            np.isclose(elevation_raw, float(nodata)), np.nan, elevation_raw
+        )
 
     # Downsampling for performance
     if native_resolution < target_resolution_m:
         factor = max(1, int(target_resolution_m / native_resolution))
-        elevation = uniform_filter(elevation_raw, size=factor)[::factor, ::factor]
+        elevation = _nanaware_box_downsample(elevation_raw, factor)
         actual_resolution = native_resolution * factor
     else:
         elevation = elevation_raw
         actual_resolution = native_resolution
-
-    elevation = np.where(elevation < -1e6, np.nan, elevation)
 
     # Slope (degrees)
     dy, dx = np.gradient(elevation, actual_resolution)
@@ -177,11 +235,22 @@ def load_and_preprocess_dem(
     # Synthetic thermal grid
     thermal = generate_thermal_grid(elevation, slope, aspect, actual_resolution)
 
-    # Shadow proxy (elevation-based)
-    elev_min = np.nanmin(elevation)
-    elev_max = np.nanmax(elevation)
-    elev_norm = (elevation - elev_min) / (elev_max - elev_min + 1e-10)
+    # Shadow proxy (elevation-based). Normalised against FIXED reference
+    # bounds, not against this window's own min/max: the window-relative form
+    # made every cell's shadow ratio -- and, through the thermal grid, its
+    # traversability -- a function of where the raster happened to be cropped,
+    # so the same terrain changed passability when loaded as part of a
+    # different window. (Round 3 review, L-3.)
+    elev_span = ELEV_REF_MAX_M - ELEV_REF_MIN_M
+    elev_norm = np.clip((elevation - ELEV_REF_MIN_M) / elev_span, 0.0, 1.0)
     shadow_ratio = (1.0 - elev_norm).astype(np.float32)
+
+    # Same radiative coupling the preprocessed path applies: a cell the
+    # shadow layer calls dark cannot hold the sunlit peak temperature.
+    # (Round 3 review, H-3.)
+    thermal = np.asarray(
+        couple_shadow_to_thermal(thermal, shadow_ratio), dtype=np.float64
+    )
 
     # Traversability (canonical logic from traversability module)
     traversable = compute_traversability_bool(slope, thermal, elevation)
@@ -215,6 +284,7 @@ def load_and_preprocess_dem(
             "default_rover_id": DEFAULT_ROVER_ID,
             "cost_weights": resolved_weights,
             "cost_model": COST_MODEL_ID,
+            "thermal_shadow_coupled": True,
             # This path only ever produces the synthetic thermal grid and the
             # elevation-proxy shadow ratio -- it does not touch the heat1d /
             # horizon / SPICE machinery -- so the honest provenance is
@@ -238,6 +308,32 @@ def load_and_preprocess_dem(
         _save_cache(cache_key, result)
 
     return result
+
+
+def _nanaware_box_downsample(array: np.ndarray, factor: int) -> np.ndarray:
+    """Box-average by *factor*, ignoring NaN instead of spreading it.
+
+    ``uniform_filter`` propagates a single NaN across its whole kernel, so
+    one no-data pixel used to poison a factor-wide neighbourhood. Averaging
+    the finite members of each block keeps a block with any real data, and
+    yields NaN only for a block that is entirely no-data.
+    """
+    factor = max(1, int(factor))
+    if factor == 1:
+        return np.asarray(array, dtype=np.float64)
+    arr = np.asarray(array, dtype=np.float64)
+    height = (arr.shape[0] // factor) * factor
+    width = (arr.shape[1] // factor) * factor
+    trimmed = arr[:height, :width]
+    blocks = trimmed.reshape(height // factor, factor, width // factor, factor)
+    with np.errstate(invalid="ignore"):
+        # All-NaN blocks legitimately produce NaN; the warning that comes
+        # with them is noise, not information.
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            return np.nanmean(blocks, axis=(1, 3))
 
 
 # ── Cache ────────────────────────────────────────────────────────────────────
@@ -271,6 +367,7 @@ def _cache_key(
             "resolution": float(resolution),
             "weights": weights,
             "cost_model": COST_MODEL_ID,
+            "thermal_shadow_coupled": True,
         },
         sort_keys=True,
     )

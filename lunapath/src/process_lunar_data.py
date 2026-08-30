@@ -26,7 +26,7 @@ _BACKEND_ROOT = str(Path(__file__).resolve().parent.parent.parent / "backend")
 if _BACKEND_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_ROOT)
 
-from app.cost_engine import compute_cost_grid, resolve_weights  # noqa: E402
+from app.cost_engine import COST_MODEL_ID, compute_cost_grid, resolve_weights  # noqa: E402
 from app.horizon import horizon_map  # noqa: E402
 from app.illumination import (  # noqa: E402
     illumination_fraction,
@@ -36,6 +36,7 @@ from app.thermal_model import (  # noqa: E402
     Heat1DModel,
     SyntheticModel,
     build_thermal_grid,
+    couple_shadow_to_thermal,
 )
 from app.traversability import compute_traversability, weakest_validity  # noqa: E402
 
@@ -330,7 +331,25 @@ def make_thermal_grid(
         aspect_for_model = grid_azimuth_to_true_azimuth(aspect, grid_north_az)
     else:
         print("  UYARI: heat1d bulunamadi; sentetik termal model kullaniliyor")
-        model = SyntheticModel(elevation=elevation, resolution_m=resolution)
+        # Sentetik model'e de gercek gunes yonu veriliyor. Onceden "gunes
+        # grid kuzeyinden" varsayimi sabitti; guney kutup stereografik
+        # CRS'te ekvator (gunes) yonu pencerenin boylamina gore grid
+        # kuzeyinden ~75 derece sapar, yani sirtlarin yanlis yuzu isitiliyordu.
+        # (Round 3 review, L-4.)
+        from app.ephemeris import true_north_grid_azimuth
+
+        try:
+            grid_north_az = true_north_grid_azimuth(lat_deg, lon_deg, crs_wkt)
+        except Exception:
+            grid_north_az = 0.0
+        # Kutupta gunes ekvator yonunde, yani kutuptan disari dogru: true
+        # azimut 0 (kuzey) kutup yonu oldugundan gunes true 180'de.
+        sun_grid_az = (grid_north_az + 180.0) % 360.0
+        model = SyntheticModel(
+            elevation=elevation,
+            resolution_m=resolution,
+            sun_azimuth_grid_deg=sun_grid_az,
+        )
         aspect_for_model = aspect
 
     grid = build_thermal_grid(model, slope, aspect_for_model, lat_deg)
@@ -406,7 +425,12 @@ def save_metadata(
             "cost_grid",
         ],
         "cost_weights": cost_weights,
-        "cost_model": "weighted_cell_cost_without_barrier",
+        # Kod ile diskteki artefaktin ayni formulu tarif ettigini garanti
+        # etmek icin sabit yerine COST_MODEL_ID yaziliyor. Elle yazilan
+        # string, cost fonksiyonu degistiginde guncellenmedi ve diskteki
+        # grid kalici olarak "bayat" damgasi tasidi. (Round 3 review, L-6.)
+        "cost_model": COST_MODEL_ID,
+        "thermal_shadow_coupled": True,
         "layer_validity": layer_validity,
     }
     path = out_dir / "metadata.json"
@@ -537,7 +561,18 @@ def main(
         elevation_grid, slope_grid, aspect_grid, resolution_m, lat_deg, lon_deg,
         str(dem_ds.crs),
     )
-    print(f"  thermal validity: {thermal_validity}")
+    # Termal katman aydinlanmayi okumuyordu: Heat1DModel bir (egim x baki)
+    # lookup tablosu, dolayisiyla kalici golgedeki bir hucre gunesli tepe
+    # sicakligini raporluyordu (uretim gridinde +42.6 C'ye kadar) ve -150 C
+    # gecilebilirlik kapisi 250 000 hucrenin yalnizca 150'sini kapatiyordu.
+    # Stefan-Boltzmann dorduncu-kuvvet harmanlamasiyla iki katman baglaniyor.
+    # (Round 3 review, H-3.)
+    thermal_grid = np.asarray(
+        couple_shadow_to_thermal(thermal_grid, shadow_ratio_grid), dtype=np.float64
+    )
+    thermal_validity = weakest_validity(thermal_validity, shadow_validity)
+
+    print(f"  thermal validity: {thermal_validity} (shadow-coupled)")
     print(f"  shadow  validity: {shadow_validity}")
     print(f"  thermal_grid    : min={np.nanmin(thermal_grid):.2f} C, "
           f"max={np.nanmax(thermal_grid):.2f} C")

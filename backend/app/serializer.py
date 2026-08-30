@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, List
 
 # PROJ enforces celestial-body matching by default; override for Moon→WGS84.
@@ -20,26 +21,73 @@ from pyproj import Transformer
 if TYPE_CHECKING:
     from .simulation import RoverState
 
-# ── Grid geometry constants ───────────────────────────────────────────────────
-# Origin: top-left corner of the 500x500 window in Polar Stereo metres.
-# Derived from window selection in process_lunar_data.py:
-#   centre pixel (250, 250) maps to (176000, 48000) m.
+# ── Grid geometry fallback ────────────────────────────────────────────────────
+# These are the LAST RESORT, used only when a caller passes no metadata.
+# Every production path carries a real origin from metadata.json, and
+# _resolve_grid_geometry prefers it.
 #
-# The y term is ADDED because rows increase southward: y = origin - row *
-# resolution, so the origin (row 0) sits north of the centre. It was
-# subtracted, which put the stored origin at the window's BOTTOM edge and
-# made the centre pixel map to y = 8000, contradicting the derivation
-# above by the full 40 km window height. The C2 fix flipped the formula
-# in grid_frame but not the constant anchored to it. Latent -- every
-# production caller passes metadata carrying a real origin, and this
-# fallback runs only without it -- but the fallback's lon/lats were ~40 km
-# out while still passing the lat < -80 sanity check.
-# (Round 2 review, L-1.)
-ORIGIN_X_M: float = 176000.0 - 250 * 80.0   # = 156000.0
-ORIGIN_Y_M: float = 48000.0  + 250 * 80.0   # = 68000.0
-RESOLUTION_M: float = 80.0
-GRID_ROWS: int = 500
-GRID_COLS: int = 500
+# They used to be hardcoded to a window that no longer exists: a comment
+# derived them from "centre pixel (250, 250) maps to (176000, 48000) m" at
+# 80 m/px, while the shipped grids have been origin (-15500, -4000) at
+# 5 m/px for some time. The numbers were wrong AND the comment presented the
+# derivation as current, so anyone reading it to understand the grid was
+# reading about a different site. They are now READ from the shipped
+# metadata at import time, so they cannot drift from the grids again, with
+# the literals below as the fallback's own fallback. (Round 3 review, L-7.)
+#
+# The y term is subtracted per row because rows increase southward, so the
+# origin (row 0) is the window's NORTH edge -- the convention grid_frame
+# defines and process_lunar_data writes. (Round 2 review, L-1.)
+_FALLBACK_ORIGIN_X_M: float = -15500.0
+_FALLBACK_ORIGIN_Y_M: float = -4000.0
+_FALLBACK_RESOLUTION_M: float = 5.0
+_FALLBACK_ROWS: int = 500
+_FALLBACK_COLS: int = 500
+
+
+def _shipped_geometry() -> tuple[float, float, float, int, int]:
+    """Grid geometry from the shipped metadata.json, or the literals above.
+
+    Read once at import. A missing or malformed file is not an error here --
+    it only means the no-metadata fallback uses the literals instead.
+    """
+    import json
+
+    candidate = (
+        Path(__file__).resolve().parent.parent.parent
+        / "lunapath"
+        / "data"
+        / "processed"
+        / "metadata.json"
+    )
+    try:
+        meta = json.loads(candidate.read_text(encoding="utf-8"))
+        origin = meta["origin"]
+        shape = meta["shape"]
+        return (
+            float(origin["x"]),
+            float(origin["y"]),
+            float(meta["resolution_m"]),
+            int(shape[0]),
+            int(shape[1]),
+        )
+    except Exception:
+        return (
+            _FALLBACK_ORIGIN_X_M,
+            _FALLBACK_ORIGIN_Y_M,
+            _FALLBACK_RESOLUTION_M,
+            _FALLBACK_ROWS,
+            _FALLBACK_COLS,
+        )
+
+
+(
+    ORIGIN_X_M,
+    ORIGIN_Y_M,
+    RESOLUTION_M,
+    GRID_ROWS,
+    GRID_COLS,
+) = _shipped_geometry()
 
 # ── Lunar South Polar Stereographic → WGS84 ──────────────────────────────────
 _PROJ_MOON_SP: str = (

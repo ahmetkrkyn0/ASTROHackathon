@@ -108,8 +108,15 @@ def list_scenarios() -> list[str]:
     ]
 
 
-def compare_results(results: list[dict]) -> dict:
-    """Return a lightweight comparison summary for multiple paths."""
+def compare_results(results: list[dict], rover: dict | None = None) -> dict:
+    """Return a lightweight comparison summary for multiple paths.
+
+    *rover* supplies the slope limit the safety key normalises against. It
+    was hardcoded to 25.0 -- lpr_1's limit -- so a comparison run for
+    nasa_viper or cnsa_yutu_2 (both 20 deg) scored their slopes against a
+    ceiling neither rover has. (Round 3 review, L-11.)
+    """
+    slope_limit = float((rover or C.get_rover())["slope_max_deg"])
     valid = [result for result in results if not result.get("error")]
     if not valid:
         return {
@@ -124,11 +131,14 @@ def compare_results(results: list[dict]) -> dict:
     # total_energy_wh below, _compute_path_metrics hardcodes it to 0.0 in
     # fast mode, so including it added a constant to every candidate --
     # no ranking effect, but it implied shadow exposure was weighed.
+    # Both terms are dimensionless in [0, 1]: max_thermal_risk is already an
+    # MRU penalty, and the slope term is normalised by the rover's own limit.
+    # Equal weight is a deliberate, stated choice, not an accident of units.
     safest = min(
         valid,
         key=lambda result: (
             result["metrics"]["max_thermal_risk"]
-            + result["metrics"]["max_slope_deg"] / 25.0
+            + result["metrics"]["max_slope_deg"] / slope_limit
         ),
     )
     # Efficiency ranks on total_weighted_cost, the multi-criteria cost the

@@ -18,7 +18,7 @@ import math
 from dataclasses import dataclass, asdict
 from typing import Any
 
-from .pose import PoseEstimate
+from .pose import SLIP_CHECKABLE_SOURCES, PoseEstimate
 from .schemas import Corridor
 
 
@@ -171,8 +171,11 @@ def project_onto_corridor(
             if distance < best_distance:
                 best_index, best_t, best_distance = i, t, distance
 
+    # segment_starts already holds the cumulative length at each segment, so
+    # re-summing the prefix was O(n) work for a value sitting in a list.
+    # (Round 3 review, L-18.)
     along_track_m = (
-        sum(segment_lengths[:best_index]) + best_t * segment_lengths[best_index]
+        segment_starts[best_index] + best_t * segment_lengths[best_index]
     )
     progress_fraction = (
         along_track_m / total_length if total_length > 0.0 else 0.0
@@ -218,6 +221,16 @@ def trigger_state_from_pose(
             "localization_covariance_m": pose.covariance_m,
         }
     )
+    # Slip inputs travel in the SAME state mapping as every other trigger's,
+    # so evaluate_triggers_detailed owns the whole enumeration and
+    # POST /api/replan sees the trigger too. They are supplied only for a
+    # source whose distance claim is a wheel measurement -- see
+    # pose.SLIP_CHECKABLE_SOURCES. For any other source the keys are absent,
+    # which the evaluator reports as skipped rather than silently clear.
+    # (Round 3 review, M-4 and L-10.)
+    if pose.source in SLIP_CHECKABLE_SOURCES and pose.distance_travelled_m > 0.0:
+        state["map_progress_m"] = fix.along_track_m
+        state["odometer_claim_m"] = pose.distance_travelled_m
     return state
 
 
@@ -227,6 +240,7 @@ def evaluate_pose(
     plan_state: dict[str, Any] | None = None,
     previous_segment_index: int | None = None,
     previous_along_track_m: float | None = None,
+    rover: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The full pose -> deviation -> trigger evaluation, shell-agnostic.
 
@@ -237,10 +251,14 @@ def evaluate_pose(
     (``along_track_m``, LunaPath's own measurement from the projected
     position) against the distance the estimator claims to have covered.
     On loose regolith the wheels turn further than the ground gained, so
-    along-track falling well short of the claim is the slip signature.
-    Absolute fixes carry no travelled distance to compare, so they are
-    not slip-checked -- and when the check does not run it is reported in
-    ``skipped``, not silently omitted from both lists.
+    along-track falling well short of the claim is the slip signature --
+    but ONLY when the claim is a wheel measurement. Visual and LiDAR
+    odometry estimate body motion from the world and have already
+    corrected for slip, so for them the ratio measures path tortuosity
+    instead; they are not slip-checked. Absolute fixes carry no travelled
+    distance at all. Whenever the check does not run it is reported in
+    ``skipped`` with the reason, not silently omitted from both lists.
+    (Round 3 review, M-4.)
 
     *previous_along_track_m* / *previous_segment_index* are passed
     through to the projection as a progress prior; see
@@ -252,7 +270,6 @@ def evaluate_pose(
     fix first. Otherwise any fired trigger recommends a replan.
     """
     from .replan_triggers import evaluate_triggers_detailed
-    from .slip_model import check_slip_accumulation
 
     fix = project_onto_corridor(
         pose,
@@ -261,39 +278,37 @@ def evaluate_pose(
         previous_along_track_m=previous_along_track_m,
     )
     trigger_state = trigger_state_from_pose(pose, corridor, plan_state, fix=fix)
-    evaluation = evaluate_triggers_detailed(trigger_state)
+    evaluation = evaluate_triggers_detailed(trigger_state, rover)
     fired = list(evaluation["fired"])
     evaluated = list(evaluation["evaluated"])
     skipped = list(evaluation["skipped"])
 
-    if pose.is_absolute_fix:
-        # An absolute fix does not integrate motion, so there is no
-        # travelled-distance claim to compare against. Reported rather
-        # than omitted: "not checkable" must stay distinguishable from
-        # "checked and clear". (Round 2 review, L-8.)
+    # The evaluator already reports slip_accumulation as skipped when its
+    # keys are absent; replace that bare "missing key" entry with the reason
+    # the keys are absent, which is what the caller actually needs to know.
+    if "slip_accumulation" not in evaluated:
+        if pose.is_absolute_fix:
+            reason = f"{pose.source} is an absolute fix; no odometry claim"
+        elif pose.source not in SLIP_CHECKABLE_SOURCES:
+            reason = (
+                f"{pose.source} estimates body motion directly, so its "
+                "distance already excludes wheel slip; the ratio against "
+                "corridor progress would measure path tortuosity instead"
+            )
+        elif pose.distance_travelled_m <= 0.0:
+            reason = "no distance travelled to compare against"
+        else:
+            reason = "slip inputs unavailable"
+        skipped = [
+            entry for entry in skipped if entry.get("trigger_id") != "slip_accumulation"
+        ]
         skipped.append(
             {
                 "trigger_id": "slip_accumulation",
                 "missing": ["distance_travelled_m"],
-                "reason": f"{pose.source} is an absolute fix; no odometry claim",
+                "reason": reason,
             }
         )
-    elif pose.distance_travelled_m <= 0.0:
-        skipped.append(
-            {
-                "trigger_id": "slip_accumulation",
-                "missing": ["distance_travelled_m"],
-                "reason": "no distance travelled to compare against",
-            }
-        )
-    else:
-        slip = check_slip_accumulation(
-            map_progress_m=fix.along_track_m,
-            odometer_claim_m=pose.distance_travelled_m,
-        )
-        evaluated.append(slip.trigger_id)
-        if slip.triggered:
-            fired.append(slip)
 
     fired_ids = {t.trigger_id for t in fired}
     if "localization_uncertainty" in fired_ids:

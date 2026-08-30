@@ -46,6 +46,16 @@ DRIFT_RATES: tuple[tuple[str, float, str], ...] = (
         0.005,
         "M2020-class VO, 0.22-2.45% band, 0.5% taken as representative",
     ),
+    (
+        # PoseSource accepts this label, so a caller using it had no budget
+        # row at all and the table silently under-reported its own coverage.
+        # (Round 3 review, L-15.)
+        "lidar_odometry",
+        0.005,
+        "LiDAR odometry (KISS-ICP class), ~0.5% translational drift on "
+        "structured terrain; quoted at the same order as VO because both "
+        "are frame-to-frame registration against the world",
+    ),
 )
 
 

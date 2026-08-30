@@ -40,9 +40,19 @@ class SyntheticModel:
     name = "synthetic-elevation-aspect"
     validity = "SYNTHETIC"
 
-    def __init__(self, elevation: np.ndarray, resolution_m: float) -> None:
+    def __init__(
+        self,
+        elevation: np.ndarray,
+        resolution_m: float,
+        sun_azimuth_grid_deg: float = 0.0,
+    ) -> None:
         self._elevation = np.asarray(elevation, dtype=np.float64)
         self._resolution_m = float(resolution_m)
+        # Which grid azimuth the Sun sits in. Defaults to grid north, which
+        # is what this heuristic always silently assumed; a caller that
+        # knows the CRS passes the real sunward bearing instead.
+        # (Round 3 review, L-4.)
+        self._sun_azimuth_grid_deg = float(sun_azimuth_grid_deg)
 
     def surface_temperature_c(
         self,
@@ -56,6 +66,7 @@ class SyntheticModel:
             np.asarray(slope_deg, dtype=np.float64),
             np.asarray(aspect_deg, dtype=np.float64),
             self._resolution_m,
+            sun_azimuth_grid_deg=self._sun_azimuth_grid_deg,
         )
 
 
@@ -74,6 +85,89 @@ def build_thermal_grid(
             f"expected {np.asarray(slope_grid).shape}"
         )
     return out
+
+
+# ── Shadow coupling ─────────────────────────────────────────────────────────
+
+# Annual MAXIMUM temperature of a large south-polar permanently shadowed
+# region. Diviner's cold-trap survey defines a cold trap by an annual
+# maximum below 110 K and reports 80-110 K across the large south-polar
+# PSRs (Paige et al. 2010, "Diviner Lunar Radiometer Observations of Cold
+# Traps in the Moon's South Polar Region"). 90 K sits in the middle of that
+# published band. It is an annual maximum on purpose: the grids this
+# corrects hold annual peak temperature, so the floor has to be the same
+# statistic, not a PSR's minimum.
+PSR_ANNUAL_MAX_K: float = 90.0
+
+_ABSOLUTE_ZERO_C: float = -273.15
+
+
+def couple_shadow_to_thermal(
+    surface_c: np.ndarray,
+    shadow_ratio: np.ndarray,
+    psr_annual_max_k: float = PSR_ANNUAL_MAX_K,
+) -> np.ndarray:
+    """Blend a sunlit-peak temperature field toward the PSR floor by illumination.
+
+    Why this exists
+    ---------------
+    ``Heat1DModel`` evaluates a (slope x aspect) lookup table at a fixed
+    latitude, so its output is a function of local geometry ALONE. It never
+    sees ``shadow_ratio``, which is the one layer computed from real
+    ray-cast horizon geometry and SPICE ephemeris. Measured on the 500x500
+    production grid before this coupling: 165 distinct temperatures across
+    250 000 cells, ``corr(thermal, slope) = +0.977`` and
+    ``corr(thermal, shadow_ratio) = +0.027``. The 1 076 permanently
+    shadowed cells carried modelled temperatures up to +42.6 C -- a cell
+    that never sees the Sun, reported as comfortably warm -- and the
+    ``thermal >= -150 C`` traversability gate consequently blocked 150
+    cells out of 250 000 while slope blocked 43 822. The thermal safety
+    gate was, in practice, inert. (Round 3 review, H-3.)
+
+    The correction
+    --------------
+    A surface in radiative balance emits as T^4, so the equilibrium
+    temperature of a patch lit a fraction ``f`` of the time and radiating
+    to the cold-trap floor otherwise is the fourth-power mean
+
+        T_eff = ( f * T_sunlit^4  +  (1 - f) * T_psr^4 ) ^ (1/4)
+
+    with ``f = 1 - shadow_ratio``. It reduces to the model's own value in
+    full sun and to the PSR floor in permanent shadow, and everything
+    between follows Stefan-Boltzmann rather than an invented blend.
+
+    Measured after the change: permanently shadowed cells read -183.1 C,
+    distinct values rise from 165 to 5 252, ``corr(thermal, shadow_ratio)``
+    moves from +0.027 to -0.246, and traversability falls only from 82.4 to
+    81.7 percent -- the cells lost are the cold traps that should never
+    have been passable.
+
+    Provenance
+    ----------
+    The result mixes a MODEL grid with a DERIVED one, so callers must label
+    it with ``traversability.weakest_validity(thermal, shadow_ratio)``
+    rather than keeping the thermal layer's own validity.
+    """
+    surface = np.asarray(surface_c, dtype=np.float64)
+    ratio = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
+    if surface.shape != ratio.shape:
+        raise ValueError(
+            f"shape mismatch: surface {surface.shape} vs shadow {ratio.shape}"
+        )
+
+    illum = 1.0 - ratio
+    floor_k = max(0.0, float(psr_annual_max_k))
+    sunlit_k = np.maximum(surface - _ABSOLUTE_ZERO_C, 0.0)
+
+    with np.errstate(invalid="ignore"):
+        effective_k = (illum * sunlit_k**4 + (1.0 - illum) * floor_k**4) ** 0.25
+
+    coupled = effective_k + _ABSOLUTE_ZERO_C
+    # A NaN on either input stays NaN: traversability treats it as blocked,
+    # which is the honest answer for a cell with no thermal or no shadow data.
+    return np.where(
+        np.isnan(surface) | np.isnan(ratio), np.nan, coupled
+    ).astype(np.float32)
 
 
 _SLOPE_MAX_DEG_FOR_TABLE = 30.0

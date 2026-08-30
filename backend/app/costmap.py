@@ -67,7 +67,18 @@ class CostMap:
         """(H, W) float64 cost grid. Impassable cells are ``inf``."""
         accumulator = np.zeros(np.asarray(ctx.slope).shape, dtype=np.float64)
         for layer in self.layers:
-            accumulator = accumulator + layer.weight * layer.contribution(ctx)
+            contribution = np.asarray(layer.contribution(ctx), dtype=np.float64)
+            # An infinite contribution means IMPASSABLE, which is not a
+            # matter of degree: `0.0 * inf` is NaN, so a layer given zero
+            # weight silently erased its own veto and emitted a
+            # "invalid value encountered in multiply" warning on the way.
+            # Weighting is applied to finite values only.
+            # (Round 3 review, L-1.)
+            with np.errstate(invalid="ignore"):
+                weighted = layer.weight * contribution
+            accumulator = accumulator + np.where(
+                np.isinf(contribution), contribution, weighted
+            )
 
         out = np.maximum(accumulator, MIN_CELL_COST)
         out[self._invalid_mask(ctx)] = np.inf
@@ -177,9 +188,13 @@ class EnergyLayer:
         self.validity = str(validity)
 
     def contribution(self, ctx: PlanContext) -> np.ndarray:
-        # Reads slope only: f_energy_cell is a resolution-independent ratio,
-        # so the layer no longer rescales with the grid step. (Review #1.)
-        return _f_energy_vec(ctx.slope, ctx.rover)
+        # Reads slope AND shadow. f_energy_cell is a resolution-independent
+        # ratio, so the layer does not rescale with the grid step (review
+        # #1); the shadow term is what stops it from being a monotone
+        # restatement of SlopeLayer -- the two penalties were rank-identical
+        # before it, so this layer's 0.259 weight expressed no preference of
+        # its own. (Round 3 review, H-4.)
+        return _f_energy_vec(ctx.slope, ctx.rover, ctx.shadow_ratio)
 
 
 class ShadowLayer:

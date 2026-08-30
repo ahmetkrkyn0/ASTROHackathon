@@ -10,6 +10,56 @@ LOG_BARRIER_MU = 0.1
 DEFAULT_TARGET_RESOLUTION_M = 80
 THERMAL_MIN_TRAVERSABLE_C = -150.0
 
+# Rover-catalogue fields the model actually reads. Everything registered in
+# ROVERS but absent from this set is published for reference only and steers
+# nothing -- ``rover_catalog`` says so explicitly rather than letting a
+# frontend infer that every listed number is modelled. Seven fields used to
+# sit in the catalogue with zero readers anywhere in the codebase; four of
+# them are now wired (p_peak_w, p_shadow_w, p_hibernate_w, h_max_shadow_h)
+# and the rest are labelled. (Round 3 review, M-8.)
+MODELLED_FIELDS: frozenset[str] = frozenset(
+    {
+        "mass_kg",
+        "v_max_ms",
+        "p_base_w",
+        "p_peak_w",
+        "p_idle_w",
+        "p_heater_w",
+        "p_shadow_w",
+        "p_hibernate_w",
+        "p_solar_w",
+        "e_cap_wh",
+        "slope_comfortable_deg",
+        "slope_max_deg",
+        "slope_lateral_max_deg",
+        "h_max_shadow_h",
+        "soc_min_pct",
+        "thermal_offset_cold",
+        "thermal_offset_hot",
+        "bat_op_min_c",
+        "bat_op_max_c",
+        "elec_op_min_c",
+        "elec_op_max_c",
+        "mu_coeff",
+        "w_slope",
+        "w_energy",
+        "w_shadow",
+        "w_thermal",
+        "sensor_payload_w",
+        "sensor_heater_w",
+    }
+)
+
+# Published for reference, read by nothing. Kept in the catalogue because
+# they are real published rover specifications and a reader comparing
+# profiles wants them -- but labelled so nobody mistakes them for inputs.
+DECLARED_ONLY_FIELDS: tuple[str, ...] = (
+    "f_net_n",
+    "regen_efficiency",
+    "thermal_tau_s",
+    "h_design_shadow_h",
+)
+
 # Multi-rover catalogue
 ROVERS: dict[str, dict[str, Any]] = {
     "lpr_1": {
@@ -219,13 +269,61 @@ def rover_catalog() -> list[dict[str, Any]]:
                 "v_max_ms": float(rover["v_max_ms"]),
                 "e_cap_wh": float(rover["e_cap_wh"]),
                 "slope_max_deg": float(rover["slope_max_deg"]),
+                # Published because it is now ENFORCED: the planner refuses
+                # any edge whose cross-slope exceeds it. It used to appear
+                # only in the dead log-barrier. (Round 3 review, H-1.)
+                "slope_lateral_max_deg": float(rover["slope_lateral_max_deg"]),
+                "soc_min_pct": float(rover["soc_min_pct"]),
                 "h_max_shadow_h": float(rover["h_max_shadow_h"]),
                 "sensor_payload_w": rover.get("sensor_payload_w"),
                 "sensor_heater_w": rover.get("sensor_heater_w"),
                 "default_weights": rover_default_weights(rover_id),
+                # Real published specifications that no part of the model
+                # reads. Separated so a consumer can show them as reference
+                # data without implying they drive a route. (Round 3, M-8.)
+                "declared_only": {
+                    field: rover.get(field) for field in DECLARED_ONLY_FIELDS
+                },
             }
         )
     return catalog
+
+
+# ── Rover-derived replan thresholds ─────────────────────────────────────────
+# The replan trigger thresholds were global constants: every rover had to be
+# 10 percent behind its energy plan before a replan fired, and every rover
+# tolerated the same 5 K temperature drop, regardless of how much reserve or
+# how wide a thermal envelope it actually carried. Both are now derived from
+# the rover's own declared limits. (Round 3 review, L-8.)
+
+def soc_deviation_threshold(rover: dict[str, Any] | None = None) -> float:
+    """SOC shortfall that forces a replan: half the rover's own reserve.
+
+    A rover holding a 30 percent floor (cnsa_yutu_2) has more room to absorb
+    a deviation before the plan stops being executable than one holding 20
+    percent (lpr_1), so the trigger scales with the reserve rather than
+    being fixed. lpr_1 lands on 0.10 -- the previous global constant -- so
+    the default profile's behaviour is unchanged.
+    """
+    cfg = get_rover() if rover is None else rover
+    return float(cfg["soc_min_pct"]) / 2.0
+
+
+def inner_temperature_drop_k(rover: dict[str, Any] | None = None) -> float:
+    """Inner-temperature drop below prediction that forces a replan.
+
+    Scaled to the battery's operating envelope: a rover with a 100 K wide
+    envelope (luvmi_m) should not replan on the same 5 K excursion as one
+    with a 35 K envelope. Floored at 2 K so a hypothetical narrow envelope
+    cannot make the trigger hair-fine. lpr_1 lands on 5.25 K against the
+    previous global 5.0 K.
+    """
+    cfg = get_rover() if rover is None else rover
+    low = cfg.get("bat_op_min_c")
+    high = cfg.get("bat_op_max_c")
+    if low is None or high is None:
+        return 5.0
+    return max(2.0, 0.15 * (float(high) - float(low)))
 
 
 # Backward-compatible aliases for the default rover. Older modules/tests still

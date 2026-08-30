@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-from .cost_engine import _SHADOW_LAMBDA, _resolve_rover, edge_energy_wh
+from .cost_engine import _SHADOW_LAMBDA, _resolve_rover
 
 
 def f_slope_grid(
@@ -40,36 +40,81 @@ def f_slope_grid(
 
 
 def f_energy_cell_grid(
-    slope_deg: np.ndarray, rover: Mapping[str, Any] | None = None
+    slope_deg: np.ndarray,
+    rover: Mapping[str, Any] | None = None,
+    shadow_ratio: np.ndarray | float = 0.0,
 ) -> np.ndarray:
-    """Array form of :func:`app.cost_engine.f_energy_cell`."""
+    """Array form of :func:`app.cost_engine.f_energy_cell`.
+
+    Reads slope AND shadow: the heater load in a dark cell is part of what a
+    traverse costs, and without it this penalty was rank-identical to
+    ``f_slope_grid`` (measured Spearman 1.000000 on the production slope
+    distribution). (Round 3 review, H-4.)
+    """
     rover_cfg = _resolve_rover(rover)
     slope_max = float(rover_cfg["slope_max_deg"])
 
-    # Scalars: the ratio cancels the edge length, so a unit edge suffices.
-    flat_wh = edge_energy_wh(0.0, 1.0, rover_cfg)
-    limit_wh = edge_energy_wh(slope_max, 1.0, rover_cfg)
-    if flat_wh <= 0.0:
-        return np.full(np.shape(slope_deg), np.inf, dtype=np.float64)
-
-    span = limit_wh / flat_wh - 1.0
     theta = np.asarray(slope_deg, dtype=np.float64)
+    shadow = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
+
+    best_wh = _energy_per_metre_wh_scalar(0.0, 0.0, rover_cfg)
+    worst_wh = _energy_per_metre_wh_scalar(slope_max, 1.0, rover_cfg)
+    if not np.isfinite(best_wh) or best_wh < 0.0:
+        return np.full(np.broadcast(theta, shadow).shape, np.inf, dtype=np.float64)
+
+    span = worst_wh - best_wh
     if not np.isfinite(span) or span <= 0.0:
         return np.where(theta > slope_max, np.inf, 0.0)
 
-    # edge_energy_wh(theta, d) = p_base * (1 + mu_coeff*sin) * t_s / 3600 with
-    # t_s = (d / cos) / (v_max * cos), so cos enters SQUARED. Against flat
-    # ground (theta = 0) everything but the shape below cancels.
+    here_wh = _energy_per_metre_wh_grid(theta, shadow, rover_cfg)
+    value = np.clip((here_wh - best_wh) / span, 0.0, 1.0)
+    return np.where(theta > slope_max, np.inf, value)
+
+
+def _housekeeping_power_w_grid(
+    shadow_ratio: np.ndarray, rover_cfg: Mapping[str, Any]
+) -> np.ndarray:
+    """Array form of :func:`app.cost_engine.housekeeping_power_w`."""
+    ratio = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
+    idle_w = float(rover_cfg["p_idle_w"])
+    shadow_w = rover_cfg.get("p_shadow_w")
+    if shadow_w is not None:
+        return idle_w + ratio * max(0.0, float(shadow_w) - idle_w)
+    return idle_w + ratio * float(rover_cfg.get("p_heater_w") or 0.0)
+
+
+def _energy_per_metre_wh_grid(
+    theta_deg: np.ndarray, shadow_ratio: np.ndarray, rover_cfg: Mapping[str, Any]
+) -> np.ndarray:
+    """Array form of :func:`app.cost_engine.net_energy_per_metre_wh`.
+
+    ``edge_travel_time_s(theta, 1.0) = (1 / cos) / (v_max * cos)``, so cos
+    enters SQUARED -- the same identity the scalar form relies on.
+    """
     mu_coeff = float(rover_cfg["mu_coeff"])
-    clamped = np.clip(theta, 0.0, None)
-    theta_rad = np.radians(clamped)
+    p_base = float(rover_cfg["p_base_w"])
+    v_max = float(rover_cfg["v_max_ms"])
+
+    theta_rad = np.radians(np.clip(np.asarray(theta_deg, dtype=np.float64), 0.0, None))
     cos_t = np.cos(theta_rad)
     with np.errstate(divide="ignore", invalid="ignore"):
-        ratio = (1.0 + mu_coeff * np.sin(theta_rad)) / (cos_t * cos_t)
-    value = (ratio - 1.0) / span
+        seconds = 1.0 / (v_max * cos_t * cos_t)
+    traction_w = p_base * (1.0 + mu_coeff * np.sin(theta_rad))
+    ratio = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
+    solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio)
+    net_w = np.maximum(
+        0.0, traction_w + _housekeeping_power_w_grid(ratio, rover_cfg) - solar_w
+    )
+    with np.errstate(invalid="ignore"):
+        return net_w * seconds / 3600.0
 
-    value = np.clip(value, 0.0, 1.0)
-    return np.where(theta > slope_max, np.inf, value)
+
+def _energy_per_metre_wh_scalar(
+    theta_deg: float, shadow_ratio: float, rover_cfg: Mapping[str, Any]
+) -> float:
+    from .cost_engine import net_energy_per_metre_wh
+
+    return net_energy_per_metre_wh(theta_deg, shadow_ratio, rover_cfg)
 
 
 def f_shadow_cell_grid(shadow_ratio: np.ndarray) -> np.ndarray:

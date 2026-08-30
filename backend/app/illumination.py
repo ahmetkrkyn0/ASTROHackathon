@@ -11,6 +11,12 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from .horizon import _NO_HORIZON_DEG as NO_HORIZON_DEG
+
+# The sentinel is written as an exact float32 -90.0; the tolerance guards
+# against a caller that stored the cube through a lossy round trip.
+_SENTINEL_TOLERANCE_DEG: float = 1e-3
+
 
 def _azimuth_bin(sun_az_deg: float, n_azimuth: int) -> int:
     """Nearest horizon azimuth bin for a Sun azimuth in degrees."""
@@ -30,12 +36,31 @@ def illuminated_mask(
             f"horizon_deg must be (n_azimuth, H, W), got shape {horizon.shape}"
         )
     bin_index = _azimuth_bin(sun_az_deg, horizon.shape[0])
-    # The `> 0` floor matters at grid-edge cells: app.horizon writes a -90 deg
-    # sentinel where a ray left the DEM without finding any obstruction, which
-    # means "no data", not "flat". Without the floor, a Sun objectively BELOW
-    # the horizontal still reads as lit there, because -20 > -90.
-    # (Faz 1 final review, finding M1.)
-    return (float(sun_elev_deg) > horizon[bin_index]) & (float(sun_elev_deg) > 0.0)
+    profile = horizon[bin_index]
+
+    # app.horizon writes a -90 deg SENTINEL where a ray left the DEM without
+    # finding any obstruction: that means "no data", not "flat ground", and
+    # without special handling a Sun objectively below the horizontal read as
+    # lit there because -20 > -90. (Faz 1 final review, M1.)
+    #
+    # The first fix was a blanket `sun_elev > 0` floor applied to EVERY cell,
+    # which also threw away every case where the terrain genuinely drops away
+    # and the horizon angle is legitimately negative. At -84 degrees latitude
+    # that is exactly the peak-of-eternal-light geometry -- a ridge top whose
+    # horizon sits below the horizontal, lit while the surrounding plain is
+    # dark -- which is the single most valuable thing an illumination layer
+    # can find. Applying the floor only where the sentinel actually appears
+    # keeps the original fix and returns the real negative horizons.
+    # (Round 3 review, M-11.)
+    # For a cell with a real horizon profile, "lit" is simply "the Sun is
+    # above it" -- negative profiles included.
+    # For a SENTINEL cell the profile carries no information, so the best
+    # available assumption is the one the sentinel actually encodes: no
+    # obstruction was found, i.e. the horizon is at or below the horizontal.
+    # Such a cell is lit exactly when the Sun is above the horizontal.
+    sentinel = profile <= (NO_HORIZON_DEG + _SENTINEL_TOLERANCE_DEG)
+    elevation = float(sun_elev_deg)
+    return np.where(sentinel, elevation > 0.0, elevation > profile)
 
 
 def illumination_fraction(

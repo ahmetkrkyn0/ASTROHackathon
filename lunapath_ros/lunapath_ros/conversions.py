@@ -208,19 +208,35 @@ def odometry_to_pose_estimate(
         float(covariance[7]),
         float(covariance[35]),
     )
-    if var_x < 0.0 or var_y < 0.0:
+    # Two ways a publisher says "I do not know": a negative variance (the
+    # documented ROS convention) and an all-zero covariance matrix (what
+    # Gazebo plugins and many drivers actually emit when nothing filled it
+    # in). Only the first was caught, so the far more common case was
+    # laundered into covariance_m = 0.0 -- PERFECT confidence -- and
+    # check_localization_uncertainty then passed unconditionally. That is
+    # precisely the fail-open this conversion exists to prevent.
+    # (Round 3 review, M-5.)
+    unknown_covariance = (var_x < 0.0 or var_y < 0.0) or not any(
+        float(value) != 0.0 for value in covariance
+    )
+    if unknown_covariance:
         if fallback_covariance_m is None:
             raise ValueError(
-                "odometry reports unknown position covariance (negative "
-                "variance) and no fallback_covariance_m is configured; "
-                "refusing to invent confidence"
+                "odometry reports unknown position covariance (negative or "
+                "all-zero variance) and no fallback_covariance_m is "
+                "configured; refusing to invent confidence"
             )
         covariance_m = float(fallback_covariance_m)
     else:
         covariance_m = float(np.sqrt(max(var_x, var_y)))
 
+    # Capped at 180 deg: beyond that the heading carries no information at
+    # all, and PoseEstimate only requires it to be finite and non-negative,
+    # so an absurd variance would otherwise pass validation unremarked.
     heading_covariance_deg = (
-        float(np.degrees(np.sqrt(var_yaw))) if var_yaw >= 0.0 else 180.0
+        min(180.0, float(np.degrees(np.sqrt(var_yaw))))
+        if var_yaw >= 0.0 and not unknown_covariance
+        else 180.0
     )
 
     stamp = message.header.stamp

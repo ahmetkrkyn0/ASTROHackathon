@@ -39,6 +39,7 @@ from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
 from .pathfinder_4d import astar_4d, bfs_move_count
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
+from .illumination_series import build_shadow_series
 from .pathfinder import astar
 from .localization import evaluate_pose
 from .pose import PoseEstimate
@@ -76,6 +77,15 @@ app = FastAPI(title="LunaPath", version="0.3.0", lifespan=_lifespan)
 app.state.active_corridor = None
 app.state.active_corridor_id = None
 app.state.active_corridor_rover_id = None
+# Every corridor this process has published, keyed by id. The single
+# `active_corridor` slot is still the default a pose is judged against, but
+# endpoints are sync defs running on a threadpool, so two concurrent
+# /api/plan calls race for it and the loser's poses were scored against the
+# winner's route with nothing but a mismatched corridor_id to reveal it.
+# Keeping the corridors addressable lets a caller pin the one it planned.
+# (Round 3 review, L-16.)
+app.state.corridors = {}
+MAX_TRACKED_CORRIDORS = 32
 
 # allow_origins=["*"] together with allow_credentials=True is not a valid
 # CORS combination -- it asks browsers to send cookies/auth headers to a
@@ -117,6 +127,14 @@ MAX_PLAN_4D_SLICES = 1000
 # cap never saw. At coarsen=1 the 500x500 grid at 1000 slices asked for 4 GB
 # from a single request. Bound the bytes, not the slice count. (Review #6.)
 MAX_PLAN_4D_CUBE_BYTES = 512 * 1024 * 1024  # 512 MiB across both cubes
+
+# Ceiling on the number of cells /api/layers will serialise in one response.
+# The 500x500 production grid at downsample=1 is 250 000 JSON numbers built
+# through an object-dtype array, which is both slow and a large response
+# nobody asked to be protected from. 65 536 cells is a 256x256 preview --
+# plenty for a map overlay -- and the error names the downsample that fits.
+# (Round 3 review, L-13.)
+MAX_LAYER_CELLS = 65536
 
 
 def _check_cube_budget(n_slices: int, coarse_shape: tuple[int, int]) -> None:
@@ -336,6 +354,19 @@ class Plan4DRequest(BaseModel):
     # from the grid via cost_cube.auto_slice_hours. (Faz 3 review, C1.)
     slice_hours: Optional[float] = Field(default=None, gt=0.0, le=24.0)
     coarsen: int = Field(default=4, ge=1, le=16)
+    # Illumination is a function of time, so a time-expanded plan needs an
+    # epoch to be a plan at all. Without one the shadow field is held
+    # constant across slices and the response says so in `shadow_model`.
+    # (Round 3 review, M-1.)
+    start_utc: Optional[str] = Field(
+        default=None,
+        description=(
+            "UTC instant the first time slice begins, e.g. "
+            "'2026-09-01T00:00:00'. Required for time-varying illumination; "
+            "without it the shadow field is static and the response reports "
+            "shadow_model='static'."
+        ),
+    )
 
 
 # A bare list[int] let a 3-element start reach astar and raise IndexError as
@@ -547,7 +578,7 @@ def plan(req: PlanRequest, request: Request):
             rover=rover,
             pixel_size_m=float(metadata["resolution_m"]),
         )
-        summary = summarize_simulation(states)
+        summary = summarize_simulation(states, rover)
     except Exception:
         logger.error("Simulation failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal simulation error.")
@@ -601,6 +632,16 @@ def plan(req: PlanRequest, request: Request):
         request.app.state.active_corridor = corridor_obj
         request.app.state.active_corridor_id = corridor_id
         request.app.state.active_corridor_rover_id = req.rover_id
+        registry = request.app.state.corridors
+        registry[corridor_id] = {
+            "corridor": corridor_obj,
+            "rover_id": req.rover_id,
+        }
+        # Bounded: a long-running process planning continuously must not
+        # accumulate corridors forever. Oldest first -- dicts preserve
+        # insertion order.
+        while len(registry) > MAX_TRACKED_CORRIDORS:
+            registry.pop(next(iter(registry)))
 
     return response
 
@@ -608,7 +649,7 @@ def plan(req: PlanRequest, request: Request):
 @app.post("/api/replan")
 def replan(req: ReplanRequest, request: Request):
     """Re-plan from the rover's current position when a trigger fires."""
-    evaluation = evaluate_triggers_detailed(req.state)
+    evaluation = evaluate_triggers_detailed(req.state, get_rover(req.rover_id))
     fired = evaluation["fired"]
     if not fired and not req.force:
         # "skipped" is reported so an empty trigger list is never mistaken
@@ -672,6 +713,16 @@ class PoseRequest(BaseModel):
         ),
     )
 
+    corridor_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Judge this pose against a SPECIFIC corridor rather than "
+            "whichever plan ran most recently -- echo back the corridor_id "
+            "from the /api/plan response that produced the route this rover "
+            "is driving. Two concurrent plans otherwise race for one slot."
+        ),
+    )
+
     _check_state = field_validator("state")(_reject_non_finite_telemetry)
 
 
@@ -687,7 +738,27 @@ def pose(req: PoseRequest, request: Request):
     LunaPath consumes this pose; it does not produce one. Whatever stack
     estimated it declares itself in ``pose.source``.
     """
-    corridor = request.app.state.active_corridor
+    if req.corridor_id is not None:
+        entry = request.app.state.corridors.get(req.corridor_id)
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"corridor_id {req.corridor_id!r} is not known to this "
+                    "process. Corridors live only in memory and only the most "
+                    f"recent {MAX_TRACKED_CORRIDORS} are retained; re-plan to "
+                    "get a fresh one."
+                ),
+            )
+        corridor = entry["corridor"]
+        corridor_id = req.corridor_id
+        corridor_rover_id = entry["rover_id"]
+    else:
+        corridor = request.app.state.active_corridor
+        corridor_id = getattr(request.app.state, "active_corridor_id", None)
+        corridor_rover_id = getattr(
+            request.app.state, "active_corridor_rover_id", None
+        )
     if corridor is None:
         raise HTTPException(
             status_code=409,
@@ -702,12 +773,11 @@ def pose(req: PoseRequest, request: Request):
         corridor,
         req.state,
         previous_along_track_m=req.previous_along_track_m,
+        rover=get_rover(corridor_rover_id) if corridor_rover_id else None,
     )
     return {
-        "corridor_id": getattr(request.app.state, "active_corridor_id", None),
-        "corridor_rover_id": getattr(
-            request.app.state, "active_corridor_rover_id", None
-        ),
+        "corridor_id": corridor_id,
+        "corridor_rover_id": corridor_rover_id,
         "corridor_fix": result["corridor_fix"].to_dict(),
         "pose_source": req.pose.source,
         "fired_triggers": [
@@ -893,12 +963,15 @@ def plan_4d(req: Plan4DRequest, request: Request):
     # shape are known -- MAX_PLAN_4D_SLICES caps the time axis only. (#6.)
     _check_cube_budget(n_slices, coarse_traversable.shape)
 
-    # Until the SPICE-driven illumination cube lands, hold shadow constant
-    # across slices: the planner machinery is exercised, the physics is not
-    # invented. Replace this series with app.illumination output per slice.
+    # A time-expanded plan whose environment never changes cannot express
+    # the one decision it exists for. build_shadow_series produces the real
+    # per-slice illumination when a horizon cache and an epoch are available,
+    # and reports honestly when it cannot. (Round 3 review, M-1.)
     base_shadow = np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64)
-    shadow_series = [base_shadow] * n_slices
-    illum_series = [1.0 - base_shadow] * n_slices
+    shadow_series, shadow_provenance = build_shadow_series(
+        base_shadow, metadata, n_slices, slice_hours, req.start_utc
+    )
+    illum_series = [1.0 - snapshot for snapshot in shadow_series]
 
     cost_cube = build_cost_cube(
         grids_for_plan, shadow_series, rover, weights_dict, coarsen=req.coarsen
@@ -917,6 +990,11 @@ def plan_4d(req: Plan4DRequest, request: Request):
         slice_hours=slice_hours,
         rover=rover,
         slope_grid=coarse_slope,
+        # Same hard edge constraints the 2-D planner enforces; without the
+        # elevation the 4-D planner could not evaluate either of them and
+        # the two planners disagreed about which edges are safe.
+        # (Round 3 review, H-1 and H-2.)
+        elevation_grid=coarsen_grid(grids_for_plan["elevation"], req.coarsen),
     )
     if result["error"]:
         # move_count is known reachable at this point (checked above), so
@@ -954,6 +1032,11 @@ def plan_4d(req: Plan4DRequest, request: Request):
         "path_pixels_coarse": result["path_pixels"],
         "path_states": result["path_states"],
         "metrics": metrics,
+        # Whether the cube this plan solved actually varied with time, and
+        # why not when it did not. A caller reading wait_steps needs this to
+        # know whether a zero means "waiting did not help" or "waiting could
+        # not have helped". (Round 3 review, M-1.)
+        "shadow_model": shadow_provenance,
         "n_slices": n_slices,
         "slice_hours": slice_hours,
         "slice_hours_source": slice_hours_source,
@@ -964,9 +1047,28 @@ def plan_4d(req: Plan4DRequest, request: Request):
     }
 
 
+def _validate_pixel_endpoints(grids: dict, start, goal) -> None:
+    """422 for an out-of-grid start/goal, matching /api/plan.
+
+    /api/plan answered 422 for these while /api/plan-multi and /api/compare
+    returned HTTP 200 with the failure buried in the results array, so the
+    same server state produced two different contracts and no client could
+    handle "bad input" uniformly. (Round 3 review, L-12.)
+    """
+    shape = grids["metadata"]["shape"]
+    rows, cols = int(shape[0]), int(shape[1])
+    for label, point in (("start", start), ("goal", goal)):
+        if not (0 <= point[0] < rows and 0 <= point[1] < cols):
+            raise HTTPException(
+                status_code=422,
+                detail=f"{label} {tuple(point)} is outside the {rows}x{cols} grid.",
+            )
+
+
 @app.post("/api/plan-multi")
 def plan_multi(req: PlanMultiRequest):
     base_grids = _get_grids()
+    _validate_pixel_endpoints(base_grids, req.start, req.goal)
     rover = get_rover(req.rover_id)
     results: list[dict[str, Any]] = []
     for profile_id in req.profiles:
@@ -1002,6 +1104,7 @@ def plan_multi(req: PlanMultiRequest):
 @app.post("/api/compare")
 def compare(req: CompareRequest):
     base_grids = _get_grids()
+    _validate_pixel_endpoints(base_grids, req.start, req.goal)
     rover = get_rover(req.rover_id)
     results = []
     for profile_id, profile in MISSION_PROFILES.items():
@@ -1022,7 +1125,7 @@ def compare(req: CompareRequest):
         "start": req.start,
         "goal": req.goal,
         "results": results,
-        "comparison": compare_results(results),
+        "comparison": compare_results(results, rover),
     }
 
 
@@ -1076,6 +1179,21 @@ def get_layer(
     layer = grids[layer_name]
     if downsample > 1:
         layer = layer[::downsample, ::downsample]
+
+    cells = int(layer.shape[0]) * int(layer.shape[1])
+    if cells > MAX_LAYER_CELLS:
+        full = grids[layer_name]
+        needed = math.ceil(
+            math.sqrt((int(full.shape[0]) * int(full.shape[1])) / MAX_LAYER_CELLS)
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{layer_name} at downsample={downsample} is {cells} cells, over "
+                f"the {MAX_LAYER_CELLS}-cell response budget. "
+                f"Use downsample={needed} or higher."
+            ),
+        )
 
     if layer_name == "traversable":
         serializable = layer.astype(np.uint8).tolist()

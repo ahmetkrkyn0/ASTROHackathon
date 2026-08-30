@@ -28,8 +28,13 @@ from typing import Any
 
 import numpy as np
 
-from .cost_engine import COST_MODEL_ID, compute_cost_grid, f_thermal, resolve_weights
-from .constants import get_rover
+from .cost_engine import (
+    COST_MODEL_ID,
+    compute_cost_grid,
+    f_thermal,
+    resolve_weights,
+)
+from .constants import LOG_BARRIER_MU, get_rover
 
 # Offsets live in _astar_core, built from the grid's ACTUAL resolution. A
 # module-level copy used to sit here hardcoding 80 m -- shadowed by the local
@@ -112,22 +117,51 @@ def astar(
     min_cost = float(np.min(cost_grid[finite_mask]))  # ≥ 0.01
 
     # ── Phase 2: A* search ──────────────────────────────────────────────
-    result = _astar_core(
-        cost_grid, traversable, elevation, thermal_grid,
-        start, goal, rows, cols, resolution, min_cost,
+    # constraints is honoured rather than ignored: /api/plan-multi and
+    # /api/compare pass each mission profile's declared limits, and until now
+    # this function's own docstring admitted it dropped them on the floor, so
+    # a profile advertising a 20 deg ceiling planned identically to one
+    # advertising 25. (Round 3 review, M-7.)
+    profile_slope_max = None
+    if constraints:
+        raw = constraints.get("max_slope_deg")
+        if raw is not None:
+            profile_slope_max = float(raw)
+
+    path_pixels, nodes_expanded, rejections = _astar_core(
+        cost_grid, traversable, elevation, thermal_grid, slope_grid,
+        start, goal, rows, cols, resolution, min_cost, rover_cfg,
+        profile_slope_max,
     )
 
     comp_ms = (time.perf_counter() - t0) * 1000.0
-    if result is None:
-        return _empty_result("No path found", comp_ms)
-
-    path_pixels, nodes_expanded = result
+    if path_pixels is None:
+        # A bare "No path found" is useless when the hard edge constraints
+        # are what closed the route: on a site whose median slope is 21 deg,
+        # a rover with a 15 deg roll-over limit fragments the passable area
+        # into components of a few hundred cells, and the caller deserves to
+        # be told THAT rather than left to guess. (Round 3 review, H-1.)
+        return _empty_result(
+            _no_path_reason(rejections, rover_cfg, profile_slope_max),
+            comp_ms,
+            rejections,
+        )
 
     # ── Post-process metrics ────────────────────────────────────────────
     metrics = _compute_path_metrics(
         path_pixels, elevation, thermal_grid, cost_grid, resolution, comp_ms,
-        nodes_expanded, rover_cfg,
+        nodes_expanded, rover_cfg, slope_grid,
     )
+    metrics["edges_rejected"] = dict(rejections)
+    metrics["constraints_applied"] = {
+        "max_slope_deg": (
+            profile_slope_max
+            if profile_slope_max is not None
+            else float(rover_cfg["slope_max_deg"])
+        ),
+        "slope_lateral_max_deg": float(rover_cfg["slope_lateral_max_deg"]),
+        "source": "profile" if profile_slope_max is not None else "rover",
+    }
 
     return {
         "path_pixels": path_pixels,
@@ -180,6 +214,106 @@ def _resolve_cost_grid(
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  HARD-CONSTRAINT BARRIER
+# ════════════════════════════════════════════════════════════════════════════
+
+_BARRIER_EPS: float = 1e-9
+
+
+_BARRIER_TABLE_BINS: int = 1024
+
+
+def _geometric_barrier(
+    along_deg: float,
+    lateral_deg: float,
+    slope_max_deg: float,
+    lateral_max_deg: float,
+    mu: float = LOG_BARRIER_MU,
+) -> float:
+    """Log-barrier on the two geometric limits.
+
+    Same shape as ``cost_engine.edge_barrier_penalty`` but without the
+    thermal terms, which are precomputed per cell. Reference form; the A*
+    loop uses the tabulated version below.
+    """
+    slack_slope = 1.0 - along_deg / slope_max_deg
+    slack_lat = 1.0 - lateral_deg / lateral_max_deg
+    if slack_slope <= _BARRIER_EPS or slack_lat <= _BARRIER_EPS:
+        return math.inf
+    return -mu * (math.log(min(1.0, slack_slope)) + math.log(min(1.0, slack_lat)))
+
+
+def _barrier_table(
+    limit_deg: float, bins: int = _BARRIER_TABLE_BINS, mu: float = LOG_BARRIER_MU
+) -> tuple[list[float], float]:
+    """Tabulate ``-mu * log(1 - atan(t)/limit)`` over t in [0, tan(limit)].
+
+    The A* inner loop evaluates the barrier once per candidate edge --
+    roughly 1.6 million times on the production grid -- and the exact form
+    costs an ``atan``, a ``degrees`` and a ``log`` each time. Tabulating
+    against the TANGENT (which the loop already has, because the hard
+    rejections are done in tangent space to avoid trigonometry) turns that
+    into an integer index and a list lookup. Measured on the 500x500 grid:
+    8.8 s of planning back down to the pre-barrier range.
+
+    The barrier is a soft shaping term whose whole purpose is a gradient
+    away from a wall the hard gate already enforces, so quantising it at
+    1024 bins changes no decision the exact form would make differently at
+    any resolution the grid can express.
+
+    Returns ``(table, inverse_step)`` where the index for a tangent ``t`` is
+    ``int(t * inverse_step)``, clamped to the last bin.
+    """
+    tan_limit = math.tan(math.radians(limit_deg))
+    if tan_limit <= 0.0:
+        return [math.inf], 0.0
+    step = tan_limit / (bins - 1)
+    table: list[float] = []
+    for i in range(bins):
+        degrees_here = math.degrees(math.atan(i * step))
+        slack = 1.0 - degrees_here / limit_deg
+        table.append(
+            math.inf if slack <= _BARRIER_EPS else -mu * math.log(min(1.0, slack))
+        )
+    return table, 1.0 / step
+
+
+def _thermal_barrier_grid(
+    thermal: np.ndarray, rover: dict[str, Any], mu: float = LOG_BARRIER_MU
+) -> np.ndarray:
+    """Per-cell thermal barrier, vectorised.
+
+    The barrier's thermal terms depend only on the cell being entered, so
+    evaluating them once per cell instead of once per edge keeps the inner
+    loop's added cost down to two logarithms.
+
+    Anchored to ``THERMAL_MIN_TRAVERSABLE_C`` and the rover's own electronics
+    ceiling -- see ``cost_engine.thermal_barrier_terms`` for why the spec's
+    fixed -20/+95 inner-temperature band was not usable here.
+    """
+    from . import constants as C
+    from .cost_engine import _surface_ceiling_c
+
+    surface = np.asarray(thermal, dtype=np.float64)
+    cold_floor = float(C.THERMAL_MIN_TRAVERSABLE_C)
+    cold_span = abs(cold_floor)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        slack_cold = np.minimum(1.0, (surface - cold_floor) / cold_span)
+        total = -mu * np.log(slack_cold)
+
+        ceiling = _surface_ceiling_c(rover)
+        if ceiling is not None and float(ceiling) > 0.0:
+            slack_hot = np.minimum(1.0, (float(ceiling) - surface) / float(ceiling))
+            total = total - mu * np.log(slack_hot)
+
+    # Non-finite means "outside the barrier's domain", which the caller must
+    # treat as an impassable edge. NaN thermal lands here too, which is the
+    # honest answer for a cell with no temperature.
+    return np.where(np.isfinite(total), total, np.inf)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  A* CORE — tight inner loop
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -188,30 +322,99 @@ def _astar_core(
     traversable: np.ndarray,
     elevation: np.ndarray,
     thermal: np.ndarray,
+    slope_grid: np.ndarray,
     start: tuple[int, int],
     goal: tuple[int, int],
     rows: int,
     cols: int,
     resolution: float,
     min_cost: float,
-) -> tuple[list[list[int]], int] | None:
-    """Inner A* loop. Returns (path_pixels, nodes_expanded) or None."""
+    rover: dict[str, Any],
+    profile_slope_max_deg: float | None = None,
+) -> tuple[list[list[int]] | None, int, dict[str, int]]:
+    """Inner A* loop. Returns (path_pixels or None, nodes_expanded, rejections).
+
+    Hard constraints enforced per EDGE, which is the only place they can be
+    expressed (round 3 review, H-1 and H-2):
+
+    * **Along-track step slope.** ``traversable`` gates on the ``np.gradient``
+      slope grid -- a central difference, so effectively a two-cell baseline
+      and a smoothed value. The rover does not drive that; it drives the
+      one-cell step between adjacent centres. On the production grid 920
+      passable-to-passable cardinal neighbour pairs had a step steeper than
+      lpr_1's 25 deg limit, and routes did take them: the default plan
+      reported a 25.08 deg segment, and at w_thermal=2.0 a 27.10 deg one --
+      over a ceiling the API and ``Corridor.max_slope_deg`` both publish as a
+      safety limit. The step slope is now computed from elevation and
+      rejected against the same limit.
+
+    * **Lateral (roll-over) slope.** ``slope_lateral_max_deg`` appeared
+      exactly once in the entire codebase, inside a log-barrier function no
+      production caller ever invoked, so the rover's tip-over limit was
+      checked nowhere. Cross-slope is a property of the edge's direction, not
+      of the cell, which is why no cell mask could ever have expressed it.
+
+    A soft ``edge_barrier_penalty`` rides on top, so the planner is pushed
+    away from both limits before it reaches them rather than only refused at
+    the wall.
+    """
 
     # Distance multipliers relative to resolution
     cardinal_dist = resolution
     diagonal_dist = resolution * math.sqrt(2)
 
-    # Update offsets with actual resolution
+    # Update offsets with actual resolution. The last two entries are the
+    # unit travel direction in (row, col) space, used to resolve the terrain
+    # gradient into along-track and cross-track components.
+    _r2 = 1.0 / math.sqrt(2.0)
     offsets = (
-        (-1,  0, cardinal_dist, False),
-        ( 1,  0, cardinal_dist, False),
-        ( 0, -1, cardinal_dist, False),
-        ( 0,  1, cardinal_dist, False),
-        (-1, -1, diagonal_dist, True),
-        (-1,  1, diagonal_dist, True),
-        ( 1, -1, diagonal_dist, True),
-        ( 1,  1, diagonal_dist, True),
+        (-1,  0, cardinal_dist, False, -1.0,  0.0),
+        ( 1,  0, cardinal_dist, False,  1.0,  0.0),
+        ( 0, -1, cardinal_dist, False,  0.0, -1.0),
+        ( 0,  1, cardinal_dist, False,  0.0,  1.0),
+        (-1, -1, diagonal_dist, True,  -_r2, -_r2),
+        (-1,  1, diagonal_dist, True,  -_r2,  _r2),
+        ( 1, -1, diagonal_dist, True,   _r2, -_r2),
+        ( 1,  1, diagonal_dist, True,   _r2,  _r2),
     )
+
+    # ── Hard-constraint geometry ────────────────────────────────────────
+    # Compared in TANGENT space so the inner loop needs no trigonometry: a
+    # step is too steep when |dz| / horizontal > tan(limit), and Pythagoras
+    # on the gradient vector gives the cross-slope as
+    # tan(lat)^2 = tan(cell)^2 - tan(along)^2 (see cost_engine.lateral_slope_deg).
+    slope_max_deg = float(rover["slope_max_deg"])
+    if profile_slope_max_deg is not None:
+        slope_max_deg = min(slope_max_deg, float(profile_slope_max_deg))
+    lateral_max_deg = float(rover["slope_lateral_max_deg"])
+    tan_slope_max = math.tan(math.radians(slope_max_deg))
+    tan_lat_max_sq = math.tan(math.radians(lateral_max_deg)) ** 2
+    slope_barrier_table, slope_barrier_scale = _barrier_table(slope_max_deg)
+    lat_barrier_table, lat_barrier_scale = _barrier_table(lateral_max_deg)
+    slope_barrier_last = len(slope_barrier_table) - 1
+    lat_barrier_last = len(lat_barrier_table) - 1
+
+    # The terrain gradient, as rise per metre along each axis. Both
+    # components come from the SAME elevation field, so decomposing them
+    # into along-track and cross-track is internally consistent -- unlike
+    # subtracting a one-cell step slope from the np.gradient cell slope,
+    # which mixes two different estimators of the same quantity and, on this
+    # grid, left a residual so noisy that it cut connectivity from 97.2 to
+    # 0 percent. Measured with the decomposition below, the 18 deg roll-over
+    # limit keeps 92.7 percent of passable cells mutually reachable.
+    grad_row, grad_col = np.gradient(
+        np.asarray(elevation, dtype=np.float64), float(resolution)
+    )
+    # .tolist() rather than a NumPy view: every read in the inner loop would
+    # otherwise allocate a NumPy scalar, and this loop performs millions of
+    # them. Python lists of floats index straight to a float object.
+    grad_row_flat = np.nan_to_num(grad_row, nan=0.0).ravel().tolist()
+    grad_col_flat = np.nan_to_num(grad_col, nan=0.0).ravel().tolist()
+
+    # The thermal half of the barrier depends only on the destination cell,
+    # so it is evaluated once per cell rather than once per edge.
+    thermal_barrier_flat = _thermal_barrier_grid(thermal, rover).ravel().tolist()
+    elev_flat = np.asarray(elevation, dtype=np.float64).ravel().tolist()
 
     # ── Heuristic: octile distance × (1 + min_cost) ────────────────────
     gr, gc = goal
@@ -229,9 +432,14 @@ def _astar_core(
     # ── NumPy-backed storage ────────────────────────────────────────────
     total_cells = rows * cols
 
-    g_score = np.full(total_cells, np.inf, dtype=np.float32)
-    closed = np.zeros(total_cells, dtype=np.bool_)
-    came_from = np.full(total_cells, -1, dtype=np.int32)
+    # Python lists, not NumPy arrays. These are touched once per candidate
+    # edge -- millions of times on the production grid -- and every NumPy
+    # element read allocates a scalar object. Lists also keep full float64
+    # precision, where the previous float32 g_score quantised path costs to
+    # about 0.06 once they passed 1e6.
+    g_score = [math.inf] * total_cells
+    closed = [False] * total_cells
+    came_from = [-1] * total_cells
 
     # Flatten helpers
     start_idx = start[0] * cols + start[1]
@@ -247,10 +455,11 @@ def _astar_core(
     heapq.heappush(open_heap, (h_start, h_start, counter, start_idx))
 
     nodes_expanded = 0
+    rejections = {"step_slope": 0, "lateral_slope": 0, "thermal_barrier": 0}
 
     # ── Flat cost/traversable views for fast indexing ───────────────────
-    cost_flat = cost_grid.ravel()
-    trav_flat = traversable.ravel()
+    cost_flat = cost_grid.ravel().tolist()
+    trav_flat = traversable.ravel().tolist()
 
     while open_heap:
         f_cur, _, _, cur_idx = heapq.heappop(open_heap)
@@ -263,14 +472,19 @@ def _astar_core(
 
         # Early exit
         if cur_idx == goal_idx:
-            return _reconstruct_path(came_from, goal_idx, cols), nodes_expanded
+            return (
+                _reconstruct_path(came_from, goal_idx, cols),
+                nodes_expanded,
+                rejections,
+            )
 
         cur_r = cur_idx // cols
         cur_c = cur_idx % cols
-        cur_g = float(g_score[cur_idx])
-        cur_cost = float(cost_flat[cur_idx])
+        cur_g = g_score[cur_idx]
+        cur_cost = cost_flat[cur_idx]
+        cur_elev = elev_flat[cur_idx]
 
-        for dr, dc, dist, is_diag in offsets:
+        for dr, dc, dist, is_diag, unit_r, unit_c in offsets:
             nr = cur_r + dr
             nc = cur_c + dc
 
@@ -292,9 +506,43 @@ def _astar_core(
                 if not trav_flat[adj1_idx] or not trav_flat[adj2_idx]:
                     continue
 
+            # ── Hard constraints on the edge itself ─────────────────
+            dz = elev_flat[n_idx] - cur_elev
+            if not (dz == dz):  # NaN elevation: unknown geometry, refuse
+                continue
+            along_tan = abs(dz) / dist
+            if along_tan > tan_slope_max:
+                rejections["step_slope"] += 1
+                continue
+            # Cross-slope: the terrain gradient projected on to the
+            # direction perpendicular to travel. The perpendicular of the
+            # unit vector (unit_r, unit_c) is (-unit_c, unit_r).
+            g_row = 0.5 * (grad_row_flat[cur_idx] + grad_row_flat[n_idx])
+            g_col = 0.5 * (grad_col_flat[cur_idx] + grad_col_flat[n_idx])
+            lat_tan = g_row * (-unit_c) + g_col * unit_r
+            lat_tan_sq = lat_tan * lat_tan
+            if lat_tan_sq > tan_lat_max_sq:
+                rejections["lateral_slope"] += 1
+                continue
+
+            barrier = thermal_barrier_flat[n_idx]
+            if barrier == math.inf:
+                rejections["thermal_barrier"] += 1
+                continue
+            slope_bin = int(along_tan * slope_barrier_scale)
+            if slope_bin > slope_barrier_last:
+                slope_bin = slope_barrier_last
+            lat_bin = int(abs(lat_tan) * lat_barrier_scale)
+            if lat_bin > lat_barrier_last:
+                lat_bin = lat_barrier_last
+            barrier += slope_barrier_table[slope_bin] + lat_barrier_table[lat_bin]
+            if barrier == math.inf:
+                rejections["step_slope"] += 1
+                continue
+
             # ── Trapezoidal edge cost ───────────────────────────────
-            n_cost = float(cost_flat[n_idx])
-            edge_cost = dist * (1.0 + (cur_cost + n_cost) * 0.5)
+            n_cost = cost_flat[n_idx]
+            edge_cost = dist * (1.0 + (cur_cost + n_cost) * 0.5 + barrier)
 
             tentative_g = cur_g + edge_cost
             if tentative_g >= g_score[n_idx]:
@@ -309,7 +557,7 @@ def _astar_core(
                 (tentative_g + h_val, h_val, counter, n_idx),
             )
 
-    return None  # No path found
+    return None, nodes_expanded, rejections  # No path found
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -346,6 +594,7 @@ def _compute_path_metrics(
     comp_ms: float,
     nodes_expanded: int,
     rover: dict[str, Any] | None = None,
+    slope_grid: np.ndarray | None = None,
 ) -> dict:
     """Compute post-hoc path metrics for API response.
 
@@ -361,11 +610,16 @@ def _compute_path_metrics(
 
     total_distance = 0.0
     max_slope = 0.0
+    max_cell_slope = 0.0
     total_weighted_cost = 0.0
     path_temps: list[float] = []
 
     for i, (r, c) in enumerate(path_pixels):
         path_temps.append(float(thermal[r, c]))
+        if slope_grid is not None:
+            cell_slope = float(slope_grid[r, c])
+            if math.isfinite(cell_slope):
+                max_cell_slope = max(max_cell_slope, cell_slope)
         if i == 0:
             continue
 
@@ -388,12 +642,30 @@ def _compute_path_metrics(
         "total_distance_m": round(total_distance, 2),
         "total_energy_wh": 0.0,  # Not tracked in fast mode
         "total_shadow_hours": 0.0,  # Not tracked in fast mode
+        # Two different quantities used to share this one name across a
+        # single /api/plan response: here it is the SEGMENT slope, computed
+        # from the elevation difference across each step the rover actually
+        # drives, while summary.max_slope_deg is the CELL slope from the
+        # np.gradient grid. On one production route they read 25.08 and
+        # 24.89. Both are now named for what they measure and both are
+        # reported here, so nothing has to be inferred from context.
+        # (Round 3 review, H-2.)
         "max_slope_deg": round(max_slope, 2),
+        "max_segment_slope_deg": round(max_slope, 2),
+        "max_cell_slope_deg": round(max_cell_slope, 2),
+        "slope_definitions": {
+            "max_segment_slope_deg": "elevation difference across each driven step",
+            "max_cell_slope_deg": "np.gradient slope grid, the traversability gate",
+        },
         "max_thermal_risk": round(
             max(f_thermal(t, rover=rover) for t in path_temps), 4
         ),
         "min_surface_temp_c": round(min(path_temps), 2),
         "total_weighted_cost": round(total_weighted_cost, 4),
+        # Weighted METRES. app.pathfinder_4d's total_cost is in weighted
+        # HOURS -- the two planners minimise different objectives, so their
+        # totals are not comparable and the unit says so. (Round 3, M-6.)
+        "cost_units": "weighted_metres",
         "path_length_nodes": len(path_pixels),
         "computation_time_ms": round(comp_ms, 1),
         "nodes_expanded": nodes_expanded,
@@ -402,13 +674,18 @@ def _compute_path_metrics(
 
 def _zero_metrics(comp_ms: float = 0.0, nodes_expanded: int = 0) -> dict:
     return {
+        "constraints_applied": None,
+        "edges_rejected": {},
         "total_distance_m": 0.0,
         "total_energy_wh": 0.0,
         "total_shadow_hours": 0.0,
         "max_slope_deg": 0.0,
+        "max_segment_slope_deg": 0.0,
+        "max_cell_slope_deg": 0.0,
         "max_thermal_risk": 0.0,
         "min_surface_temp_c": 0.0,
         "total_weighted_cost": 0.0,
+        "cost_units": "weighted_metres",
         "path_length_nodes": 0,
         "computation_time_ms": round(comp_ms, 1),
         "nodes_expanded": nodes_expanded,
@@ -419,12 +696,57 @@ def _zero_metrics(comp_ms: float = 0.0, nodes_expanded: int = 0) -> dict:
 #  HELPERS
 # ════════════════════════════════════════════════════════════════════════════
 
-def _empty_result(error: str, comp_time_ms: float = 0.0) -> dict:
+def _empty_result(
+    error: str,
+    comp_time_ms: float = 0.0,
+    rejections: dict[str, int] | None = None,
+) -> dict:
+    metrics = _zero_metrics(comp_time_ms)
+    if rejections is not None:
+        metrics["edges_rejected"] = dict(rejections)
     return {
         "path_pixels": [],
-        "metrics": _zero_metrics(comp_time_ms),
+        "metrics": metrics,
         "error": error,
     }
+
+
+def _no_path_reason(
+    rejections: dict[str, int],
+    rover: dict[str, Any],
+    profile_slope_max_deg: float | None,
+) -> str:
+    """Explain which constraint closed the route, when one did."""
+    lateral = rejections.get("lateral_slope", 0)
+    along = rejections.get("step_slope", 0)
+    thermal = rejections.get("thermal_barrier", 0)
+    if not (lateral or along or thermal):
+        return "No path found"
+
+    slope_limit = float(rover["slope_max_deg"])
+    if profile_slope_max_deg is not None:
+        slope_limit = min(slope_limit, float(profile_slope_max_deg))
+
+    parts: list[str] = []
+    if lateral:
+        parts.append(
+            f"{lateral} edges exceeded the {rover['slope_lateral_max_deg']} deg "
+            "roll-over (cross-slope) limit"
+        )
+    if along:
+        parts.append(
+            f"{along} edges exceeded the {slope_limit:g} deg step-slope limit"
+        )
+    if thermal:
+        parts.append(f"{thermal} edges entered cells outside the thermal envelope")
+    return (
+        "No path found for "
+        f"{rover.get('name', rover.get('id', 'this rover'))}: "
+        + "; ".join(parts)
+        + ". The terrain between these points is steeper than this rover can "
+        "cross safely -- try a rover with a higher roll-over limit, or points "
+        "in gentler terrain."
+    )
 
 
 def _in_bounds(r: int, c: int, rows: int, cols: int) -> bool:

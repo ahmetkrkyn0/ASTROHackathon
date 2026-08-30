@@ -145,6 +145,17 @@ _FURNISHED: set[str] = set()
 
 
 def _ensure_kernels(spice, meta_kernel: str) -> None:
+    # The cache is only valid while the SPICE pool still holds what it
+    # recorded. Anything calling spice.kclear() empties the pool without
+    # telling us, after which every subsequent query would run with NO
+    # kernels loaded and fail obscurely -- or worse, succeed against a
+    # partially reloaded pool. Checking the pool is one cheap call.
+    # (Round 3 review, L-17.)
+    try:
+        if int(spice.ktotal("ALL")) == 0:
+            _FURNISHED.clear()
+    except Exception:  # pragma: no cover - defensive, ktotal is not optional
+        _FURNISHED.clear()
     if meta_kernel not in _FURNISHED:
         spice.furnsh(meta_kernel)
         _FURNISHED.add(meta_kernel)

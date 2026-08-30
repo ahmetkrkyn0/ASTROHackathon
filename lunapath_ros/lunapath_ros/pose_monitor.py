@@ -55,6 +55,13 @@ class PoseMonitor(Node):
     def __init__(self) -> None:
         super().__init__("lunapath_pose_monitor")
         self.declare_parameter("odom_topic", "odom")
+        # The label decides more than provenance: app.localization only runs
+        # the slip check for sources whose distance claim is a WHEEL
+        # measurement (pose.SLIP_CHECKABLE_SOURCES). Visual and LiDAR
+        # odometry estimate body motion from the world and have already
+        # corrected for slip, so comparing their distance against corridor
+        # progress would measure path tortuosity under a trigger named
+        # "slip". Label the publisher honestly. (Round 3 review, M-4.)
         self.declare_parameter("pose_source", "visual_odometry")
         # Negative means "not configured": odometry with unknown covariance
         # is then rejected rather than assigned invented confidence.
@@ -108,6 +115,12 @@ class PoseMonitor(Node):
         if self._last_xy is not None:
             self._travelled_m += math.hypot(x - self._last_xy[0], y - self._last_xy[1])
         self._last_xy = (x, y)
+        # NOTE: this integral is the displacement of the POSE STREAM, so it
+        # is a genuine odometer claim only when the publisher is wheel
+        # odometry (pose_source="dead_reckoning"). For a VO or LiDAR
+        # publisher it is the same estimate the corridor projection uses,
+        # and evaluate_pose correctly declines to slip-check it.
+        # (Round 3 review, M-4.)
 
         if self._corridor is None:
             # Nothing to judge against; distance keeps integrating so the

@@ -19,7 +19,9 @@ from typing import Any
 
 import numpy as np
 
-from .costmap import MIN_CELL_COST, PlanContext, default_cost_map
+from .constants import THERMAL_MIN_TRAVERSABLE_C
+from .costmap import PlanContext, default_cost_map
+from .thermal_model import couple_shadow_to_thermal
 
 
 def coarsen_grid(grid: np.ndarray, factor: int, how: str = "mean") -> np.ndarray:
@@ -62,8 +64,15 @@ def build_cost_cube(
     rover: Mapping[str, Any],
     weights: Mapping[str, float] | None = None,
     coarsen: int = 1,
+    couple_thermal: bool = True,
 ) -> np.ndarray:
-    """(T, H', W') cost cube, one slice per shadow-ratio snapshot."""
+    """(T, H', W') cost cube, one slice per shadow-ratio snapshot.
+
+    *couple_thermal* recomputes the surface temperature from each slice's own
+    illumination (``thermal_model.couple_shadow_to_thermal``) instead of
+    holding the annual field fixed. Pass False only when *base_grids* already
+    carries a per-slice thermal field of its own.
+    """
     if len(shadow_ratio_series) == 0:
         raise ValueError("shadow_ratio_series must contain at least one snapshot")
 
@@ -86,59 +95,59 @@ def build_cost_cube(
 
     cost_map = default_cost_map(rover, weights)
 
-    # Only layers that read shadow_ratio vary across slices; slope, energy and
-    # thermal read grids that are constant in time. Re-evaluating all four per
-    # slice made a 168-slice cube cost ~22 s -- the np.vectorize layers
-    # dominate. Evaluate the invariant layers once and add the varying ones
-    # per slice. (Faz 3 review, M3.)
-    #
-    # Which layers vary is PROBED, not assumed from the layer name: a layer
-    # that reads shadow_ratio under a different name would otherwise be
-    # silently frozen at one value, producing a time-invariant cube that looks
-    # correct. Probing keeps this honest as new CostLayers are added.
-    def _context(shadow: np.ndarray) -> PlanContext:
-        return PlanContext(
-            slope=slope_c,
-            thermal=thermal_c,
-            shadow_ratio=shadow,
-            traversable=traversable_c,
-            resolution_m=resolution_c,
-            rover=rover,
-        )
-
-    zeros = np.zeros_like(slope_c, dtype=np.float64)
-    ones = np.ones_like(slope_c, dtype=np.float64)
-
-    invariant = np.zeros_like(slope_c, dtype=np.float64)
-    varying: list[Any] = []
-    for layer in cost_map.layers:
-        at_zero = np.asarray(layer.contribution(_context(zeros)), dtype=np.float64)
-        at_one = np.asarray(layer.contribution(_context(ones)), dtype=np.float64)
-        if np.allclose(at_zero, at_one, equal_nan=True):
-            invariant = invariant + layer.weight * at_zero
-        else:
-            varying.append(layer)
-
-    # The invalid mask depends on shadow only through NaN, so it is rebuilt
-    # per slice; everything else in it is time-invariant.
-    base_invalid = ~traversable_c | np.isnan(slope_c) | np.isnan(thermal_c)
-
+    # Every layer is evaluated per slice. The optimisation this replaces --
+    # evaluating "invariant" layers once -- rested on the assumption that
+    # only the shadow layer varies with time. That stopped being true when
+    # thermal became a function of illumination (round 3, H-3): a cell that
+    # is dark at slice t is genuinely COLDER at slice t, and freezing the
+    # thermal layer at one value hid exactly the physics the 4-D planner
+    # exists to reason about. The layers are true NumPy now (review #8
+    # removed np.vectorize), so per-slice evaluation costs a handful of
+    # array ops per slice rather than the ~22 s that made the optimisation
+    # necessary in the first place.
     slices: list[np.ndarray] = []
     for snapshot in shadow_ratio_series:
         shadow_c = coarsen_grid(np.asarray(snapshot, dtype=np.float64), coarsen)
-        accumulator = invariant.copy()
-        for layer in varying:
-            accumulator = accumulator + layer.weight * layer.contribution(
-                _context(shadow_c)
+        thermal_slice = (
+            np.asarray(
+                couple_shadow_to_thermal(thermal_c, shadow_c), dtype=np.float64
             )
-        out = np.maximum(accumulator, MIN_CELL_COST)
-        out[base_invalid | np.isnan(shadow_c)] = np.inf
-        slices.append(out)
+            if couple_thermal
+            else thermal_c
+        )
+
+        # A cell whose temperature at THIS slice is outside the traversable
+        # band is impassable at this slice and passable later -- which is
+        # what finally gives the WAIT edge something to buy. Before the
+        # coupling, shadow only made a cell more expensive, never
+        # impassable, so waiting could never pay for the time it costs.
+        #
+        # It is folded into the slice's OWN traversable mask rather than
+        # applied afterwards, so CostMap.total is the single place that
+        # decides passability and a caller can reproduce the slice exactly
+        # by building the same PlanContext.
+        traversable_slice = traversable_c & (
+            thermal_slice >= THERMAL_MIN_TRAVERSABLE_C
+        )
+        context = PlanContext(
+            slope=slope_c,
+            thermal=thermal_slice,
+            shadow_ratio=shadow_c,
+            traversable=traversable_slice,
+            resolution_m=resolution_c,
+            rover=rover,
+        )
+        slices.append(cost_map.total(context))
 
     return np.stack(slices, axis=0)
 
 
-from .cost_engine import edge_travel_time_s, f_shadow_cell, resolve_weights
+from .cost_engine import (
+    edge_travel_time_s,
+    f_shadow_cell,
+    housekeeping_power_w,
+    resolve_weights,
+)
 
 
 def wait_cost(
@@ -153,21 +162,40 @@ def wait_cost(
     energy axis; waiting in shadow drains state of charge and accumulates
     shadow exposure. Modelling this is what turns "go faster" into
     "stop, let the Sun come, then cross".
+
+    Time is in the total, not just the penalties. A MOVE edge costs
+    ``travel_hours * (1 + weighted cell cost)``; a WAIT used to cost only
+    the weighted penalties, so a slice spent in full sunlight came out at
+    exactly 0.0 -- waiting was free, the planner had no reason to prefer
+    arriving sooner, and ties between "go now" and "wait indefinitely, then
+    go" were broken by heap insertion order rather than by the objective.
+    Both edge families now cost hours scaled the same way. The heuristic
+    stays admissible: a WAIT costs at least ``dt`` and closes no distance,
+    so a distance-based lower bound is still a lower bound.
+    (Round 3 review, M-2.)
+
+    Housekeeping power comes from ``cost_engine.housekeeping_power_w``, so
+    the heater load here matches the one the energy penalty and the
+    simulator use. It previously charged full heater power even in full
+    sunlight. (Round 3 review, M-9.)
     """
     frac = min(1.0, max(0.0, float(illum_frac)))
     dt = max(0.0, float(dt_hours))
 
     solar_in_w = float(rover["p_solar_w"]) * frac
-    idle_w = float(rover["p_idle_w"])
-    heater_w = float(rover["p_heater_w"])
-    net_w = solar_in_w - idle_w - heater_w
+    net_w = solar_in_w - housekeeping_power_w(1.0 - frac, rover)
 
-    delta_soc = net_w * dt / float(rover["e_cap_wh"])
-    energy_penalty = max(0.0, -delta_soc)
-    shadow_penalty = f_shadow_cell(1.0 - frac) * dt
+    # Rate form, so the dt factor is applied once, at the end.
+    soc_drain_per_hour = max(0.0, -net_w / float(rover["e_cap_wh"]))
+    shadow_penalty = f_shadow_cell(1.0 - frac)
 
     return float(
-        weights["w_energy"] * energy_penalty + weights["w_shadow"] * shadow_penalty
+        dt
+        * (
+            1.0
+            + weights["w_energy"] * soc_drain_per_hour
+            + weights["w_shadow"] * shadow_penalty
+        )
     )
 
 

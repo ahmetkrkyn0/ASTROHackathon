@@ -61,6 +61,21 @@ PoseSource = Literal[
 # accumulated drift or merely slows it.
 ABSOLUTE_SOURCES: frozenset[str] = frozenset({"skyline_fix", "sun_sensor"})
 
+# Sources whose ``distance_travelled_m`` is a WHEEL measurement, and whose
+# divergence from ground actually gained is therefore slip.
+#
+# Visual and LiDAR odometry estimate body motion from the world, so they
+# have already corrected for slip: the wheels turning further than the rover
+# advanced does not appear in their distance at all. Comparing their claim
+# against along-track progress measures how much the rover WEAVED inside its
+# corridor -- ordinary obstacle avoidance -- and a rover taking 33 percent
+# extra path length would trip a trigger named "slip" while slipping not at
+# all. The ROS monitor makes this concrete: it integrates the distance from
+# the very pose stream it then projects, so both sides of the ratio come
+# from one estimator and genuine wheel slip is invisible by construction.
+# (Round 3 review, M-4.)
+SLIP_CHECKABLE_SOURCES: frozenset[str] = frozenset({"dead_reckoning"})
+
 
 class PoseEstimate(BaseModel):
     """A pose estimate handed to LunaPath by a local navigation stack."""

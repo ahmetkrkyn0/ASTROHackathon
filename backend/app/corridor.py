@@ -18,9 +18,21 @@ DEFAULT_MAX_HALF_WIDTH_M: float = 400.0
 
 
 def clearance_map(traversable: np.ndarray, resolution_m: float) -> np.ndarray:
-    """Distance in metres from every cell to the nearest impassable cell."""
+    """Distance in metres from every cell to the nearest impassable cell.
+
+    The mask is padded with one ring of impassable cells before the distance
+    transform, so THE EDGE OF THE MAP COUNTS AS AN OBSTACLE.
+    ``distance_transform_edt`` measures distance to the nearest False cell
+    *inside* the array, so an all-passable border cell used to come back with
+    a large clearance and ``build_corridor`` would publish a half-width of up
+    to 400 m extending off the DEM -- lateral room the global planner has no
+    evidence for, handed to a local planner as a permission.
+    (Round 3 review, M-12.)
+    """
     mask = np.asarray(traversable, dtype=bool)
-    return distance_transform_edt(mask) * float(resolution_m)
+    padded = np.pad(mask, 1, mode="constant", constant_values=False)
+    distance = distance_transform_edt(padded)[1:-1, 1:-1]
+    return distance * float(resolution_m)
 
 
 def _pixel_to_metres(

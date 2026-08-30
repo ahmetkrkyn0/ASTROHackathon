@@ -1,4 +1,10 @@
 fastapi==0.115.6
+# Used DIRECTLY by app.main and app.pose (BaseModel, Field, field_validator,
+# conlist), not merely pulled in by FastAPI. It arrived transitively, in a
+# file where every other dependency is ==-pinned, so a FastAPI bump could
+# have swapped the validation library underneath the contracts without a
+# line changing here. (Round 3 review, L-14.)
+pydantic==2.9.2
 uvicorn==0.34.0
 rasterio==1.4.3
 numpy==2.2.1

@@ -15,10 +15,24 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .constants import inner_temperature_drop_k, soc_deviation_threshold
+
+# Defaults for the DEFAULT rover. Every threshold that has a rover-specific
+# derivation now takes one; these constants remain the value that derivation
+# produces for lpr_1, so existing callers see no change.
+# (Round 3 review, L-8.)
 SOC_DEVIATION_THRESHOLD: float = 0.10        # fraction of capacity
 INNER_TEMPERATURE_DROP_K: float = 5.0        # kelvin below prediction
 TIME_DRIFT_MINUTES: float = 30.0
 COMM_WINDOW_MINUTES: float = 15.0
+
+# How many standard deviations of position error must fit inside the
+# corridor. Comparing 1 sigma against the half-width means the trigger fires
+# only once there is already roughly a one-in-three chance the rover is
+# OUTSIDE its corridor -- late, for a safety check. Two sigma brings that to
+# about one in twenty, the conventional engineering margin.
+# (Round 3 review, L-9.)
+LOCALIZATION_SIGMA_MULTIPLIER: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -28,26 +42,42 @@ class TriggerResult:
     detail: str
 
 
-def check_soc_deviation(actual_soc: float, planned_soc: float) -> TriggerResult:
-    """Being behind the energy plan forces a replan; being ahead does not."""
+def check_soc_deviation(
+    actual_soc: float,
+    planned_soc: float,
+    rover: Mapping[str, Any] | None = None,
+) -> TriggerResult:
+    """Being behind the energy plan forces a replan; being ahead does not.
+
+    The threshold is half the rover's own SOC reserve: a rover holding 30
+    percent has more room to absorb a deviation than one holding 20, and a
+    single global constant said otherwise. (Round 3 review, L-8.)
+    """
+    threshold = soc_deviation_threshold(rover)
     shortfall = float(planned_soc) - float(actual_soc)
-    fired = shortfall > SOC_DEVIATION_THRESHOLD
+    fired = shortfall > threshold
     return TriggerResult(
         "soc_deviation",
         fired,
         f"SOC {actual_soc:.3f} vs planned {planned_soc:.3f} "
-        f"(shortfall {shortfall:.3f}, threshold {SOC_DEVIATION_THRESHOLD})",
+        f"(shortfall {shortfall:.3f}, threshold {threshold:.3f})",
     )
 
 
-def check_inner_temperature(actual_c: float, predicted_c: float) -> TriggerResult:
+def check_inner_temperature(
+    actual_c: float,
+    predicted_c: float,
+    rover: Mapping[str, Any] | None = None,
+) -> TriggerResult:
+    """Scaled to the width of the battery envelope. (Round 3 review, L-8.)"""
+    threshold = inner_temperature_drop_k(rover)
     drop = float(predicted_c) - float(actual_c)
-    fired = drop > INNER_TEMPERATURE_DROP_K
+    fired = drop > threshold
     return TriggerResult(
         "inner_temperature",
         fired,
         f"inner {actual_c:.2f} C vs predicted {predicted_c:.2f} C "
-        f"(drop {drop:.2f} K, threshold {INNER_TEMPERATURE_DROP_K} K)",
+        f"(drop {drop:.2f} K, threshold {threshold:.2f} K)",
     )
 
 
@@ -87,13 +117,24 @@ def check_comm_window(
 
 
 def check_localization_uncertainty(
-    covariance_m: float, half_width_m: float
+    covariance_m: float,
+    half_width_m: float,
+    sigma_multiplier: float = LOCALIZATION_SIGMA_MULTIPLIER,
 ) -> TriggerResult:
-    fired = float(covariance_m) > float(half_width_m)
+    """Fire when the position uncertainty no longer fits inside the corridor.
+
+    *covariance_m* is a 1-sigma figure. Comparing it directly against the
+    half-width fires only when the rover is already about as likely as not
+    to be outside -- see LOCALIZATION_SIGMA_MULTIPLIER.
+    (Round 3 review, L-9.)
+    """
+    bound_m = float(covariance_m) * float(sigma_multiplier)
+    fired = bound_m > float(half_width_m)
     return TriggerResult(
         "localization_uncertainty",
         fired,
-        f"position covariance {covariance_m:.1f} m exceeds "
+        f"position uncertainty {bound_m:.1f} m "
+        f"({sigma_multiplier:g} sigma of {covariance_m:.1f} m) exceeds "
         f"corridor half-width {half_width_m:.1f} m",
     )
 
@@ -107,10 +148,18 @@ _TRIGGER_INPUTS: dict[str, tuple[str, ...]] = {
     "corridor_violation": ("lateral_offset_m", "half_width_m"),
     "comm_window": ("comm_minutes_remaining",),
     "localization_uncertainty": ("localization_covariance_m", "half_width_m"),
+    # slip_accumulation used to be evaluated ONLY by
+    # localization.evaluate_pose, so POST /api/replan neither ran it nor
+    # listed it as skipped -- a trigger missing from the module that calls
+    # itself "that enumeration", and invisible in the one place a caller
+    # reads to learn what was actually checked. (Round 3 review, L-10.)
+    "slip_accumulation": ("map_progress_m", "odometer_claim_m"),
 }
 
 
-def evaluate_triggers(state: Mapping[str, Any]) -> list[TriggerResult]:
+def evaluate_triggers(
+    state: Mapping[str, Any], rover: Mapping[str, Any] | None = None
+) -> list[TriggerResult]:
     """Run every check whose inputs are present; return only fired triggers.
 
     Kept for callers that only want the fired list. Prefer
@@ -118,7 +167,7 @@ def evaluate_triggers(state: Mapping[str, Any]) -> list[TriggerResult]:
     trigger was actually evaluated -- an empty list here means "nothing
     fired", which is NOT the same as "everything was checked".
     """
-    return evaluate_triggers_detailed(state)["fired"]
+    return evaluate_triggers_detailed(state, rover)["fired"]
 
 
 def _is_unusable(value: Any) -> bool:
@@ -135,7 +184,9 @@ def _is_unusable(value: Any) -> bool:
     return not math.isfinite(float(value))
 
 
-def evaluate_triggers_detailed(state: Mapping[str, Any]) -> dict[str, Any]:
+def evaluate_triggers_detailed(
+    state: Mapping[str, Any], rover: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """Evaluate every trigger, reporting the ones that could not be checked.
 
     Each check is guarded by the presence AND USABILITY of its telemetry
@@ -178,12 +229,14 @@ def evaluate_triggers_detailed(state: Mapping[str, Any]) -> dict[str, Any]:
 
         if trigger_id == "soc_deviation":
             results.append(
-                check_soc_deviation(state["actual_soc"], state["planned_soc"])
+                check_soc_deviation(
+                    state["actual_soc"], state["planned_soc"], rover
+                )
             )
         elif trigger_id == "inner_temperature":
             results.append(
                 check_inner_temperature(
-                    state["actual_inner_c"], state["predicted_inner_c"]
+                    state["actual_inner_c"], state["predicted_inner_c"], rover
                 )
             )
         elif trigger_id == "time_drift":
@@ -200,6 +253,14 @@ def evaluate_triggers_detailed(state: Mapping[str, Any]) -> dict[str, Any]:
             results.append(
                 check_localization_uncertainty(
                     state["localization_covariance_m"], state["half_width_m"]
+                )
+            )
+        elif trigger_id == "slip_accumulation":
+            from .slip_model import check_slip_accumulation
+
+            results.append(
+                check_slip_accumulation(
+                    state["map_progress_m"], state["odometer_claim_m"]
                 )
             )
 

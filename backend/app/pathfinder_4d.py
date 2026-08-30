@@ -111,8 +111,11 @@ def _empty(error: str, elapsed_ms: float = 0.0) -> dict[str, Any]:
             "move_steps": 0,
             "arrival_slice": None,
             "total_cost": None,
+            "cost_units": "weighted_hours",
             "nodes_expanded": 0,
             "computation_time_ms": round(elapsed_ms, 3),
+            "edges_dropped_at_horizon": 0,
+            "horizon_truncated": False,
         },
         "error": error,
     }
@@ -128,8 +131,17 @@ def astar_4d(
     slice_hours: float,
     rover: Mapping[str, Any],
     slope_grid: np.ndarray | None = None,
+    elevation_grid: np.ndarray | None = None,
 ) -> dict[str, Any]:
-    """Plan through space and time. Returns path_states, path_pixels, metrics."""
+    """Plan through space and time. Returns path_states, path_pixels, metrics.
+
+    *elevation_grid*, when supplied, enables the same two hard edge
+    constraints the 2-D planner enforces: the along-track step slope against
+    ``slope_max_deg`` and the cross-slope against ``slope_lateral_max_deg``.
+    Without it neither can be evaluated, and the two planners in this product
+    would disagree about which edges are safe -- the same class of divergence
+    round 2 fixed for corner-cutting. (Round 3 review, H-1 and H-2.)
+    """
     t0 = time.perf_counter()
 
     cost = np.asarray(cost_cube, dtype=np.float64)
@@ -161,6 +173,31 @@ def astar_4d(
         if slope_grid is None
         else np.asarray(slope_grid, dtype=np.float64)
     )
+
+    slope_max_deg = float(rover["slope_max_deg"])
+    lateral_max_deg = float(rover["slope_lateral_max_deg"])
+    tan_slope_max = math.tan(math.radians(slope_max_deg))
+    tan_lat_max_sq = math.tan(math.radians(lateral_max_deg)) ** 2
+    if elevation_grid is None:
+        elevation = None
+        grad_row = grad_col = None
+    else:
+        elevation = np.asarray(elevation_grid, dtype=np.float64)
+        if elevation.shape != (height, width):
+            return _empty("elevation_grid shape must match cost_cube slices")
+        grad_row, grad_col = np.gradient(elevation, float(resolution_m))
+        grad_row = np.nan_to_num(grad_row, nan=0.0)
+        grad_col = np.nan_to_num(grad_col, nan=0.0)
+
+    # A move rejected only because it would land past the last time slice is
+    # not the same as a move that is unsafe, and the difference matters: the
+    # horizon is sized from bfs_move_count, the length of the shortest
+    # MOVE-COUNT route, while this planner minimises COST. A cheaper route
+    # can need more slices than that bound, in which case its edges were
+    # silently dropped and a horizon-truncated answer came back as an
+    # ordinary success. Counting them lets the caller be told.
+    # (Round 3 review, M-3.)
+    horizon_dropped = 0
 
     finite = cost[np.isfinite(cost)]
     min_cost = float(np.min(finite)) if finite.size else 0.01
@@ -243,12 +280,30 @@ def astar_4d(
                 continue
 
             distance_m = diag_m if diagonal else resolution_m
+
+            # Same hard edge constraints as pathfinder._astar_core.
+            if elevation is not None:
+                dz = elevation[nr, nc] - elevation[row, col]
+                if not math.isfinite(dz):
+                    continue
+                along_tan = abs(dz) / distance_m
+                if along_tan > tan_slope_max:
+                    continue
+                norm = math.hypot(d_row, d_col)
+                unit_r, unit_c = d_row / norm, d_col / norm
+                g_row = 0.5 * (grad_row[row, col] + grad_row[nr, nc])
+                g_col = 0.5 * (grad_col[row, col] + grad_col[nr, nc])
+                lat_tan = g_row * (-unit_c) + g_col * unit_r
+                if lat_tan * lat_tan > tan_lat_max_sq:
+                    continue
+
             travel_s = edge_travel_time_s(float(slopes[nr, nc]), distance_m, rover)
             if not math.isfinite(travel_s):
                 continue
             d_slices = max(1, int(math.ceil(travel_s / 3600.0 / slice_hours)))
             arrival = slice_index + d_slices
             if arrival >= n_slices:
+                horizon_dropped += 1
                 continue
 
             from_cost = cost[slice_index, row, col]
@@ -268,7 +323,10 @@ def astar_4d(
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     if goal_state is None:
-        return _empty("No path found within the time horizon", elapsed_ms)
+        result = _empty("No path found within the time horizon", elapsed_ms)
+        result["metrics"]["edges_dropped_at_horizon"] = horizon_dropped
+        result["metrics"]["horizon_truncated"] = horizon_dropped > 0
+        return result
 
     states: list[tuple[int, int, int]] = [goal_state]
     while states[-1] in came_from:
@@ -289,8 +347,17 @@ def astar_4d(
             "move_steps": len(states) - 1 - wait_steps,
             "arrival_slice": goal_state[2],
             "total_cost": round(float(g_score[goal_state]), 6),
+            # MOVE edges cost travel HOURS scaled by the weighted cell cost,
+            # and WAIT edges cost slice hours the same way -- so this total
+            # is in weighted hours. app.pathfinder's total_weighted_cost is
+            # in weighted METRES. Two endpoints answering different
+            # questions under similar field names is a trap; the unit is
+            # now stated. (Round 3 review, M-6.)
+            "cost_units": "weighted_hours",
             "nodes_expanded": nodes_expanded,
             "computation_time_ms": round(elapsed_ms, 3),
+            "edges_dropped_at_horizon": horizon_dropped,
+            "horizon_truncated": horizon_dropped > 0,
         },
         "error": None,
     }

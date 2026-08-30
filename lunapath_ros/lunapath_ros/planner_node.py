@@ -224,7 +224,10 @@ class LunaPathPlanner(Node):
                 rover=rover,
                 pixel_size_m=float(metadata["resolution_m"]),
             )
-            summary = summarize_simulation(states)
+            # The rover is passed so the shadow-exposure and peak-power
+            # checks are measured against ITS limits, not the default
+            # rover's. (Round 3 review, M-8.)
+            summary = summarize_simulation(states, rover)
             # Direct indexing (not .get(key, 0.0)) so a genuinely renamed or
             # missing key in the core surfaces here as a KeyError -- caught
             # below and reported via error_msg -- rather than as a silently
