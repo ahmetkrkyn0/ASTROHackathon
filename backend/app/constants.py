@@ -44,6 +44,8 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_energy": 0.259,
         "w_shadow": 0.142,
         "w_thermal": 0.190,
+        "sensor_payload_w": None,
+        "sensor_heater_w": None,
     },
     "luvmi_m": {
         "name": "LUVMI-M",
@@ -77,6 +79,8 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_energy": 0.30,
         "w_shadow": 0.30,
         "w_thermal": 0.0,
+        "sensor_payload_w": None,
+        "sensor_heater_w": None,
     },
     "nasa_viper": {
         "name": "NASA VIPER",
@@ -110,6 +114,8 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_energy": 0.25,
         "w_shadow": 0.20,
         "w_thermal": 0.20,
+        "sensor_payload_w": None,
+        "sensor_heater_w": None,
     },
     "cnsa_yutu_2": {
         "name": "CNSA Yutu-2",
@@ -143,6 +149,8 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_energy": 0.30,
         "w_shadow": 0.20,
         "w_thermal": 0.0,
+        "sensor_payload_w": None,
+        "sensor_heater_w": None,
     },
 }
 
@@ -212,6 +220,8 @@ def rover_catalog() -> list[dict[str, Any]]:
                 "e_cap_wh": float(rover["e_cap_wh"]),
                 "slope_max_deg": float(rover["slope_max_deg"]),
                 "h_max_shadow_h": float(rover["h_max_shadow_h"]),
+                "sensor_payload_w": rover.get("sensor_payload_w"),
+                "sensor_heater_w": rover.get("sensor_heater_w"),
                 "default_weights": rover_default_weights(rover_id),
             }
         )
