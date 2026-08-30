@@ -177,3 +177,48 @@ def test_a_ridge_produces_a_shorter_range_than_flat_ground():
     north_ridge = math.hypot(scan_ridge[0][0], scan_ridge[0][1])
     north_flat = math.hypot(scan_flat[0][0], scan_flat[0][1])
     assert north_ridge < north_flat
+
+
+def test_corridor_half_width_bounds_a_virtual_lidar_scan():
+    """Smoke test: a fake local consumer chains Corridor -> virtual_scan.
+
+    Does not assert scan accuracy (see the module limitation notice); it
+    proves build_corridor's output composes with virtual_scan without any
+    adaptation layer -- the interface the two phases promised actually fits.
+    """
+    from app.constants import get_rover
+    from app.corridor import build_corridor
+
+    shape = (30, 30)
+    resolution_m = 10.0
+    elevation = np.zeros(shape, dtype=np.float64)
+    grids = {
+        "slope": np.full(shape, 3.0),
+        "thermal": np.full(shape, -60.0),
+        "shadow_ratio": np.full(shape, 0.1),
+        "traversable": np.ones(shape, dtype=bool),
+        "metadata": {
+            "origin": {"x": 0.0, "y": 0.0},
+            "resolution_m": resolution_m,
+            "shape": list(shape),
+            "crs": "test",
+        },
+    }
+    path = [(5, 5), (6, 6), (7, 7), (8, 8), (9, 9)]
+    corridor = build_corridor(path, grids, get_rover("lpr_1"))
+
+    for (row, col), half_width_m in zip(path[:-1], corridor.half_width_m):
+        scan_range = max(half_width_m, 1.0) * 2.0
+        scan = virtual_scan(
+            elevation,
+            resolution_m,
+            row,
+            col,
+            n_azimuth=8,
+            elevation_angles_deg=(-10.0,),
+            max_range_m=scan_range,
+            range_step_m=resolution_m / 8.0,
+        )
+        for east, north, _up in scan:
+            planar_range = math.hypot(float(east), float(north))
+            assert planar_range <= scan_range + 1e-6
