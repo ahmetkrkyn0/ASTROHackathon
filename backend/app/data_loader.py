@@ -222,6 +222,14 @@ def load_preprocessed_grids(
         "resolution_m": float(metadata["resolution_m"]),
         "shape": metadata["shape"],
         "crs": metadata.get("crs", "unknown"),
+        # Where this window sits in the raw DEM it was cut from. Present in
+        # metadata.json since P1 and dropped here until now, because nothing
+        # in-process needed it -- the horizon rebuild reads metadata.json
+        # straight off disk. /api/terrain publishes it so a viewer can place
+        # the window against the wider site, and so the pixel offset a
+        # caller reads back is the one the grid was actually cut at rather
+        # than something it inferred from `origin` and the resolution.
+        "window_offset": metadata.get("window_offset"),
         "source": "preprocessed",
         "processed_dir": d,
         "default_rover_id": metadata.get("default_rover_id", DEFAULT_ROVER_ID),

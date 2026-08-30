@@ -14,7 +14,7 @@ from uuid import uuid4
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, conlist, field_validator
 
 from .constants import (
@@ -58,6 +58,14 @@ from .route_analysis import route_statistics as compute_route_statistics
 from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
 from .mission_reference import reference_summary
 from .simulation import simulate_path, summarize_simulation
+from .terrain import (
+    BINARY_LAYER_HEADERS,
+    BINARY_MEDIA_TYPE,
+    TERRAIN_LAYERS,
+    binary_layer_headers,
+    encode_layer_f32,
+    terrain_manifest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +116,12 @@ app.add_middleware(
     allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    # A browser cannot read a custom response header on a cross-origin
+    # request unless the server names it here. The binary layer carries its
+    # entire self-description in X-Layer-* -- shape, endianness, effective
+    # resolution, value range -- so without this line the 3-D client reads
+    # `undefined` for every one of them, and gets no error saying why.
+    expose_headers=list(BINARY_LAYER_HEADERS),
 )
 
 
@@ -1258,6 +1272,19 @@ def get_layer(
     # a negative step silently REVERSED the grid -- a correct-looking map with
     # its axes flipped. Bound it at the signature. (Review #9.)
     downsample: int = Query(1, ge=1, le=50),
+    # Two representations of one grid. JSON is the map overlay's: readable,
+    # capped, and ~17 bytes of text per number. f32 is the 3-D client's: the
+    # exact memory layout a Float32Array and a GPU want, at a quarter of the
+    # size, which is why the cell ceiling does not apply to it.
+    format: str = Query(
+        "json",
+        pattern="^(json|f32)$",
+        description=(
+            "json: nested lists, capped at MAX_LAYER_CELLS cells. "
+            "f32: raw little-endian float32, row-major, NaN for no-data, "
+            "uncapped."
+        ),
+    ),
     rover_id: str = DEFAULT_ROVER_ID,
     w_slope: float | None = None,
     w_energy: float | None = None,
@@ -1312,6 +1339,24 @@ def get_layer(
     if downsample > 1:
         layer = layer[::downsample, ::downsample]
 
+    if format == "f32":
+        # MAX_LAYER_CELLS guards a JSON response, where every number is text
+        # built through an object-dtype array. The same 500x500 grid is
+        # 1.00 MB of float32 -- less than the capped 256x256 JSON preview
+        # costs -- so applying the ceiling here would only deny the caller
+        # resolution it can plainly afford.
+        return Response(
+            content=encode_layer_f32(layer),
+            media_type=BINARY_MEDIA_TYPE,
+            headers=binary_layer_headers(
+                layer_name,
+                layer,
+                downsample,
+                float(metadata.get("resolution_m", 1.0)),
+                (metadata.get("layer_validity") or {}).get(layer_name),
+            ),
+        )
+
     cells = int(layer.shape[0]) * int(layer.shape[1])
     if cells > MAX_LAYER_CELLS:
         full = grids[layer_name]
@@ -1338,6 +1383,57 @@ def get_layer(
         "metadata": metadata,
         "data": serializable,
     }
+
+
+@app.get("/api/terrain")
+def terrain(
+    rover_id: str = DEFAULT_ROVER_ID,
+    w_slope: float | None = None,
+    w_energy: float | None = None,
+    w_shadow: float | None = None,
+    w_thermal: float | None = None,
+):
+    """Everything a 3-D scene needs before it fetches a byte of grid.
+
+    ``/api/layers`` answers "what are the numbers". This answers "what do
+    they mean": mesh dimensions, the georeference that ties the mesh to the
+    Moon, the elevation range the displacement scales by, the decode
+    contract, and per-layer units, range and provenance with the URL to
+    fetch each one. One call, so a client is never assembling a query
+    string by hand, guessing an axis direction, or normalising a colour
+    ramp against a range it had to compute for itself.
+    """
+    base_grids = _get_grids()
+    weight_overrides = {
+        key: value
+        for key, value in {
+            "w_slope": w_slope,
+            "w_energy": w_energy,
+            "w_shadow": w_shadow,
+            "w_thermal": w_thermal,
+        }.items()
+        if value is not None
+    }
+    rover = get_rover(rover_id)
+    grids = grids_for_rover(base_grids, rover_id, weight_overrides or None)
+
+    # Echoed into every binary_url so the caller can fetch them verbatim.
+    # cost and traversable are rover- and weight-dependent; a URL that
+    # dropped these would quietly hand back the default rover's grid.
+    query = {"rover_id": rover_id}
+    query.update({key: repr(value) for key, value in weight_overrides.items()})
+
+    return terrain_manifest(
+        grids,
+        rover_id=rover_id,
+        rover_name=rover["name"],
+        # The weights actually resolved for this rover, which are not the
+        # overrides the caller sent: grids_for_rover fills the unspecified
+        # ones from the rover's own defaults.
+        weights=dict((grids["metadata"] or {}).get("cost_weights") or {}) or None,
+        layer_names=TERRAIN_LAYERS,
+        binary_query="&".join(f"{key}={value}" for key, value in query.items()),
+    )
 
 
 @app.get("/api/reference-missions")
