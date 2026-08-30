@@ -11,6 +11,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MissionWeights.msg"
   "msg/PlanMetrics.msg"
   "msg/Corridor.msg"
+  "msg/ReplanTrigger.msg"
   "action/PlanTraverse.action"
   DEPENDENCIES builtin_interfaces geometry_msgs nav_msgs
 )

@@ -140,3 +140,62 @@ def trigger_state_from_pose(
         }
     )
     return state
+
+
+def evaluate_pose(
+    pose: PoseEstimate,
+    corridor: Corridor,
+    plan_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The full pose -> deviation -> trigger evaluation, shell-agnostic.
+
+    Both shells -- ``POST /api/pose`` and the ROS 2 pose monitor -- call
+    this one function, so the trigger policy cannot drift between them.
+
+    Slip is checked by comparing actual advance along the corridor
+    (``along_track_m``, LunaPath's own measurement from the projected
+    position) against the distance the estimator claims to have covered.
+    On loose regolith the wheels turn further than the ground gained, so
+    along-track falling well short of the claim is the slip signature.
+    Absolute fixes carry no travelled distance to compare, so they are
+    not slip-checked.
+
+    ``recommended_action`` policy: a fired ``localization_uncertainty``
+    outranks everything -- replanning from a pose wider than the corridor
+    plans from a lie, so the honest move is to stop and take an absolute
+    fix first. Otherwise any fired trigger recommends a replan.
+    """
+    from .replan_triggers import evaluate_triggers_detailed
+    from .slip_model import check_slip_accumulation
+
+    fix = project_onto_corridor(pose, corridor)
+    trigger_state = trigger_state_from_pose(pose, corridor, plan_state)
+    evaluation = evaluate_triggers_detailed(trigger_state)
+    fired = list(evaluation["fired"])
+    evaluated = list(evaluation["evaluated"])
+
+    if not pose.is_absolute_fix and pose.distance_travelled_m > 0.0:
+        slip = check_slip_accumulation(
+            travelled_m=fix.along_track_m,
+            commanded_m=pose.distance_travelled_m,
+        )
+        evaluated.append(slip.trigger_id)
+        if slip.triggered:
+            fired.append(slip)
+
+    fired_ids = {t.trigger_id for t in fired}
+    if "localization_uncertainty" in fired_ids:
+        recommended_action = "stop_and_localize"
+    elif fired_ids:
+        recommended_action = "replan"
+    else:
+        recommended_action = "continue"
+
+    return {
+        "corridor_fix": fix,
+        "fired": fired,
+        "evaluated": evaluated,
+        "skipped": evaluation["skipped"],
+        "trigger_state": trigger_state,
+        "recommended_action": recommended_action,
+    }

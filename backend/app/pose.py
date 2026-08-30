@@ -26,6 +26,7 @@ and converted in exactly one place rather than inline at each call site.
 
 from __future__ import annotations
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -129,3 +130,35 @@ class PoseEstimate(BaseModel):
         Such a pose bounds accumulated drift instead of adding to it.
         """
         return self.source in ABSOLUTE_SOURCES
+
+
+def quaternion_to_grid_heading_deg(
+    qx: float, qy: float, qz: float, qw: float
+) -> float:
+    """ROS orientation quaternion -> grid heading in degrees.
+
+    This is the single place the two conventions meet, kept in the
+    backend so it is pytest-tested without a ROS installation
+    (``lunapath_ros.conversions`` wraps it, following the grid_frame
+    pattern).
+
+    ROS REP-103: yaw is measured counter-clockwise from +x, and in the
+    map frame +x is East, +y is North. Grid heading (this module's
+    convention, above): 0 = grid North, clockwise positive. Both frames
+    have +y as north as long as the map frame is aligned with the
+    projected CRS -- which is how grid_frame.pixel_to_map_xy defines it --
+    so the conversion is the standard compass identity
+    ``heading = 90 - yaw``.
+
+    An unnormalised quaternion is accepted. The denominator is written as
+    ``qw^2 + qx^2 - qy^2 - qz^2`` rather than the textbook
+    ``1 - 2(qy^2 + qz^2)``: the two are equal only at unit norm, and the
+    first form scales with |q|^2 exactly as the numerator does, so atan2
+    cancels the norm and a publisher whose normalisation drifted still
+    yields the right heading.
+    """
+    yaw_rad = math.atan2(
+        2.0 * (qw * qz + qx * qy),
+        qw * qw + qx * qx - qy * qy - qz * qz,
+    )
+    return (90.0 - math.degrees(yaw_rad)) % 360.0

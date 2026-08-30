@@ -56,6 +56,15 @@ class LunaPathPlanner(Node):
             cancel_callback=self.cancel_callback,
             callback_group=ReentrantCallbackGroup(),
         )
+        # Latched so the pose monitor receives the active corridor even if
+        # it starts after the plan was made (see pose_monitor.LATCHED_QOS,
+        # the subscribing side of the same profile).
+        from lunapath_msgs.msg import Corridor as CorridorMsg
+        from lunapath_ros.pose_monitor import LATCHED_QOS
+
+        self._corridor_pub = self.create_publisher(
+            CorridorMsg, "corridor", LATCHED_QOS
+        )
         self.get_logger().info("PlanTraverse action server ready on /plan_traverse")
 
     # ── Goal admission ──────────────────────────────────────────────────
@@ -189,6 +198,10 @@ class LunaPathPlanner(Node):
             result.corridor = corridor_to_msg(
                 build_corridor(plan["path_pixels"], grids, rover).model_dump()
             )
+            # Also published latched: the action result reaches only the
+            # requesting client, but the pose monitor (Faz 7) needs the
+            # active corridor too, whenever it happens to start.
+            self._corridor_pub.publish(result.corridor)
         except (ValueError, KeyError) as exc:
             corridor_err = f"corridor skipped: {exc}"
             self.get_logger().warning(corridor_err)

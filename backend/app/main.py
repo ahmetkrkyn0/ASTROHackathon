@@ -39,6 +39,8 @@ from .costmap import PlanContext, default_cost_map
 from .pathfinder_4d import astar_4d, bfs_move_count
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .pathfinder import astar
+from .localization import evaluate_pose
+from .pose import PoseEstimate
 from .replan_triggers import evaluate_triggers_detailed
 from .rover_grids import grids_for_rover
 from .scenarios import (
@@ -67,6 +69,10 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="LunaPath", version="0.3.0", lifespan=_lifespan)
+# The corridor of the most recent successful plan; what /api/pose projects
+# against. Declared here so the attribute always exists -- getattr guards
+# elsewhere would hide a typo in the attribute name.
+app.state.active_corridor = None
 
 # allow_origins=["*"] together with allow_credentials=True is not a valid
 # CORS combination -- it asks browsers to send cookies/auth headers to a
@@ -489,9 +495,13 @@ def plan(req: PlanRequest, request: Request):
         raise HTTPException(status_code=500, detail="Internal simulation error.")
 
     try:
-        corridor_payload = build_corridor(
-            astar_result["path_pixels"], grids_for_plan, rover
-        ).model_dump()
+        corridor_obj = build_corridor(astar_result["path_pixels"], grids_for_plan, rover)
+        corridor_payload = corridor_obj.model_dump()
+        # The most recent successfully planned corridor becomes the one
+        # /api/pose projects against. Single-slot state, like app.state.grids:
+        # LunaPath plans for one rover, and a pose only makes sense against
+        # the route that rover is currently driving.
+        request.app.state.active_corridor = corridor_obj
     except (ValueError, KeyError) as exc:
         logger.warning("Corridor generation skipped: %s", exc)
         corridor_payload = None
@@ -563,6 +573,55 @@ def replan(req: ReplanRequest, request: Request):
         "evaluated": evaluation["evaluated"],
         "skipped": evaluation["skipped"],
         "plan": payload,
+    }
+
+
+class PoseRequest(BaseModel):
+    pose: PoseEstimate
+    state: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Telemetry the pose alone cannot supply (SoC, temperatures, "
+            "comm window), merged under the pose-derived keys -- same shape "
+            "as ReplanRequest.state."
+        ),
+    )
+
+
+@app.post("/api/pose")
+def pose(req: PoseRequest, request: Request):
+    """Locate a pose in the active corridor and evaluate the replan triggers.
+
+    This endpoint closes the loop Phase 7 exists for:
+    pose -> deviation -> trigger -> replan. The returned ``trigger_state``
+    is exactly what ``POST /api/replan`` accepts as ``state``, so a caller
+    that sees fired triggers forwards it unchanged.
+
+    LunaPath consumes this pose; it does not produce one. Whatever stack
+    estimated it declares itself in ``pose.source``.
+    """
+    corridor = request.app.state.active_corridor
+    if corridor is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No active corridor. POST /api/plan first -- a pose is only "
+                "meaningful against the route the rover is driving."
+            ),
+        )
+
+    result = evaluate_pose(req.pose, corridor, req.state)
+    return {
+        "corridor_fix": result["corridor_fix"].to_dict(),
+        "pose_source": req.pose.source,
+        "fired_triggers": [
+            {"trigger_id": t.trigger_id, "detail": t.detail}
+            for t in result["fired"]
+        ],
+        "evaluated": result["evaluated"],
+        "skipped": result["skipped"],
+        "trigger_state": result["trigger_state"],
+        "recommended_action": result["recommended_action"],
     }
 
 

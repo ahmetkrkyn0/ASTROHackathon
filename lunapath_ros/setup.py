@@ -23,6 +23,7 @@ setup(
         "console_scripts": [
             "planner_node = lunapath_ros.planner_node:main",
             "grid_publisher = lunapath_ros.grid_publisher:main",
+            "pose_monitor = lunapath_ros.pose_monitor:main",
         ],
     },
 )

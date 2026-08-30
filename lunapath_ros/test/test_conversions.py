@@ -129,3 +129,98 @@ def test_corridor_msg_maps_the_capital_k_field():
     assert list(message.thermal_budget_k_s) == pytest.approx([2.0])
     assert len(message.waypoints) == 2
     assert len(message.half_width_m) == len(message.waypoints) - 1
+
+
+# ── Faz 7: odometry -> PoseEstimate and Corridor round-trip ─────────────────
+
+
+def _odometry(x=100.0, y=200.0, yaw_deg=0.0, var_x=4.0, var_y=1.0, var_yaw=0.01):
+    import math
+
+    from nav_msgs.msg import Odometry
+
+    message = Odometry()
+    message.header.stamp = _stamp()
+    message.pose.pose.position.x = x
+    message.pose.pose.position.y = y
+    half = math.radians(yaw_deg) / 2.0
+    message.pose.pose.orientation.z = math.sin(half)
+    message.pose.pose.orientation.w = math.cos(half)
+    covariance = [0.0] * 36
+    covariance[0], covariance[7], covariance[35] = var_x, var_y, var_yaw
+    message.pose.covariance = covariance
+    return message
+
+
+def test_corridor_msg_round_trips_back_to_the_backend_dict():
+    from lunapath_ros.conversions import msg_to_corridor
+
+    corridor = {
+        "crs": "test",
+        "waypoints": [(0.0, 0.0), (80.0, 0.0)],
+        "fallback_points": [(0.0, 0.0), (80.0, 0.0)],
+        "half_width_m": [12.5],
+        "max_slope_deg": [4.0],
+        "energy_budget_wh": [30.0],
+        "thermal_budget_K_s": [500.0],
+    }
+    restored = msg_to_corridor(corridor_to_msg(corridor))
+    assert restored["thermal_budget_K_s"] == pytest.approx([500.0])
+    assert restored["waypoints"][1] == pytest.approx((80.0, 0.0))
+    assert restored["crs"] == "test"
+
+
+def test_odometry_maps_to_a_valid_pose_estimate():
+    from app.pose import PoseEstimate
+    from lunapath_ros.conversions import odometry_to_pose_estimate
+
+    payload = odometry_to_pose_estimate(
+        _odometry(), source="lidar_odometry", distance_travelled_m=42.0
+    )
+    pose = PoseEstimate(**payload)  # the contract itself validates it
+    assert pose.x_m == pytest.approx(100.0)
+    assert pose.distance_travelled_m == pytest.approx(42.0)
+    assert pose.source == "lidar_odometry"
+
+
+def test_odometry_covariance_takes_the_conservative_axis():
+    from lunapath_ros.conversions import odometry_to_pose_estimate
+
+    payload = odometry_to_pose_estimate(
+        _odometry(var_x=4.0, var_y=1.0), source="visual_odometry",
+        distance_travelled_m=0.0,
+    )
+    # sqrt(max(4, 1)) = 2: the ellipse's long axis leaves the corridor first.
+    assert payload["covariance_m"] == pytest.approx(2.0)
+
+
+def test_odometry_identity_orientation_reads_grid_east():
+    """yaw 0 faces map +x (East) = grid 90. If this reads 0, the REP-103
+    offset was dropped -- the Phase 2 frame bug all over again."""
+    from lunapath_ros.conversions import odometry_to_pose_estimate
+
+    payload = odometry_to_pose_estimate(
+        _odometry(yaw_deg=0.0), source="visual_odometry", distance_travelled_m=0.0
+    )
+    assert payload["heading_deg"] == pytest.approx(90.0)
+
+
+def test_unknown_covariance_without_a_fallback_is_refused():
+    from lunapath_ros.conversions import odometry_to_pose_estimate
+
+    with pytest.raises(ValueError, match="covariance"):
+        odometry_to_pose_estimate(
+            _odometry(var_x=-1.0), source="visual_odometry", distance_travelled_m=0.0
+        )
+
+
+def test_unknown_covariance_uses_the_configured_fallback():
+    from lunapath_ros.conversions import odometry_to_pose_estimate
+
+    payload = odometry_to_pose_estimate(
+        _odometry(var_x=-1.0),
+        source="visual_odometry",
+        distance_travelled_m=0.0,
+        fallback_covariance_m=7.5,
+    )
+    assert payload["covariance_m"] == pytest.approx(7.5)

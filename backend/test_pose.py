@@ -128,3 +128,50 @@ def test_zero_uncertainty_is_allowed():
     """0 is a legitimate (if optimistic) covariance; only negatives and
     non-finite values are contract violations."""
     assert _pose(covariance_m=0.0).covariance_m == 0.0
+
+
+# --- quaternion -> grid heading (the ROS boundary's geometry) --------------
+
+import math
+
+from app.pose import quaternion_to_grid_heading_deg
+
+
+def _yaw_quaternion(yaw_deg: float) -> tuple[float, float, float, float]:
+    half = math.radians(yaw_deg) / 2.0
+    return 0.0, 0.0, math.sin(half), math.cos(half)
+
+
+@pytest.mark.parametrize(
+    "yaw_deg,expected_heading",
+    [
+        (0.0, 90.0),     # facing +x (map East)  -> grid East
+        (90.0, 0.0),     # facing +y (map North) -> grid North
+        (180.0, 270.0),  # facing -x (map West)  -> grid West
+        (-90.0, 180.0),  # facing -y (map South) -> grid South
+        (45.0, 45.0),    # north-east in both frames
+    ],
+)
+def test_ros_yaw_maps_to_the_grid_compass(yaw_deg, expected_heading):
+    qx, qy, qz, qw = _yaw_quaternion(yaw_deg)
+    heading = quaternion_to_grid_heading_deg(qx, qy, qz, qw)
+    # Circular comparison: 359.999...
+    # and 0.0 are the same bearing, and float rounding near the wrap
+    # produces exactly that.
+    difference = (heading - expected_heading + 180.0) % 360.0 - 180.0
+    assert difference == pytest.approx(0.0, abs=1e-9)
+
+
+def test_an_unnormalised_quaternion_gives_the_same_heading():
+    """atan2 of the yaw terms is scale-invariant; a publisher whose
+    normalisation drifted must not corrupt the heading."""
+    qx, qy, qz, qw = _yaw_quaternion(30.0)
+    scaled = quaternion_to_grid_heading_deg(qx * 3.0, qy * 3.0, qz * 3.0, qw * 3.0)
+    assert scaled == pytest.approx(quaternion_to_grid_heading_deg(qx, qy, qz, qw))
+
+
+def test_the_identity_quaternion_faces_grid_east():
+    """ROS identity orientation is yaw 0 = +x = map East. If this ever
+    reads 0 (grid North), the 90-degree offset was dropped -- the exact
+    Phase 2 frame bug."""
+    assert quaternion_to_grid_heading_deg(0.0, 0.0, 0.0, 1.0) == pytest.approx(90.0)

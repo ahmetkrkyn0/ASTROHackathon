@@ -148,3 +148,99 @@ def corridor_to_msg(corridor: dict[str, Any]):
     message.energy_budget_wh = [float(v) for v in corridor["energy_budget_wh"]]
     message.thermal_budget_k_s = [float(v) for v in corridor["thermal_budget_K_s"]]
     return message
+
+
+def msg_to_corridor(message) -> dict[str, Any]:
+    """lunapath_msgs/Corridor -> the dict app.schemas.Corridor validates.
+
+    Inverse of :func:`corridor_to_msg`, including the one field-name
+    mapping back (``thermal_budget_k_s`` -> ``thermal_budget_K_s``).
+    Returned as a plain dict so this module stays importable without
+    pydantic; the caller validates with ``Corridor(**result)``.
+    """
+    return {
+        "crs": str(message.crs),
+        "waypoints": [(float(p.x), float(p.y)) for p in message.waypoints],
+        "fallback_points": [
+            (float(p.x), float(p.y)) for p in message.fallback_points
+        ],
+        "half_width_m": [float(v) for v in message.half_width_m],
+        "max_slope_deg": [float(v) for v in message.max_slope_deg],
+        "energy_budget_wh": [float(v) for v in message.energy_budget_wh],
+        "thermal_budget_K_s": [float(v) for v in message.thermal_budget_k_s],
+    }
+
+
+def odometry_to_pose_estimate(
+    message,
+    source: str,
+    distance_travelled_m: float,
+    fallback_covariance_m: float | None = None,
+) -> dict[str, Any]:
+    """nav_msgs/Odometry -> the dict app.pose.PoseEstimate validates.
+
+    The heading comes from ``app.pose.quaternion_to_grid_heading_deg`` --
+    the single tested home of the REP-103-yaw-to-grid-compass conversion;
+    nothing here re-derives it.
+
+    ``distance_travelled_m`` is supplied by the caller because Odometry
+    carries pose and twist but no cumulative distance; the subscribing
+    node integrates displacement between messages and passes the total.
+
+    Covariance: ``pose.covariance`` is the 6x6 row-major matrix, so
+    var_x = [0], var_y = [7], var_yaw = [35]. The horizontal 1-sigma is
+    the sqrt of the LARGER of var_x and var_y -- the conservative axis --
+    because check_localization_uncertainty compares a single number
+    against the corridor half-width and the ellipse's long axis is what
+    leaves the corridor first. A negative variance is the ROS convention
+    for "unknown"; unknown is not zero, so it maps to
+    *fallback_covariance_m* when given and raises otherwise, rather than
+    laundering ignorance into confidence.
+    """
+    from app.pose import quaternion_to_grid_heading_deg
+
+    position = message.pose.pose.position
+    orientation = message.pose.pose.orientation
+    covariance = message.pose.covariance
+
+    var_x, var_y, var_yaw = (
+        float(covariance[0]),
+        float(covariance[7]),
+        float(covariance[35]),
+    )
+    if var_x < 0.0 or var_y < 0.0:
+        if fallback_covariance_m is None:
+            raise ValueError(
+                "odometry reports unknown position covariance (negative "
+                "variance) and no fallback_covariance_m is configured; "
+                "refusing to invent confidence"
+            )
+        covariance_m = float(fallback_covariance_m)
+    else:
+        covariance_m = float(np.sqrt(max(var_x, var_y)))
+
+    heading_covariance_deg = (
+        float(np.degrees(np.sqrt(var_yaw))) if var_yaw >= 0.0 else 180.0
+    )
+
+    stamp = message.header.stamp
+    timestamp_s = float(stamp.sec) + float(stamp.nanosec) * 1e-9
+    from datetime import datetime, timezone
+
+    timestamp_utc = datetime.fromtimestamp(timestamp_s, tz=timezone.utc).isoformat()
+
+    return {
+        "x_m": float(position.x),
+        "y_m": float(position.y),
+        "heading_deg": quaternion_to_grid_heading_deg(
+            float(orientation.x),
+            float(orientation.y),
+            float(orientation.z),
+            float(orientation.w),
+        ),
+        "covariance_m": covariance_m,
+        "heading_covariance_deg": heading_covariance_deg,
+        "timestamp_utc": timestamp_utc,
+        "source": str(source),
+        "distance_travelled_m": float(distance_travelled_m),
+    }

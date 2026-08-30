@@ -65,6 +65,8 @@ def generate_launch_description() -> LaunchDescription:
     actions = [
         DeclareLaunchArgument("frame_id", default_value="moon_map"),
         DeclareLaunchArgument("processed_dir", default_value=""),
+        DeclareLaunchArgument("odom_topic", default_value="odom"),
+        DeclareLaunchArgument("pose_source", default_value="visual_odometry"),
     ]
 
     backend_dir = _find_backend_dir()
@@ -106,6 +108,22 @@ def generate_launch_description() -> LaunchDescription:
             executable="planner_node",
             name="lunapath_planner",
             parameters=[{"frame_id": frame_id, "processed_dir": processed_dir}],
+            output="screen",
+        ),
+        # Faz 7: consumes nav_msgs/Odometry from whatever odometry stack
+        # is running (none is launched here -- LunaPath does not produce
+        # odometry) and publishes ReplanTrigger when the pose leaves the
+        # corridor, uncertainty outgrows it, or slip accumulates.
+        Node(
+            package="lunapath_ros",
+            executable="pose_monitor",
+            name="lunapath_pose_monitor",
+            parameters=[
+                {
+                    "odom_topic": LaunchConfiguration("odom_topic"),
+                    "pose_source": LaunchConfiguration("pose_source"),
+                }
+            ],
             output="screen",
         ),
     ]
