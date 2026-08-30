@@ -120,10 +120,23 @@ def match_skyline(
 
     n_azimuth, height, width = cube.shape
 
-    # Sum of squared differences along the azimuth axis: one score per
-    # cell, lower is better.
-    residual = cube - observed[:, None, None]
-    scores = np.sum(residual * residual, axis=0)
+    # Occluded bearings (a mast, the lander, anything in frame) arrive as
+    # NaN. A plain SSD propagates one NaN bin into every cell's score, the
+    # NaN-to-inf mapping below then finds no finite candidate, and the
+    # function returns None -- the value that means "empty search space".
+    # A realistic partial observation was therefore unmatchable AND
+    # indistinguishable from having nothing to search. Score on the valid
+    # bins instead, normalised by how many there were so cells are still
+    # comparable. (Round 2 review, L-9.)
+    valid_bins = np.isfinite(observed)
+    n_valid = int(np.count_nonzero(valid_bins))
+    if n_valid == 0:
+        raise ValueError(
+            "observed_horizon_deg has no finite bins; nothing to match against"
+        )
+
+    residual = cube[valid_bins] - observed[valid_bins, None, None]
+    scores = np.sum(residual * residual, axis=0) / n_valid
 
     if search_mask is not None:
         mask = np.asarray(search_mask, dtype=bool)

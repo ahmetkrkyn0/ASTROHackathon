@@ -126,7 +126,7 @@ def astar(
     # ── Post-process metrics ────────────────────────────────────────────
     metrics = _compute_path_metrics(
         path_pixels, elevation, thermal_grid, cost_grid, resolution, comp_ms,
-        nodes_expanded,
+        nodes_expanded, rover_cfg,
     )
 
     return {
@@ -345,8 +345,17 @@ def _compute_path_metrics(
     resolution: float,
     comp_ms: float,
     nodes_expanded: int,
+    rover: dict[str, Any] | None = None,
 ) -> dict:
-    """Compute post-hoc path metrics for API response."""
+    """Compute post-hoc path metrics for API response.
+
+    *rover* selects the thermal envelope max_thermal_risk is measured
+    against. Without it f_thermal falls back to the DEFAULT rover, so a
+    plan requested for any other profile reported a risk computed from
+    lpr_1's battery limits -- luvmi_m, whose envelope reaches -100 C, was
+    told a comfortable -60 C route was risky, and /api/compare fed that
+    number into its safest-profile ranking. (Round 2 review, M-2.)
+    """
     if len(path_pixels) < 2:
         return _zero_metrics(comp_ms, nodes_expanded)
 
@@ -381,7 +390,7 @@ def _compute_path_metrics(
         "total_shadow_hours": 0.0,  # Not tracked in fast mode
         "max_slope_deg": round(max_slope, 2),
         "max_thermal_risk": round(
-            max(f_thermal(t) for t in path_temps), 4
+            max(f_thermal(t, rover=rover) for t in path_temps), 4
         ),
         "min_surface_temp_c": round(min(path_temps), 2),
         "total_weighted_cost": round(total_weighted_cost, 4),

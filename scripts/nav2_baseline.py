@@ -49,6 +49,14 @@ def shortest_traversable_path(traversable, start, goal, resolution_m):
             nr, nc = r + dr, c + dc
             if not (0 <= nr < height and 0 <= nc < width) or not traversable[nr, nc]:
                 continue
+            # Same diagonal corner-cutting rule LunaPath's planners apply.
+            # Without it the baseline may squeeze between two blocked cells
+            # where LunaPath refuses to, making the baseline's route
+            # artificially shorter -- a comparison that flatters LunaPath's
+            # own numbers by holding the baseline to a weaker safety
+            # standard. (Round 2 review, M-1.)
+            if dr and dc and not (traversable[r, nc] and traversable[nr, c]):
+                continue
             step = resolution_m * (math.sqrt(2.0) if dr and dc else 1.0)
             nd = d + step
             if nd < dist.get((nr, nc), math.inf):
@@ -99,7 +107,11 @@ def pick_endpoints(traversable, start, goal):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--start", type=int, nargs=2, default=(100, 100))
+    # Matches the sibling comparison scripts: (100, 100) is a
+    # non-traversable cell on the shipped 500x500 / 5 m-px grid, so the
+    # advertised no-argument invocation always failed.
+    # (Round 2 review, L-11.)
+    parser.add_argument("--start", type=int, nargs=2, default=(150, 150))
     parser.add_argument("--goal", type=int, nargs=2, default=(400, 400))
     parser.add_argument("--out", default="docs/research/nav2_baseline.md")
     args = parser.parse_args()

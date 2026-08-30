@@ -79,6 +79,9 @@ class RoverState:
     cumulative_cost: float
     recharge_count: int
     recharged_this_step: bool
+    # Battery level at this step's lowest point, before any recharge stop.
+    # Equal to battery_pct on steps that did not recharge.
+    battery_low_pct: float = 100.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -98,6 +101,7 @@ class RoverState:
             "cumulative_cost": round(self.cumulative_cost, 2),
             "recharge_count": self.recharge_count,
             "recharged_this_step": self.recharged_this_step,
+            "battery_low_pct": round(self.battery_low_pct, 2),
         }
 
 
@@ -168,6 +172,13 @@ def simulate_path(
         # clock advances exactly once per step.
         elapsed_hours += step_time_h
 
+        # The level BEFORE any recharge. min_battery_pct is the answer to
+        # "how close did we get to empty", and recharging happens before
+        # the state is recorded -- so a step that flattened the battery
+        # recorded 100% and the dip vanished. A route that ran the battery
+        # to zero seven times reported a 100% minimum.
+        # (Round 2 review, M-7.)
+        battery_low_wh = battery_wh
         recharged_this_step = False
         if i > 0 and battery_wh <= 0.0:
             # Recharging took ZERO time and required no sunlight: the rover
@@ -215,6 +226,9 @@ def simulate_path(
                 cumulative_cost=cumulative_cost,
                 recharge_count=recharge_count,
                 recharged_this_step=recharged_this_step,
+                battery_low_pct=max(0.0, battery_low_wh)
+                / battery_capacity_wh
+                * 100.0,
             )
         )
 
@@ -250,7 +264,7 @@ def summarize_simulation(states: list[RoverState]) -> dict[str, Any]:
         "total_distance_km": round(last.distance_m / 1000.0, 4),
         "total_elapsed_hours": round(last.elapsed_hours, 4),
         "final_battery_pct": round(last.battery_pct, 2),
-        "min_battery_pct": round(min(s.battery_pct for s in states), 2),
+        "min_battery_pct": round(min(s.battery_low_pct for s in states), 2),
         "max_slope_deg": round(max(s.slope_deg for s in states), 2),
         "total_energy_consumed_wh": round(sum(s.step_energy_wh for s in states), 2),
         "total_shadow_exposure": round(total_shadow_exposure, 4),

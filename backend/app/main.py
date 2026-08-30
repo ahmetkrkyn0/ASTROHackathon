@@ -175,12 +175,24 @@ async def _startup_load_grids() -> None:
 
 
 def _get_grids() -> dict:
-    """Grids for endpoints that take no Request. Same source as _active_grids."""
+    """Grids for endpoints that take no Request. Same source as _active_grids.
+
+    Answers 503, matching _active_grids. It used to answer 400 for the
+    identical server state, so /api/plan-multi and /api/compare called
+    "grids not loaded" a caller error while /api/plan called it a service
+    condition, and no client could handle "not ready" uniformly. Review #7
+    unified the grid STORE; this unifies the status contract.
+    (Round 2 review, L-4.)
+    """
     grids = _current_grids()
     if grids is None:
         raise HTTPException(
-            status_code=400,
-            detail="No grids loaded. Call POST /api/load-preprocessed or POST /api/load-dem first.",
+            status_code=503,
+            detail=(
+                "Grid data not loaded. "
+                "Run the P1 pipeline and call POST /api/load-preprocessed, "
+                "or wait for server startup to complete."
+            ),
         )
     return grids
 

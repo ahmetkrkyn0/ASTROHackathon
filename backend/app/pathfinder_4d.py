@@ -81,6 +81,12 @@ def bfs_move_count(
                 and mask[nr, nc]
                 and dist[nr, nc] < 0
             ):
+                # Same corner-cutting rule as astar_4d's MOVE edges: this
+                # count sizes the planner's horizon, so counting a route
+                # the planner cannot take would size it for a plan that
+                # never happens. (Round 2 review, M-1.)
+                if d_row and d_col and not (mask[row, nc] and mask[nr, col]):
+                    continue
                 dist[nr, nc] = dist[row, col] + 1
                 if (nr, nc) == goal:
                     return int(dist[nr, nc])
@@ -222,6 +228,18 @@ def astar_4d(
         for d_row, d_col, diagonal in _OFFSETS:
             nr, nc = row + d_row, col + d_col
             if not in_bounds(nr, nc) or not passable[nr, nc]:
+                continue
+
+            # Diagonal corner-cutting safety, matching pathfinder._astar_core:
+            # both adjacent cardinal cells must be passable, or the move
+            # squeezes the rover diagonally between two blocked cells. The
+            # 2-D planner has always refused this; without the same rule
+            # here, /api/plan-4d returned routes through squeezes that
+            # /api/plan calls untraversable -- two planners in one product
+            # disagreeing about a safety predicate. bfs_move_count carries
+            # the same rule so the horizon it sizes stays consistent with
+            # the routes this loop can actually take. (Round 2 review, M-1.)
+            if diagonal and not (passable[row, nc] and passable[nr, col]):
                 continue
 
             distance_m = diag_m if diagonal else resolution_m

@@ -347,9 +347,13 @@ def test_m7_a_route_that_never_recharges_is_unaffected():
     )
     summary = summarize_simulation(states)
     assert summary["total_recharges"] == 0
+    # With no recharge the pre-recharge level IS the recorded level, so
+    # the reported minimum is unchanged from before the fix.
     assert summary["min_battery_pct"] == pytest.approx(
-        min(state.battery_pct for state in states)
+        min(state.battery_pct for state in states), abs=0.01
     )
+    for state in states:
+        assert state.battery_low_pct == pytest.approx(state.battery_pct)
 
 
 # ── M-1: the 4-D planner must refuse diagonal corner-cutting ──────────────
@@ -490,13 +494,14 @@ def test_l4_every_endpoint_reports_missing_grids_as_503():
     try:
         with TestClient(app) as client:
             app.state.grids = None
+            # plan takes {row, col}; plan-multi and compare take [r, c]
+            # pairs -- different schemas, same readiness condition.
             for path, body in (
                 ("/api/plan", {"start": {"row": 0, "col": 0},
                                "goal": {"row": 1, "col": 1}}),
-                ("/api/plan-multi", {"start": {"row": 0, "col": 0},
-                                     "goal": {"row": 1, "col": 1}}),
-                ("/api/compare", {"start": {"row": 0, "col": 0},
-                                  "goal": {"row": 1, "col": 1}}),
+                ("/api/plan-multi", {"start": [0, 0], "goal": [1, 1],
+                                     "profiles": ["balanced"]}),
+                ("/api/compare", {"start": [0, 0], "goal": [1, 1]}),
             ):
                 response = client.post(path, json=body)
                 assert response.status_code == 503, f"{path} -> {response.status_code}"
