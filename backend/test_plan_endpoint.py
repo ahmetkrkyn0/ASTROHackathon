@@ -18,10 +18,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 # Disable startup grid loading so the test server does not need .npy files.
 # The startup handler checks app.state.grids after load; we inject it manually.
+# app.state is the only grid store (backend review #7).
 os.environ["LUNAPATH_SKIP_STARTUP"] = "YES"  # harmless — startup still runs but fails gracefully
 
 from fastapi.testclient import TestClient
-import app.main as _main_module
+from app.cost_engine import COST_MODEL_ID
 from app.main import app
 from app.serializer import pixel_to_lonlat
 
@@ -68,14 +69,19 @@ def _make_grids(
                 "w_shadow": 0.142,
                 "w_thermal": 0.190,
             },
+            # Stamped so the stored cost grid counts as this build's: an
+            # unstamped grid is now recomputed rather than trusted, because a
+            # P1 .npy predating the review #1 energy change would otherwise
+            # keep planning on the old formula. (Review #5.)
+            "cost_model": COST_MODEL_ID,
+            "default_rover_id": "lpr_1",
         },
     }
 
 
 def _inject_grids(grids: dict) -> None:
-    """Push synthetic grids into app.state and module global."""
+    """Push synthetic grids into app.state, the single grid store."""
     app.state.grids = grids
-    _main_module._grids = grids
 
 
 def check(condition: bool, label: str) -> None:
@@ -110,7 +116,6 @@ def test_rovers_returns_catalog():
 def test_plan_503_when_no_grids():
     # Remove grids
     app.state.grids = None
-    _main_module._grids = None
 
     r = client.post("/api/plan", json={
         "start": {"row": 0, "col": 0},

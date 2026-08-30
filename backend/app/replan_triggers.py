@@ -97,29 +97,78 @@ def check_localization_uncertainty(
     )
 
 
+# Which telemetry keys each trigger needs. Declared once so evaluate_triggers
+# can report what it could NOT check instead of silently skipping it.
+_TRIGGER_INPUTS: dict[str, tuple[str, ...]] = {
+    "soc_deviation": ("actual_soc", "planned_soc"),
+    "inner_temperature": ("actual_inner_c", "predicted_inner_c"),
+    "time_drift": ("drift_minutes",),
+    "corridor_violation": ("lateral_offset_m", "half_width_m"),
+    "comm_window": ("comm_minutes_remaining",),
+    "localization_uncertainty": ("localization_covariance_m", "half_width_m"),
+}
+
+
 def evaluate_triggers(state: Mapping[str, Any]) -> list[TriggerResult]:
-    """Run every check whose inputs are present; return only fired triggers."""
+    """Run every check whose inputs are present; return only fired triggers.
+
+    Kept for callers that only want the fired list. Prefer
+    :func:`evaluate_triggers_detailed` when you need to know whether a
+    trigger was actually evaluated -- an empty list here means "nothing
+    fired", which is NOT the same as "everything was checked".
+    """
+    return evaluate_triggers_detailed(state)["fired"]
+
+
+def evaluate_triggers_detailed(state: Mapping[str, Any]) -> dict[str, Any]:
+    """Evaluate every trigger, reporting the ones that could not be checked.
+
+    Each check is guarded by the presence of its telemetry keys, so a
+    partial or malformed state produced an empty fired-list that read as
+    "no replan needed" -- a fail-open answer from a safety mechanism.
+    A telemetry packet missing actual_soc reported all-clear at 1% battery,
+    and nothing said so. Returning the skipped list lets the caller see the
+    difference between "checked and clear" and "never checked".
+    (Backend review, #4.)
+    """
     results: list[TriggerResult] = []
+    skipped: list[dict[str, Any]] = []
 
-    if "actual_soc" in state and "planned_soc" in state:
-        results.append(check_soc_deviation(state["actual_soc"], state["planned_soc"]))
-    if "actual_inner_c" in state and "predicted_inner_c" in state:
-        results.append(
-            check_inner_temperature(state["actual_inner_c"], state["predicted_inner_c"])
-        )
-    if "drift_minutes" in state:
-        results.append(check_time_drift(state["drift_minutes"]))
-    if "lateral_offset_m" in state and "half_width_m" in state:
-        results.append(
-            check_corridor_violation(state["lateral_offset_m"], state["half_width_m"])
-        )
-    if "comm_minutes_remaining" in state:
-        results.append(check_comm_window(state["comm_minutes_remaining"]))
-    if "localization_covariance_m" in state and "half_width_m" in state:
-        results.append(
-            check_localization_uncertainty(
-                state["localization_covariance_m"], state["half_width_m"]
+    for trigger_id, required in _TRIGGER_INPUTS.items():
+        missing = [key for key in required if key not in state]
+        if missing:
+            skipped.append({"trigger_id": trigger_id, "missing": missing})
+            continue
+
+        if trigger_id == "soc_deviation":
+            results.append(
+                check_soc_deviation(state["actual_soc"], state["planned_soc"])
             )
-        )
+        elif trigger_id == "inner_temperature":
+            results.append(
+                check_inner_temperature(
+                    state["actual_inner_c"], state["predicted_inner_c"]
+                )
+            )
+        elif trigger_id == "time_drift":
+            results.append(check_time_drift(state["drift_minutes"]))
+        elif trigger_id == "corridor_violation":
+            results.append(
+                check_corridor_violation(
+                    state["lateral_offset_m"], state["half_width_m"]
+                )
+            )
+        elif trigger_id == "comm_window":
+            results.append(check_comm_window(state["comm_minutes_remaining"]))
+        elif trigger_id == "localization_uncertainty":
+            results.append(
+                check_localization_uncertainty(
+                    state["localization_covariance_m"], state["half_width_m"]
+                )
+            )
 
-    return [result for result in results if result.triggered]
+    return {
+        "fired": [result for result in results if result.triggered],
+        "evaluated": [result.trigger_id for result in results],
+        "skipped": skipped,
+    }

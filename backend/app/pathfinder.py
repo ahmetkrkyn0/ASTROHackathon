@@ -28,25 +28,13 @@ from typing import Any
 
 import numpy as np
 
-from .cost_engine import compute_cost_grid, f_thermal
+from .cost_engine import COST_MODEL_ID, compute_cost_grid, f_thermal, resolve_weights
 from .constants import get_rover
 
-# ── Grid resolution (metres per cell) ──────────────────────────────────────
-_CELL_M = 80.0  # 80 m per grid cell (cardinal)
-_DIAG_M = _CELL_M * math.sqrt(2)  # ≈ 113.14 m (diagonal)
-
-# ── 8-direction offsets: (dr, dc, distance_m, is_diagonal) ─────────────────
-# Precomputed tuple — zero per-iteration allocation.
-_OFFSETS: tuple[tuple[int, int, float, bool], ...] = (
-    (-1,  0, _CELL_M, False),   # N
-    ( 1,  0, _CELL_M, False),   # S
-    ( 0, -1, _CELL_M, False),   # W
-    ( 0,  1, _CELL_M, False),   # E
-    (-1, -1, _DIAG_M, True),    # NW
-    (-1,  1, _DIAG_M, True),    # NE
-    ( 1, -1, _DIAG_M, True),    # SW
-    ( 1,  1, _DIAG_M, True),    # SE
-)
+# Offsets live in _astar_core, built from the grid's ACTUAL resolution. A
+# module-level copy used to sit here hardcoding 80 m -- shadowed by the local
+# one, so it was dead, and misleading: the production grid is 5 m/px.
+# (Backend review, #16.)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -103,16 +91,19 @@ def astar(
     if not traversable[goal]:
         return _empty_result("Goal is not traversable")
 
-    # ── Phase 1: Precompute cost grid ───────────────────────────────────
+    # ── Phase 1: Cost grid ──────────────────────────────────────────────
     # Each traversable cell → [0.01, ∞), blocked cells → inf.
+    #
+    # grids["cost"] is already the grid rover_grids.grids_for_rover computed
+    # for exactly this rover and these weights, and recomputing it here threw
+    # that away and spent another ~0.75 s per request producing a bit-identical
+    # array (/api/compare paid it ten times over). Reuse it when the caller
+    # says it matches, and fall back to computing it otherwise. (Review #5.)
     rover_cfg = get_rover() if rover is None else rover
-    cost_grid = compute_cost_grid(
-        slope_grid, thermal_grid, shadow_grid,
-        resolution_m=resolution,
-        traversable=traversable,
-        weights=weights,
-        rover=rover_cfg,
-    ).astype(np.float32)
+    cost_grid = _resolve_cost_grid(
+        grids, slope_grid, thermal_grid, shadow_grid,
+        resolution, traversable, weights, rover_cfg,
+    )
 
     # Derive MIN_COST for heuristic scaling (admissibility guarantee)
     finite_mask = np.isfinite(cost_grid)
@@ -143,6 +134,49 @@ def astar(
         "metrics": metrics,
         "error": None,
     }
+
+
+def _resolve_cost_grid(
+    grids: dict[str, Any],
+    slope_grid: np.ndarray,
+    thermal_grid: np.ndarray,
+    shadow_grid: np.ndarray,
+    resolution: float,
+    traversable: np.ndarray,
+    weights: dict[str, float] | None,
+    rover_cfg: dict[str, Any],
+) -> np.ndarray:
+    """Reuse the caller's cost grid when it was built for this exact request.
+
+    ``grids_for_rover`` stamps ``metadata["rover_id"]`` and
+    ``metadata["cost_weights"]`` onto the grids it adapts, so a cost grid is
+    reusable only when BOTH match what this call was asked for -- and only
+    when its shape matches the grids it is supposed to describe.
+    """
+    metadata = grids.get("metadata") or {}
+    cached = grids.get("cost")
+
+    if cached is not None and np.asarray(cached).shape == slope_grid.shape:
+        resolved = resolve_weights(weights, rover_cfg)
+        stamped_rover = metadata.get("rover_id")
+        stamped_weights = metadata.get("cost_weights")
+        if (
+            stamped_rover is not None
+            and stamped_rover == rover_cfg.get("id")
+            and stamped_weights == resolved
+            # A grid produced by an older formula (a P1 .npy on disk) is not
+            # this build's grid even when the rover and weights agree.
+            and metadata.get("cost_model") == COST_MODEL_ID
+        ):
+            return np.asarray(cached, dtype=np.float32)
+
+    return compute_cost_grid(
+        slope_grid, thermal_grid, shadow_grid,
+        resolution_m=resolution,
+        traversable=traversable,
+        weights=weights,
+        rover=rover_cfg,
+    ).astype(np.float32)
 
 
 # ════════════════════════════════════════════════════════════════════════════

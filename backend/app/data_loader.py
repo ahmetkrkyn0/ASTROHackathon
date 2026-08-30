@@ -13,7 +13,7 @@ import rasterio
 from scipy.ndimage import uniform_filter
 
 from .constants import DEFAULT_ROVER_ID, DEFAULT_TARGET_RESOLUTION_M
-from .cost_engine import compute_cost_grid, resolve_weights
+from .cost_engine import COST_MODEL_ID, compute_cost_grid, resolve_weights
 from .thermal_grid import generate_thermal_grid
 from .traversability import compute_traversability_bool, weakest_validity
 
@@ -118,7 +118,10 @@ def load_preprocessed_grids(
         "processed_dir": d,
         "default_rover_id": metadata.get("default_rover_id", DEFAULT_ROVER_ID),
         "cost_weights": cost_weights,
-        "cost_model": metadata.get("cost_model", "weighted_cell_cost_without_barrier"),
+        # No default to the CURRENT model id: a P1 grid that predates
+        # cost_model must read as "unknown", not as "matches this build".
+        # (Review #5.)
+        "cost_model": metadata.get("cost_model", "unknown"),
         "layer_validity": {
             layer: str(metadata.get("layer_validity", {}).get(layer, "UNKNOWN"))
             for layer in _VALIDITY_LAYERS
@@ -211,7 +214,7 @@ def load_and_preprocess_dem(
             "dem_path": dem_path,
             "default_rover_id": DEFAULT_ROVER_ID,
             "cost_weights": resolved_weights,
-            "cost_model": "weighted_cell_cost_without_barrier",
+            "cost_model": COST_MODEL_ID,
             # This path only ever produces the synthetic thermal grid and the
             # elevation-proxy shadow ratio -- it does not touch the heat1d /
             # horizon / SPICE machinery -- so the honest provenance is
@@ -244,10 +247,35 @@ def _cache_key(
     resolution: float,
     weights: dict[str, float],
 ) -> str:
+    """Cache key covering the DEM's identity, not just its basename.
+
+    The old key was ``{basename}_{int(resolution)}m_{weight_hash}``, so
+    /a/dem.tif and /b/dem.tif collided, an edited DEM reused its stale
+    entry, and int() collapsed 80.0/80.4/80.9 onto one key. The full path,
+    the file's size+mtime, the untruncated resolution and the cost model id
+    all now feed the hash. (Backend review, #17.)
+    """
     basename = os.path.splitext(os.path.basename(dem_path))[0]
-    weight_blob = json.dumps(weights, sort_keys=True)
-    weight_hash = hashlib.md5(weight_blob.encode("utf-8")).hexdigest()[:8]
-    return f"{basename}_{int(resolution)}m_{weight_hash}"
+    try:
+        stat = os.stat(dem_path)
+        identity = f"{os.path.abspath(dem_path)}|{stat.st_size}|{stat.st_mtime_ns}"
+    except OSError:
+        # Unreadable now: fall back to the path alone rather than crashing on
+        # a cache lookup. A wrong-but-stable key is still better than a
+        # basename collision.
+        identity = os.path.abspath(dem_path)
+
+    blob = json.dumps(
+        {
+            "identity": identity,
+            "resolution": float(resolution),
+            "weights": weights,
+            "cost_model": COST_MODEL_ID,
+        },
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    return f"{basename}_{float(resolution):g}m_{digest}"
 
 
 def _save_cache(key: str, data: dict[str, Any]) -> None:

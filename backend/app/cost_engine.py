@@ -14,6 +14,13 @@ import numpy as np
 
 from . import constants as C
 
+# Identifies the formula compute_cost_grid implements. Bump this whenever a
+# penalty term changes shape, so anything holding a cost grid computed by an
+# older build (a P1 .npy on disk, a cache directory) can tell that it no
+# longer matches this code instead of being silently reused. The v2 bump is
+# review #1: f_energy -> f_energy_cell. (Review #5.)
+COST_MODEL_ID: str = "weighted_cell_cost_without_barrier_v2"
+
 _WEIGHT_KEYS: tuple[str, ...] = (
     "w_slope",
     "w_energy",
@@ -368,23 +375,37 @@ def compute_cost_grid(
 
     rover_cfg = _resolve_rover(rover)
     resolved = resolve_weights(weights, rover_cfg)
-    cost_grid = np.full(slope_grid.shape, np.inf, dtype=np.float64)
 
-    for idx, slope_deg in np.ndenumerate(slope_grid):
-        thermal_c = float(thermal_grid[idx])
-        shadow_ratio = float(shadow_ratio_grid[idx])
+    # Evaluated with the array forms in app.cost_vec rather than a per-cell
+    # ndenumerate loop: same formulas, same results (asserted cell-for-cell in
+    # test_review_fixes), ~7.3 s -> ~0.05 s on the 500x500 production grid.
+    # This runs on the request path, so the loop was a latency cost paid by
+    # every plan. (Backend review, #8.)
+    from .cost_vec import (
+        f_energy_cell_grid,
+        f_shadow_cell_grid,
+        f_slope_grid,
+        f_thermal_grid,
+    )
 
-        if not traversable_mask[idx]:
-            continue
-        if math.isnan(float(slope_deg)) or math.isnan(thermal_c) or math.isnan(shadow_ratio):
-            continue
+    slope = np.asarray(slope_grid, dtype=np.float64)
+    thermal = np.asarray(thermal_grid, dtype=np.float64)
+    shadow = np.asarray(shadow_ratio_grid, dtype=np.float64)
 
-        local_cost = (
-            resolved["w_slope"] * f_slope(float(slope_deg), rover_cfg)
-            + resolved["w_energy"] * f_energy_cell(float(slope_deg), rover_cfg)
-            + resolved["w_shadow"] * f_shadow_cell(shadow_ratio)
-            + resolved["w_thermal"] * f_thermal(thermal_c, rover_cfg)
+    with np.errstate(invalid="ignore"):
+        combined = (
+            resolved["w_slope"] * f_slope_grid(slope, rover_cfg)
+            + resolved["w_energy"] * f_energy_cell_grid(slope, rover_cfg)
+            + resolved["w_shadow"] * f_shadow_cell_grid(shadow)
+            + resolved["w_thermal"] * f_thermal_grid(thermal, rover_cfg)
         )
-        cost_grid[idx] = max(0.01, local_cost)
 
+    cost_grid = np.maximum(combined, 0.01)
+    invalid = (
+        ~traversable_mask
+        | np.isnan(slope)
+        | np.isnan(thermal)
+        | np.isnan(shadow)
+    )
+    cost_grid[invalid] = np.inf
     return cost_grid

@@ -56,4 +56,23 @@ def apply_sensor_overhead_to_summary(
     base_final_pct = float(summary.get("final_battery_pct", 0.0))
     overhead_pct = (100.0 * overhead_wh / e_cap_wh) if e_cap_wh > 0 else 0.0
     adjusted["final_battery_pct"] = round(max(0.0, base_final_pct - overhead_pct), 2)
+
+    # min_battery_pct used to pass through untouched while final_battery_pct
+    # dropped, so the adjusted summary could report a MINIMUM above its own
+    # final value -- an impossible battery curve. The overhead accumulates
+    # over the traverse, so the honest post-hoc bound is the same shift
+    # applied to the minimum. The risk-level counters
+    # (critical_steps_count / high_or_above_steps_count) still describe the
+    # UNADJUSTED curve and are dropped rather than left silently stale: this
+    # is a scoping adjustment, not a re-simulation. (Backend review, #12.)
+    if "min_battery_pct" in summary:
+        base_min_pct = float(summary["min_battery_pct"])
+        adjusted["min_battery_pct"] = round(max(0.0, base_min_pct - overhead_pct), 2)
+
+    if overhead_wh > 0.0:
+        for stale in ("critical_steps_count", "high_or_above_steps_count"):
+            if stale in adjusted:
+                adjusted[stale] = None
+        adjusted["risk_counts_valid"] = False
+
     return adjusted

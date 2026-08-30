@@ -123,15 +123,29 @@ class CostMap:
         return breakdown
 
 
-from .cost_engine import f_energy_cell, f_shadow_cell, f_slope, f_thermal, resolve_weights
+from .cost_engine import (  # noqa: F401  (scalar forms are the reference)
+    f_energy_cell,
+    f_shadow_cell,
+    f_slope,
+    f_thermal,
+    resolve_weights,
+)
+from .cost_vec import (
+    f_energy_cell_grid,
+    f_shadow_cell_grid,
+    f_slope_grid,
+    f_thermal_grid,
+)
 
-# The scalar penalties in cost_engine are the frozen, validated formulas.
-# np.vectorize keeps the layered path bit-identical to the legacy loop.
-# Optimising this (see spec: precomputation) is explicitly out of scope.
-_f_slope_vec = np.vectorize(f_slope, otypes=[np.float64], excluded={1})
-_f_energy_vec = np.vectorize(f_energy_cell, otypes=[np.float64], excluded={1})
-_f_shadow_cell_vec = np.vectorize(f_shadow_cell, otypes=[np.float64])
-_f_thermal_vec = np.vectorize(f_thermal, otypes=[np.float64], excluded={1})
+# The scalar penalties in cost_engine remain the frozen, validated formulas;
+# app.cost_vec holds true array forms of the same maths. np.vectorize was
+# never vectorisation -- it is a Python loop in a wrapper, and it made the
+# 500x500 grid cost ~1.5 s per call on the request path.
+# test_review_fixes asserts the two forms agree cell for cell. (Review #8.)
+_f_slope_vec = f_slope_grid
+_f_energy_vec = f_energy_cell_grid
+_f_shadow_cell_vec = f_shadow_cell_grid
+_f_thermal_vec = f_thermal_grid
 
 
 # Provenance is a property of the DATA, not of the class: the same layer

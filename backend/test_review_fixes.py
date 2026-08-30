@@ -175,3 +175,440 @@ def test_load_dem_still_reports_a_missing_file_as_404():
     client = TestClient(app)
     response = client.post("/api/load-dem", json={"dem_file": "no_such_dem.tif"})
     assert response.status_code == 404
+
+
+# ── #4  triggers report what they could not evaluate ──────────────────────
+
+def test_missing_telemetry_is_reported_not_silently_skipped():
+    from app.replan_triggers import evaluate_triggers_detailed
+
+    result = evaluate_triggers_detailed({"actual_soc": 0.01})
+    assert result["fired"] == []
+    skipped_ids = {entry["trigger_id"] for entry in result["skipped"]}
+    assert "soc_deviation" in skipped_ids
+    missing = next(
+        e["missing"] for e in result["skipped"] if e["trigger_id"] == "soc_deviation"
+    )
+    assert "planned_soc" in missing
+
+
+def test_empty_state_skips_every_trigger():
+    from app.replan_triggers import _TRIGGER_INPUTS, evaluate_triggers_detailed
+
+    result = evaluate_triggers_detailed({})
+    assert result["evaluated"] == []
+    assert len(result["skipped"]) == len(_TRIGGER_INPUTS)
+
+
+def test_complete_telemetry_evaluates_and_fires():
+    from app.replan_triggers import evaluate_triggers_detailed
+
+    result = evaluate_triggers_detailed({"actual_soc": 0.2, "planned_soc": 0.9})
+    assert "soc_deviation" in result["evaluated"]
+    assert [t.trigger_id for t in result["fired"]] == ["soc_deviation"]
+
+
+def test_evaluate_triggers_keeps_its_fired_only_contract():
+    from app.replan_triggers import evaluate_triggers
+
+    fired = evaluate_triggers({"actual_soc": 0.2, "planned_soc": 0.9})
+    assert [t.trigger_id for t in fired] == ["soc_deviation"]
+
+
+# ── #6  the 4-D cube budget bounds bytes, not just slices ─────────────────
+
+def test_cube_budget_rejects_a_multi_gigabyte_request():
+    from app.main import _check_cube_budget
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as excinfo:
+        _check_cube_budget(1000, (500, 500))
+    assert excinfo.value.status_code == 422
+
+
+def test_cube_budget_allows_a_coarsened_horizon():
+    from app.main import _check_cube_budget
+
+    _check_cube_budget(1000, (125, 125))  # must not raise
+
+
+# ── #9 / #10  input validation on the remaining endpoints ─────────────────
+
+@pytest.mark.parametrize("downsample", [0, -1, -2, 51])
+def test_layers_rejects_an_out_of_range_downsample(downsample):
+    client = TestClient(app)
+    response = client.get(f"/api/layers/slope?downsample={downsample}")
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("start", [[1, 2, 3], [1], []])
+def test_plan_multi_rejects_a_malformed_pixel_pair(start):
+    client = TestClient(app)
+    response = client.post(
+        "/api/plan-multi",
+        json={"start": start, "goal": [5, 5], "profiles": ["balanced"]},
+    )
+    assert response.status_code == 422
+
+
+# ── #5  the cost grid is reused, not recomputed, when it matches ──────────
+
+def test_reused_and_recomputed_cost_grids_plan_the_same_route():
+    """The reuse fast path must be an optimisation, never a behaviour change."""
+    from app.pathfinder import astar
+
+    grids = _fake_grids((24, 24))
+    grids["slope"] = np.clip(grids["slope"], 0.0, 18.0)  # keep a route open
+    adapted = grids_for_rover(grids, "lpr_1")
+
+    reused = astar(adapted, (1, 1), (20, 20), rover=get_rover("lpr_1"))
+    stripped = {
+        **adapted,
+        "metadata": {k: v for k, v in adapted["metadata"].items() if k != "rover_id"},
+    }
+    recomputed = astar(stripped, (1, 1), (20, 20), rover=get_rover("lpr_1"))
+
+    assert reused["error"] == recomputed["error"]
+    assert reused["path_pixels"] == recomputed["path_pixels"]
+
+
+def test_a_cost_grid_from_an_older_formula_is_not_reused():
+    """A P1 .npy predating the review #1 energy change must be recomputed."""
+    from app.cost_engine import COST_MODEL_ID
+
+    grids = _fake_grids((16, 16))
+    grids["metadata"]["cost_model"] = "weighted_cell_cost_without_barrier"
+    adapted = grids_for_rover(grids, "lpr_1")
+    assert adapted["metadata"]["cost_model"] == COST_MODEL_ID
+
+
+# ── #7  app.state is the only grid store ──────────────────────────────────
+
+def test_main_exposes_no_module_level_grid_global():
+    import app.main as main_module
+
+    assert not hasattr(main_module, "_grids")
+
+
+def test_get_grids_and_active_grids_read_the_same_store():
+    import app.main as main_module
+
+    saved = getattr(app.state, "grids", None)
+    try:
+        sentinel = {"metadata": {"shape": [1, 1]}}
+        main_module._set_grids(sentinel)
+        assert main_module._get_grids() is sentinel
+        assert main_module._current_grids() is sentinel
+    finally:
+        main_module._set_grids(saved)
+
+
+# ── #8  scalar and vectorised penalties may never drift apart ─────────────
+
+def _sample_slopes() -> np.ndarray:
+    rng = np.random.default_rng(7)
+    return np.concatenate([rng.uniform(0.0, 40.0, 2000), [0.0, 20.0, 25.0, 90.0, -3.0]])
+
+
+def _sample_temps() -> np.ndarray:
+    rng = np.random.default_rng(8)
+    return np.concatenate([rng.uniform(-260.0, 140.0, 2000), [0.0, -1e-4, 1e-4, -150.0]])
+
+
+@pytest.mark.parametrize("rover_id", sorted(ROVERS))
+def test_vectorised_slope_matches_the_scalar_form(rover_id):
+    from app.cost_vec import f_slope_grid
+
+    rover = get_rover(rover_id)
+    domain = _sample_slopes()
+    scalar = np.array([f_slope(float(x), rover) for x in domain])
+    assert np.allclose(scalar, f_slope_grid(domain, rover), equal_nan=True)
+
+
+@pytest.mark.parametrize("rover_id", sorted(ROVERS))
+def test_vectorised_energy_matches_the_scalar_form(rover_id):
+    from app.cost_vec import f_energy_cell_grid
+
+    rover = get_rover(rover_id)
+    domain = _sample_slopes()
+    scalar = np.array([f_energy_cell(float(x), rover) for x in domain])
+    assert np.allclose(scalar, f_energy_cell_grid(domain, rover), equal_nan=True)
+
+
+@pytest.mark.parametrize("rover_id", sorted(ROVERS))
+def test_vectorised_thermal_matches_the_scalar_form(rover_id):
+    from app.cost_vec import f_thermal_grid
+
+    rover = get_rover(rover_id)
+    domain = _sample_temps()
+    scalar = np.array([f_thermal(float(x), rover) for x in domain])
+    assert np.allclose(scalar, f_thermal_grid(domain, rover), equal_nan=True)
+
+
+def test_vectorised_shadow_matches_the_scalar_form():
+    from app.cost_engine import f_shadow_cell
+    from app.cost_vec import f_shadow_cell_grid
+
+    rng = np.random.default_rng(9)
+    domain = np.concatenate([rng.uniform(-0.2, 1.2, 2000), [0.0, 0.5, 1.0]])
+    scalar = np.array([f_shadow_cell(float(x)) for x in domain])
+    assert np.allclose(scalar, f_shadow_cell_grid(domain))
+
+
+def test_the_two_cost_grid_implementations_agree():
+    """compute_cost_grid and CostMap.total must never diverge: one plans the
+    route, the other explains it. (Review #8.)"""
+    rng = np.random.default_rng(3)
+    shape = (40, 40)
+    slope = rng.uniform(0.0, 30.0, shape)
+    thermal = rng.uniform(-160.0, 40.0, shape)
+    shadow = rng.uniform(0.0, 1.0, shape)
+    trav = (slope <= 25.0) & (thermal >= -150.0)
+    rover = get_rover("lpr_1")
+
+    loop = compute_cost_grid(slope, thermal, shadow, 5.0, traversable=trav, rover=rover)
+    layered = default_cost_map(rover).total(
+        PlanContext(
+            slope=slope, thermal=thermal, shadow_ratio=shadow,
+            traversable=trav, resolution_m=5.0, rover=rover,
+        )
+    )
+    assert np.array_equal(np.isfinite(loop), np.isfinite(layered))
+    finite = np.isfinite(loop)
+    assert np.allclose(loop[finite], layered[finite])
+
+
+def test_nan_inputs_stay_impassable_after_vectorisation():
+    rover = get_rover("lpr_1")
+    shape = (4, 4)
+    slope = np.full(shape, 5.0)
+    thermal = np.full(shape, -60.0)
+    shadow = np.full(shape, 0.2)
+    slope[0, 0] = np.nan
+    thermal[1, 1] = np.nan
+    shadow[2, 2] = np.nan
+
+    grid = compute_cost_grid(
+        slope, thermal, shadow, 5.0,
+        traversable=np.ones(shape, dtype=bool), rover=rover,
+    )
+    assert np.isinf(grid[0, 0]) and np.isinf(grid[1, 1]) and np.isinf(grid[2, 2])
+    assert np.isfinite(grid[3, 3])
+
+
+# ── #11  a non-polar grid is a 422, not an opaque 500 ─────────────────────
+
+def _polar_grids(origin_y: float, shape=(20, 20)) -> dict:
+    from app.cost_engine import COST_MODEL_ID
+
+    return {
+        "elevation": np.zeros(shape),
+        "slope": np.full(shape, 5.0),
+        "aspect": np.zeros(shape),
+        "thermal": np.full(shape, -50.0),
+        "shadow_ratio": np.full(shape, 0.1),
+        "cost": np.full(shape, 0.5),
+        "traversable": np.ones(shape, dtype=bool),
+        "metadata": {
+            "resolution_m": 80.0,
+            "shape": list(shape),
+            "crs": "moon_sp",
+            "origin": {"x": 0.0, "y": origin_y},
+            "cost_weights": {
+                "w_slope": 0.409, "w_energy": 0.259,
+                "w_shadow": 0.142, "w_thermal": 0.190,
+            },
+            "cost_model": COST_MODEL_ID,
+            "default_rover_id": "lpr_1",
+        },
+    }
+
+
+def test_a_non_polar_grid_reports_422_with_the_real_reason():
+    client = TestClient(app)
+    saved = getattr(app.state, "grids", None)
+    try:
+        app.state.grids = _polar_grids(1_000_000.0)
+        response = client.post(
+            "/api/plan",
+            json={"start": {"row": 0, "col": 0}, "goal": {"row": 5, "col": 5}},
+        )
+        assert response.status_code == 422
+        assert "south pole" in response.json()["detail"]
+    finally:
+        app.state.grids = saved
+
+
+def test_a_polar_grid_still_plans():
+    client = TestClient(app)
+    saved = getattr(app.state, "grids", None)
+    try:
+        app.state.grids = _polar_grids(0.0)
+        response = client.post(
+            "/api/plan",
+            json={"start": {"row": 0, "col": 0}, "goal": {"row": 5, "col": 5}},
+        )
+        assert response.status_code == 200
+    finally:
+        app.state.grids = saved
+
+
+# ── #12  the adjusted summary stays internally consistent ─────────────────
+
+def _sensor_summary() -> dict:
+    return {
+        "total_energy_consumed_wh": 500.0,
+        "total_elapsed_hours": 3.0,
+        "final_battery_pct": 70.0,
+        "min_battery_pct": 68.0,
+        "critical_steps_count": 0,
+        "high_or_above_steps_count": 1,
+    }
+
+
+def test_sensor_overhead_keeps_min_at_or_below_final_battery():
+    from app.sensor_payload import apply_sensor_overhead_to_summary, with_sensor_payload
+
+    rover = with_sensor_payload(get_rover("lpr_1"), payload_w=12.0, heater_w=8.0)
+    adjusted = apply_sensor_overhead_to_summary(_sensor_summary(), rover)
+    assert adjusted["min_battery_pct"] < 68.0
+    assert adjusted["min_battery_pct"] <= adjusted["final_battery_pct"]
+
+
+def test_sensor_overhead_invalidates_the_stale_risk_counters():
+    from app.sensor_payload import apply_sensor_overhead_to_summary, with_sensor_payload
+
+    rover = with_sensor_payload(get_rover("lpr_1"), payload_w=12.0)
+    adjusted = apply_sensor_overhead_to_summary(_sensor_summary(), rover)
+    assert adjusted["risk_counts_valid"] is False
+    assert adjusted["critical_steps_count"] is None
+
+
+def test_a_payload_free_rover_leaves_the_summary_untouched():
+    from app.sensor_payload import apply_sensor_overhead_to_summary
+
+    adjusted = apply_sensor_overhead_to_summary(_sensor_summary(), get_rover("lpr_1"))
+    assert adjusted["final_battery_pct"] == pytest.approx(70.0)
+    assert adjusted["min_battery_pct"] == pytest.approx(68.0)
+    assert adjusted["critical_steps_count"] == 0
+
+
+# ── #13  recharging costs time and needs sunlight ─────────────────────────
+
+def _run_simulation(shadow_ratio: float, steps: int = 400) -> dict:
+    from app.simulation import simulate_path, summarize_simulation
+
+    shape = (20, 20)
+    result = {"error": None, "path_pixels": [[0, i % 20] for i in range(steps)]}
+    states = simulate_path(
+        result,
+        np.full(shape, 0.5), np.full(shape, 20.0),
+        np.full(shape, -50.0), np.full(shape, shadow_ratio),
+        rover=get_rover("lpr_1"), pixel_size_m=80.0,
+    )
+    return summarize_simulation(states)
+
+
+def test_a_rover_in_full_shadow_cannot_recharge():
+    dark = _run_simulation(1.0)
+    assert dark["total_recharges"] == 0
+    assert dark["final_battery_pct"] == pytest.approx(0.0)
+
+
+def test_recharging_in_sunlight_advances_the_clock():
+    lit = _run_simulation(0.0)
+    dark = _run_simulation(1.0)
+    assert lit["total_recharges"] > 0
+    assert lit["total_elapsed_hours"] > dark["total_elapsed_hours"]
+
+
+def test_drive_time_is_still_counted_once_per_step():
+    assert _run_simulation(1.0)["total_elapsed_hours"] > 0.0
+
+
+# ── #14  the thermal shadow proxy is direction-agnostic ───────────────────
+
+def test_a_ridge_east_of_a_cell_now_casts_a_shadow():
+    from app.thermal_grid import generate_thermal_grid
+
+    shape = (5, 5)
+    elevation = np.zeros(shape)
+    elevation[:, 4] = 100.0  # ridge on the EASTERN edge
+    grid = generate_thermal_grid(
+        elevation, np.zeros(shape), np.zeros(shape), 80.0
+    )
+    assert grid[2, 3] < grid[2, 0]
+
+
+def test_row_zero_is_no_longer_structurally_exempt_from_shadow():
+    from app.thermal_grid import generate_thermal_grid
+
+    shape = (5, 5)
+    elevation = np.zeros(shape)
+    elevation[1, :] = 100.0  # ridge immediately SOUTH of row 0
+    grid = generate_thermal_grid(
+        elevation, np.zeros(shape), np.zeros(shape), 80.0
+    )
+    assert grid[0, 2] < grid[3, 2]
+
+
+# ── #16 / #20 / #21  cleanups that must not change behaviour ──────────────
+
+def test_pathfinder_has_no_stale_module_level_offsets():
+    import app.pathfinder as pathfinder
+
+    assert not hasattr(pathfinder, "_OFFSETS")
+    assert not hasattr(pathfinder, "_CELL_M")
+
+
+def test_bfs_move_count_still_measures_correctly():
+    from app.pathfinder_4d import bfs_move_count
+
+    open_grid = np.ones((10, 10), dtype=bool)
+    assert bfs_move_count(open_grid, (0, 0), (9, 9)) == 9
+    assert bfs_move_count(open_grid, (0, 0), (0, 5)) == 5
+    assert bfs_move_count(open_grid, (3, 3), (3, 3)) == 0
+
+    walled = np.ones((5, 5), dtype=bool)
+    walled[:, 2] = False
+    assert bfs_move_count(walled, (0, 0), (0, 4)) is None
+
+
+def test_negative_slope_never_yields_a_discount():
+    from app.simulation import _slope_multiplier
+
+    assert _slope_multiplier(-5.0) == pytest.approx(_slope_multiplier(0.0))
+    assert _slope_multiplier(-5.0) >= 1.0
+
+
+# ── #17  the DEM cache key identifies the DEM ─────────────────────────────
+
+def test_cache_key_separates_same_named_dems_in_different_directories():
+    from app.cost_engine import resolve_weights
+    from app.data_loader import _cache_key
+
+    weights = resolve_weights(None)
+    assert _cache_key("/a/dem.tif", 80, weights) != _cache_key("/b/dem.tif", 80, weights)
+
+
+def test_cache_key_does_not_truncate_the_resolution():
+    from app.cost_engine import resolve_weights
+    from app.data_loader import _cache_key
+
+    weights = resolve_weights(None)
+    keys = {_cache_key("/a/dem.tif", r, weights) for r in (80.0, 80.4, 80.9)}
+    assert len(keys) == 3
+
+
+# ── #15 / #19  CORS and the lifespan handler ──────────────────────────────
+
+def test_wildcard_cors_does_not_advertise_credentials():
+    client = TestClient(app)
+    response = client.get("/api/health", headers={"Origin": "https://example.test"})
+    assert response.headers.get("access-control-allow-credentials") is None
+
+
+def test_startup_runs_through_the_lifespan_handler():
+    import app.main as main_module
+
+    assert main_module.app.router.lifespan_context is not None

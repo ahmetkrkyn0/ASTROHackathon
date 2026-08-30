@@ -12,7 +12,8 @@ def generate_thermal_grid(
     """Generate synthetic surface temperature map from DEM.
 
     Lunar South Pole assumptions:
-        - Sun at ~1.5° above horizon, roughly from north
+        - Low Sun angle; direction not modelled (the aspect term below is
+          the only directional input, and it assumes sun from the north)
         - Low areas → more shadow → colder
         - North-facing slopes → more sun → warmer
         - South-facing slopes → less sun → colder
@@ -35,12 +36,26 @@ def generate_thermal_grid(
     slope_weight = np.clip(slope_grid / 25.0, 0.0, 1.0)
     T_aspect_delta = sun_factor * slope_weight * 40.0
 
-    # Local shadow proxy: north neighbor higher → blocks sun
-    shadow_penalty = np.zeros_like(elevation_grid)
-    if H > 1:
-        height_diff = np.zeros_like(elevation_grid)
-        height_diff[1:, :] = elevation_grid[:-1, :] - elevation_grid[1:, :]
-        shadow_penalty = np.clip(height_diff / (resolution_m * 0.1), 0, 1) * (-30.0)
+    # Local shadow proxy: terrain rising toward the Sun blocks it.
+    #
+    # This looked at the NORTH neighbour only, so a ridge to the east, west or
+    # south cast no shadow at all, and row 0 could never be shadowed because
+    # height_diff[0, :] was never written. Take the largest rise over the
+    # 8-neighbourhood instead, which is direction-agnostic and leaves no row
+    # structurally exempt. Still a proxy, not ray-casting: the real pipeline
+    # uses app.horizon + SPICE, and this grid stays labelled SYNTHETIC.
+    # (Backend review, #14.)
+    padded = np.pad(elevation_grid, 1, mode="edge")
+    max_rise = np.full_like(elevation_grid, -np.inf)
+    for d_row in (-1, 0, 1):
+        for d_col in (-1, 0, 1):
+            if d_row == 0 and d_col == 0:
+                continue
+            neighbour = padded[
+                1 + d_row : 1 + d_row + H, 1 + d_col : 1 + d_col + W
+            ]
+            max_rise = np.maximum(max_rise, neighbour - elevation_grid)
+    shadow_penalty = np.clip(max_rise / (resolution_m * 0.1), 0, 1) * (-30.0)
 
     T_surface = np.clip(T_base + T_aspect_delta + shadow_penalty, -250.0, 130.0)
     return T_surface.astype(np.float32)

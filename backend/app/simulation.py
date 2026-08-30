@@ -35,10 +35,18 @@ _SLOPE_MULT_CAP: float = 2.5
 
 
 def _slope_multiplier(slope_deg: float) -> float:
-    """Return piecewise-linear energy multiplier for the given slope."""
+    """Return piecewise-linear energy multiplier for the given slope.
+
+    Clamped at 0: slope grids carry a MAGNITUDE, so a negative value is bad
+    input rather than a downhill stretch. Extrapolating the first segment
+    below 0 returned multipliers under 1.0 (0.70 at -5 deg), i.e. free
+    energy. The production grid never goes negative, so this is a guard
+    against bad input, not a live fix. (Backend review, #21.)
+    """
+    theta = max(0.0, float(slope_deg))
     for deg_lo, deg_hi, mult_lo, mult_hi in _SLOPE_BREAKPOINTS:
-        if slope_deg <= deg_hi:
-            t = (slope_deg - deg_lo) / (deg_hi - deg_lo)
+        if theta <= deg_hi:
+            t = (theta - deg_lo) / (deg_hi - deg_lo)
             return mult_lo + t * (mult_hi - mult_lo)
     return _SLOPE_MULT_CAP
 
@@ -116,6 +124,7 @@ def simulate_path(
     idle_power_w = float(rover_cfg["p_idle_w"])
     heater_power_w = float(rover_cfg["p_heater_w"])
     nominal_speed_ms = float(rover_cfg["v_max_ms"])
+    solar_power_w = float(rover_cfg.get("p_solar_w") or 0.0)
     step_pixel_size_m = float(pixel_size_m or PIXEL_SIZE_M)
     diag_dist_m = _diag_distance_m(step_pixel_size_m)
 
@@ -155,15 +164,36 @@ def simulate_path(
         step_energy = drive_energy + heater_energy + idle_energy
 
         battery_wh -= step_energy
+        # Bank the drive time before any recharge stop extends it, so the
+        # clock advances exactly once per step.
+        elapsed_hours += step_time_h
+
         recharged_this_step = False
         if i > 0 and battery_wh <= 0.0:
-            battery_wh = battery_capacity_wh
-            recharge_count += 1
-            recharged_this_step = True
+            # Recharging took ZERO time and required no sunlight: the rover
+            # refilled to 100% in place, in shadow, without the clock moving,
+            # which is an unbounded free-energy source that made routes look
+            # feasible when they are not. Charge at the solar input the cell
+            # actually offers and CHARGE THE TIME IT TAKES, so elapsed_hours
+            # (and everything derived from it) reflects the stop. A cell with
+            # no usable sunlight cannot recharge at all. (Backend review, #13.)
+            solar_in_w = solar_power_w * (1.0 - shadow_ratio)
+            net_charge_w = solar_in_w - idle_power_w - heater_power_w * shadow_ratio
+            if net_charge_w > 0.0:
+                deficit_wh = battery_capacity_wh - battery_wh
+                recharge_hours = deficit_wh / net_charge_w
+                battery_wh = battery_capacity_wh
+                elapsed_hours += recharge_hours
+                step_time_h += recharge_hours
+                recharge_count += 1
+                recharged_this_step = True
+            else:
+                # Stranded: no sunlight to recover on. Report the flat
+                # battery rather than inventing energy.
+                battery_wh = 0.0
         battery_pct = battery_wh / battery_capacity_wh * 100.0
 
         cumulative_dist_m += step_dist
-        elapsed_hours += step_time_h
         node_cost = float(cost_grid[r, c])
         cumulative_cost += node_cost
 

@@ -194,7 +194,10 @@ def test_battery_does_not_go_negative():
 
 
 def test_battery_recharges_to_full_when_depleted():
-    grids = _flat_grids(slope=24.0, shadow=1.0)
+    # shadow=0.0: recharging now requires usable sunlight and costs the time
+    # it takes. Under the old model the rover refilled instantly even in full
+    # shadow, which was an unbounded free-energy source. (Backend review #13.)
+    grids = _flat_grids(slope=24.0, shadow=0.0)
     path = [[0, i] for i in range(GRID_SHAPE[1])]
     states = simulate_path(_astar_result(path), *grids)
 
@@ -299,7 +302,8 @@ def test_summarize_shadow_exposure():
 
 
 def test_summarize_risk_counts():
-    # Force battery depletion to trigger HIGH/CRITICAL
+    # Force battery depletion to trigger HIGH/CRITICAL. Full shadow drains
+    # hardest AND now blocks recharging, so this covers the stranded case.
     grids = _flat_grids(slope=24.9, shadow=1.0)
     path = [[0, i] for i in range(GRID_SHAPE[1])]
     states = simulate_path(_astar_result(path), *grids)
@@ -309,7 +313,18 @@ def test_summarize_risk_counts():
     # With heavy drain, expect at least some high-risk steps
     check(s["high_or_above_steps_count"] > 0,
           "heavy drain produces high-risk steps")
-    check(s["total_recharges"] > 0, "heavy drain produces recharge events")
+    # A rover with no sunlight cannot recover: recharges must be zero, and it
+    # ends stranded rather than conjuring energy. (Backend review #13.)
+    check(s["total_recharges"] == 0, "no recharge is possible in full shadow")
+    check(s["final_battery_pct"] == 0.0, "a stranded rover reports a flat battery")
+
+    # In sunlight the same heavy drain DOES recover, and the recharge costs time.
+    lit = summarize_simulation(
+        simulate_path(_astar_result(path), *_flat_grids(slope=24.9, shadow=0.0))
+    )
+    check(lit["total_recharges"] > 0, "heavy drain in sunlight produces recharges")
+    check(lit["total_elapsed_hours"] > s["total_elapsed_hours"],
+          "recharging advances the clock")
 
 
 if __name__ == "__main__":

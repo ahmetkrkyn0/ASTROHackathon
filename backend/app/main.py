@@ -6,14 +6,15 @@ import logging
 import math
 import os
 import traceback
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, conlist, field_validator
 
 from .constants import (
     DEFAULT_ROVER_ID,
@@ -38,7 +39,7 @@ from .costmap import PlanContext, default_cost_map
 from .pathfinder_4d import astar_4d, bfs_move_count
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .pathfinder import astar
-from .replan_triggers import evaluate_triggers
+from .replan_triggers import evaluate_triggers_detailed
 from .rover_grids import grids_for_rover
 from .scenarios import (
     MISSION_PROFILES,
@@ -53,12 +54,36 @@ from .simulation import simulate_path, summarize_simulation
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="LunaPath", version="0.3.0")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Startup/shutdown hook.
+
+    Replaces @app.on_event("startup"), deprecated in FastAPI 0.115.
+    (Backend review, #19.)
+    """
+    await _startup_load_grids()
+    yield
+
+
+app = FastAPI(title="LunaPath", version="0.3.0", lifespan=_lifespan)
+
+# allow_origins=["*"] together with allow_credentials=True is not a valid
+# CORS combination -- it asks browsers to send cookies/auth headers to a
+# wildcard origin. There is no authentication on this API today, so nothing
+# is exploitable yet; declaring credentials=False keeps it that way rather
+# than leaving a CSRF hole armed for whoever adds auth. Set
+# LUNAPATH_CORS_ORIGINS (comma-separated) to lock this down further.
+# (Backend review, #15.)
+_cors_origins = [
+    origin.strip()
+    for origin in os.environ.get("LUNAPATH_CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -76,23 +101,58 @@ def _handle_unknown_rover(request: Request, exc: UnknownRoverError) -> JSONRespo
 # week-long horizon is thousands of slices. Cap the slice count so a request
 # cannot ask the server to allocate gigabytes. (Faz 3 review, C1.)
 MAX_PLAN_4D_SLICES = 1000
+# The slice cap alone does not bound memory: build_cost_cube materialises
+# (T, H', W') float64 and build_wait_cost_cube another, so the real cost is
+# T * H' * W' * 8 * 2 bytes -- and H'/W' shrink with coarsen, which the slice
+# cap never saw. At coarsen=1 the 500x500 grid at 1000 slices asked for 4 GB
+# from a single request. Bound the bytes, not the slice count. (Review #6.)
+MAX_PLAN_4D_CUBE_BYTES = 512 * 1024 * 1024  # 512 MiB across both cubes
+
+
+def _check_cube_budget(n_slices: int, coarse_shape: tuple[int, int]) -> None:
+    """Reject a (slice count, coarse grid) pair that would not fit in memory."""
+    height, width = coarse_shape
+    needed = n_slices * height * width * 8 * 2  # cost cube + wait cube
+    if needed > MAX_PLAN_4D_CUBE_BYTES:
+        affordable = max(
+            2, MAX_PLAN_4D_CUBE_BYTES // max(1, height * width * 8 * 2)
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{n_slices} slices over a {height}x{width} coarse grid needs "
+                f"{needed / 2**20:.0f} MiB of cost cubes, over the "
+                f"{MAX_PLAN_4D_CUBE_BYTES / 2**20:.0f} MiB budget; "
+                f"raise coarsen or keep the horizon at or under {affordable} "
+                "slices."
+            ),
+        )
 # Extra slices added on top of the exact MOVE-only horizon (bfs_move_count *
 # worst-case slices-per-move) so the planner has room to choose to WAIT --
 # waiting costs time, not coarse distance, so it does not show up in the
 # BFS move count at all. (Faz 1-2-3 review, H1.)
 DEFAULT_HORIZON_WAIT_PAD_SLICES = 20
 
-_grids: dict | None = None
+# app.state.grids is the ONE place the loaded grids live. There used to be a
+# module-level _grids global alongside it, hand-synchronised at four call
+# sites: _get_grids read only the global, _active_grids read both, and
+# /api/health read only the global, so an update that missed one left
+# different endpoints serving different grids. (Backend review, #7.)
 
 
-@app.on_event("startup")
+def _set_grids(grids: dict | None) -> None:
+    app.state.grids = grids
+
+
+def _current_grids() -> dict | None:
+    return getattr(app.state, "grids", None)
+
+
 async def _startup_load_grids() -> None:
     """Attempt to load P1 .npy grids at server start."""
-    global _grids
     try:
         grids = load_preprocessed_grids()
-        _grids = grids
-        app.state.grids = grids
+        _set_grids(grids)
         shape = grids["metadata"]["shape"]
         logger.info("Grids loaded at startup: shape=%s", shape)
     except FileNotFoundError as exc:
@@ -101,24 +161,26 @@ async def _startup_load_grids() -> None:
             "Call POST /api/load-preprocessed or POST /api/load-dem before planning.",
             exc,
         )
-        app.state.grids = None
+        _set_grids(None)
     except Exception as exc:
         logger.error("Unexpected error loading grids at startup: %s", exc)
-        app.state.grids = None
+        _set_grids(None)
 
 
 def _get_grids() -> dict:
-    if _grids is None:
+    """Grids for endpoints that take no Request. Same source as _active_grids."""
+    grids = _current_grids()
+    if grids is None:
         raise HTTPException(
             status_code=400,
             detail="No grids loaded. Call POST /api/load-preprocessed or POST /api/load-dem first.",
         )
-    return _grids
+    return grids
 
 
 def _active_grids(request: Request) -> dict:
-    """Return the active grids dict, preferring app.state over the module global."""
-    grids = getattr(request.app.state, "grids", None) or _grids
+    """Return the active grids dict."""
+    grids = getattr(request.app.state, "grids", None)
     if grids is None:
         raise HTTPException(
             status_code=503,
@@ -230,16 +292,21 @@ class Plan4DRequest(BaseModel):
     coarsen: int = Field(default=4, ge=1, le=16)
 
 
+# A bare list[int] let a 3-element start reach astar and raise IndexError as
+# an unhandled 500; /api/plan validated this and these two did not. (#10.)
+PixelPair = conlist(int, min_length=2, max_length=2)
+
+
 class PlanMultiRequest(BaseModel):
-    start: list[int]
-    goal: list[int]
+    start: PixelPair
+    goal: PixelPair
     profiles: list[str]
     rover_id: str = DEFAULT_ROVER_ID
 
 
 class CompareRequest(BaseModel):
-    start: list[int]
-    goal: list[int]
+    start: PixelPair
+    goal: PixelPair
     rover_id: str = DEFAULT_ROVER_ID
 
 
@@ -257,8 +324,9 @@ class LoadPreprocessedRequest(BaseModel):
 
 @app.get("/api/health")
 def health():
-    loaded = _grids is not None
-    shape = _grids["metadata"]["shape"] if loaded else None
+    grids = _current_grids()
+    loaded = grids is not None
+    shape = grids["metadata"]["shape"] if loaded else None
     return {"status": "ok", "version": "0.3.0", "dem_loaded": loaded, "grid_shape": shape}
 
 
@@ -273,38 +341,35 @@ def rovers():
 @app.post("/api/load-preprocessed")
 def load_preprocessed(req: LoadPreprocessedRequest):
     """Load pre-computed .npy grids from the P1 pipeline output."""
-    global _grids
     try:
-        _grids = load_preprocessed_grids(
+        grids = load_preprocessed_grids(
             processed_dir=req.processed_dir,
             weights=req.weights,
         )
-        app.state.grids = _grids
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"status": "loaded", "metadata": _grids["metadata"]}
+    _set_grids(grids)
+    return {"status": "loaded", "metadata": grids["metadata"]}
 
 
 @app.post("/api/load-dem")
 def load_dem(req: LoadDEMRequest):
-    global _grids
     dem_path = _resolve_dem_path(req.dem_file)
     if not dem_path.is_file():
         raise HTTPException(status_code=404, detail=f"DEM file not found: {req.dem_file}")
     try:
-        _grids = load_and_preprocess_dem(
+        grids = load_and_preprocess_dem(
             str(dem_path),
             req.target_resolution_m,
             use_cache=req.use_cache,
             weights=req.weights,
         )
-        app.state.grids = _grids
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    meta = _grids["metadata"]
-    return {"status": "loaded", "metadata": meta}
+    _set_grids(grids)
+    return {"status": "loaded", "metadata": grids["metadata"]}
 
 
 @app.get("/api/cell-telemetry")
@@ -442,6 +507,14 @@ def plan(req: PlanRequest, request: Request):
             rover_name=rover["name"],
             corridor=corridor_payload,
         )
+    except ValueError as exc:
+        # pixel_to_lonlat rejects a grid whose pixels do not project into the
+        # lunar south polar region. That is a bad origin/CRS in the loaded
+        # grids -- the pipeline's input, not a server fault -- and the blanket
+        # 500 hid the real reason behind "Internal serialization error".
+        # (Backend review, #11.)
+        logger.warning("Projection rejected the loaded grid geometry: %s", exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
         logger.error("Response serialization failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal serialization error.")
@@ -450,12 +523,26 @@ def plan(req: PlanRequest, request: Request):
 @app.post("/api/replan")
 def replan(req: ReplanRequest, request: Request):
     """Re-plan from the rover's current position when a trigger fires."""
-    fired = evaluate_triggers(req.state)
+    evaluation = evaluate_triggers_detailed(req.state)
+    fired = evaluation["fired"]
     if not fired and not req.force:
+        # "skipped" is reported so an empty trigger list is never mistaken
+        # for an all-clear: a telemetry packet missing actual_soc used to
+        # answer "no replan needed" at 1% battery, silently. (Review #4.)
+        skipped = evaluation["skipped"]
         return {
             "replanned": False,
             "triggers": [],
-            "reason": "no replan trigger fired",
+            "evaluated": evaluation["evaluated"],
+            "skipped": skipped,
+            "reason": (
+                "no replan trigger fired"
+                if not skipped
+                else (
+                    f"no replan trigger fired, but {len(skipped)} trigger(s) "
+                    "could not be evaluated -- telemetry fields are missing"
+                )
+            ),
         }
 
     plan_request = PlanRequest(
@@ -471,6 +558,8 @@ def replan(req: ReplanRequest, request: Request):
         "triggers": [
             {"trigger_id": t.trigger_id, "detail": t.detail} for t in fired
         ],
+        "evaluated": evaluation["evaluated"],
+        "skipped": evaluation["skipped"],
         "plan": payload,
     }
 
@@ -643,6 +732,10 @@ def plan_4d(req: Plan4DRequest, request: Request):
             )
         n_slices = max(2, default_n_slices)
 
+    # Bound the actual allocation now that both n_slices and the coarse grid
+    # shape are known -- MAX_PLAN_4D_SLICES caps the time axis only. (#6.)
+    _check_cube_budget(n_slices, coarse_traversable.shape)
+
     # Until the SPICE-driven illumination cube lands, hold shadow constant
     # across slices: the planner machinery is exercised, the physics is not
     # invented. Replace this series with app.illumination output per slice.
@@ -779,7 +872,10 @@ def compare(req: CompareRequest):
 @app.get("/api/layers/{layer_name}")
 def get_layer(
     layer_name: str,
-    downsample: int = 1,
+    # downsample=0 raised "slice step cannot be zero" as an unhandled 500, and
+    # a negative step silently REVERSED the grid -- a correct-looking map with
+    # its axes flipped. Bound it at the signature. (Review #9.)
+    downsample: int = Query(1, ge=1, le=50),
     rover_id: str = DEFAULT_ROVER_ID,
     w_slope: float | None = None,
     w_energy: float | None = None,
@@ -854,13 +950,13 @@ def load_scenario_endpoint(scenario_id: str):
         raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
 
     if "dem_file" in scenario:
-        global _grids
         dem_path = _resolve_dem_path(scenario["dem_file"])
         if dem_path.is_file():
-            _grids = load_and_preprocess_dem(
-                str(dem_path),
-                scenario.get("grid_resolution_m", 80),
-                weights=scenario.get("weights"),
+            _set_grids(
+                load_and_preprocess_dem(
+                    str(dem_path),
+                    scenario.get("grid_resolution_m", 80),
+                    weights=scenario.get("weights"),
+                )
             )
-            app.state.grids = _grids
     return scenario

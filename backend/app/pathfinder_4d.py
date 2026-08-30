@@ -70,8 +70,9 @@ def bfs_move_count(
 
     while queue:
         row, col = queue.popleft()
-        if (row, col) == goal:
-            return int(dist[row, col])
+        # No goal test on pop: start == goal returned above, and every other
+        # cell has its distance fixed when it is PUSHED, so the goal is
+        # detected there. (Backend review, #20.)
         for d_row, d_col in offsets:
             nr, nc = row + d_row, col + d_col
             if (
@@ -81,6 +82,8 @@ def bfs_move_count(
                 and dist[nr, nc] < 0
             ):
                 dist[nr, nc] = dist[row, col] + 1
+                if (nr, nc) == goal:
+                    return int(dist[nr, nc])
                 queue.append((nr, nc))
     return None
 

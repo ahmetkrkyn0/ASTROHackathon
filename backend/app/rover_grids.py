@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 
 from .constants import DEFAULT_ROVER_ID, get_rover
-from .cost_engine import compute_cost_grid, resolve_weights
+from .cost_engine import COST_MODEL_ID, compute_cost_grid, resolve_weights
 from .traversability import compute_traversability_bool
 
 
@@ -64,11 +64,17 @@ def grids_for_rover(
             )
         )
     )
+    # A grid whose cost_model is not this build's was computed by an older
+    # formula. The P1 .npy set on disk is exactly that after review #1
+    # changed the energy term, and reusing it would have kept planning on
+    # the inert-energy costs the fix was meant to remove. (Review #5.)
+    stored_model = metadata.get("cost_model")
     needs_cost_recompute = (
         rover_id != default_rover_id
         or resolved_weights != stored_weights
         or not mask_matches_stored
         or "cost" not in base_grids
+        or stored_model != COST_MODEL_ID
     )
     cost = (
         compute_cost_grid(
@@ -84,6 +90,8 @@ def grids_for_rover(
         else base_grids["cost"]
     )
 
+    if needs_cost_recompute:
+        metadata["cost_model"] = COST_MODEL_ID
     metadata["cost_weights"] = resolved_weights
     metadata["rover_id"] = rover_id
     metadata["rover_name"] = rover["name"]
