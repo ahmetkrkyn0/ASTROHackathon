@@ -9,6 +9,7 @@ import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional, Union
+from uuid import uuid4
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -73,6 +74,8 @@ app = FastAPI(title="LunaPath", version="0.3.0", lifespan=_lifespan)
 # against. Declared here so the attribute always exists -- getattr guards
 # elsewhere would hide a typo in the attribute name.
 app.state.active_corridor = None
+app.state.active_corridor_id = None
+app.state.active_corridor_rover_id = None
 
 # allow_origins=["*"] together with allow_credentials=True is not a valid
 # CORS combination -- it asks browsers to send cookies/auth headers to a
@@ -416,7 +419,20 @@ def load_dem(req: LoadDEMRequest):
 
 
 @app.get("/api/cell-telemetry")
-def get_cell_telemetry(row: int, col: int, request: Request):
+def get_cell_telemetry(
+    row: int,
+    col: int,
+    request: Request,
+    rover_id: Optional[str] = Query(
+        default=None,
+        description=(
+            "Rover whose limits and weights explain this cell. Defaults to "
+            "the loaded grid's rover, which is what every other planning "
+            "endpoint would NOT have used when planning for a different "
+            "profile."
+        ),
+    ),
+):
     grids = _active_grids(request)
     metadata = grids["metadata"]
     shape = metadata["shape"]
@@ -431,7 +447,13 @@ def get_cell_telemetry(row: int, col: int, request: Request):
     lon, lat = pixel_to_lonlat(row, col, metadata)
     resolution_m = float(metadata["resolution_m"])
 
-    rover = get_rover(metadata.get("rover_id", metadata.get("default_rover_id")))
+    # Explaining a cell with a different rover than the route was planned
+    # for makes the "why this route?" tooltip disagree with the route.
+    # Base grids carry only default_rover_id, so without the parameter
+    # this always answered for lpr_1. (Round 2 review, L-10.)
+    rover = get_rover(
+        rover_id or metadata.get("rover_id", metadata.get("default_rover_id"))
+    )
     context = PlanContext(
         slope=np.asarray(grids["slope"], dtype=np.float64),
         thermal=np.asarray(grids["thermal"], dtype=np.float64),
@@ -533,17 +555,17 @@ def plan(req: PlanRequest, request: Request):
     try:
         corridor_obj = build_corridor(astar_result["path_pixels"], grids_for_plan, rover)
         corridor_payload = corridor_obj.model_dump()
-        # The most recent successfully planned corridor becomes the one
-        # /api/pose projects against. Single-slot state, like app.state.grids:
-        # LunaPath plans for one rover, and a pose only makes sense against
-        # the route that rover is currently driving.
-        request.app.state.active_corridor = corridor_obj
     except (ValueError, KeyError) as exc:
         logger.warning("Corridor generation skipped: %s", exc)
+        corridor_obj = None
         corridor_payload = None
 
+    corridor_id = uuid4().hex[:12] if corridor_obj is not None else None
+    if corridor_payload is not None:
+        corridor_payload["corridor_id"] = corridor_id
+
     try:
-        return build_plan_response(
+        response = build_plan_response(
             astar_result,
             states,
             summary,
@@ -566,6 +588,21 @@ def plan(req: PlanRequest, request: Request):
     except Exception:
         logger.error("Response serialization failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal serialization error.")
+
+    # Published only once the response the caller receives is fully built.
+    # Assigning mid-request meant a plan whose serialisation then failed
+    # (422/500) still replaced the corridor /api/pose judges against with
+    # one the caller never saw. The id lets a pose report WHICH corridor it
+    # was judged against -- endpoints are sync defs on a threadpool, so two
+    # concurrent /api/plan calls race for this single slot, and without an
+    # identity the loser's poses were scored against the winner's route
+    # undetectably. (Round 2 review, L-6.)
+    if corridor_obj is not None:
+        request.app.state.active_corridor = corridor_obj
+        request.app.state.active_corridor_id = corridor_id
+        request.app.state.active_corridor_rover_id = req.rover_id
+
+    return response
 
 
 @app.post("/api/replan")
@@ -667,6 +704,10 @@ def pose(req: PoseRequest, request: Request):
         previous_along_track_m=req.previous_along_track_m,
     )
     return {
+        "corridor_id": getattr(request.app.state, "active_corridor_id", None),
+        "corridor_rover_id": getattr(
+            request.app.state, "active_corridor_rover_id", None
+        ),
         "corridor_fix": result["corridor_fix"].to_dict(),
         "pose_source": req.pose.source,
         "fired_triggers": [
@@ -1065,14 +1106,27 @@ def load_scenario_endpoint(scenario_id: str):
     if scenario is None:
         raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
 
+    # The load status is reported rather than implied. A missing dem_file
+    # used to return the scenario with HTTP 200 and load nothing, so the
+    # caller could not tell a loaded scenario from a no-op; and unlike
+    # /api/load-dem this path did not map load failures, so a malformed
+    # DEM surfaced as an unhandled 500. (Round 2 review, L-5.)
+    status = "no_dem_declared"
     if "dem_file" in scenario:
         dem_path = _resolve_dem_path(scenario["dem_file"])
-        if dem_path.is_file():
-            _set_grids(
-                load_and_preprocess_dem(
-                    str(dem_path),
-                    scenario.get("grid_resolution_m", 80),
-                    weights=scenario.get("weights"),
+        if not dem_path.is_file():
+            status = "dem_missing"
+        else:
+            try:
+                _set_grids(
+                    load_and_preprocess_dem(
+                        str(dem_path),
+                        scenario.get("grid_resolution_m", 80),
+                        weights=scenario.get("weights"),
+                    )
                 )
-            )
-    return scenario
+                status = "loaded"
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {**scenario, "load_status": status}

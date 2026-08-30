@@ -133,6 +133,23 @@ def grid_azimuth_to_true_azimuth(
     return rotated if grid_az.ndim else float(rotated)
 
 
+# Kernels already furnished in this process. spice.furnsh appends the
+# meta-kernel's files to CSPICE's KEEPER database every time it is
+# called, so sun_track(n_samples=N) -- which calls sun_vector_body per
+# sample -- loaded the same kernels N+1 times. Duplicates count against
+# the loaded-kernel limit and re-prioritise SPKs, so a long-running
+# process making repeated ephemeris queries degrades and eventually
+# fails with a kernel-database error. Load once per process per kernel.
+# (Round 2 review, L-3.)
+_FURNISHED: set[str] = set()
+
+
+def _ensure_kernels(spice, meta_kernel: str) -> None:
+    if meta_kernel not in _FURNISHED:
+        spice.furnsh(meta_kernel)
+        _FURNISHED.add(meta_kernel)
+
+
 def sun_vector_body(et: float, meta_kernel: str = DEFAULT_META_KERNEL) -> np.ndarray:
     """Sun position in MOON_ME at ephemeris time *et*. Requires NAIF kernels."""
     try:
@@ -143,7 +160,7 @@ def sun_vector_body(et: float, meta_kernel: str = DEFAULT_META_KERNEL) -> np.nda
             "Install it and run lunapath/src/fetch_kernels.py first."
         ) from exc
 
-    spice.furnsh(meta_kernel)
+    _ensure_kernels(spice, meta_kernel)
     position, _light_time = spice.spkpos("SUN", et, _MOON_BODY_FRAME, "LT+S", "MOON")
     return np.asarray(position, dtype=np.float64)
 
@@ -169,7 +186,7 @@ def sun_track(
             "Install it and run lunapath/src/fetch_kernels.py first."
         ) from exc
 
-    spice.furnsh(meta_kernel)
+    _ensure_kernels(spice, meta_kernel)
     et0 = spice.str2et(utc_start)
     et1 = spice.str2et(utc_end)
     ets = np.linspace(et0, et1, int(n_samples))

@@ -689,3 +689,141 @@ def test_m6_the_contract_states_the_distance_epoch():
     description = PoseEstimate.model_fields["distance_travelled_m"].description
     assert "ACTIVE CORRIDOR" in description
     assert "reset" in description.lower()
+
+
+# ── L-1: the serializer fallback origin must match its own derivation ─────
+
+
+def test_l1_the_fallback_origin_places_the_centre_pixel_where_the_comment_says():
+    """The constant's comment derives "centre pixel (250, 250) maps to
+    (176000, 48000)". Under y = origin - row * res that requires ADDING
+    the row term to the origin; it was subtracted, putting the stored
+    origin at the window's bottom edge, 40 km out."""
+    from app.serializer import ORIGIN_Y_M, RESOLUTION_M
+
+    assert ORIGIN_Y_M - 250 * RESOLUTION_M == pytest.approx(48000.0)
+
+
+def test_l1_the_fallback_still_lands_in_the_south_polar_region():
+    from app.serializer import pixel_to_lonlat
+
+    _lon, lat = pixel_to_lonlat(250, 250, None)
+    assert lat < -80.0
+
+
+# ── L-3: SPICE kernels must be furnished once per process ────────────────
+
+
+def test_l3_repeated_ephemeris_calls_do_not_refurnish_the_kernel():
+    """furnsh appends to CSPICE's KEEPER database every call, so
+    sun_track(N) loaded the meta-kernel N+1 times and a long-running
+    process eventually hit the kernel-database limit."""
+    import pathlib
+    from unittest.mock import patch
+
+    kernels = pathlib.Path(__file__).resolve().parent.parent / "kernels"
+    if not (kernels / "lunapath.tm").exists():
+        pytest.skip("NAIF kernels not fetched")
+
+    import spiceypy
+
+    from app import ephemeris
+
+    ephemeris._FURNISHED.clear()
+    try:
+        with patch.object(
+            spiceypy, "furnsh", wraps=spiceypy.furnsh
+        ) as spy:
+            ephemeris.sun_track(
+                "2026-08-30T00:00:00", "2026-08-30T06:00:00", 8, -69.4, 32.3
+            )
+            assert spy.call_count == 1
+    finally:
+        ephemeris._FURNISHED.clear()
+
+
+# ── L-5: scenario loading must report what it did ────────────────────────
+
+
+def test_l5_scenario_response_reports_its_load_status():
+    from app.main import load_scenario_endpoint
+    from app.scenarios import list_scenarios
+
+    names = list_scenarios()
+    if not names:
+        pytest.skip("no scenarios shipped")
+    payload = load_scenario_endpoint(names[0])
+    assert payload["load_status"] in {"loaded", "dem_missing", "no_dem_declared"}
+
+
+# ── L-6: a pose must say which corridor it was judged against ────────────
+
+
+def test_l6_plan_and_pose_agree_on_the_corridor_identity():
+    previous_grids = getattr(app.state, "grids", None)
+    previous_corridor = getattr(app.state, "active_corridor", None)
+    try:
+        with TestClient(app) as client:
+            app.state.grids = _plan_grids()
+            plan = client.post(
+                "/api/plan",
+                json={"start": {"row": 2, "col": 2}, "goal": {"row": 2, "col": 15}},
+            ).json()
+            corridor_id = plan["corridor"]["corridor_id"]
+            assert corridor_id
+
+            x0, y0 = plan["corridor"]["waypoints"][0]
+            pose = client.post(
+                "/api/pose",
+                json={
+                    "pose": {
+                        "x_m": x0,
+                        "y_m": y0,
+                        "heading_deg": 90.0,
+                        "covariance_m": 2.0,
+                        "heading_covariance_deg": 1.0,
+                        "timestamp_utc": "2026-08-30T12:00:00Z",
+                        "source": "visual_odometry",
+                        "distance_travelled_m": 0.0,
+                    }
+                },
+            ).json()
+            assert pose["corridor_id"] == corridor_id
+    finally:
+        app.state.grids = previous_grids
+        app.state.active_corridor = previous_corridor
+
+
+# ── L-10: cell telemetry must explain with the requested rover ───────────
+
+
+def test_l10_cell_telemetry_accepts_a_rover_id():
+    previous_grids = getattr(app.state, "grids", None)
+    try:
+        with TestClient(app) as client:
+            app.state.grids = _plan_grids()
+            default = client.get("/api/cell-telemetry?row=5&col=5").json()
+            viper = client.get(
+                "/api/cell-telemetry?row=5&col=5&rover_id=nasa_viper"
+            ).json()
+            # The breakdown is what the tooltip shows; it must reflect the
+            # rover the route was planned for, not always the grid default.
+            assert (
+                default["cost_breakdown"]["total"]
+                != viper["cost_breakdown"]["total"]
+            )
+    finally:
+        app.state.grids = previous_grids
+
+
+def test_l10_an_unknown_rover_id_is_rejected():
+    previous_grids = getattr(app.state, "grids", None)
+    try:
+        with TestClient(app) as client:
+            app.state.grids = _plan_grids()
+            response = client.get(
+                "/api/cell-telemetry?row=5&col=5&rover_id=not_a_rover"
+            )
+            assert response.status_code == 422
+    finally:
+        app.state.grids = previous_grids

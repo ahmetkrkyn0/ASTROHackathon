@@ -24,8 +24,19 @@ if TYPE_CHECKING:
 # Origin: top-left corner of the 500x500 window in Polar Stereo metres.
 # Derived from window selection in process_lunar_data.py:
 #   centre pixel (250, 250) maps to (176000, 48000) m.
+#
+# The y term is ADDED because rows increase southward: y = origin - row *
+# resolution, so the origin (row 0) sits north of the centre. It was
+# subtracted, which put the stored origin at the window's BOTTOM edge and
+# made the centre pixel map to y = 8000, contradicting the derivation
+# above by the full 40 km window height. The C2 fix flipped the formula
+# in grid_frame but not the constant anchored to it. Latent -- every
+# production caller passes metadata carrying a real origin, and this
+# fallback runs only without it -- but the fallback's lon/lats were ~40 km
+# out while still passing the lat < -80 sanity check.
+# (Round 2 review, L-1.)
 ORIGIN_X_M: float = 176000.0 - 250 * 80.0   # = 156000.0
-ORIGIN_Y_M: float = 48000.0  - 250 * 80.0   # = 28000.0
+ORIGIN_Y_M: float = 48000.0  + 250 * 80.0   # = 68000.0
 RESOLUTION_M: float = 80.0
 GRID_ROWS: int = 500
 GRID_COLS: int = 500
