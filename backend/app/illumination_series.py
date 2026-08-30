@@ -119,6 +119,8 @@ def _spice_shadow_series(
     from datetime import datetime, timedelta, timezone
 
     from .ephemeris import (
+        DEFAULT_META_KERNEL,
+        _ensure_kernels,
         sun_azel_from_vector,
         sun_vector_body,
         true_azimuth_to_grid_azimuth,
@@ -127,6 +129,18 @@ def _spice_shadow_series(
     from .illumination import illuminated_mask
 
     import spiceypy as spice
+
+    # str2et needs the leapsecond kernel in the pool, and the loop below
+    # calls it BEFORE the first sun_vector_body -- which is the call that
+    # would otherwise have loaded the pool. In a cold process the very first
+    # str2et therefore raised SPICE(NOLEAPSECONDS), the caller's broad
+    # `except Exception` turned that into the static series, and the reason
+    # string blamed "real illumination unavailable" for what was an ordering
+    # mistake. Measured: a fresh process reported model="static"; the same
+    # call after anything else had touched SPICE reported "spice_horizon"
+    # and a genuinely time-varying series. Load the pool explicitly rather
+    # than depending on who ran first.
+    _ensure_kernels(spice, DEFAULT_META_KERNEL)
 
     horizon = np.load(cache_path)
     if horizon.ndim != 3 or horizon.shape[1:] != base_shadow.shape:

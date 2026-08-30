@@ -245,3 +245,81 @@ def test_manifest_layer_range_matches_the_binary_it_points_at():
         assert float(finite.min()) == pytest.approx(entry["min"], rel=1e-5), name
         assert float(finite.max()) == pytest.approx(entry["max"], rel=1e-5), name
         assert int(np.isnan(values).sum()) == entry["nodata"], name
+
+
+# -- the time-slice series ---------------------------------------------------
+
+SERIES = "/api/illumination-series"
+
+
+def test_series_manifest_reports_slices_grid_and_fields():
+    manifest = client.get(f"{SERIES}?n_slices=6&slice_hours=4").json()
+    assert manifest["slices"] == 6
+    assert manifest["slice_hours"] == 4.0
+    assert manifest["grid"]["rows"] == ROWS and manifest["grid"]["cols"] == COLS
+    assert manifest["binary_format"]["shape"] == [6, ROWS, COLS]
+    assert set(manifest["fields"]) == {"shadow", "surface_temp_c"}
+    assert manifest["fields"]["surface_temp_c"]["units"] == "degC"
+    assert manifest["thermal_model"]["tau_s"] > 0
+
+
+def test_series_without_an_epoch_says_static_and_says_why():
+    """Illumination is a function of time; without an epoch it cannot vary,
+    and the response must not let a frozen cube pass as physics."""
+    manifest = client.get(f"{SERIES}?n_slices=4").json()
+    assert manifest["shadow_model"]["time_varying"] is False
+    assert manifest["shadow_model"]["model"] == "static"
+    assert "epoch" in manifest["shadow_model"]["reason"]
+    assert manifest["sun"] == []
+
+
+def test_series_binary_is_slice_major_then_row_major():
+    response = client.get(f"{SERIES}?n_slices=6&slice_hours=4&format=f32&field=shadow")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/octet-stream"
+    assert int(response.headers["X-Series-Slices"]) == 6
+    assert int(response.headers["X-Series-Rows"]) == ROWS
+    assert int(response.headers["X-Series-Cols"]) == COLS
+    values = np.frombuffer(response.content, dtype=BINARY_DTYPE)
+    assert values.size == 6 * ROWS * COLS
+    cube = values.reshape(6, ROWS, COLS)
+    assert np.nanmin(cube) >= 0.0 and np.nanmax(cube) <= 1.0
+
+
+def test_series_temperature_uses_the_planner_recipe():
+    """The surface a viewer animates has to be the surface the planner
+    costed. build_cost_cube starts every cell at the equilibrium under its
+    long-run illumination; with a static series that is also where it
+    stays, so slice 0 is exactly that field."""
+    from app.thermal_model import shadowed_equilibrium_c
+
+    grids = _make_grids()
+    response = client.get(
+        f"{SERIES}?n_slices=2&slice_hours=4&format=f32&field=surface_temp_c"
+    )
+    cube = np.frombuffer(response.content, dtype=BINARY_DTYPE).reshape(2, ROWS, COLS)
+    expected = np.asarray(
+        shadowed_equilibrium_c(grids["thermal_sunlit_peak"], grids["shadow_ratio"]),
+        dtype=np.float64,
+    )
+    np.testing.assert_allclose(cube[0], expected, rtol=1e-4, equal_nan=True)
+
+
+def test_series_downsample_decimates_both_axes():
+    manifest = client.get(f"{SERIES}?n_slices=2&downsample=2").json()
+    assert manifest["grid"]["rows"] == 4 and manifest["grid"]["cols"] == 3
+    assert manifest["grid"]["resolution_m"] == pytest.approx(10.0)
+    binary = client.get(f"{SERIES}?n_slices=2&downsample=2&format=f32&field=shadow")
+    assert len(binary.content) == 2 * 4 * 3 * 4
+
+
+def test_series_rejects_an_unknown_field():
+    assert client.get(f"{SERIES}?n_slices=2&format=f32&field=albedo").status_code == 422
+
+
+def test_series_manifest_urls_are_fetchable_as_given():
+    manifest = client.get(f"{SERIES}?n_slices=3&slice_hours=2&downsample=2").json()
+    for name, entry in manifest["fields"].items():
+        response = client.get(entry["binary_url"])
+        assert response.status_code == 200, f"{name}: {entry['binary_url']}"
+        assert len(response.content) == 3 * 4 * 3 * 4, name

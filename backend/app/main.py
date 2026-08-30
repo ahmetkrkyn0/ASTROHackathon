@@ -39,7 +39,13 @@ from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
 from .pathfinder_4d import astar_4d, gated_move_count
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
-from .illumination_series import build_shadow_series
+from .illumination_series import build_shadow_series, sun_track_for_series
+from .thermal_model import (
+    REGOLITH_LAG_VALIDITY,
+    REGOLITH_THERMAL_TAU_S,
+    relax_surface_c,
+    shadowed_equilibrium_c,
+)
 from .pathfinder import astar
 from .localization import evaluate_pose
 from .pose import PoseEstimate
@@ -151,6 +157,13 @@ MAX_PLAN_4D_CUBE_BYTES = 512 * 1024 * 1024  # 512 MiB across both cubes
 # plenty for a map overlay -- and the error names the downsample that fits.
 # (Round 3 review, L-13.)
 MAX_LAYER_CELLS = 65536
+
+# A slice series is (T, H, W) float32 on the wire. At 24 slices the full
+# 500x500 grid is 24 MB -- a fine LAN payload and a poor one over anything
+# else. 64 MiB is the point past which the caller is asked to decimate
+# instead. Like MAX_LAYER_CELLS, the refusal names the number that would fit
+# rather than merely saying no.
+MAX_SERIES_BYTES = 64 * 1024 * 1024
 
 
 def _check_cube_budget(n_slices: int, coarse_shape: tuple[int, int]) -> None:
@@ -1434,6 +1447,175 @@ def terrain(
         layer_names=TERRAIN_LAYERS,
         binary_query="&".join(f"{key}={value}" for key, value in query.items()),
     )
+
+
+def _series_field_cube(
+    grids: dict,
+    shadow_series: list,
+    field: str,
+    step: int,
+    slice_hours: float,
+) -> np.ndarray:
+    """(T, rows, cols) for one field, decimated by *step*.
+
+    The temperature branch mirrors ``cost_cube.build_cost_cube`` step for
+    step -- same initial state, same per-slice target, same time constant --
+    so the surface a viewer animates is the surface the planner costed.
+    Deriving it differently here would put a field on screen that nothing
+    ever planned against, which is a worse failure than not shipping it.
+    """
+    stack = np.stack(
+        [np.asarray(snapshot, dtype=np.float64)[::step, ::step]
+         for snapshot in shadow_series]
+    )
+    if field == "shadow":
+        return stack
+
+    sunlit = np.asarray(grids["thermal_sunlit_peak"], dtype=np.float64)[::step, ::step]
+    base_shadow = np.asarray(grids["shadow_ratio"], dtype=np.float64)[::step, ::step]
+    # Initial state: equilibrium under the cell's LONG-RUN illumination.
+    # Starting at the annual peak would assume the traverse begins at the
+    # hottest moment of the year. (Round 4 review, H-3.)
+    state = np.asarray(shadowed_equilibrium_c(sunlit, base_shadow), dtype=np.float64)
+    dt_s = max(0.0, float(slice_hours)) * 3600.0
+
+    out = np.empty_like(stack)
+    for index in range(stack.shape[0]):
+        target = np.asarray(
+            shadowed_equilibrium_c(sunlit, stack[index]), dtype=np.float64
+        )
+        state = np.asarray(relax_surface_c(state, target, dt_s), dtype=np.float64)
+        out[index] = state
+    return out
+
+
+@app.get("/api/illumination-series")
+def illumination_series(
+    start_utc: Optional[str] = None,
+    n_slices: int = Query(24, ge=1, le=MAX_PLAN_4D_SLICES),
+    slice_hours: float = Query(1.0, gt=0.0, le=24.0),
+    downsample: int = Query(1, ge=1, le=50),
+    format: str = Query("json", pattern="^(json|f32)$"),
+    field: str = Query("shadow", pattern="^(shadow|surface_temp_c)$"),
+):
+    """Illumination and surface temperature over time, for an animated scene.
+
+    The 4-D planner already reasons over exactly this series -- it is what
+    makes "wait here for the Sun" a decision rather than a slogan -- but it
+    consumed the series privately and published only the route. A client
+    that wants to show WHY a route waits needs the same field the planner
+    waited on.
+
+    Time-varying illumination needs two things: an epoch, and the horizon
+    cube cached beside the processed grids. Without either, the series is
+    static and ``shadow_model`` says so and names what was missing. It is
+    never disguised as physics.
+    """
+    grids = _get_grids()
+    metadata = grids["metadata"]
+    base_shadow = np.asarray(grids["shadow_ratio"], dtype=np.float64)
+
+    step = int(downsample)
+    rows = len(range(0, base_shadow.shape[0], step))
+    cols = len(range(0, base_shadow.shape[1], step))
+    needed = int(n_slices) * rows * cols * 4
+    if needed > MAX_SERIES_BYTES:
+        fits = math.ceil(
+            math.sqrt((int(n_slices) * base_shadow.size * 4) / MAX_SERIES_BYTES)
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{n_slices} slices at downsample={downsample} is "
+                f"{needed / 2**20:.0f} MiB, over the "
+                f"{MAX_SERIES_BYTES // 2**20} MiB series budget. "
+                f"Use downsample={fits} or higher, or ask for fewer slices."
+            ),
+        )
+
+    shadow_series, provenance = build_shadow_series(
+        base_shadow, metadata, int(n_slices), float(slice_hours), start_utc
+    )
+
+    if format == "f32":
+        cube = _series_field_cube(
+            grids, shadow_series, field, step, float(slice_hours)
+        )
+        return Response(
+            content=encode_layer_f32(cube.reshape(-1, cube.shape[-1])),
+            media_type=BINARY_MEDIA_TYPE,
+            headers={
+                "X-Series-Field": field,
+                "X-Series-Slices": str(int(n_slices)),
+                "X-Series-Rows": str(rows),
+                "X-Series-Cols": str(cols),
+                "X-Series-Downsample": str(step),
+                "X-Series-Resolution-M": repr(
+                    float(metadata["resolution_m"]) * step
+                ),
+                "X-Layer-Dtype": "float32",
+                "X-Layer-Endian": "little",
+                "X-Layer-Order": "row-major",
+            },
+        )
+
+    sun: list[dict[str, Any]] = []
+    if start_utc:
+        try:
+            sun = sun_track_for_series(
+                metadata, int(n_slices), float(slice_hours), start_utc
+            )
+        except Exception as exc:
+            # Same reasoning as build_shadow_series: a missing kernel must
+            # degrade to "no Sun track" and say so, not take the endpoint
+            # down. Deliberately broad -- spiceypy maps SPICE failures on to
+            # assorted builtin exception types.
+            logger.warning("Sun track unavailable: %s", exc)
+            sun = []
+
+    query_base = (
+        f"n_slices={n_slices}&slice_hours={slice_hours}&downsample={step}&format=f32"
+    )
+    if start_utc:
+        query_base = f"start_utc={start_utc}&" + query_base
+
+    fields: dict[str, Any] = {}
+    for name in ("shadow", "surface_temp_c"):
+        cube = _series_field_cube(grids, shadow_series, name, step, float(slice_hours))
+        finite = cube[np.isfinite(cube)]
+        fields[name] = {
+            "units": "fraction" if name == "shadow" else "degC",
+            "min": float(finite.min()) if finite.size else None,
+            "max": float(finite.max()) if finite.size else None,
+            "binary_url": f"/api/illumination-series?{query_base}&field={name}",
+        }
+
+    return {
+        "slices": int(n_slices),
+        "slice_hours": float(slice_hours),
+        "start_utc": start_utc,
+        "grid": {
+            "rows": rows,
+            "cols": cols,
+            "resolution_m": float(metadata["resolution_m"]) * step,
+            "downsample": step,
+        },
+        "shadow_model": provenance,
+        "thermal_model": {
+            "recipe": "shadowed_equilibrium_c per slice, then relax_surface_c",
+            "tau_s": REGOLITH_THERMAL_TAU_S,
+            "validity": REGOLITH_LAG_VALIDITY,
+        },
+        "sun": sun,
+        "fields": fields,
+        "binary_format": {
+            "dtype": "float32",
+            "endian": "little",
+            "order": "slice-major, then row-major",
+            "shape": [int(n_slices), rows, cols],
+            "nodata": "NaN",
+        },
+    }
 
 
 @app.get("/api/reference-missions")
