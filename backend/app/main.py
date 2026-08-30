@@ -270,6 +270,28 @@ class PlanRequest(BaseModel):
     include_simulation: bool = True
 
 
+def _reject_non_finite_telemetry(state: dict[str, float]) -> dict[str, float]:
+    """Refuse NaN/inf telemetry at the API boundary.
+
+    ``dict[str, float]`` does not stop them: a bare ``NaN`` literal is
+    legal to Python's JSON decoder, so a plain client sends one without
+    trying. Downstream, evaluate_triggers_detailed now skips such values
+    rather than reporting them as checked (round 2, H-1), but a caller
+    who sent broken telemetry deserves to be told at the door instead of
+    reading a skipped list to discover its packet was unusable. It also
+    keeps the value out of the response: Starlette serialises with
+    allow_nan=False, and /api/pose echoes trigger_state back, so a NaN
+    that got this far returned an opaque 500.
+    """
+    bad = sorted(key for key, value in state.items() if not math.isfinite(value))
+    if bad:
+        raise ValueError(
+            f"non-finite telemetry values for {bad}; "
+            "send a finite number or omit the key"
+        )
+    return state
+
+
 class ReplanRequest(BaseModel):
     current: Union[StartGoalPixel, StartGoalGeo]
     goal: Union[StartGoalPixel, StartGoalGeo]
@@ -280,6 +302,8 @@ class ReplanRequest(BaseModel):
         description="Telemetry snapshot evaluated against the replan triggers.",
     )
     force: bool = False
+
+    _check_state = field_validator("state")(_reject_non_finite_telemetry)
 
 
 class Plan4DRequest(BaseModel):
@@ -586,6 +610,8 @@ class PoseRequest(BaseModel):
             "as ReplanRequest.state."
         ),
     )
+
+    _check_state = field_validator("state")(_reject_non_finite_telemetry)
 
 
 @app.post("/api/pose")

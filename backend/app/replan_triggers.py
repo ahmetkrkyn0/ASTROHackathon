@@ -11,6 +11,7 @@ on the ground, on the rover, or inside a test.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -120,16 +121,40 @@ def evaluate_triggers(state: Mapping[str, Any]) -> list[TriggerResult]:
     return evaluate_triggers_detailed(state)["fired"]
 
 
+def _is_unusable(value: Any) -> bool:
+    """True when *value* cannot be compared against a threshold.
+
+    NaN and infinity are the cases that matter. Every comparison against
+    NaN is False, so a NaN telemetry value makes its trigger's predicate
+    False and the trigger reports "checked and clear" -- a fail-open
+    answer from a safety mechanism, on telemetry that is visibly broken.
+    A non-numeric value would raise instead; both are "not checkable".
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return True
+    return not math.isfinite(float(value))
+
+
 def evaluate_triggers_detailed(state: Mapping[str, Any]) -> dict[str, Any]:
     """Evaluate every trigger, reporting the ones that could not be checked.
 
-    Each check is guarded by the presence of its telemetry keys, so a
-    partial or malformed state produced an empty fired-list that read as
-    "no replan needed" -- a fail-open answer from a safety mechanism.
-    A telemetry packet missing actual_soc reported all-clear at 1% battery,
-    and nothing said so. Returning the skipped list lets the caller see the
-    difference between "checked and clear" and "never checked".
-    (Backend review, #4.)
+    Each check is guarded by the presence AND USABILITY of its telemetry
+    keys, so a partial or malformed state produced an empty fired-list
+    that read as "no replan needed" -- a fail-open answer from a safety
+    mechanism. A telemetry packet missing actual_soc reported all-clear at
+    1% battery, and nothing said so. Returning the skipped list lets the
+    caller see the difference between "checked and clear" and "never
+    checked". (Backend review, #4.)
+
+    The usability half closes round 2's H-1: a bare ``NaN`` literal is
+    legal JSON to Python's decoder, so a client can put NaN in any
+    telemetry field and pass ``dict[str, float]`` validation. That value
+    then makes every comparison False and the trigger was reported as
+    EVALUATED -- the same fail-open shape as a missing key, arriving
+    through the value instead. Non-finite values are now skipped with a
+    reason, which also keeps the response JSON-serialisable: Starlette
+    renders with allow_nan=False and a NaN echoed back in trigger_state
+    took /api/pose down with a 500.
     """
     results: list[TriggerResult] = []
     skipped: list[dict[str, Any]] = []
@@ -138,6 +163,17 @@ def evaluate_triggers_detailed(state: Mapping[str, Any]) -> dict[str, Any]:
         missing = [key for key in required if key not in state]
         if missing:
             skipped.append({"trigger_id": trigger_id, "missing": missing})
+            continue
+
+        unusable = [key for key in required if _is_unusable(state[key])]
+        if unusable:
+            skipped.append(
+                {
+                    "trigger_id": trigger_id,
+                    "missing": unusable,
+                    "reason": "non-finite or non-numeric telemetry value",
+                }
+            )
             continue
 
         if trigger_id == "soc_deviation":

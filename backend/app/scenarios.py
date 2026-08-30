@@ -120,15 +120,26 @@ def compare_results(results: list[dict]) -> dict:
         }
 
     shortest = min(valid, key=lambda result: result["metrics"]["total_distance_m"])
+    # total_shadow_hours is deliberately absent from the safety key: like
+    # total_energy_wh below, _compute_path_metrics hardcodes it to 0.0 in
+    # fast mode, so including it added a constant to every candidate --
+    # no ranking effect, but it implied shadow exposure was weighed.
     safest = min(
         valid,
         key=lambda result: (
-            result["metrics"]["total_shadow_hours"]
-            + result["metrics"]["max_thermal_risk"]
+            result["metrics"]["max_thermal_risk"]
             + result["metrics"]["max_slope_deg"] / 25.0
         ),
     )
-    efficient = min(valid, key=lambda result: result["metrics"]["total_energy_wh"])
+    # Efficiency ranks on total_weighted_cost, the multi-criteria cost the
+    # planner actually minimised. It previously ranked on total_energy_wh,
+    # which _compute_path_metrics hardcodes to 0.0 for every path ("not
+    # tracked in fast mode") -- so min() returned whichever profile came
+    # first in the list and the response asserted it "uses the least
+    # energy". A fabricated energy claim from a constant-zero metric is
+    # exactly what the layer_validity discipline exists to prevent.
+    # (Round 2 review, H-2.)
+    efficient = min(valid, key=lambda result: result["metrics"]["total_weighted_cost"])
 
     return {
         "shortest_profile": shortest.get("profile_id"),
@@ -136,6 +147,8 @@ def compare_results(results: list[dict]) -> dict:
         "most_efficient_profile": efficient.get("profile_id"),
         "recommendation": (
             f"{safest.get('profile_id')} minimizes the weighted safety envelope; "
-            f"{efficient.get('profile_id')} uses the least energy."
+            f"{efficient.get('profile_id')} has the lowest weighted traverse cost. "
+            "Energy and shadow totals are not tracked in fast mode, so neither "
+            "ranking is an energy claim."
         ),
     }

@@ -48,6 +48,41 @@ bir model ciktisi olmadan devam edilmez.
 """
 
 
+def destination_transform(metadata: dict) -> "rasterio.Affine":
+    """Affine transform of the processed grid, for reprojecting into it.
+
+    ``metadata["origin"]["y"]`` is the window's TOP edge -- the P1
+    pipeline records ``win_transform.f``, and ``grid_frame.pixel_to_map_xy``
+    reads row 0 back at exactly that y, descending with increasing row.
+    ``from_origin(west, north, ...)`` wants that same top edge.
+
+    An earlier revision added ``rows * resolution`` here, treating the
+    origin as the bottom edge. That displaced the sampling window one
+    full window height north (2.5 km on the shipped 500 x 5 m grid), so
+    every statistic would have been computed against the wrong terrain
+    with entirely plausible-looking magnitudes. The synthetic end-to-end
+    check missed it because it built its reference raster with the same
+    wrong transform -- two errors cancelling into a passing test -- which
+    is why test_review2_fixes.py now pins this against grid_frame
+    instead. (Round 2 review, H-3.)
+
+    Half-cell registration: ``pixel_to_map_xy`` returns ``origin.y`` for
+    row 0, i.e. it treats the recorded origin as that row's CENTRE, while
+    ``from_origin`` names the raster's outer edge. Offsetting by half a
+    cell here makes reprojected cell centres land on the coordinates the
+    rest of the app assigns to those same cells; without it every sample
+    is drawn half a pixel north of the model value it is compared with.
+    """
+    resolution_m = float(metadata["resolution_m"])
+    origin = metadata["origin"]
+    return rasterio.transform.from_origin(
+        float(origin["x"]) - resolution_m / 2.0,
+        float(origin["y"]) + resolution_m / 2.0,
+        resolution_m,
+        resolution_m,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compare the modelled thermal grid against a Diviner raster."
@@ -79,17 +114,12 @@ def main() -> int:
     model = np.load(model_path)
 
     # The grid's georeferencing lives in metadata.json, not in a readable
-    # raster header: the processed layers are bare .npy arrays. Build the
-    # destination transform from the recorded origin and resolution.
+    # raster header: the processed layers are bare .npy arrays.
     metadata = json.loads(
         (processed_dir / "metadata.json").read_text(encoding="utf-8")
     )
-    resolution_m = float(metadata["resolution_m"])
-    origin = metadata["origin"]
     rows, cols = metadata["shape"]
-    dst_transform = rasterio.transform.from_origin(
-        origin["x"], origin["y"] + rows * resolution_m, resolution_m, resolution_m
-    )
+    dst_transform = destination_transform(metadata)
     dst_crs = metadata["crs"]
 
     with rasterio.open(reference_path) as reference_ds:
