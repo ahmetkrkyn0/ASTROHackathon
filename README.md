@@ -35,6 +35,24 @@ bir yer katmanı aracıdır. Bu yüzden:
 - Proje bir **"otonom navigasyon sistemi" değildir** — bkz.
   [docs/research/09_olgunluk_kiyaslama.md](docs/research/09_olgunluk_kiyaslama.md).
 
+## Kapsam — odometri ve konum belirleme (Faz 7)
+
+**LunaPath odometri üretmez; odometri tüketir ve yörünge DEM'iyle doğrular.**
+Hiçbir SLAM/VO algoritması içermez, hiçbir odometri kütüphanesine bağlanmaz:
+
+- Giriş sözleşmesi `backend/app/pose.py` (`PoseEstimate`) — herhangi bir
+  odometri yığınının (tekerlek EKF, KISS-ICP, stereo VO) LunaPath'e nasıl
+  bağlanacağını tanımlar; ROS tarafında karşılığı `nav_msgs/Odometry` aboneliğidir.
+- `backend/app/skyline.py` bir konum belirleme ürünü değil, **arayüz ve
+  fizibilite kanıtıdır**: DEM ufuk küpü (`horizon_map`) gözlenen bir ufuk
+  profiliyle eşlenerek drift'siz mutlak konumun bu veriden çıkabildiğini
+  gösterir; düz arazide eşleşme güvenilir diye değil, `ambiguity_ratio`
+  etiketiyle döner.
+- `backend/app/slip_model.py` **UNCALIBRATED** etiketlidir: yön iddiası
+  (eğimde enerji artar) taşır, büyüklük iddiası taşımaz.
+- Koridorun gerçek bir odometri hata bütçesiyle uyumu sayıyla gösterilir:
+  [docs/research/localization_budget.md](docs/research/localization_budget.md).
+
 ---
 
 ## Proje yapısı
