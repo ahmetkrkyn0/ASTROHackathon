@@ -161,6 +161,24 @@ def _ensure_kernels(spice, meta_kernel: str) -> None:
         _FURNISHED.add(meta_kernel)
 
 
+def utc_to_et(utc: str, meta_kernel: str = DEFAULT_META_KERNEL) -> float:
+    """UTC string -> ephemeris time, loading the kernel pool first.
+
+    ``spice.str2et`` needs the leapsecond kernel in the pool. Every caller
+    that furnished the pool itself before calling ``str2et`` directly has,
+    at one point, gotten the order wrong: the first ``str2et`` in a cold
+    process raises ``SPICE(NOLEAPSECONDS)``, and depending on how broadly
+    the caller catches that, it can look like "no kernels available" when
+    the kernels were simply never asked for yet. Routing every UTC-to-ET
+    conversion through here makes "furnish before you convert" a property
+    of the API instead of something each caller has to remember.
+    """
+    import spiceypy as spice
+
+    _ensure_kernels(spice, meta_kernel)
+    return float(spice.str2et(utc))
+
+
 def sun_vector_body(et: float, meta_kernel: str = DEFAULT_META_KERNEL) -> np.ndarray:
     """Sun position in MOON_ME at ephemeris time *et*. Requires NAIF kernels."""
     try:

@@ -9,6 +9,7 @@ import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional, Union
+from urllib.parse import urlencode
 from uuid import uuid4
 
 import numpy as np
@@ -67,6 +68,7 @@ from .simulation import simulate_path, summarize_simulation
 from .terrain import (
     BINARY_LAYER_HEADERS,
     BINARY_MEDIA_TYPE,
+    SERIES_HEADERS,
     TERRAIN_LAYERS,
     binary_layer_headers,
     encode_layer_f32,
@@ -127,7 +129,11 @@ app.add_middleware(
     # entire self-description in X-Layer-* -- shape, endianness, effective
     # resolution, value range -- so without this line the 3-D client reads
     # `undefined` for every one of them, and gets no error saying why.
-    expose_headers=list(BINARY_LAYER_HEADERS),
+    # X-Series-* is the same contract for /api/illumination-series's binary
+    # payload -- it was missing here even though the endpoint set the
+    # headers, which is the exact "sets it, but nobody can read it
+    # cross-origin" failure this comment already warns about.
+    expose_headers=list(BINARY_LAYER_HEADERS) + list(SERIES_HEADERS),
 )
 
 
@@ -164,6 +170,17 @@ MAX_LAYER_CELLS = 65536
 # instead. Like MAX_LAYER_CELLS, the refusal names the number that would fit
 # rather than merely saying no.
 MAX_SERIES_BYTES = 64 * 1024 * 1024
+
+# MAX_SERIES_BYTES bounds the *response*, computed after downsample -- but
+# build_shadow_series's real (spice_horizon) path builds n_slices full-
+# resolution float64 grids BEFORE anything downsamples them, same as
+# _check_cube_budget's cube below. A caller can ask for downsample=50 and
+# still force ~2 GB of allocation at n_slices=1000: 1000 * 500*500*8 bytes,
+# while the downsampled-response check above sees only 1000*10*10*4 bytes
+# and passes it. Same 512 MiB precedent as MAX_PLAN_4D_CUBE_BYTES, since the
+# shape of the risk is identical -- an anonymous GET forcing a large,
+# unauthenticated allocation.
+MAX_SERIES_WORKING_BYTES = 512 * 1024 * 1024
 
 
 def _check_cube_budget(n_slices: int, coarse_shape: tuple[int, int]) -> None:
@@ -1445,7 +1462,10 @@ def terrain(
         # ones from the rover's own defaults.
         weights=dict((grids["metadata"] or {}).get("cost_weights") or {}) or None,
         layer_names=TERRAIN_LAYERS,
-        binary_query="&".join(f"{key}={value}" for key, value in query.items()),
+        # urlencode, not a hand-built f-string: rover_id is arbitrary caller
+        # input reflected verbatim into a URL every manifest publishes and
+        # every client is told to fetch as-is.
+        binary_query=urlencode(query),
     )
 
 
@@ -1458,11 +1478,17 @@ def _series_field_cube(
 ) -> np.ndarray:
     """(T, rows, cols) for one field, decimated by *step*.
 
-    The temperature branch mirrors ``cost_cube.build_cost_cube`` step for
-    step -- same initial state, same per-slice target, same time constant --
-    so the surface a viewer animates is the surface the planner costed.
-    Deriving it differently here would put a field on screen that nothing
-    ever planned against, which is a worse failure than not shipping it.
+    The temperature branch uses the SAME thermal recipe as
+    ``cost_cube.build_cost_cube`` -- same initial state, same per-slice
+    target, same time constant -- so the surface a viewer animates is the
+    surface the planner costed. Deriving it differently here would put a
+    field on screen that nothing ever planned against, which is a worse
+    failure than not shipping it. The two diverge only in *spatial*
+    reduction above ``downsample=1``: this decimates by simple striding
+    (``[::step, ::step]``), the same approach ``/api/layers`` already uses
+    for its own downsample parameter, while ``build_cost_cube`` block-means
+    via ``coarsen_grid``. Identical at native resolution; not literally
+    "step for step" once a client asks for a coarser preview.
     """
     stack = np.stack(
         [np.asarray(snapshot, dtype=np.float64)[::step, ::step]
@@ -1533,6 +1559,24 @@ def illumination_series(
             ),
         )
 
+    # Real check on the WORKING set, independent of downsample -- see
+    # MAX_SERIES_WORKING_BYTES above. This is what actually protects the
+    # process; the response-size check above only protects the wire.
+    working_needed = int(n_slices) * base_shadow.size * 8
+    if working_needed > MAX_SERIES_WORKING_BYTES:
+        fits = max(1, MAX_SERIES_WORKING_BYTES // max(1, base_shadow.size * 8))
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{n_slices} slices at native resolution needs "
+                f"{working_needed / 2**20:.0f} MiB to build the series before "
+                f"any downsampling, over the "
+                f"{MAX_SERIES_WORKING_BYTES // 2**20} MiB working-set budget. "
+                f"Ask for at most {fits} slices; downsample does not reduce "
+                "this cost."
+            ),
+        )
+
     shadow_series, provenance = build_shadow_series(
         base_shadow, metadata, int(n_slices), float(slice_hours), start_utc
     )
@@ -1553,9 +1597,15 @@ def illumination_series(
                 "X-Series-Resolution-M": repr(
                     float(metadata["resolution_m"]) * step
                 ),
-                "X-Layer-Dtype": "float32",
-                "X-Layer-Endian": "little",
-                "X-Layer-Order": "row-major",
+                "X-Series-Dtype": "float32",
+                "X-Series-Endian": "little",
+                # Matches the manifest's binary_format.order. The old
+                # "row-major" here (an X-Layer-* name reused on a payload
+                # that has a time axis a single layer does not) undersold
+                # the actual layout and could mislead a header-only
+                # consumer that never fetches /api/illumination-series's
+                # own JSON manifest.
+                "X-Series-Order": "slice-major, then row-major",
             },
         )
 
@@ -1573,11 +1623,20 @@ def illumination_series(
             logger.warning("Sun track unavailable: %s", exc)
             sun = []
 
-    query_base = (
-        f"n_slices={n_slices}&slice_hours={slice_hours}&downsample={step}&format=f32"
-    )
+    # urlencode, not a hand-built f-string: start_utc is arbitrary caller
+    # input (an ISO-8601 timestamp can carry a "+" UTC offset, which a plain
+    # f-string leaves unescaped and a URL round-trip then decodes as a
+    # space) reflected verbatim into a URL every field entry publishes and
+    # every client is told to fetch as-is.
+    query_params: dict[str, Any] = {
+        "n_slices": n_slices,
+        "slice_hours": slice_hours,
+        "downsample": step,
+        "format": "f32",
+    }
     if start_utc:
-        query_base = f"start_utc={start_utc}&" + query_base
+        query_params["start_utc"] = start_utc
+    query_base = urlencode(query_params)
 
     fields: dict[str, Any] = {}
     for name in ("shadow", "surface_temp_c"):

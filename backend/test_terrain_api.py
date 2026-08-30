@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.cost_engine import COST_MODEL_ID  # noqa: E402
 from app.data_loader import derive_thermal_fields  # noqa: E402
 from app.main import app  # noqa: E402
-from app.terrain import BINARY_DTYPE, BINARY_LAYER_HEADERS  # noqa: E402
+from app.terrain import BINARY_DTYPE, BINARY_LAYER_HEADERS, SERIES_HEADERS  # noqa: E402
 
 ROWS, COLS = 8, 6
 SHAPE = (ROWS, COLS)
@@ -200,6 +200,24 @@ def test_cors_exposes_every_binary_header():
         assert name.lower() in exposed, f"{name} is invisible to the browser"
 
 
+def test_cors_exposes_every_series_header():
+    """The series binary payload has its own X-Series-* headers (a time axis
+    a single layer does not carry) -- CORS_review found these were missing
+    from the middleware's allowlist even though the endpoint set them, the
+    exact failure the sibling layer test above exists to catch."""
+    response = client.get(
+        f"{SERIES}?n_slices=2&format=f32&field=shadow",
+        headers={"Origin": "http://localhost:5173"},
+    )
+    exposed = {
+        name.strip().lower()
+        for name in response.headers.get("access-control-expose-headers", "").split(",")
+    }
+    for name in SERIES_HEADERS:
+        assert name.lower() in exposed, f"{name} is invisible to the browser"
+        assert name in response.headers, f"{name} was never set on the response"
+
+
 # -- the manifest ------------------------------------------------------------
 
 def test_terrain_manifest_describes_the_grid():
@@ -286,6 +304,33 @@ def test_series_binary_is_slice_major_then_row_major():
     assert np.nanmin(cube) >= 0.0 and np.nanmax(cube) <= 1.0
 
 
+def test_series_binary_preserves_slice_order_when_time_varying(monkeypatch):
+    """The test above cannot catch a slice/row axis swap: without an epoch
+    the series is static, so every slice is byte-identical and no
+    permutation of the T axis is detectable. Monkeypatch a genuinely
+    time-varying series -- one snapshot per slice, offset by its own index
+    -- so a T/W swap (n_slices=4 vs COLS=6, deliberately different) has
+    something to disagree with."""
+    import app.main as main_module
+
+    base = np.asarray(_make_grids()["shadow_ratio"], dtype=np.float64)
+
+    def _fake_series(base_shadow, metadata, n_slices, slice_hours, start_utc=None):
+        series = [base + float(i) for i in range(int(n_slices))]
+        return series, {"model": "spice_horizon", "time_varying": True}
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _fake_series)
+
+    response = client.get(f"{SERIES}?n_slices=4&slice_hours=4&format=f32&field=shadow")
+    assert response.status_code == 200
+    cube = np.frombuffer(response.content, dtype=BINARY_DTYPE).reshape(4, ROWS, COLS)
+    means = cube.reshape(4, -1).mean(axis=1)
+    # Slice i was offset by i; a correct slice-major encode keeps that
+    # strictly increasing. A swapped axis reshapes the same bytes into a
+    # different partition and this monotonicity does not survive it.
+    assert np.all(np.diff(means) > 0)
+
+
 def test_series_temperature_uses_the_planner_recipe():
     """The surface a viewer animates has to be the surface the planner
     costed. build_cost_cube starts every cell at the equilibrium under its
@@ -303,6 +348,49 @@ def test_series_temperature_uses_the_planner_recipe():
         dtype=np.float64,
     )
     np.testing.assert_allclose(cube[0], expected, rtol=1e-4, equal_nan=True)
+
+
+def test_series_temperature_relaxes_toward_a_new_target_across_slices(monkeypatch):
+    """The test above only proves slice 0 -- the initial equilibrium -- is
+    right. With a static series ``target == state`` at every step, so
+    relax_surface_c is a no-op and that test cannot tell whether the
+    slice-to-slice integration (the actual "same recipe as build_cost_cube"
+    claim) works at all. Feed a genuinely time-varying shadow series and
+    check slice 1 moved from slice 0's state toward slice 1's own target --
+    not jumped straight to it (relax_surface_c is a first-order lag, not an
+    instant reset) and not stayed put (that would mean the series was never
+    threaded through the temperature branch)."""
+    from app.thermal_model import shadowed_equilibrium_c
+    import app.main as main_module
+
+    grids = _make_grids()
+    base = np.asarray(grids["shadow_ratio"], dtype=np.float64)
+    shaded = np.clip(base + 0.5, 0.0, 1.0)  # a distinctly different illumination
+
+    def _fake_series(base_shadow, metadata, n_slices, slice_hours, start_utc=None):
+        return [base, shaded], {"model": "spice_horizon", "time_varying": True}
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _fake_series)
+
+    response = client.get(
+        f"{SERIES}?n_slices=2&slice_hours=4&format=f32&field=surface_temp_c"
+    )
+    cube = np.frombuffer(response.content, dtype=BINARY_DTYPE).reshape(2, ROWS, COLS)
+
+    sunlit = grids["thermal_sunlit_peak"]
+    slice0_target = np.asarray(shadowed_equilibrium_c(sunlit, base), dtype=np.float64)
+    slice1_target = np.asarray(
+        shadowed_equilibrium_c(sunlit, shaded), dtype=np.float64
+    )
+    np.testing.assert_allclose(cube[0], slice0_target, rtol=1e-4, equal_nan=True)
+
+    finite = np.isfinite(cube[0]) & np.isfinite(slice1_target)
+    moved_toward_target = np.abs(cube[1][finite] - slice1_target[finite]) < np.abs(
+        cube[0][finite] - slice1_target[finite]
+    )
+    assert moved_toward_target.all()
+    assert not np.allclose(cube[1][finite], cube[0][finite])
+    assert not np.allclose(cube[1][finite], slice1_target[finite])
 
 
 def test_series_downsample_decimates_both_axes():

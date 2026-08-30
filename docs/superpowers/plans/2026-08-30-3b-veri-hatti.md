@@ -1324,7 +1324,14 @@ davranışını değiştirdi. 4-B ve aydınlanma testlerinin 98'i geçiyor.
 
 **4. `data_loader.py`'ye bir satır.** `window_offset` `metadata.json`'da vardı,
 bellekteki metadata'ya taşınmıyordu; `/api/terrain` onsuz pencereyi ham DEM'e
-oturtamıyor. Sözlüğe anahtar ekler, hiçbir davranışı değiştirmez.
+oturtamıyor. Sözlüğe anahtar ekler — **düzeltme (bağımsız denetim, 2026-08-30):**
+bu satır tam anlamıyla "hiçbir davranışı değiştirmez" değil. Metadata sözlüğü
+`/api/layers`, `/api/load-preprocessed` ve `/api/load-dem` yanıtlarına aynen
+yankılanıyor, yani üçü de artık ek bir `metadata.window_offset` alanı
+döndürüyor. Makul bir istemci için geriye uyumlu (anahtar seti hiçbir yerde
+sabitlenmiyor) ama bu, SPICE düzeltmesiyle aynı türden, kayıt altına
+alınmamış ikinci bir kısıt sapmasıydı — burada düzeltiliyor. Kod
+değiştirilmedi (alanın kendisi `/api/terrain` için gerekli).
 
 ## Kapanış ölçümü
 

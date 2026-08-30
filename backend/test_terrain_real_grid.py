@@ -26,15 +26,16 @@ from app.main import app
 from app.terrain import BINARY_DTYPE
 
 pytestmark = pytest.mark.skipif(
-    not os.path.exists(os.path.join(_P1_PROCESSED_DIR, "metadata.json")),
-    reason="lunapath/data/processed/metadata.json not present -- run the P1 pipeline first",
+    not os.path.exists(os.path.join(_P1_PROCESSED_DIR, "elevation_grid.npy")),
+    reason="lunapath/data/processed/*.npy not present -- run the P1 pipeline first",
 )
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def client():
     with TestClient(app) as test_client:
         yield test_client
+    app.state.grids = None
 
 
 def test_manifest_describes_the_production_grid(client):
@@ -189,3 +190,18 @@ def test_series_refuses_an_oversized_request_and_names_the_fix(client):
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert "downsample=" in detail and "MiB" in detail
+
+
+def test_series_working_set_budget_survives_a_high_downsample_request(client):
+    """The response-size check alone passes this request: downsample=50
+    shrinks the wire payload to under 1 MiB. What it does not shrink is the
+    n_slices full-resolution float64 grids build_shadow_series's real
+    (spice_horizon) path builds BEFORE anything downsamples -- on this
+    500x500 grid, 1000 slices there is ~1.9 GiB. The working-set budget
+    exists to catch exactly this, independent of downsample."""
+    response = client.get(
+        f"{SERIES}?n_slices=1000&downsample=50&format=f32&field=shadow"
+    )
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "MiB" in detail and "downsample does not reduce" in detail

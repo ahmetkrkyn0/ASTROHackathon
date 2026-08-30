@@ -66,6 +66,22 @@ BINARY_LAYER_HEADERS = (
     "X-Layer-Validity",
 )
 
+#: Response headers ``GET /api/illumination-series?format=f32`` sets on its
+#: binary payload. A separate tuple from ``BINARY_LAYER_HEADERS`` because the
+#: series payload has an extra (time) axis a single layer does not -- listed
+#: here, same as that tuple, so the CORS middleware can expose exactly these.
+SERIES_HEADERS = (
+    "X-Series-Field",
+    "X-Series-Slices",
+    "X-Series-Rows",
+    "X-Series-Cols",
+    "X-Series-Downsample",
+    "X-Series-Resolution-M",
+    "X-Series-Dtype",
+    "X-Series-Endian",
+    "X-Series-Order",
+)
+
 #: Physical unit of each layer, for axis labels and legend text. The 3-D
 #: viewer colours several of these and displaces geometry with another;
 #: without units it has to hard-code the strings it prints beside the
@@ -116,7 +132,14 @@ def encode_layer_f32(layer: np.ndarray) -> bytes:
     values = np.asarray(layer, dtype=np.float64)
     # Both flavours of absent value collapse to NaN here; see module docstring.
     values = np.where(np.isfinite(values), values, np.nan)
-    return np.ascontiguousarray(values, dtype=BINARY_DTYPE).tobytes()
+    cast = np.ascontiguousarray(values, dtype=BINARY_DTYPE)
+    # A finite float64 beyond float32 range (~3.4e38) overflows to +/-inf on
+    # the cast above, silently reintroducing exactly the value this function
+    # exists to remove. No layer reaches that magnitude today, but the "NaN,
+    # and only NaN" promise is stated as absolute -- so enforce it after the
+    # cast, not just before.
+    cast[~np.isfinite(cast)] = np.float32(np.nan)
+    return cast.tobytes()
 
 
 def layer_stats(layer: np.ndarray) -> dict[str, Any]:
@@ -222,11 +245,14 @@ def terrain_manifest(
     contract, and per-layer range/units/validity with the URL to fetch each.
     """
     metadata = dict(grids.get("metadata") or {})
-    shape = metadata.get("shape")
-    if not shape:
-        sample = np.asarray(grids["elevation"])
-        shape = [int(sample.shape[0]), int(sample.shape[1])]
-    rows, cols = int(shape[0]), int(shape[1])
+    # The elevation array's own shape is authoritative -- it is what
+    # binary_layer_headers reports per-layer, byte for byte. metadata["shape"]
+    # is expected to agree, but a client sizes its Float32Array off THIS
+    # manifest; if the two ever drift, trusting the array keeps
+    # bytes_per_layer honest even though the mismatch itself would still be
+    # worth investigating.
+    sample = np.asarray(grids["elevation"])
+    rows, cols = int(sample.shape[0]), int(sample.shape[1])
     resolution_m = float(metadata.get("resolution_m", 1.0))
     validity = dict(metadata.get("layer_validity") or {})
 

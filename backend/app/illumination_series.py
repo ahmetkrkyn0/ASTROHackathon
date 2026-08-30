@@ -119,28 +119,13 @@ def _spice_shadow_series(
     from datetime import datetime, timedelta, timezone
 
     from .ephemeris import (
-        DEFAULT_META_KERNEL,
-        _ensure_kernels,
         sun_azel_from_vector,
         sun_vector_body,
         true_azimuth_to_grid_azimuth,
         true_north_grid_azimuth,
+        utc_to_et,
     )
     from .illumination import illuminated_mask
-
-    import spiceypy as spice
-
-    # str2et needs the leapsecond kernel in the pool, and the loop below
-    # calls it BEFORE the first sun_vector_body -- which is the call that
-    # would otherwise have loaded the pool. In a cold process the very first
-    # str2et therefore raised SPICE(NOLEAPSECONDS), the caller's broad
-    # `except Exception` turned that into the static series, and the reason
-    # string blamed "real illumination unavailable" for what was an ordering
-    # mistake. Measured: a fresh process reported model="static"; the same
-    # call after anything else had touched SPICE reported "spice_horizon"
-    # and a genuinely time-varying series. Load the pool explicitly rather
-    # than depending on who ran first.
-    _ensure_kernels(spice, DEFAULT_META_KERNEL)
 
     horizon = np.load(cache_path)
     if horizon.ndim != 3 or horizon.shape[1:] != base_shadow.shape:
@@ -164,7 +149,7 @@ def _spice_shadow_series(
     series: list[np.ndarray] = []
     for index in range(n_slices):
         moment = start + timedelta(hours=slice_hours * index)
-        et = spice.str2et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
+        et = utc_to_et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
         true_az, elev = sun_azel_from_vector(
             sun_vector_body(et), lat_deg, lon_deg
         )
@@ -215,22 +200,13 @@ def sun_track_for_series(
     """
     from datetime import datetime, timedelta, timezone
 
-    import spiceypy as spice
-
     from .ephemeris import (
-        DEFAULT_META_KERNEL,
-        _ensure_kernels,
         sun_azel_from_vector,
         sun_vector_body,
         true_azimuth_to_grid_azimuth,
         true_north_grid_azimuth,
+        utc_to_et,
     )
-
-    # str2et needs the leapsecond kernel, and it is called BEFORE the first
-    # sun_vector_body -- which is what would otherwise have loaded the pool.
-    # In a cold process the first str2et therefore raises NOLEAPSECONDS.
-    # Load the pool explicitly rather than relying on call order.
-    _ensure_kernels(spice, DEFAULT_META_KERNEL)
 
     lat_deg, lon_deg = _window_centre_latlon(metadata)
     crs_wkt = metadata.get("crs")
@@ -247,7 +223,7 @@ def sun_track_for_series(
     track: list[dict[str, Any]] = []
     for index in range(int(n_slices)):
         moment = start + timedelta(hours=float(slice_hours) * index)
-        et = spice.str2et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
+        et = utc_to_et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
         true_az, elev = sun_azel_from_vector(sun_vector_body(et), lat_deg, lon_deg)
         track.append(
             {

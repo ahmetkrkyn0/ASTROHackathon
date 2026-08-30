@@ -187,3 +187,63 @@ def test_grid_azimuth_to_true_azimuth_vectorises_over_an_aspect_grid():
     assert out.shape == aspect_grid.shape
     expected = np.mod(aspect_grid - grid_north_az, 360.0)
     assert np.allclose(out, expected)
+
+
+# ── utc_to_et must furnish the kernel pool before converting ────────────────
+#
+# illumination_series.py's _spice_shadow_series once called spice.str2et
+# BEFORE the first sun_vector_body -- the call that would otherwise have
+# loaded the kernel pool. In a cold process the very first str2et raised
+# SPICE(NOLEAPSECONDS); a broad `except Exception` turned that into "real
+# illumination unavailable", a message that blamed missing kernels for what
+# was actually an ordering mistake -- /api/plan-4d could never produce a
+# time-varying series, not just on a cold start. The fix (app.ephemeris's
+# utc_to_et, which every str2et call site now routes through) makes
+# "furnish before you convert" a property of the API. This test proves that
+# property holds without needing real NAIF kernels -- unlike
+# test_l3_repeated_ephemeris_calls_do_not_refurnish_the_kernel above, it
+# fakes spiceypy entirely, so it runs in the default suite on a fresh clone
+# instead of skipping.
+
+
+def test_utc_to_et_furnishes_the_kernel_pool_before_converting(monkeypatch):
+    import spiceypy
+
+    from app import ephemeris
+
+    state = {"furnished": False}
+
+    def _fake_furnsh(_path):
+        state["furnished"] = True
+
+    def _fake_ktotal(_category):
+        return 1 if state["furnished"] else 0
+
+    def _fake_str2et(_utc):
+        if not state["furnished"]:
+            # What a cold process actually raised before the fix.
+            raise RuntimeError("SPICE(NOLEAPSECONDS): kernel pool not loaded")
+        return 12345.0
+
+    monkeypatch.setattr(spiceypy, "furnsh", _fake_furnsh)
+    monkeypatch.setattr(spiceypy, "ktotal", _fake_ktotal)
+    monkeypatch.setattr(spiceypy, "str2et", _fake_str2et)
+    ephemeris._FURNISHED.clear()
+    try:
+        assert ephemeris.utc_to_et("2026-08-30T00:00:00") == 12345.0
+        assert state["furnished"] is True
+    finally:
+        ephemeris._FURNISHED.clear()
+
+
+def test_utc_to_et_without_the_fix_would_have_failed_cold(monkeypatch):
+    """Documents the failure the fix prevents: calling the fake str2et
+    directly, the way the pre-fix code did, raises on a cold pool."""
+    import spiceypy
+
+    def _fake_str2et(_utc):
+        raise RuntimeError("SPICE(NOLEAPSECONDS): kernel pool not loaded")
+
+    monkeypatch.setattr(spiceypy, "str2et", _fake_str2et)
+    with pytest.raises(RuntimeError, match="NOLEAPSECONDS"):
+        spiceypy.str2et("2026-08-30T00:00:00")
