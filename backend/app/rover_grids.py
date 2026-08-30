@@ -48,6 +48,9 @@ def grids_for_rover(
         base_grids["thermal"],
         base_grids.get("elevation"),
         rover=rover,
+        # Survivability is a cold-end question, so the gate reads the cell's
+        # cold-end equilibrium when the loader derived one. (Round 4, H-3.)
+        thermal_min=base_grids.get("thermal_min"),
     )
 
     # The stored cost grid carries the same trust problem as the stored mask:
@@ -85,6 +88,7 @@ def grids_for_rover(
             traversable=traversable,
             weights=resolved_weights,
             rover=rover,
+            thermal_min_grid=base_grids.get("thermal_min"),
         )
         if needs_cost_recompute
         else base_grids["cost"]

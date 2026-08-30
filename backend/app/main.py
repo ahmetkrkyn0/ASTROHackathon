@@ -37,7 +37,7 @@ from .cost_cube import (
 from .cost_engine import edge_travel_time_s
 from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
-from .pathfinder_4d import astar_4d, bfs_move_count
+from .pathfinder_4d import astar_4d, gated_move_count
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
 from .illumination_series import build_shadow_series
 from .pathfinder import astar
@@ -47,6 +47,7 @@ from .replan_triggers import evaluate_triggers_detailed
 from .rover_grids import grids_for_rover
 from .scenarios import (
     MISSION_PROFILES,
+    check_profile_constraints,
     compare_results,
     get_profile,
     list_profiles,
@@ -55,6 +56,7 @@ from .scenarios import (
 )
 from .route_analysis import route_statistics as compute_route_statistics
 from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
+from .mission_reference import reference_summary
 from .simulation import simulate_path, summarize_simulation
 
 logger = logging.getLogger(__name__)
@@ -485,6 +487,7 @@ def get_cell_telemetry(
     rover = get_rover(
         rover_id or metadata.get("rover_id", metadata.get("default_rover_id"))
     )
+    thermal_min = grids.get("thermal_min")
     context = PlanContext(
         slope=np.asarray(grids["slope"], dtype=np.float64),
         thermal=np.asarray(grids["thermal"], dtype=np.float64),
@@ -492,6 +495,10 @@ def get_cell_telemetry(
         traversable=np.asarray(grids["traversable"], dtype=bool),
         resolution_m=resolution_m,
         rover=rover,
+        thermal_min=(
+            None if thermal_min is None
+            else np.asarray(thermal_min, dtype=np.float64)
+        ),
     )
     cost_map = default_cost_map(
         rover,
@@ -506,7 +513,15 @@ def get_cell_telemetry(
         "lon": round(lon, 6),
         "lat": round(lat, 6),
         "altitude_m": _read_grid_value(grids["elevation"], row, col),
+        # Both ends of the cell's temperature range. `thermal_c` is the
+        # annual peak, as before; `thermal_min_c` is the cold-end
+        # equilibrium the traversability gate actually tests.
+        # (Round 4 review, H-3.)
         "thermal_c": _read_grid_value(grids["thermal"], row, col),
+        "thermal_min_c": (
+            None if grids.get("thermal_min") is None
+            else _read_grid_value(grids["thermal_min"], row, col)
+        ),
         "resolution_m": resolution_m,
         "span_km": round((rows * resolution_m) / 1000.0, 4),
         "cost_breakdown": breakdown,
@@ -577,14 +592,45 @@ def plan(req: PlanRequest, request: Request):
             grids_for_plan["shadow_ratio"],
             rover=rover,
             pixel_size_m=float(metadata["resolution_m"]),
+            # Travel time and energy from the grade actually driven, the
+            # same geometry the planner gated on. (Round 4 review, L-4.)
+            elevation_grid=grids_for_plan["elevation"],
         )
         summary = summarize_simulation(states, rover)
     except Exception:
         logger.error("Simulation failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal simulation error.")
 
+    # A stranded simulation stops partway, so the corridor is built from the
+    # prefix the rover can actually execute. Publishing the full route beside
+    # a truncated geojson put two different journeys in one response --
+    # measured: a 60-waypoint corridor and 295 m of astar_metrics next to an
+    # 18-point geojson and 85 m of summary -- and the corridor is the
+    # contract a local planner executes, so it is the one that must not
+    # describe a drive that ends in a dead battery. (Round 4 review, M-3.)
+    planned_pixels = list(astar_result["path_pixels"])
+    executable_pixels = planned_pixels[: len(states)] if states else planned_pixels
+    stranded = bool(summary.get("stranded"))
+    execution = {
+        "stranded": stranded,
+        "planned_nodes": len(planned_pixels),
+        "executable_nodes": len(executable_pixels),
+        "truncated": len(executable_pixels) < len(planned_pixels),
+        "reason": (
+            "battery could not be recovered within one lunar day at the "
+            "stranding cell; the corridor covers only the executable prefix"
+            if stranded
+            else None
+        ),
+    }
+
     try:
-        corridor_obj = build_corridor(astar_result["path_pixels"], grids_for_plan, rover)
+        corridor_obj = build_corridor(
+            executable_pixels,
+            grids_for_plan,
+            rover,
+            elevation=grids_for_plan["elevation"],
+        )
         corridor_payload = corridor_obj.model_dump()
     except (ValueError, KeyError) as exc:
         logger.warning("Corridor generation skipped: %s", exc)
@@ -607,6 +653,7 @@ def plan(req: PlanRequest, request: Request):
             rover_name=rover["name"],
             corridor=corridor_payload,
             route_statistics=compute_route_statistics(states),
+            execution=execution,
         )
     except ValueError as exc:
         # pixel_to_lonlat rejects a grid whose pixels do not project into the
@@ -847,6 +894,15 @@ def plan_4d(req: Plan4DRequest, request: Request):
     # coarsen_traversable twice) was wasted work, not a correctness issue.
     coarse_traversable = coarsen_traversable(grids_for_plan["traversable"], req.coarsen)
     coarse_slope = coarsen_grid(grids_for_plan["slope"], req.coarsen, how="max")
+    # "center", not "mean": path_pixels publishes block CENTRES as waypoints,
+    # so the geometry a rover meets driving between two of them is the
+    # geometry at those centres. A block mean smooths the terrain -- measured
+    # at coarsen=4 it left the step-slope gate rejecting nothing at all where
+    # the fine gate rejected 1 894 edges. (Round 4 review, L-11.)
+    coarse_elevation = coarsen_grid(
+        grids_for_plan["elevation"], req.coarsen, how="center"
+    )
+    effective_resolution_m = float(metadata["resolution_m"]) * req.coarsen
 
     # coarsen_traversable is conservative (AND over every fine cell in a
     # block), so a coarse cell it marks passable is guaranteed finite-cost:
@@ -855,7 +911,18 @@ def plan_4d(req: Plan4DRequest, request: Request):
     # f_slope). bfs_move_count is therefore both a reachability check AND an
     # exact distance bound for the planner that follows -- no separate
     # "usable" mask is needed. (Faz 1-2-3 review, H1/H3.)
-    move_count = bfs_move_count(coarse_traversable, coarse_start, coarse_goal)
+    # Reachability through the graph the planner will ACTUALLY search --
+    # cells AND the hard edge gates. The ungated count called routes reachable
+    # that the cross-slope limit closes, so the planner then reported them as
+    # horizon-limited however many slices it was given. (Round 4 review, H-2.)
+    move_count = gated_move_count(
+        coarse_traversable,
+        coarse_start,
+        coarse_goal,
+        coarse_elevation,
+        effective_resolution_m,
+        rover,
+    )
     if not bool(coarse_traversable[coarse_start]):
         raise HTTPException(
             status_code=422,
@@ -880,20 +947,28 @@ def plan_4d(req: Plan4DRequest, request: Request):
         raise HTTPException(
             status_code=422,
             detail=(
-                f"start {start} and goal {goal} are not connected through "
-                f"passable coarse blocks at coarsen={req.coarsen}: terrain "
-                "hazards split the grid into disconnected regions here. "
-                "Lower coarsen or choose a different pair."
+                f"start {start} and goal {goal} are not connected at "
+                f"coarsen={req.coarsen} once {rover['name']}'s "
+                f"{rover['slope_max_deg']:g} deg step-slope and "
+                f"{rover['slope_lateral_max_deg']:g} deg roll-over limits are "
+                "applied to each edge: the terrain between them splits into "
+                "regions this rover cannot cross between. Lower coarsen, "
+                "choose a different pair, or use a rover with a higher "
+                "roll-over limit. No time horizon would have helped."
             ),
         )
 
     # Size the time slice to a real cell crossing unless the caller pinned it.
     # (Faz 3 review, C1.)
     if req.slice_hours is None:
+        # The FINE slope distribution over a COARSE cell's length. Passing the
+        # how="max" coarsened grid made this a median of block maxima --
+        # biased high, and biased by the coarsen factor, which has nothing to
+        # do with how long a crossing takes. (Round 4 review, L-7.)
         slice_hours = auto_slice_hours(
-            coarse_slope,
-            coarse_traversable,
-            resolution_m=float(metadata["resolution_m"]) * req.coarsen,
+            grids_for_plan["slope"],
+            grids_for_plan["traversable"],
+            resolution_m=effective_resolution_m,
             rover=rover,
         )
         slice_hours_source = "auto"
@@ -937,7 +1012,7 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # diagonal), plus a pad for an optional WAIT. This is provably
         # sufficient whenever the route is reachable, not a guessed
         # multiplier. (Faz 1-2-3 review, H1.)
-        diag_m = float(metadata["resolution_m"]) * req.coarsen * math.sqrt(2.0)
+        diag_m = effective_resolution_m * math.sqrt(2.0)
         worst_edge_s = edge_travel_time_s(float(rover["slope_max_deg"]), diag_m, rover)
         max_slices_per_move = (
             max(1, int(math.ceil(worst_edge_s / 3600.0 / slice_hours)))
@@ -974,7 +1049,15 @@ def plan_4d(req: Plan4DRequest, request: Request):
     illum_series = [1.0 - snapshot for snapshot in shadow_series]
 
     cost_cube = build_cost_cube(
-        grids_for_plan, shadow_series, rover, weights_dict, coarsen=req.coarsen
+        grids_for_plan,
+        shadow_series,
+        rover,
+        weights_dict,
+        coarsen=req.coarsen,
+        # The thermal state is integrated across slices with the regolith
+        # time constant, so the cube needs to know how long a slice is.
+        # (Round 4 review, H-1 and H-3.)
+        slice_hours=slice_hours,
     )
     wait_cube = build_wait_cost_cube(
         illum_series, rover, slice_hours, weights_dict, coarsen=req.coarsen
@@ -986,7 +1069,7 @@ def plan_4d(req: Plan4DRequest, request: Request):
         coarse_traversable,
         start=coarse_start,
         goal=coarse_goal,
-        resolution_m=float(metadata["resolution_m"]) * req.coarsen,
+        resolution_m=effective_resolution_m,
         slice_hours=slice_hours,
         rover=rover,
         slope_grid=coarse_slope,
@@ -994,16 +1077,16 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # elevation the 4-D planner could not evaluate either of them and
         # the two planners disagreed about which edges are safe.
         # (Round 3 review, H-1 and H-2.)
-        elevation_grid=coarsen_grid(grids_for_plan["elevation"], req.coarsen),
+        elevation_grid=coarse_elevation,
     )
     if result["error"]:
-        # move_count is known reachable at this point (checked above), so
-        # this only fires when the caller pinned an n_slices/horizon_hours/
-        # slice_hours combination too tight for the route it asked for --
-        # tell them the exact number that would have worked.
+        # move_count already accounted for the edge gates, so a failure here
+        # is a horizon or cost problem rather than a geometric one -- and the
+        # planner's own message now names which. (Round 4 review, H-2.)
         detail = (
-            f"{result['error']} (the shortest coarse route needs at least "
-            f"{move_count} moves; raise n_slices or horizon_hours)"
+            f"{result['error']} (the shortest gated coarse route needs at "
+            f"least {move_count} moves at {n_slices} slices of "
+            f"{slice_hours:.4f} h)"
         )
         raise HTTPException(status_code=404, detail=detail)
 
@@ -1042,9 +1125,46 @@ def plan_4d(req: Plan4DRequest, request: Request):
         "slice_hours_source": slice_hours_source,
         "horizon_hours": n_slices * slice_hours,
         "coarsen": req.coarsen,
-        "effective_resolution_m": float(metadata["resolution_m"]) * req.coarsen,
+        "effective_resolution_m": effective_resolution_m,
         "rover_id": req.rover_id,
     }
+
+
+def _attach_constraint_check(
+    result: dict, profile: dict, grids: dict, rover: dict
+) -> None:
+    """Simulate a profile's route and record which declared limits it met.
+
+    ``max_shadow_h``, ``max_energy_wh`` and ``min_soc`` are path-dependent,
+    so they cannot be enforced inside the search -- but they CAN be checked
+    against the route that came out, and until round 4 nothing did: three of
+    the four constraints every mission profile publishes appeared nowhere
+    outside scenarios.py. The simulation is the same one /api/plan runs and
+    costs well under a second on the production grid. (Round 4 review, M-4.)
+    """
+    summary = None
+    if not result.get("error") and result.get("path_pixels"):
+        try:
+            states = simulate_path(
+                result,
+                grids["cost"],
+                grids["slope"],
+                grids["thermal"],
+                grids["shadow_ratio"],
+                rover=rover,
+                pixel_size_m=float(grids["metadata"]["resolution_m"]),
+                elevation_grid=grids["elevation"],
+            )
+            summary = summarize_simulation(states, rover)
+        except Exception:
+            logger.warning(
+                "Constraint check skipped for %s: %s",
+                result.get("profile_id"),
+                traceback.format_exc(),
+            )
+            summary = None
+    result["constraint_check"] = check_profile_constraints(profile, summary)
+    result["simulation_summary"] = summary
 
 
 def _validate_pixel_endpoints(grids: dict, start, goal) -> None:
@@ -1097,6 +1217,7 @@ def plan_multi(req: PlanMultiRequest):
         result["profile_id"] = profile_id
         result["profile_name"] = profile["name"]
         result["color"] = profile["color"]
+        _attach_constraint_check(result, profile, grids, rover)
         results.append(result)
     return {"results": results}
 
@@ -1120,6 +1241,7 @@ def compare(req: CompareRequest):
         result["profile_id"] = profile_id
         result["profile_name"] = profile["name"]
         result["color"] = profile["color"]
+        _attach_constraint_check(result, profile, grids, rover)
         results.append(result)
     return {
         "start": req.start,
@@ -1148,6 +1270,7 @@ def get_layer(
         "slope",
         "aspect",
         "thermal",
+        "thermal_min",
         "shadow_ratio",
         "cost",
         "traversable",
@@ -1176,6 +1299,15 @@ def get_layer(
     metadata["rover_id"] = rover_id
     metadata["rover_name"] = rover["name"]
 
+    if layer_name not in grids:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"{layer_name} is not present in the loaded grids. It is "
+                "derived at load time from the sunlit-peak thermal field; "
+                "reload with POST /api/load-preprocessed."
+            ),
+        )
     layer = grids[layer_name]
     if downsample > 1:
         layer = layer[::downsample, ::downsample]
@@ -1206,6 +1338,19 @@ def get_layer(
         "metadata": metadata,
         "data": serializable,
     }
+
+
+@app.get("/api/reference-missions")
+def reference_missions():
+    """Published real-mission traverse figures, with citations.
+
+    ``app.mission_reference`` is the external reality check the maturity
+    assessment asks for, and it had no consumer anywhere outside its own
+    tests -- so the one module in the backend whose entire purpose is to be
+    compared against was not reachable by anything doing the comparing.
+    (Round 4 review, L-9.)
+    """
+    return reference_summary()
 
 
 @app.get("/api/profiles")

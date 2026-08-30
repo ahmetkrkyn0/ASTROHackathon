@@ -84,3 +84,57 @@ def pragyan_active_days() -> int:
 
 def pragyan_average_rate_m_per_day() -> float:
     return float(PRAGYAN_MISSION["total_distance_m"]) / pragyan_active_days()
+
+
+def reference_summary() -> dict[str, object]:
+    """JSON-ready view of everything this module holds, citations included.
+
+    Nothing outside this module's own tests read any of it -- not the API,
+    not a script -- so the one component whose entire purpose is to be the
+    external reality check was unreachable by anything doing the comparing.
+    ``GET /api/reference-missions`` is that reader. (Round 4 review, L-9.)
+
+    Every rate here includes dormancy: LunaPath does not model duty cycles,
+    so these are LOWER bounds on an actively-driving rate, not estimates of
+    one. The field names say so.
+    """
+    return {
+        "note": (
+            "Published mission figures, not model output. Rates include "
+            "lunar-night dormancy and are lower bounds on driving rate."
+        ),
+        "missions": [
+            {
+                "mission": YUTU_2_MILESTONES[-1].mission,
+                "total_distance_m": YUTU_2_MILESTONES[-1].total_distance_m,
+                "as_of": YUTU_2_MILESTONES[-1].on_date.isoformat(),
+                "lower_bound_rate_m_per_calendar_day": round(
+                    yutu2_average_rate_m_per_day(), 4
+                ),
+                "milestones": [
+                    {
+                        "on_date": m.on_date.isoformat(),
+                        "total_distance_m": m.total_distance_m,
+                        "source": m.source,
+                    }
+                    for m in YUTU_2_MILESTONES
+                ],
+            },
+            {
+                "mission": PRAGYAN_MISSION["mission"],
+                "total_distance_m": PRAGYAN_MISSION["total_distance_m"],
+                "as_of": PRAGYAN_MISSION["sleep_date"].isoformat(),  # type: ignore[union-attr]
+                "active_days": pragyan_active_days(),
+                "lower_bound_rate_m_per_calendar_day": round(
+                    pragyan_average_rate_m_per_day(), 4
+                ),
+                "milestones": [
+                    {
+                        "on_date": PRAGYAN_MISSION["sleep_date"].isoformat(),  # type: ignore[union-attr]
+                        "total_distance_m": PRAGYAN_MISSION["total_distance_m"],
+                        "source": PRAGYAN_MISSION["source"],
+                    }
+                ],
+            },
+        ],
+    }

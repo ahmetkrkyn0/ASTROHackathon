@@ -156,6 +156,12 @@ _TRIGGER_INPUTS: dict[str, tuple[str, ...]] = {
     "slip_accumulation": ("map_progress_m", "odometer_claim_m"),
 }
 
+# Keys a trigger may READ but does not require. Absent, the check still
+# runs; present, it can say more. (Round 4 review, L-6.)
+_TRIGGER_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
+    "slip_accumulation": ("corridor_length_m",),
+}
+
 
 def evaluate_triggers(
     state: Mapping[str, Any], rover: Mapping[str, Any] | None = None
@@ -258,9 +264,14 @@ def evaluate_triggers_detailed(
         elif trigger_id == "slip_accumulation":
             from .slip_model import check_slip_accumulation
 
+            corridor_length = state.get("corridor_length_m")
             results.append(
                 check_slip_accumulation(
-                    state["map_progress_m"], state["odometer_claim_m"]
+                    state["map_progress_m"],
+                    state["odometer_claim_m"],
+                    corridor_length_m=(
+                        None if _is_unusable(corridor_length) else corridor_length
+                    ),
                 )
             )
 

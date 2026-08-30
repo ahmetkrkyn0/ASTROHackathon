@@ -83,12 +83,109 @@ MISSION_PROFILES: dict[str, dict] = {
 }
 
 
+# Which constraint keys the PLANNER can enforce during the search, and
+# which can only be checked against a simulated route afterwards. Declared
+# so /api/profiles can say so instead of publishing four numbers that look
+# equally binding. Three of the four steered nothing at all and appeared
+# nowhere in the codebase outside this file. (Round 4 review, M-4.)
+ENFORCED_CONSTRAINTS: tuple[str, ...] = ("max_slope_deg",)
+VERIFIED_CONSTRAINTS: tuple[str, ...] = (
+    "max_shadow_h",
+    "max_energy_wh",
+    "min_soc",
+)
+
+
+def check_profile_constraints(
+    profile: dict, summary: dict | None
+) -> dict[str, dict]:
+    """Verdict per declared constraint, against a simulated route.
+
+    ``max_slope_deg`` is enforced inside the search, so its verdict is
+    structural. The other three are path-dependent -- they need a battery
+    trace -- so they are checked here, after the fact, and reported with
+    ``checked: False`` when no simulation was run rather than silently
+    omitted.
+    """
+    constraints = profile.get("constraints", {})
+    verdicts: dict[str, dict] = {
+        "max_slope_deg": {
+            "limit": constraints.get("max_slope_deg"),
+            "enforced_in_search": True,
+            "checked": True,
+            "actual": None,
+            "satisfied": True,
+        }
+    }
+
+    def entry(limit, actual, satisfied):
+        return {
+            "limit": limit,
+            "enforced_in_search": False,
+            "checked": summary is not None and actual is not None,
+            "actual": actual,
+            "satisfied": satisfied,
+        }
+
+    shadow_limit = constraints.get("max_shadow_h")
+    shadow_actual = None if summary is None else summary.get("max_continuous_shadow_h")
+    verdicts["max_shadow_h"] = entry(
+        shadow_limit,
+        shadow_actual,
+        None
+        if shadow_actual is None or shadow_limit is None
+        else bool(shadow_actual <= shadow_limit),
+    )
+
+    energy_limit = constraints.get("max_energy_wh")
+    energy_actual = (
+        None if summary is None else summary.get("total_energy_consumed_wh")
+    )
+    verdicts["max_energy_wh"] = entry(
+        energy_limit,
+        energy_actual,
+        None
+        if energy_actual is None or energy_limit is None
+        else bool(energy_actual <= energy_limit),
+    )
+
+    soc_limit = constraints.get("min_soc")
+    soc_actual_pct = None if summary is None else summary.get("min_battery_pct")
+    soc_actual = None if soc_actual_pct is None else soc_actual_pct / 100.0
+    verdicts["min_soc"] = entry(
+        soc_limit,
+        None if soc_actual is None else round(soc_actual, 4),
+        None
+        if soc_actual is None or soc_limit is None
+        else bool(soc_actual >= soc_limit),
+    )
+    return verdicts
+
+
 def get_profile(profile_id: str) -> dict | None:
     return MISSION_PROFILES.get(profile_id)
 
 
 def list_profiles() -> dict[str, dict]:
-    return MISSION_PROFILES
+    """Mission profiles, with each constraint labelled by how it is applied.
+
+    A profile used to publish four constraints of which the planner applied
+    one, with nothing in the payload distinguishing them. (Round 4, M-4.)
+    """
+    return {
+        profile_id: {
+            **profile,
+            "constraint_handling": {
+                key: (
+                    "enforced_in_search"
+                    if key in ENFORCED_CONSTRAINTS
+                    else "verified_after_simulation"
+                )
+                for key in profile.get("constraints", {})
+            },
+        }
+        for profile_id, profile in MISSION_PROFILES.items()
+    }
 
 
 def load_scenario(scenario_id: str) -> dict | None:

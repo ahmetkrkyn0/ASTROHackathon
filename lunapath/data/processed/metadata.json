@@ -36,7 +36,9 @@
     "shadow_ratio": "DERIVED",
     "thermal": "DERIVED",
     "traversable": "DERIVED",
-    "cost": "DERIVED"
+    "cost": "DERIVED",
+    "thermal_min": "DERIVED"
   },
-  "thermal_shadow_coupled": true
+  "thermal_shadow_coupled": true,
+  "thermal_field": "sunlit_peak"
 }

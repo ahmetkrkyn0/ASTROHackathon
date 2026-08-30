@@ -21,7 +21,14 @@ MIN_CELL_COST: float = 0.01
 
 @dataclass
 class PlanContext:
-    """Everything a layer may read. Layers must not mutate it."""
+    """Everything a layer may read. Layers must not mutate it.
+
+    *thermal* is the cell's annual PEAK surface temperature and
+    *thermal_min* its cold-end equilibrium -- the two ends of the range the
+    cell spans (see :mod:`app.thermal_model`). ``thermal_min`` defaults to
+    None, in which case every consumer falls back to the peak, which is what
+    the whole codebase did before round 4.
+    """
 
     slope: np.ndarray
     thermal: np.ndarray
@@ -29,6 +36,7 @@ class PlanContext:
     traversable: np.ndarray
     resolution_m: float
     rover: Mapping[str, Any]
+    thermal_min: np.ndarray | None = None
 
 
 @runtime_checkable
@@ -56,12 +64,15 @@ class CostMap:
         return [layer.name for layer in self.layers]
 
     def _invalid_mask(self, ctx: PlanContext) -> np.ndarray:
-        return (
+        invalid = (
             ~np.asarray(ctx.traversable, dtype=bool)
             | np.isnan(ctx.slope)
             | np.isnan(ctx.thermal)
             | np.isnan(ctx.shadow_ratio)
         )
+        if ctx.thermal_min is not None:
+            invalid = invalid | np.isnan(ctx.thermal_min)
+        return invalid
 
     def total(self, ctx: PlanContext) -> np.ndarray:
         """(H, W) float64 cost grid. Impassable cells are ``inf``."""
@@ -101,6 +112,10 @@ class CostMap:
             traversable=np.asarray(ctx.traversable)[cell],
             resolution_m=ctx.resolution_m,
             rover=ctx.rover,
+            thermal_min=(
+                None if ctx.thermal_min is None
+                else np.asarray(ctx.thermal_min)[cell]
+            ),
         )
 
     def explain(self, row: int, col: int, ctx: PlanContext) -> dict[str, float | None]:
@@ -119,7 +134,17 @@ class CostMap:
         running = 0.0
         finite = True
         for layer in self.layers:
-            value = float(layer.weight * layer.contribution(cell_ctx)[0, 0])
+            # Same guard as total(): an infinite contribution means
+            # IMPASSABLE, and `0.0 * inf` is NaN, so a zero-weighted layer
+            # silently erased its own veto and emitted a RuntimeWarning on
+            # the way. Round 3 (L-1) fixed this in total() and left the
+            # identical expression here untouched. (Round 4 review, L-1.)
+            contribution = float(layer.contribution(cell_ctx)[0, 0])
+            value = (
+                contribution
+                if np.isinf(contribution)
+                else layer.weight * contribution
+            )
             if np.isfinite(value):
                 breakdown[layer.name] = value
                 running += value
@@ -216,7 +241,9 @@ class ThermalLayer:
         self.validity = str(validity)
 
     def contribution(self, ctx: PlanContext) -> np.ndarray:
-        return _f_thermal_vec(ctx.thermal, ctx.rover)
+        # Both ends of the cell's temperature range, not just its peak: a
+        # cell is only safe if it is survivable at BOTH. (Round 4, H-3.)
+        return _f_thermal_vec(ctx.thermal, ctx.rover, ctx.thermal_min)
 
 
 def default_cost_map(

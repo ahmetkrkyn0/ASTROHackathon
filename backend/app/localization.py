@@ -231,7 +231,23 @@ def trigger_state_from_pose(
     if pose.source in SLIP_CHECKABLE_SOURCES and pose.distance_travelled_m > 0.0:
         state["map_progress_m"] = fix.along_track_m
         state["odometer_claim_m"] = pose.distance_travelled_m
+        # The corridor's own length, so the slip check can tell an odometer
+        # that was never reset from a rover that is genuinely slipping.
+        # (Round 4 review, L-6.)
+        state["corridor_length_m"] = corridor_length_m(corridor)
     return state
+
+
+def corridor_length_m(corridor: Corridor) -> float:
+    """Total polyline length of a corridor's centreline, in metres."""
+    return float(
+        sum(
+            math.hypot(bx - ax, by - ay)
+            for (ax, ay), (bx, by) in zip(
+                corridor.waypoints[:-1], corridor.waypoints[1:]
+            )
+        )
+    )
 
 
 def evaluate_pose(

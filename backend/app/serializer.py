@@ -280,6 +280,7 @@ def build_plan_response(
     rover_name: str | None = None,
     corridor: dict[str, Any] | None = None,
     route_statistics: dict[str, Any] | None = None,
+    execution: dict[str, Any] | None = None,
 ) -> dict:
     """Assemble the final API response for a single plan request.
 
@@ -309,6 +310,12 @@ def build_plan_response(
         "geojson": states_to_geojson(states, metadata),
         "corridor": corridor,
         "route_statistics": route_statistics,
+        # How much of the planned route the rover can actually execute.
+        # `astar_metrics` describes what the PLANNER found; `summary` and
+        # `geojson` describe what the SIMULATION could drive, and when a
+        # traverse strands those are different journeys. Nothing said so
+        # except a `stranded` flag three levels down. (Round 4 review, M-3.)
+        "execution": execution,
     }
     if rover_id is not None:
         response["rover"] = {

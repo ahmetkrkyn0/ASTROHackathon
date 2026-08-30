@@ -387,8 +387,31 @@ def _thermal_penalty(
     return _sigmoid(gain * (float(low) - value)) + _sigmoid(gain * (value - float(high)))
 
 
-def f_thermal(T_surface_C: float, rover: Mapping[str, Any] | None = None) -> float:
+def f_thermal(
+    T_surface_C: float,
+    rover: Mapping[str, Any] | None = None,
+    T_surface_min_C: float | None = None,
+) -> float:
+    """Thermal penalty for a cell, in MRU [0, 1].
+
+    *T_surface_C* is the cell's annual peak. *T_surface_min_C*, when given,
+    is its cold-end equilibrium -- the two ends of the range the cell
+    actually spans. Both are evaluated and the WORSE penalty wins, because a
+    cell that is survivable at neither end is not made safe by the other:
+    the envelope is what the rover has to sit inside. Passing only the peak
+    (the pre-round-4 signature) asks about one end and is kept working for
+    callers that genuinely only have one. (Round 4 review, H-3.)
+    """
     rover_cfg = _resolve_rover(rover)
+    if T_surface_min_C is not None:
+        return max(
+            _f_thermal_one(float(T_surface_C), rover_cfg),
+            _f_thermal_one(float(T_surface_min_C), rover_cfg),
+        )
+    return _f_thermal_one(T_surface_C, rover_cfg)
+
+
+def _f_thermal_one(T_surface_C: float, rover_cfg: Mapping[str, Any]) -> float:
     T_inner = surface_to_inner(T_surface_C, rover_cfg)
 
     weighted_terms: list[tuple[float, float]] = []
@@ -419,6 +442,13 @@ def f_thermal(T_surface_C: float, rover: Mapping[str, Any] | None = None) -> flo
 
 # ── 2.3.5  Log-barrier penalty ──────────────────────────────────────────────
 
+# Slack floor. A slack of exactly 0 means "standing on the wall", which is a
+# very large penalty but not an impossible state -- the hard gates decide
+# what is impossible. Flooring the slack keeps the barrier finite there and
+# keeps every wall's inclusive/exclusive convention identical.
+_BARRIER_SLACK_EPS: float = 1e-6
+
+
 def lateral_slope_deg(cell_slope_deg: float, along_slope_deg: float) -> float:
     """Cross-slope of an edge, given the cell's total slope and the edge's own.
 
@@ -445,23 +475,70 @@ def lateral_slope_deg(cell_slope_deg: float, along_slope_deg: float) -> float:
     return math.degrees(math.atan(math.sqrt(residual)))
 
 
-def _surface_ceiling_c(rover_cfg: Mapping[str, Any]) -> float | None:
-    """Surface temperature at which the rover's hottest component hits its limit.
+def lateral_slope_tan(
+    grad_row: float, grad_col: float, unit_row: float, unit_col: float
+) -> float:
+    """|cross-slope| as a TANGENT, from the terrain gradient and heading.
 
-    Inverts :func:`surface_to_inner` on the warm branch. Returns None when the
-    rover declares no electronics limit or no hot offset, in which case the
-    barrier simply has no hot term -- the same "skip what is not declared"
-    convention ``_thermal_penalty`` already uses.
+    The terrain gradient at a cell is ``(grad_row, grad_col)`` in rise per
+    metre. An edge travelling along the unit vector ``(unit_row, unit_col)``
+    rolls on the component perpendicular to it; the perpendicular of
+    ``(r, c)`` is ``(-c, r)``, so the cross-slope is their dot product.
+
+    Returned as a tangent because that is what both A* loops compare
+    against: ``tan(limit)`` is a constant, so the hard gate needs no
+    trigonometry per edge. :func:`lateral_slope_from_gradient` wraps this in
+    degrees for anything that wants to report the angle.
+
+    Both planners had their own copy of this expression. They agreed, but
+    nothing made them agree, and the tests exercised a third form
+    (:func:`lateral_slope_deg`, the Pythagoras identity) that no production
+    caller ran. (Round 4 review, M-5.)
     """
-    inner_max = rover_cfg.get("elec_op_max_c")
+    return abs(float(grad_row) * -float(unit_col) + float(grad_col) * float(unit_row))
+
+
+def lateral_slope_from_gradient(
+    grad_row: float, grad_col: float, unit_row: float, unit_col: float
+) -> float:
+    """:func:`lateral_slope_tan` in degrees."""
+    return math.degrees(math.atan(lateral_slope_tan(grad_row, grad_col, unit_row, unit_col)))
+
+
+def _surface_ceiling_c(rover_cfg: Mapping[str, Any]) -> float | None:
+    """Surface temperature at which the rover's FIRST component hits its limit.
+
+    Inverts :func:`surface_to_inner` on the warm branch, for every component
+    the rover declares a ceiling for, and takes the tightest.
+
+    It used to read ``elec_op_max_c`` alone, which is not the binding limit.
+    ``f_thermal`` weights the battery envelope at 0.6 against the
+    electronics' 0.4 precisely because the battery is the more fragile part,
+    and for lpr_1 it is also the NARROWER one: 35 C inner (75 C surface)
+    against the electronics' 40 C (80 C surface), so the barrier stood 5 C
+    beyond the wall it was supposed to guard. For luvmi_m, which declares
+    ``bat_op_max_c = 0`` and no electronics limit at all, there was no hot
+    term whatsoever. (Round 4 review, M-7.)
+
+    Returns None when the rover declares no ceiling or no hot offset, in
+    which case the barrier simply has no hot term -- the same "skip what is
+    not declared" convention ``_thermal_penalty`` already uses.
+    """
     offset_hot = rover_cfg.get("thermal_offset_hot")
-    if inner_max is None or offset_hot is None:
+    if offset_hot is None:
         return None
-    return float(inner_max) - float(offset_hot)
+    ceilings = [
+        float(rover_cfg[key]) - float(offset_hot)
+        for key in ("bat_op_max_c", "elec_op_max_c")
+        if rover_cfg.get(key) is not None
+    ]
+    return min(ceilings) if ceilings else None
 
 
 def thermal_barrier_terms(
-    t_surface_c: float, rover: Mapping[str, Any] | None = None
+    t_surface_c: float,
+    rover: Mapping[str, Any] | None = None,
+    t_surface_min_c: float | None = None,
 ) -> list[float]:
     """log(slack) terms keeping a route away from its thermal limits.
 
@@ -484,6 +561,11 @@ def thermal_barrier_terms(
     """
     rover_cfg = _resolve_rover(rover)
     surface = float(t_surface_c)
+    # Each wall is approached from the end of the cell's range that actually
+    # gets near it: the cold wall from the cold-end equilibrium, the hot wall
+    # from the annual peak. Given one temperature, both walls use it -- the
+    # pre-round-4 behaviour. (Round 4 review, H-3.)
+    surface_cold = surface if t_surface_min_c is None else float(t_surface_min_c)
     terms: list[float] = []
 
     cold_floor = float(C.THERMAL_MIN_TRAVERSABLE_C)
@@ -494,10 +576,17 @@ def thermal_barrier_terms(
     # barrier is, and a negative edge term would also break the A*
     # heuristic's admissibility, which relies on every edge costing at least
     # distance * (1 + min_cost).
-    slack_cold = min(1.0, (surface - cold_floor) / cold_span)
-    if slack_cold <= 0.0:
+    # Clamped at _BARRIER_SLACK_EPS rather than tested with <= 0, so the
+    # barrier's cold wall agrees with the traversability gate's. The gate is
+    # inclusive (``thermal >= THERMAL_MIN_TRAVERSABLE_C``) while this was
+    # exclusive, so a cell at exactly -150.0 C was a legal START and an
+    # illegal DESTINATION -- the same cell, two answers. It now costs a large
+    # finite penalty there, which is what a barrier at a wall should do.
+    # (Round 4 review, L-12.)
+    slack_cold = min(1.0, (surface_cold - cold_floor) / cold_span)
+    if slack_cold < 0.0:
         return [float("-inf")]
-    terms.append(math.log(slack_cold))
+    terms.append(math.log(max(slack_cold, _BARRIER_SLACK_EPS)))
 
     ceiling = _surface_ceiling_c(rover_cfg)
     if ceiling is not None and ceiling > 0.0:
@@ -506,9 +595,9 @@ def thermal_barrier_terms(
         # comfortable cell therefore costs exactly zero barrier rather than a
         # standing penalty for existing.
         slack_hot = min(1.0, (ceiling - surface) / ceiling)
-        if slack_hot <= 0.0:
+        if slack_hot < 0.0:
             return [float("-inf")]
-        terms.append(math.log(slack_hot))
+        terms.append(math.log(max(slack_hot, _BARRIER_SLACK_EPS)))
 
     return terms
 
@@ -519,6 +608,7 @@ def edge_barrier_penalty(
     t_surface_c: float,
     mu: float = C.LOG_BARRIER_MU,
     rover: Mapping[str, Any] | None = None,
+    t_surface_min_c: float | None = None,
 ) -> float:
     """The barrier terms a static-grid planner can actually evaluate.
 
@@ -545,12 +635,46 @@ def edge_barrier_penalty(
         return float("inf")
     terms.append(math.log(min(1.0, slack_lat)))
 
-    thermal_terms = thermal_barrier_terms(t_surface_c, rover_cfg)
+    thermal_terms = thermal_barrier_terms(t_surface_c, rover_cfg, t_surface_min_c)
     if any(not math.isfinite(term) for term in thermal_terms):
         return float("inf")
     terms.extend(thermal_terms)
 
     return -float(mu) * sum(terms)
+
+
+def geometric_barrier_terms(
+    theta_along: float,
+    theta_lateral: float,
+    rover: Mapping[str, Any] | None = None,
+    slope_max_deg: float | None = None,
+) -> list[float]:
+    """The two ``log(slack)`` terms for the geometric limits, alone.
+
+    Split out so ``pathfinder._barrier_table`` can TABULATE this exact
+    function instead of restating it. Both planners used to carry their own
+    transcription of the barrier while the tests exercised a third copy in
+    this module that no production caller ran -- so a divergence between the
+    formula under test and the formula in use would have passed the suite.
+    (Round 4 review, M-5.)
+
+    *slope_max_deg* overrides the rover's own limit, which is how a mission
+    profile's tighter ceiling reaches the barrier as well as the hard gate.
+    Returns ``[-inf]`` when either limit is reached.
+    """
+    rover_cfg = _resolve_rover(rover)
+    limit_along = (
+        float(rover_cfg["slope_max_deg"])
+        if slope_max_deg is None
+        else float(slope_max_deg)
+    )
+    limit_lateral = float(rover_cfg["slope_lateral_max_deg"])
+
+    slack_slope = 1.0 - abs(float(theta_along)) / limit_along
+    slack_lat = 1.0 - abs(float(theta_lateral)) / limit_lateral
+    if slack_slope <= 0.0 or slack_lat <= 0.0:
+        return [float("-inf")]
+    return [math.log(min(1.0, slack_slope)), math.log(min(1.0, slack_lat))]
 
 
 def log_barrier_penalty(
@@ -672,6 +796,7 @@ def compute_cost_grid(
     traversable: np.ndarray | None = None,
     weights: Mapping[str, float] | None = None,
     rover: Mapping[str, Any] | None = None,
+    thermal_min_grid: np.ndarray | None = None,
 ) -> np.ndarray:
     """Compute a continuous weighted cost layer for each grid cell.
 
@@ -715,6 +840,11 @@ def compute_cost_grid(
     slope = np.asarray(slope_grid, dtype=np.float64)
     thermal = np.asarray(thermal_grid, dtype=np.float64)
     shadow = np.asarray(shadow_ratio_grid, dtype=np.float64)
+    thermal_min = (
+        None
+        if thermal_min_grid is None
+        else np.asarray(thermal_min_grid, dtype=np.float64)
+    )
 
     with np.errstate(invalid="ignore"):
         combined = (
@@ -724,7 +854,10 @@ def compute_cost_grid(
             # four AHP criteria decided the same thing. (Round 3, H-4.)
             + resolved["w_energy"] * f_energy_cell_grid(slope, rover_cfg, shadow)
             + resolved["w_shadow"] * f_shadow_cell_grid(shadow)
-            + resolved["w_thermal"] * f_thermal_grid(thermal, rover_cfg)
+            # Both ends of the cell's temperature range when the caller has
+            # them: a cell survivable at its peak but not at its cold-end
+            # equilibrium is not a safe cell. (Round 4 review, H-3.)
+            + resolved["w_thermal"] * f_thermal_grid(thermal, rover_cfg, thermal_min)
         )
 
     cost_grid = np.maximum(combined, 0.01)
@@ -734,5 +867,7 @@ def compute_cost_grid(
         | np.isnan(thermal)
         | np.isnan(shadow)
     )
+    if thermal_min is not None:
+        invalid = invalid | np.isnan(thermal_min)
     cost_grid[invalid] = np.inf
     return cost_grid

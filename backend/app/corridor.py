@@ -77,8 +77,17 @@ def build_corridor(
     rover: Mapping[str, Any],
     safe_shadow_ratio: float = DEFAULT_SAFE_SHADOW_RATIO,
     max_half_width_m: float = DEFAULT_MAX_HALF_WIDTH_M,
+    elevation: np.ndarray | None = None,
 ) -> Corridor:
-    """Turn a pixel path into the contract a local planner can execute."""
+    """Turn a pixel path into the contract a local planner can execute.
+
+    *elevation*, when given, makes ``max_slope_deg`` the SEGMENT slope the
+    rover actually drives -- the elevation difference across each step --
+    rather than the ``np.gradient`` cell slope. Round 3 (H-2) split those two
+    definitions apart in the planner's metrics and left the corridor
+    publishing the smoothed one, under a field a local planner reads as a
+    per-segment safety ceiling. (Round 4 review, L-4.)
+    """
     path = [(int(r), int(c)) for r, c in path_pixels]
     if len(path) < 2:
         raise ValueError("a corridor needs at least two waypoints")
@@ -123,7 +132,17 @@ def build_corridor(
             float(min(min(clearance[r0, c0], clearance[r1, c1]), max_half_width_m))
         )
 
-        segment_slope = float(max(slope[r0, c0], slope[r1, c1]))
+        cell_slope = float(max(slope[r0, c0], slope[r1, c1]))
+        if elevation is not None:
+            dz = float(elevation[r1, c1]) - float(elevation[r0, c0])
+            step_slope = math.degrees(math.atan2(abs(dz), distance_m))
+            # The worse of the two: the cell slope bounds what the terrain
+            # does across the block, the step slope what the rover climbs
+            # between the two centres, and a corridor ceiling must not
+            # under-report either.
+            segment_slope = max(cell_slope, step_slope)
+        else:
+            segment_slope = cell_slope
         max_slope_deg.append(segment_slope)
 
         energy_wh = edge_energy_wh(segment_slope, distance_m, rover)

@@ -24,7 +24,83 @@ from typing import Any
 
 import numpy as np
 
-from .cost_engine import edge_travel_time_s
+from .cost_engine import edge_travel_time_s, lateral_slope_tan
+
+# Every reason this planner can refuse an edge. Declared once so the metrics
+# always carry the full set of keys and a caller can tell "checked, none"
+# from "not counted". (Round 4 review, H-2.)
+REJECTION_KEYS: tuple[str, ...] = (
+    "step_slope",
+    "lateral_slope",
+    "nan_elevation",
+    "untraversable",
+    "corner_cut",
+    "cost_infinite",
+    "horizon",
+)
+
+
+def _empty_rejections() -> dict[str, int]:
+    return {key: 0 for key in REJECTION_KEYS}
+
+
+def no_path_reason_4d(
+    rejections: dict[str, int],
+    rover: Mapping[str, Any],
+    n_slices: int,
+    slice_hours: float,
+) -> str:
+    """Explain which constraint closed a 4-D route.
+
+    Round 3 gave the 2-D planner ``_no_path_reason`` and left this planner
+    with one string: "No path found within the time horizon". That message is
+    not merely unhelpful, it is usually WRONG. At the default ``coarsen=4``,
+    618 of 8 768 passable coarse cells -- 7.0 percent -- have no surviving
+    edge at all once the cross-slope gate is applied, and a plan starting
+    from one of them returned the horizon message however many slices the
+    caller granted: reproduced at 800 slices against a 103-move route.
+    (Round 4 review, H-2.)
+    """
+    lateral = rejections.get("lateral_slope", 0)
+    along = rejections.get("step_slope", 0)
+    horizon = rejections.get("horizon", 0)
+    blocked = rejections.get("cost_infinite", 0)
+    unknown = rejections.get("nan_elevation", 0)
+
+    parts: list[str] = []
+    if lateral:
+        parts.append(
+            f"{lateral} edges exceeded the {rover['slope_lateral_max_deg']} deg "
+            "roll-over (cross-slope) limit"
+        )
+    if along:
+        parts.append(
+            f"{along} edges exceeded the {rover['slope_max_deg']} deg "
+            "step-slope limit"
+        )
+    if blocked:
+        parts.append(f"{blocked} edges led into cells with no finite cost")
+    if unknown:
+        parts.append(f"{unknown} edges crossed cells with no elevation")
+    if horizon:
+        parts.append(
+            f"{horizon} edges would have arrived past the last of "
+            f"{n_slices} slices ({n_slices * slice_hours:.1f} h)"
+        )
+
+    if not parts:
+        return (
+            "No path found: the goal is not reachable from the start through "
+            "passable cells at this coarsen factor."
+        )
+    lead = "No path found"
+    if horizon and not (lateral or along or blocked or unknown):
+        lead = "No path found within the time horizon"
+    return (
+        f"{lead} for {rover.get('name', rover.get('id', 'this rover'))}: "
+        + "; ".join(parts)
+        + "."
+    )
 
 _OFFSETS: tuple[tuple[int, int, bool], ...] = (
     (-1, 0, False), (1, 0, False), (0, -1, False), (0, 1, False),
@@ -94,7 +170,90 @@ def bfs_move_count(
     return None
 
 
-def _empty(error: str, elapsed_ms: float = 0.0) -> dict[str, Any]:
+def gated_move_count(
+    traversable: np.ndarray,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    elevation: np.ndarray | None,
+    resolution_m: float,
+    rover: Mapping[str, Any],
+) -> int | None:
+    """:func:`bfs_move_count`, but honouring the hard EDGE gates as well.
+
+    ``bfs_move_count`` answers reachability through passable CELLS.
+    ``astar_4d`` additionally refuses edges on step slope and cross-slope, so
+    the two graphs are not the same one -- and on the production grid at
+    ``coarsen=4`` the difference is large: 83.5 percent of the passable area
+    is reachable through cells, and the gated graph's largest component is
+    76.4 percent, with 7.0 percent of cells isolated outright.
+
+    Sizing the time horizon from the ungated count is therefore sizing it for
+    a route the planner cannot take, and checking reachability with the
+    ungated count reports a plan as merely horizon-limited when it is
+    geometrically impossible. (Round 4 review, H-2.)
+    """
+    mask = np.asarray(traversable, dtype=bool)
+    height, width = mask.shape
+    if not (0 <= start[0] < height and 0 <= start[1] < width):
+        return None
+    if not (0 <= goal[0] < height and 0 <= goal[1] < width):
+        return None
+    if not mask[start] or not mask[goal]:
+        return None
+    if start == goal:
+        return 0
+
+    if elevation is None:
+        return bfs_move_count(mask, start, goal)
+
+    elev = np.asarray(elevation, dtype=np.float64)
+    grad_row, grad_col = np.gradient(elev, float(resolution_m))
+    grad_row = np.nan_to_num(grad_row, nan=0.0)
+    grad_col = np.nan_to_num(grad_col, nan=0.0)
+    tan_slope_max = math.tan(math.radians(float(rover["slope_max_deg"])))
+    tan_lat_max_sq = math.tan(math.radians(float(rover["slope_lateral_max_deg"]))) ** 2
+    diag_m = float(resolution_m) * math.sqrt(2.0)
+
+    dist = np.full(mask.shape, -1, dtype=np.int64)
+    dist[start] = 0
+    queue: deque[tuple[int, int]] = deque([start])
+    while queue:
+        row, col = queue.popleft()
+        for d_row, d_col, diagonal in _OFFSETS:
+            nr, nc = row + d_row, col + d_col
+            if not (0 <= nr < height and 0 <= nc < width):
+                continue
+            if not mask[nr, nc] or dist[nr, nc] >= 0:
+                continue
+            if diagonal and not (mask[row, nc] and mask[nr, col]):
+                continue
+            distance_m = diag_m if diagonal else float(resolution_m)
+            dz = elev[nr, nc] - elev[row, col]
+            if not math.isfinite(dz) or abs(dz) / distance_m > tan_slope_max:
+                continue
+            norm = math.hypot(d_row, d_col)
+            unit_r, unit_c = d_row / norm, d_col / norm
+            lat_tan = lateral_slope_tan(
+                0.5 * (grad_row[row, col] + grad_row[nr, nc]),
+                0.5 * (grad_col[row, col] + grad_col[nr, nc]),
+                unit_r,
+                unit_c,
+            )
+            if lat_tan * lat_tan > tan_lat_max_sq:
+                continue
+            dist[nr, nc] = dist[row, col] + 1
+            if (nr, nc) == goal:
+                return int(dist[nr, nc])
+            queue.append((nr, nc))
+    return None
+
+
+def _empty(
+    error: str,
+    elapsed_ms: float = 0.0,
+    rejections: dict[str, int] | None = None,
+    nodes_expanded: int = 0,
+) -> dict[str, Any]:
     """A failed plan.
 
     ``total_cost`` is ``None``, not ``inf``: this dict is a candidate for
@@ -103,6 +262,7 @@ def _empty(error: str, elapsed_ms: float = 0.0) -> dict[str, Any]:
     convention the rest of this API already uses for unrepresentable values
     (``main._read_grid_value``, ``main.get_layer``, ``CostMap.explain``).
     """
+    tally = _empty_rejections() if rejections is None else dict(rejections)
     return {
         "path_states": [],
         "path_pixels": [],
@@ -112,10 +272,13 @@ def _empty(error: str, elapsed_ms: float = 0.0) -> dict[str, Any]:
             "arrival_slice": None,
             "total_cost": None,
             "cost_units": "weighted_hours",
-            "nodes_expanded": 0,
+            # Threaded through rather than reported as a flat 0 beside a
+            # non-empty rejection tally. (Round 4 review, M-2.)
+            "nodes_expanded": nodes_expanded,
             "computation_time_ms": round(elapsed_ms, 3),
-            "edges_dropped_at_horizon": 0,
-            "horizon_truncated": False,
+            "edges_rejected": tally,
+            "edges_dropped_at_horizon": tally.get("horizon", 0),
+            "horizon_truncated": tally.get("horizon", 0) > 0,
         },
         "error": error,
     }
@@ -189,15 +352,12 @@ def astar_4d(
         grad_row = np.nan_to_num(grad_row, nan=0.0)
         grad_col = np.nan_to_num(grad_col, nan=0.0)
 
-    # A move rejected only because it would land past the last time slice is
-    # not the same as a move that is unsafe, and the difference matters: the
-    # horizon is sized from bfs_move_count, the length of the shortest
-    # MOVE-COUNT route, while this planner minimises COST. A cheaper route
-    # can need more slices than that bound, in which case its edges were
-    # silently dropped and a horizon-truncated answer came back as an
-    # ordinary success. Counting them lets the caller be told.
-    # (Round 3 review, M-3.)
-    horizon_dropped = 0
+    # Every refusal is counted, not just the horizon one. A move rejected
+    # because it would land past the last slice is not the same as a move
+    # that is unsafe, and until round 4 only the former was tallied -- so
+    # when the geometry gates closed a route the planner said the horizon
+    # was too short. (Round 3 M-3; round 4 H-2.)
+    rejections = _empty_rejections()
 
     finite = cost[np.isfinite(cost)]
     min_cost = float(np.min(finite)) if finite.size else 0.01
@@ -264,7 +424,10 @@ def astar_4d(
         # MOVE edges
         for d_row, d_col, diagonal in _OFFSETS:
             nr, nc = row + d_row, col + d_col
-            if not in_bounds(nr, nc) or not passable[nr, nc]:
+            if not in_bounds(nr, nc):
+                continue
+            if not passable[nr, nc]:
+                rejections["untraversable"] += 1
                 continue
 
             # Diagonal corner-cutting safety, matching pathfinder._astar_core:
@@ -277,6 +440,7 @@ def astar_4d(
             # the same rule so the horizon it sizes stays consistent with
             # the routes this loop can actually take. (Round 2 review, M-1.)
             if diagonal and not (passable[row, nc] and passable[nr, col]):
+                rejections["corner_cut"] += 1
                 continue
 
             distance_m = diag_m if diagonal else resolution_m
@@ -285,30 +449,41 @@ def astar_4d(
             if elevation is not None:
                 dz = elevation[nr, nc] - elevation[row, col]
                 if not math.isfinite(dz):
+                    rejections["nan_elevation"] += 1
                     continue
                 along_tan = abs(dz) / distance_m
                 if along_tan > tan_slope_max:
+                    rejections["step_slope"] += 1
                     continue
                 norm = math.hypot(d_row, d_col)
                 unit_r, unit_c = d_row / norm, d_col / norm
                 g_row = 0.5 * (grad_row[row, col] + grad_row[nr, nc])
                 g_col = 0.5 * (grad_col[row, col] + grad_col[nr, nc])
-                lat_tan = g_row * (-unit_c) + g_col * unit_r
+                # One shared implementation, in cost_engine. (Round 4, M-5.)
+                lat_tan = lateral_slope_tan(g_row, g_col, unit_r, unit_c)
                 if lat_tan * lat_tan > tan_lat_max_sq:
+                    rejections["lateral_slope"] += 1
                     continue
 
-            travel_s = edge_travel_time_s(float(slopes[nr, nc]), distance_m, rover)
+            # Trapezoidal, matching pathfinder._astar_core's edge cost: an
+            # edge is half in each cell, so its travel time follows the mean
+            # of the two slopes rather than the destination's alone.
+            # (Round 4 review, L-5.)
+            edge_slope = 0.5 * (float(slopes[row, col]) + float(slopes[nr, nc]))
+            travel_s = edge_travel_time_s(edge_slope, distance_m, rover)
             if not math.isfinite(travel_s):
+                rejections["step_slope"] += 1
                 continue
             d_slices = max(1, int(math.ceil(travel_s / 3600.0 / slice_hours)))
             arrival = slice_index + d_slices
             if arrival >= n_slices:
-                horizon_dropped += 1
+                rejections["horizon"] += 1
                 continue
 
             from_cost = cost[slice_index, row, col]
             to_cost = cost[arrival, nr, nc]
             if not (math.isfinite(from_cost) and math.isfinite(to_cost)):
+                rejections["cost_infinite"] += 1
                 continue
 
             step = (travel_s / 3600.0) * (1.0 + 0.5 * (from_cost + to_cost))
@@ -323,10 +498,12 @@ def astar_4d(
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     if goal_state is None:
-        result = _empty("No path found within the time horizon", elapsed_ms)
-        result["metrics"]["edges_dropped_at_horizon"] = horizon_dropped
-        result["metrics"]["horizon_truncated"] = horizon_dropped > 0
-        return result
+        return _empty(
+            no_path_reason_4d(rejections, rover, n_slices, slice_hours),
+            elapsed_ms,
+            rejections,
+            nodes_expanded,
+        )
 
     states: list[tuple[int, int, int]] = [goal_state]
     while states[-1] in came_from:
@@ -356,8 +533,9 @@ def astar_4d(
             "cost_units": "weighted_hours",
             "nodes_expanded": nodes_expanded,
             "computation_time_ms": round(elapsed_ms, 3),
-            "edges_dropped_at_horizon": horizon_dropped,
-            "horizon_truncated": horizon_dropped > 0,
+            "edges_rejected": dict(rejections),
+            "edges_dropped_at_horizon": rejections["horizon"],
+            "horizon_truncated": rejections["horizon"] > 0,
         },
         "error": None,
     }

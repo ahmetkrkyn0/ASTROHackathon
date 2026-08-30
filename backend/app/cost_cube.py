@@ -21,11 +21,25 @@ import numpy as np
 
 from .constants import THERMAL_MIN_TRAVERSABLE_C
 from .costmap import PlanContext, default_cost_map
-from .thermal_model import couple_shadow_to_thermal
+from .thermal_model import (
+    REGOLITH_THERMAL_TAU_S,
+    relax_surface_c,
+    shadowed_equilibrium_c,
+    sunlit_peak_from_annual_peak_c,
+)
 
 
 def coarsen_grid(grid: np.ndarray, factor: int, how: str = "mean") -> np.ndarray:
-    """Block-reduce a 2-D grid by an integer factor."""
+    """Block-reduce a 2-D grid by an integer factor.
+
+    ``how="center"`` returns the value at each block's CENTRE cell rather
+    than a statistic over the block. That is the right reduction for
+    elevation in the 4-D planner: ``/api/plan-4d`` publishes block centres as
+    its waypoints, so the geometry a rover meets driving between two of them
+    is the geometry AT those centres -- not the average of two blocks, which
+    smooths the terrain and made the coarse step-slope gate reject nothing at
+    all where the fine gate rejected 1 894 edges. (Round 4 review, L-11.)
+    """
     arr = np.asarray(grid, dtype=np.float64)
     factor = int(factor)
     if factor <= 1:
@@ -40,6 +54,11 @@ def coarsen_grid(grid: np.ndarray, factor: int, how: str = "mean") -> np.ndarray
         return np.nanmean(blocks, axis=(1, 3))
     if how == "max":
         return np.nanmax(blocks, axis=(1, 3))
+    if how == "center":
+        offset = factor // 2
+        return arr[offset::factor, offset::factor][
+            : height // factor, : width // factor
+        ]
     raise ValueError(f"unknown reduction: {how!r}")
 
 
@@ -65,13 +84,38 @@ def build_cost_cube(
     weights: Mapping[str, float] | None = None,
     coarsen: int = 1,
     couple_thermal: bool = True,
+    slice_hours: float = 1.0,
+    tau_s: float = REGOLITH_THERMAL_TAU_S,
 ) -> np.ndarray:
     """(T, H', W') cost cube, one slice per shadow-ratio snapshot.
 
-    *couple_thermal* recomputes the surface temperature from each slice's own
-    illumination (``thermal_model.couple_shadow_to_thermal``) instead of
-    holding the annual field fixed. Pass False only when *base_grids* already
-    carries a per-slice thermal field of its own.
+    Thermal dynamics
+    ----------------
+    With *couple_thermal* the surface temperature is INTEGRATED across the
+    slices: each slice has an equilibrium target set by its own illumination,
+    and the surface relaxes toward it with the regolith time constant
+    ``tau_s`` over ``slice_hours``. Pass False to hold ``base_grids["thermal"]``
+    fixed for every slice.
+
+    Two round-4 findings meet here.
+
+    * **H-1.** The previous form applied ``couple_shadow_to_thermal`` to
+      ``base_grids["thermal"]`` -- a field the loader has ALREADY coupled
+      (``metadata["thermal_shadow_coupled"]``). Applying the Stefan-Boltzmann
+      blend twice does not halve its effect, it compounds it: measured on the
+      production grid the 4-D planner's map ran 37 C colder than the 2-D
+      planner's for the same terrain at the same instant, 3 494 cells were
+      impassable to one planner and passable to the other, and mean cell cost
+      was 20 percent high. The stored field is now taken back to the sunlit
+      peak first (``sunlit_peak_from_annual_peak_c``) and the correction
+      applied exactly once, per slice.
+
+    * **H-3.** There were no dynamics at all, so a cell crossing into shadow
+      was scored at the permanently-shadowed floor within the same slice --
+      below the traversability gate, hence impassable, however briefly the
+      shadow lasted. Three quarters of this grid sits above shadow_ratio 0.5.
+      The first-order lag is what makes a passing shadow cost something
+      finite and a genuine cold trap cost everything.
     """
     if len(shadow_ratio_series) == 0:
         raise ValueError("shadow_ratio_series must contain at least one snapshot")
@@ -79,7 +123,15 @@ def build_cost_cube(
     slope = np.asarray(base_grids["slope"], dtype=np.float64)
     thermal = np.asarray(base_grids["thermal"], dtype=np.float64)
     traversable = np.asarray(base_grids["traversable"], dtype=bool)
-    resolution_m = float(base_grids["metadata"]["resolution_m"])
+    metadata = base_grids["metadata"]
+    resolution_m = float(metadata["resolution_m"])
+    # The long-run illumination the stored thermal field was corrected
+    # against. A caller assembling base_grids by hand may not carry one, in
+    # which case the first snapshot is the best available stand-in.
+    base_shadow = np.asarray(
+        base_grids.get("shadow_ratio", shadow_ratio_series[0]), dtype=np.float64
+    )
+    already_coupled = bool(metadata.get("thermal_shadow_coupled", False))
 
     for index, snapshot in enumerate(shadow_ratio_series):
         if np.asarray(snapshot).shape != slope.shape:
@@ -91,7 +143,30 @@ def build_cost_cube(
     slope_c = coarsen_grid(slope, coarsen, how="max")       # worst case per block
     thermal_c = coarsen_grid(thermal, coarsen, how="mean")
     traversable_c = coarsen_traversable(traversable, coarsen)
+    base_shadow_c = coarsen_grid(base_shadow, coarsen, how="mean")
     resolution_c = resolution_m * max(1, int(coarsen))
+
+    # The sunlit-peak field. data_loader publishes it directly -- it is the
+    # single stored statistic everything else is derived from -- so normally
+    # there is nothing to invert. The inversion is the fallback for a caller
+    # that assembled `base_grids` by hand from a corrected field.
+    sunlit = base_grids.get("thermal_sunlit_peak")
+    if sunlit is not None:
+        sunlit_c = coarsen_grid(np.asarray(sunlit, dtype=np.float64), coarsen)
+    elif already_coupled:
+        sunlit_c = np.asarray(
+            sunlit_peak_from_annual_peak_c(thermal_c, base_shadow_c), dtype=np.float64
+        )
+    else:
+        sunlit_c = thermal_c
+    # Initial state: the equilibrium under the cell's LONG-RUN illumination.
+    # Starting every cell at its annual peak would assume the traverse begins
+    # at the hottest moment of the year; starting at the long-run equilibrium
+    # is the honest "we do not know where in the cycle this is" prior.
+    surface_state = np.asarray(
+        shadowed_equilibrium_c(sunlit_c, base_shadow_c), dtype=np.float64
+    )
+    dt_s = max(0.0, float(slice_hours)) * 3600.0
 
     cost_map = default_cost_map(rover, weights)
 
@@ -108,13 +183,20 @@ def build_cost_cube(
     slices: list[np.ndarray] = []
     for snapshot in shadow_ratio_series:
         shadow_c = coarsen_grid(np.asarray(snapshot, dtype=np.float64), coarsen)
-        thermal_slice = (
-            np.asarray(
-                couple_shadow_to_thermal(thermal_c, shadow_c), dtype=np.float64
+        if couple_thermal:
+            # Where this slice's illumination would take the surface if it
+            # were held there indefinitely, and how far the surface actually
+            # gets in one slice.
+            target = np.asarray(
+                shadowed_equilibrium_c(sunlit_c, shadow_c), dtype=np.float64
             )
-            if couple_thermal
-            else thermal_c
-        )
+            surface_state = np.asarray(
+                relax_surface_c(surface_state, target, dt_s, tau_s),
+                dtype=np.float64,
+            )
+            thermal_slice = surface_state
+        else:
+            thermal_slice = thermal_c
 
         # A cell whose temperature at THIS slice is outside the traversable
         # band is impassable at this slice and passable later -- which is
@@ -253,6 +335,11 @@ def auto_slice_hours(
     Impassable cells are excluded: they routinely carry near-vertical
     slopes that the rover will never drive and whose traversal time is
     infinite.
+
+    Feed this the FINE slope grid with the COARSE cell length. Callers used
+    to pass a ``how="max"`` coarsened grid, so the "median" was a median of
+    block maxima -- biased high, and biased by the coarsen factor, which has
+    nothing to do with how long a crossing takes. (Round 4 review, L-7.)
     """
     slope_arr = np.asarray(slope, dtype=np.float64)
     passable = np.asarray(traversable, dtype=bool)

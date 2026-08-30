@@ -36,7 +36,11 @@ from app.thermal_model import (  # noqa: E402
     Heat1DModel,
     SyntheticModel,
     build_thermal_grid,
-    couple_shadow_to_thermal,
+    couple_shadow_to_thermal,  # noqa: F401  (kept for callers of this module)
+)
+from app.data_loader import (  # noqa: E402
+    THERMAL_FIELD_SUNLIT_PEAK,
+    derive_thermal_fields,
 )
 from app.traversability import compute_traversability, weakest_validity  # noqa: E402
 
@@ -56,7 +60,11 @@ DEFAULT_WINDOW_SIZE = 500
 SLOPE_MAX_DEG = 25.0
 HORIZON_N_AZIMUTH = 72
 HORIZON_MAX_RANGE_M = 10000.0
-HORIZON_MAX_STEPS = 200  # adım sayısı sabit -> hesap yuku cozunurlukten bagimsiz
+# Ornek sayisini sinirlar, MENZILI DEGIL: app.horizon yakin alani hucre
+# hucre, uzagi geometrik araliklarla tariyor. Onceki surumde bu bir menzil
+# sinirlamasiydi ve 5 m/px'te nominal 10 km'yi 1 km'ye dusuruyordu -- kutup
+# sitesinde uzun golgeyi atan tam da uzaktaki sirt. (Round 4 review, H-4.)
+HORIZON_MAX_STEPS = 200
 # Bir Ay gunu boyunca saatlik ornekleme
 SUN_TRACK_START_UTC = "2026-11-15T00:00:00"
 SUN_TRACK_END_UTC = "2026-12-13T00:00:00"
@@ -192,6 +200,45 @@ def find_action_window(
 # 2) GRID URETIMI — 7 katman
 # =============================================================================
 
+def read_context_window(
+    dem_ds: rasterio.DatasetReader,
+    win: Window,
+    resolution_m: float,
+    max_range_m: float,
+) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+    """Planlama penceresi + cevresindeki gercek arazi, ve pencerenin yeri.
+
+    Ufuk hesabinin isinlari DEM'i erken terk etmesin diye pencere
+    ``max_range_m`` kadar (DEM sinirlarina kirpilarak) genisletilir. Donen
+    ROI, genisletilmis dizi icinde planlama penceresinin yari-acik
+    (row0, row1, col0, col1) sinirlaridir. (Round 4 review, H-4.)
+    """
+    pad = int(round(float(max_range_m) / float(resolution_m)))
+    row0 = max(0, int(win.row_off) - pad)
+    col0 = max(0, int(win.col_off) - pad)
+    row1 = min(dem_ds.height, int(win.row_off) + int(win.height) + pad)
+    col1 = min(dem_ds.width, int(win.col_off) + int(win.width) + pad)
+    context_win = Window(col0, row0, col1 - col0, row1 - row0)
+
+    data = dem_ds.read(1, window=context_win).astype(np.float64)
+    nodata = dem_ds.nodata
+    data = np.where(data < -1e6, np.nan, data)
+    if nodata is not None and np.isfinite(nodata):
+        data = np.where(np.isclose(data, float(nodata)), np.nan, data)
+
+    roi = (
+        int(win.row_off) - row0,
+        int(win.row_off) - row0 + int(win.height),
+        int(win.col_off) - col0,
+        int(win.col_off) - col0 + int(win.width),
+    )
+    print(
+        f"  ufuk baglami    : {data.shape} piksel, ROI {roi} "
+        f"(pencere {int(win.height)}x{int(win.width)})"
+    )
+    return data, roi
+
+
 def make_elevation_grid(dem_ds: rasterio.DatasetReader, win: Window) -> np.ndarray:
     """Metre cinsinden yukseklik grid'i (float64)."""
     data = dem_ds.read(1, window=win).astype(np.float64)
@@ -234,6 +281,8 @@ def make_shadow_ratio_grid(
     lat_deg: float,
     lon_deg: float,
     crs_wkt: str,
+    context_elevation: np.ndarray | None = None,
+    roi: tuple[int, int, int, int] | None = None,
 ) -> tuple[np.ndarray, str]:
     """Golge orani [0, 1]. 0=aydinlik, 1=karanlik.
 
@@ -241,6 +290,16 @@ def make_shadow_ratio_grid(
     cekirdekleri yoksa yukseklik proxy'sine duser ve bunu bildirir.
     lat_deg/lon_deg window_center_latlon()'dan gelir -- sabit degil.
     crs_wkt gercek kuzey -> grid kuzeyi azimut donusumu icin gerekli.
+
+    context_elevation / roi
+    -----------------------
+    Ufuk, planlama penceresinin KIRPILMIS kopyasi uzerinde degil, o pencereyi
+    iceren daha genis arazi uzerinde hesaplanir. 2,5 km'lik bir kirpmada her
+    isin birkac yuz metrede DEM'i terk ediyor ve "engel yok" diyordu -- ki bu
+    "engel bulunamadi" ile ayni sey degil. 16 km'lik ham DEM baglaminda
+    olculdu: kalici golge hucresi 1076 -> 1336, shadow_ratio standart sapmasi
+    0,060 -> 0,082, bilgi tasiyan kuyruk %6,4 -> %19,3.
+    (Round 4 review, H-4.)
 
     Donus: (shadow_ratio_grid, validity)
     """
@@ -273,12 +332,13 @@ def make_shadow_ratio_grid(
             for az, elev in samples
         ]
         horizon = horizon_map(
-            elevation,
+            elevation if context_elevation is None else context_elevation,
             resolution,
             n_azimuth=HORIZON_N_AZIMUTH,
             max_range_m=HORIZON_MAX_RANGE_M,
             max_steps=HORIZON_MAX_STEPS,
             progress=True,
+            roi=None if context_elevation is None else roi,
         )
         frac = illumination_fraction(horizon, grid_samples)
         return shadow_ratio_from_illumination(frac).astype(np.float64), "DERIVED"
@@ -359,12 +419,15 @@ def make_thermal_grid(
 def make_traversability_grid(
     slope: np.ndarray,
     thermal: np.ndarray,
+    thermal_min: np.ndarray | None = None,
 ) -> np.ndarray:
     """Ikili gecebilirlik maskesi.
 
     Hesaplama backend/app/traversability.py modulunden gelir (tek kaynak).
+    *thermal_min* hucrenin soguk uc dengesi: hayatta kalabilirlik bir soguk
+    uc sorusu oldugu icin kapi onu okur. (Round 4 review, H-3.)
     """
-    return compute_traversability(slope, thermal)
+    return compute_traversability(slope, thermal, thermal_min=thermal_min)
 
 
 def make_cost_grid(
@@ -374,6 +437,7 @@ def make_cost_grid(
     resolution: float,
     traversability: np.ndarray,
     weights: dict[str, float] | None = None,
+    thermal_min: np.ndarray | None = None,
 ) -> np.ndarray:
     """Cell-level weighted cost grid.
 
@@ -389,6 +453,7 @@ def make_cost_grid(
         resolution,
         traversable=traversability.astype(bool),
         weights=weights,
+        thermal_min_grid=thermal_min,
     )
 
 
@@ -430,7 +495,13 @@ def save_metadata(
         # string, cost fonksiyonu degistiginde guncellenmedi ve diskteki
         # grid kalici olarak "bayat" damgasi tasidi. (Round 3 review, L-6.)
         "cost_model": COST_MODEL_ID,
-        "thermal_shadow_coupled": True,
+        # thermal_grid.npy'nin HANGI istatistigi tuttugu. Eski
+        # `thermal_shadow_coupled` bayragi yalnizca "bir duzeltme uygulandi"
+        # diyordu, hangisi oldugunu degil -- ve duzeltilmis bir alani elinde
+        # tutup baska bir aydinlanmayi isteyen bir tuketicinin geri donusu
+        # yoktu. (Round 4 review, H-1.)
+        "thermal_field": THERMAL_FIELD_SUNLIT_PEAK,
+        "thermal_shadow_coupled": True,  # eski ad; bkz. thermal_field
         "layer_validity": layer_validity,
     }
     path = out_dir / "metadata.json"
@@ -551,8 +622,19 @@ def main(
     print(f"  aspect_grid     : min={np.nanmin(aspect_grid):.2f} deg, "
           f"max={np.nanmax(aspect_grid):.2f} deg")
 
+    # Ufuk icin pencere cevresindeki gercek araziyi de oku: menzil kadar
+    # pad, DEM sinirlarina kirpilmis. (Round 4 review, H-4.)
+    context_elevation, context_roi = read_context_window(
+        dem_ds, win, resolution_m, HORIZON_MAX_RANGE_M
+    )
     shadow_ratio_grid, shadow_validity = make_shadow_ratio_grid(
-        elevation_grid, resolution_m, lat_deg, lon_deg, str(dem_ds.crs)
+        elevation_grid,
+        resolution_m,
+        lat_deg,
+        lon_deg,
+        str(dem_ds.crs),
+        context_elevation=context_elevation,
+        roi=context_roi,
     )
     print(f"  shadow_ratio    : min={np.nanmin(shadow_ratio_grid):.3f}, "
           f"max={np.nanmax(shadow_ratio_grid):.3f}")
@@ -561,33 +643,42 @@ def main(
         elevation_grid, slope_grid, aspect_grid, resolution_m, lat_deg, lon_deg,
         str(dem_ds.crs),
     )
-    # Termal katman aydinlanmayi okumuyordu: Heat1DModel bir (egim x baki)
-    # lookup tablosu, dolayisiyla kalici golgedeki bir hucre gunesli tepe
-    # sicakligini raporluyordu (uretim gridinde +42.6 C'ye kadar) ve -150 C
-    # gecilebilirlik kapisi 250 000 hucrenin yalnizca 150'sini kapatiyordu.
-    # Stefan-Boltzmann dorduncu-kuvvet harmanlamasiyla iki katman baglaniyor.
-    # (Round 3 review, H-3.)
-    thermal_grid = np.asarray(
-        couple_shadow_to_thermal(thermal_grid, shadow_ratio_grid), dtype=np.float64
+    # thermal_grid.npy artik DUZELTILMEMIS gunesli tepeyi tutuyor. Aydinlanma
+    # bagimli iki istatistik (yillik tepe ve soguk uc dengesi) yukleme aninda
+    # ondan turetiliyor, boylece duzeltme tam olarak BIR KEZ uygulaniyor.
+    # Round 3 duzeltilmis alani ayni ada yaziyordu ve app.cost_cube onu
+    # yeniden duzeltiyordu. (Round 4 review, H-1 ve H-3.)
+    thermal_sunlit_peak = np.asarray(thermal_grid, dtype=np.float64)
+    thermal_peak, thermal_min_grid = derive_thermal_fields(
+        thermal_sunlit_peak, shadow_ratio_grid
     )
     thermal_validity = weakest_validity(thermal_validity, shadow_validity)
 
-    print(f"  thermal validity: {thermal_validity} (shadow-coupled)")
+    print(f"  thermal validity: {thermal_validity} (sunlit_peak stored)")
     print(f"  shadow  validity: {shadow_validity}")
-    print(f"  thermal_grid    : min={np.nanmin(thermal_grid):.2f} C, "
-          f"max={np.nanmax(thermal_grid):.2f} C")
+    print(f"  thermal_grid    : min={np.nanmin(thermal_sunlit_peak):.2f} C, "
+          f"max={np.nanmax(thermal_sunlit_peak):.2f} C (gunesli tepe)")
+    print(f"  thermal peak    : min={np.nanmin(thermal_peak):.2f} C, "
+          f"max={np.nanmax(thermal_peak):.2f} C")
+    print(f"  thermal min     : min={np.nanmin(thermal_min_grid):.2f} C, "
+          f"max={np.nanmax(thermal_min_grid):.2f} C (soguk uc)")
 
-    traversability_grid = make_traversability_grid(slope_grid, thermal_grid)
+    # Gecilebilirlik SOGUK UC sorusudur. (Round 4 review, H-3.)
+    thermal_grid = thermal_sunlit_peak
+    traversability_grid = make_traversability_grid(
+        slope_grid, thermal_peak, thermal_min=thermal_min_grid
+    )
     passable_pct = 100.0 * np.nansum(traversability_grid) / traversability_grid.size
     print(f"  traversability  : gecilebilir={passable_pct:.1f}%")
 
     cost_grid = make_cost_grid(
         slope_grid,
-        thermal_grid,
+        thermal_peak,
         shadow_ratio_grid,
         resolution_m,
         traversability_grid,
         resolved_weights,
+        thermal_min=thermal_min_grid,
     )
     finite_cost = cost_grid[np.isfinite(cost_grid)]
     if finite_cost.size > 0:
@@ -608,7 +699,7 @@ def main(
         "traversability_grid": traversability_grid,
         "cost_grid": cost_grid,
     }
-    print_validation(thermal_grid, traversability_grid, cost_grid, grids)
+    print_validation(thermal_peak, traversability_grid, cost_grid, grids)
 
     # -- 5. Kaydetme ----------------------------------------------------------
     print("\n--- Ciktilar Diske Yaziliyor ---")
@@ -633,6 +724,7 @@ def main(
             "aspect": "DERIVED",
             "shadow_ratio": shadow_validity,
             "thermal": thermal_validity,
+            "thermal_min": thermal_validity,
             # traversable depends only on slope + thermal (see
             # compute_traversability); cost additionally reads shadow_ratio
             # (ShadowLayer) and energy (always MODEL, never the weakest

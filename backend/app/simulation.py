@@ -66,6 +66,10 @@ class RoverState:
     cumulative_cost: float
     recharge_count: int
     recharged_this_step: bool
+    # The grade actually driven into this cell, from the elevation
+    # difference across the step. Equal to slope_deg when no elevation grid
+    # was supplied. (Round 4 review, L-4.)
+    segment_slope_deg: float = 0.0
     # Battery level at this step's lowest point, before any recharge stop.
     # Equal to battery_pct on steps that did not recharge.
     battery_low_pct: float = 100.0
@@ -86,6 +90,7 @@ class RoverState:
             "battery_pct": round(self.battery_pct, 2),
             "risk_level": self.risk_level,
             "slope_deg": round(self.slope_deg, 2),
+            "segment_slope_deg": round(self.segment_slope_deg, 2),
             "surface_temp_c": round(self.surface_temp_c, 2),
             "shadow_ratio": round(self.shadow_ratio, 2),
             "node_cost": round(self.node_cost, 2),
@@ -106,6 +111,7 @@ def simulate_path(
     shadow_grid: np.ndarray,
     rover: dict[str, Any] | None = None,
     pixel_size_m: float | None = None,
+    elevation_grid: np.ndarray | None = None,
 ) -> list[RoverState]:
     """Simulate rover traversal over an A* path.
 
@@ -122,6 +128,15 @@ def simulate_path(
     ``mu_coeff``, LUVMI-M (1.296) and LPR-1 (3.471) were simulated with
     identical slope energy despite a factor of 2.7 between their published
     traction coefficients. (Round 3 review, M-9.)
+
+    *elevation_grid*, when given, supplies the SEGMENT slope -- the elevation
+    difference across each driven step. Round 3 (H-2) established that this
+    and the ``np.gradient`` cell slope are different quantities, made the
+    planner gate on the segment one, and reported both; the simulator kept
+    computing travel time and energy from the cell slope alone, so the route
+    was validated against one geometry and costed against another. The drive
+    grade is now the worse of the two, which is the conservative reading and
+    never under-reports a climb. (Round 4 review, L-4.)
     """
     if astar_result.get("error") is not None:
         raise ValueError(f"A* result contains error: {astar_result['error']}")
@@ -165,20 +180,30 @@ def simulate_path(
         slope_deg = float(slope_grid[r, c])
         shadow_ratio = float(shadow_grid[r, c])
 
+        segment_slope_deg = slope_deg
+        if i > 0 and elevation_grid is not None:
+            prev = path_pixels[i - 1]
+            dz = float(elevation_grid[r, c]) - float(
+                elevation_grid[int(prev[0]), int(prev[1])]
+            )
+            if math.isfinite(dz):
+                segment_slope_deg = math.degrees(math.atan2(abs(dz), step_dist))
+        drive_slope_deg = max(slope_deg, segment_slope_deg)
+
         if i == 0:
             step_time_h = 0.0
             step_energy = 0.0
         else:
-            travel_s = edge_travel_time_s(slope_deg, step_dist, rover_cfg)
+            travel_s = edge_travel_time_s(drive_slope_deg, step_dist, rover_cfg)
             if not math.isfinite(travel_s):
                 raise ValueError(
-                    f"step {i} at ({r}, {c}) has slope {slope_deg} deg, which the "
-                    "travel-time model cannot cross; the planner should not have "
-                    "produced this edge"
+                    f"step {i} at ({r}, {c}) has slope {drive_slope_deg} deg, which "
+                    "the travel-time model cannot cross; the planner should not "
+                    "have produced this edge"
                 )
             step_time_h = travel_s / 3600.0
             step_energy = (
-                gross_energy_per_metre_wh(slope_deg, shadow_ratio, rover_cfg)
+                gross_energy_per_metre_wh(drive_slope_deg, shadow_ratio, rover_cfg)
                 * step_dist
             )
 
@@ -252,6 +277,7 @@ def simulate_path(
                 # field over. (Round 3 review, M-10.)
                 risk_level=_risk_level(battery_low_pct),
                 slope_deg=slope_deg,
+                segment_slope_deg=segment_slope_deg,
                 surface_temp_c=float(thermal_grid[r, c]),
                 shadow_ratio=shadow_ratio,
                 node_cost=node_cost,
@@ -334,6 +360,7 @@ def summarize_simulation(
             "final_battery_pct": 0.0,
             "min_battery_pct": 0.0,
             "max_slope_deg": 0.0,
+            "max_segment_slope_deg": 0.0,
             "total_energy_consumed_wh": 0.0,
             "total_shadow_exposure": 0.0,
             "critical_steps_count": 0,
@@ -364,6 +391,9 @@ def summarize_simulation(
         "final_battery_pct": round(last.battery_pct, 2),
         "min_battery_pct": round(min(s.battery_low_pct for s in states), 2),
         "max_slope_deg": round(max(s.slope_deg for s in states), 2),
+        "max_segment_slope_deg": round(
+            max(s.segment_slope_deg for s in states), 2
+        ),
         "total_energy_consumed_wh": round(sum(s.step_energy_wh for s in states), 2),
         "total_shadow_exposure": round(total_shadow_exposure, 4),
         "critical_steps_count": sum(1 for s in states if s.risk_level == "CRITICAL"),

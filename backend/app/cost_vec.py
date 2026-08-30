@@ -145,10 +145,28 @@ def surface_to_inner_grid(
 
 
 def f_thermal_grid(
-    surface_c: np.ndarray, rover: Mapping[str, Any] | None = None
+    surface_c: np.ndarray,
+    rover: Mapping[str, Any] | None = None,
+    surface_min_c: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Array form of :func:`app.cost_engine.f_thermal`."""
+    """Array form of :func:`app.cost_engine.f_thermal`.
+
+    *surface_min_c* is the cell's cold-end equilibrium. When given, both ends
+    of the cell's range are scored and the worse penalty wins -- the same
+    envelope rule the scalar form applies. (Round 4 review, H-3.)
+    """
     rover_cfg = _resolve_rover(rover)
+    if surface_min_c is not None:
+        return np.maximum(
+            _f_thermal_one_grid(surface_c, rover_cfg),
+            _f_thermal_one_grid(surface_min_c, rover_cfg),
+        )
+    return _f_thermal_one_grid(surface_c, rover_cfg)
+
+
+def _f_thermal_one_grid(
+    surface_c: np.ndarray, rover_cfg: Mapping[str, Any]
+) -> np.ndarray:
     inner = surface_to_inner_grid(surface_c, rover_cfg)
 
     total_weight = 0.0

@@ -14,7 +14,11 @@ import rasterio
 from .constants import DEFAULT_ROVER_ID, DEFAULT_TARGET_RESOLUTION_M
 from .cost_engine import COST_MODEL_ID, compute_cost_grid, resolve_weights
 from .thermal_grid import ELEV_REF_MAX_M, ELEV_REF_MIN_M, generate_thermal_grid
-from .thermal_model import couple_shadow_to_thermal
+from .thermal_model import (
+    annual_peak_c,
+    shadowed_equilibrium_c,
+    sunlit_peak_from_equilibrium_c,
+)
 from .traversability import compute_traversability_bool, weakest_validity
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
@@ -31,6 +35,8 @@ _GRID_KEYS: tuple[str, ...] = (
     "slope",
     "aspect",
     "thermal",
+    "thermal_min",
+    "thermal_sunlit_peak",
     "shadow_ratio",
     "cost",
 )
@@ -41,9 +47,40 @@ _VALIDITY_LAYERS: tuple[str, ...] = (
     "aspect",
     "shadow_ratio",
     "thermal",
+    "thermal_min",
     "traversable",
     "cost",
 )
+
+# What ``thermal_grid.npy`` holds. Exactly one value is written by anything
+# current: the UNCORRECTED sunlit peak straight out of the surface thermal
+# model. Everything illumination-dependent -- the annual peak and the
+# cold-end equilibrium -- is derived from it at load time, so the shadow
+# correction is applied exactly once and cannot be applied twice.
+#
+# The old ``thermal_shadow_coupled`` flag could not express that. It said
+# whether SOME correction had been applied, not WHICH statistic was stored,
+# so a consumer holding an already-corrected field and wanting a different
+# illumination had no way to get back. app.cost_cube did the obvious thing
+# and corrected again. (Round 4 review, H-1.)
+THERMAL_FIELD_SUNLIT_PEAK: str = "sunlit_peak"
+
+
+def derive_thermal_fields(
+    sunlit_peak: np.ndarray, shadow_ratio: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """The two ends of each cell's temperature range, from the stored field.
+
+    Returns ``(annual_peak, cold_end_equilibrium)``. A cell is only passable
+    if it survives the COLD end, and only comfortable if it survives both --
+    see :mod:`app.thermal_model` for why these are different statistics and
+    why round 3 conflated them. (Round 4 review, H-3.)
+    """
+    peak = np.asarray(annual_peak_c(sunlit_peak, shadow_ratio), dtype=np.float64)
+    cold = np.asarray(
+        shadowed_equilibrium_c(sunlit_peak, shadow_ratio), dtype=np.float64
+    )
+    return peak, cold
 
 
 def load_preprocessed_grids(
@@ -94,41 +131,59 @@ def load_preprocessed_grids(
 
     stored_validity = dict(metadata.get("layer_validity", {}))
 
-    # ── Shadow coupling ──────────────────────────────────────────────────
-    # The thermal layer P1 writes is a (slope x aspect) lookup at fixed
-    # latitude: it never reads shadow_ratio, so a permanently shadowed cell
-    # could be reported at +42.6 C and the -150 C traversability gate blocked
-    # 150 cells out of 250 000. Couple the two layers here rather than only
-    # in the pipeline, so the fix reaches the grids already on disk without a
-    # re-run. Idempotent: a pipeline that already coupled them stamps
-    # `thermal_shadow_coupled` and this is skipped. (Round 3 review, H-3.)
+    # ── Illumination correction, applied exactly once ────────────────────
+    # The thermal layer the surface model writes is a (slope x aspect) lookup
+    # at fixed latitude: it never reads shadow_ratio, so a permanently
+    # shadowed cell was reported at +42.6 C and the -150 C traversability
+    # gate blocked 150 cells out of 250 000.
+    #
+    # The stored field is the SUNLIT PEAK and stays that way; the two
+    # illumination-dependent statistics are derived here. An artefact
+    # predating `thermal_field` stored a corrected field instead, so it is
+    # taken back to the sunlit peak first -- once, here, where the metadata
+    # says what was done to it. (Round 3 H-3; round 4 H-1 and H-3.)
     thermal_validity = str(stored_validity.get("thermal", "UNKNOWN"))
     shadow_validity = str(stored_validity.get("shadow_ratio", "UNKNOWN"))
-    already_coupled = bool(metadata.get("thermal_shadow_coupled", False))
-    if not already_coupled:
-        result["thermal"] = np.asarray(
-            couple_shadow_to_thermal(result["thermal"], result["shadow_ratio"]),
+    thermal_field = metadata.get("thermal_field")
+    legacy_coupled = thermal_field is None and bool(
+        metadata.get("thermal_shadow_coupled", False)
+    )
+    if legacy_coupled:
+        sunlit_peak = np.asarray(
+            sunlit_peak_from_equilibrium_c(result["thermal"], result["shadow_ratio"]),
             dtype=np.float64,
         )
-        thermal_validity = weakest_validity(thermal_validity, shadow_validity)
-        # The stored mask was built against the UNCOUPLED thermal grid, so it
-        # calls cold traps passable. Rebuild it from the grid it is supposed
-        # to describe -- ~0.05 s on the production grid.
-        result["traversable"] = compute_traversability_bool(
-            result["slope"], result["thermal"], result["elevation"]
-        )
+    else:
+        sunlit_peak = result["thermal"]
+
+    result["thermal_sunlit_peak"] = sunlit_peak
+    result["thermal"], result["thermal_min"] = derive_thermal_fields(
+        sunlit_peak, result["shadow_ratio"]
+    )
+    thermal_validity = weakest_validity(thermal_validity, shadow_validity)
+    # Rebuilt from the fields it is supposed to describe. The stored mask was
+    # gated on whichever thermal statistic that build happened to hold; the
+    # gate is a COLD-END question and now says so.
+    result["traversable"] = compute_traversability_bool(
+        result["slope"],
+        result["thermal"],
+        result["elevation"],
+        thermal_min=result["thermal_min"],
+    )
 
     resolved = resolve_weights(weights)
     stored_weights = metadata.get("cost_weights", {})
 
-    # Recompute the cost grid when the weights differ from what P1 used, or
-    # when the thermal layer was just coupled -- the stored grid describes the
-    # uncoupled field either way. `cost_model` is stamped with THIS build's id
-    # afterwards: leaving the file's stored value meant a freshly computed
-    # grid was labelled stale and pathfinder recomputed it a second time.
-    # (Round 3 review, L-5.)
-    recomputed_cost = (weights is not None and resolved != stored_weights) or (
-        not already_coupled
+    # The cost grid is recomputed whenever it cannot be shown to describe the
+    # layers now in hand: different weights, a different cost model, or a
+    # thermal envelope this build derived rather than read. `cost_model` is
+    # stamped with THIS build's id afterwards: leaving the file's stored value
+    # meant a freshly computed grid was labelled stale and pathfinder
+    # recomputed it a second time. (Round 3 review, L-5.)
+    recomputed_cost = (
+        (weights is not None and resolved != stored_weights)
+        or metadata.get("cost_model") != COST_MODEL_ID
+        or legacy_coupled
     )
     if recomputed_cost:
         result["cost"] = compute_cost_grid(
@@ -138,6 +193,7 @@ def load_preprocessed_grids(
             float(metadata["resolution_m"]),
             traversable=result["traversable"],
             weights=resolved,
+            thermal_min_grid=result["thermal_min"],
         )
         cost_weights = resolved
         cost_model = COST_MODEL_ID
@@ -153,13 +209,13 @@ def load_preprocessed_grids(
         for layer in _VALIDITY_LAYERS
     }
     validity["thermal"] = thermal_validity
-    if not already_coupled:
-        validity["traversable"] = weakest_validity(
-            validity.get("slope", "UNKNOWN"), thermal_validity
-        )
-        validity["cost"] = weakest_validity(
-            validity.get("slope", "UNKNOWN"), thermal_validity, shadow_validity
-        )
+    validity["thermal_min"] = thermal_validity
+    validity["traversable"] = weakest_validity(
+        validity.get("slope", "UNKNOWN"), thermal_validity
+    )
+    validity["cost"] = weakest_validity(
+        validity.get("slope", "UNKNOWN"), thermal_validity, shadow_validity
+    )
 
     result["metadata"] = {
         "origin": metadata.get("origin"),
@@ -171,7 +227,8 @@ def load_preprocessed_grids(
         "default_rover_id": metadata.get("default_rover_id", DEFAULT_ROVER_ID),
         "cost_weights": cost_weights,
         "cost_model": cost_model,
-        "thermal_shadow_coupled": True,
+        "thermal_field": THERMAL_FIELD_SUNLIT_PEAK,
+        "thermal_shadow_coupled": True,  # legacy alias; see thermal_field
         "layer_validity": validity,
     }
 
@@ -245,15 +302,16 @@ def load_and_preprocess_dem(
     elev_norm = np.clip((elevation - ELEV_REF_MIN_M) / elev_span, 0.0, 1.0)
     shadow_ratio = (1.0 - elev_norm).astype(np.float32)
 
-    # Same radiative coupling the preprocessed path applies: a cell the
-    # shadow layer calls dark cannot hold the sunlit peak temperature.
-    # (Round 3 review, H-3.)
-    thermal = np.asarray(
-        couple_shadow_to_thermal(thermal, shadow_ratio), dtype=np.float64
-    )
+    # Same illumination correction the preprocessed path applies, from the
+    # same single stored statistic: a cell the shadow layer calls dark cannot
+    # hold the sunlit peak temperature. (Round 3 H-3; round 4 H-1/H-3.)
+    thermal_sunlit_peak = thermal
+    thermal, thermal_min = derive_thermal_fields(thermal_sunlit_peak, shadow_ratio)
 
     # Traversability (canonical logic from traversability module)
-    traversable = compute_traversability_bool(slope, thermal, elevation)
+    traversable = compute_traversability_bool(
+        slope, thermal, elevation, thermal_min=thermal_min
+    )
     cost = compute_cost_grid(
         slope,
         thermal,
@@ -261,6 +319,7 @@ def load_and_preprocess_dem(
         actual_resolution,
         traversable=traversable,
         weights=resolved_weights,
+        thermal_min_grid=thermal_min,
     )
 
     result: dict[str, Any] = {
@@ -268,6 +327,8 @@ def load_and_preprocess_dem(
         "slope": slope,
         "aspect": aspect,
         "thermal": thermal,
+        "thermal_min": thermal_min,
+        "thermal_sunlit_peak": thermal_sunlit_peak,
         "shadow_ratio": shadow_ratio,
         "cost": cost,
         "traversable": traversable,
@@ -284,7 +345,8 @@ def load_and_preprocess_dem(
             "default_rover_id": DEFAULT_ROVER_ID,
             "cost_weights": resolved_weights,
             "cost_model": COST_MODEL_ID,
-            "thermal_shadow_coupled": True,
+            "thermal_field": THERMAL_FIELD_SUNLIT_PEAK,
+            "thermal_shadow_coupled": True,  # legacy alias; see thermal_field
             # This path only ever produces the synthetic thermal grid and the
             # elevation-proxy shadow ratio -- it does not touch the heat1d /
             # horizon / SPICE machinery -- so the honest provenance is
@@ -298,6 +360,7 @@ def load_and_preprocess_dem(
                 "aspect": "DERIVED",
                 "shadow_ratio": "SYNTHETIC",
                 "thermal": "SYNTHETIC",
+                "thermal_min": "SYNTHETIC",
                 "traversable": weakest_validity("DERIVED", "SYNTHETIC"),
                 "cost": weakest_validity("DERIVED", "SYNTHETIC"),
             },
@@ -367,7 +430,7 @@ def _cache_key(
             "resolution": float(resolution),
             "weights": weights,
             "cost_model": COST_MODEL_ID,
-            "thermal_shadow_coupled": True,
+            "thermal_field": THERMAL_FIELD_SUNLIT_PEAK,
         },
         sort_keys=True,
     )

@@ -100,10 +100,19 @@ def slip_energy_multiplier(slope_deg: float) -> float:
     return 1.0 / (1.0 - slip_ratio(slope_deg))
 
 
+# How far past the corridor's own length an odometry claim may run before
+# it is treated as an epoch error rather than as slip. Weaving inside a
+# corridor and ordinary obstacle avoidance genuinely add path length; a
+# claim of several times the route is not slip, it is a counter that was
+# never reset. (Round 4 review, L-6.)
+ODOMETER_EPOCH_TOLERANCE: float = 1.5
+
+
 def check_slip_accumulation(
     map_progress_m: float,
     odometer_claim_m: float,
     threshold: float = SLIP_ACCUMULATION_THRESHOLD,
+    corridor_length_m: float | None = None,
 ) -> TriggerResult:
     """Fire when ground actually gained falls below *threshold* of the
     distance the estimator claims to have covered.
@@ -123,6 +132,27 @@ def check_slip_accumulation(
     """
     claim = float(odometer_claim_m)
     progress = float(map_progress_m)
+
+    # `distance_travelled_m` is contractually counted FROM THE START OF THE
+    # ACTIVE CORRIDOR and reset on every new plan (see app.pose). Nothing
+    # enforced that: a caller integrating since boot hands a replanned
+    # corridor a near-zero along-track against a large claim, the ratio
+    # collapses, slip fires, the response recommends a replan -- which
+    # issues another corridor and repeats. Detecting the impossible claim is
+    # what breaks the loop. (Round 4 review, L-6.)
+    if (
+        corridor_length_m is not None
+        and float(corridor_length_m) > 0.0
+        and claim > ODOMETER_EPOCH_TOLERANCE * float(corridor_length_m)
+    ):
+        return TriggerResult(
+            "slip_accumulation",
+            False,
+            f"odometry claims {claim:.1f} m against a corridor only "
+            f"{float(corridor_length_m):.1f} m long; distance_travelled_m is "
+            "counted from the start of the ACTIVE corridor and must be reset "
+            "on every new plan, so this claim cannot be compared",
+        )
 
     if claim <= 0.0:
         # Nothing was claimed, so there is no ratio to judge. Report
