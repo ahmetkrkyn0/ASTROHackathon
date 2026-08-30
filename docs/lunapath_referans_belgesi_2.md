@@ -104,6 +104,22 @@ LOG_BARRIER_MU = 0.1             # μ parametresi (ayarlanabilir, başlangıç d
 
 Sistem çok kriterli maliyet fonksiyonuyla çalışan A* kullanır. Her edge'in maliyeti 4 penalty bileşeninin AHP-ağırlıklı toplamı artı log-barrier cezasıdır.
 
+> **Uygulama notu (Faz 3 bağımsız review, H-1).** Barrier terimi tek bir
+> fonksiyonda değil, iki yerde uygulanır — çünkü terimlerinden biri edge'in
+> değil *yolun* özelliğidir:
+>
+> | Terim | Nerede uygulanıyor | Neden |
+> |---|---|---|
+> | `theta_along` (25°) | `pathfinder._astar_core`, her kenarda | Kenarın kendi geometrisi. Yükseklik farkından hesaplanır; hücre eğimi gridi (`np.gradient`) yumuşatılmış olduğu için ayrı bir ölçüdür. |
+> | `theta_lateral` (18°) | `pathfinder._astar_core`, her kenarda | Devrilme limiti seyahat *yönüne* bağlıdır; hücre bazlı bir maske bunu ifade edemez. |
+> | `T_inner` | `pathfinder._thermal_barrier_grid`, hücre başına | Zamanla değişmediği için kenar başına değil hücre başına hesaplanır. Limitler rover'ın kendi zarfına ve `THERMAL_MIN_TRAVERSABLE_C`'ye bağlanır; belgedeki sabit −20/+95 iç sıcaklık bandı bu termal modelin ürettiği aralıkta gridin %36'sını kapatıyordu. |
+> | `soc` (%20) | `simulation.simulate_path` | SOC yol-bağımlıdır: statik grid üzerinde çalışan bir planlayıcı onu değerlendiremez. Simülatör rezervin altına inmeden şarj molası verir. |
+>
+> Bu bölünme bilinçlidir ve `cost_engine.edge_barrier_penalty` ile
+> `cost_engine.log_barrier_penalty` docstring'lerinde de yazılıdır. Round 3
+> review'dan önce hiçbiri çağrılmıyordu; yanal eğim ve SOC limitleri üründe
+> hiçbir yerde kontrol edilmiyordu.
+
 ```
 C(a→b) = w₁·f_slope(θ) + w₂·f_energy(θ,d) + w₃·f_shadow(H) + w₄·f_thermal(T) + J_penalty
 

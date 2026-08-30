@@ -28,14 +28,15 @@
     "w_shadow": 0.142,
     "w_thermal": 0.19
   },
-  "cost_model": "weighted_cell_cost_without_barrier",
+  "cost_model": "weighted_cell_cost_shadow_aware_energy_v3",
   "layer_validity": {
     "elevation": "MEASURED",
     "slope": "DERIVED",
     "aspect": "DERIVED",
     "shadow_ratio": "DERIVED",
-    "thermal": "MODEL",
+    "thermal": "DERIVED",
     "traversable": "DERIVED",
     "cost": "DERIVED"
-  }
+  },
+  "thermal_shadow_coupled": true
 }
