@@ -97,7 +97,7 @@ gerekçesi [`docs/superpowers/reviews/2026-08-30-backend-review-4.md`](../review
   - `binary_layer_headers(layer_name: str, layer: np.ndarray, downsample: int, resolution_m: float, validity: str | None) -> dict[str, str]`
   - `terrain_manifest(grids: dict, rover_id: str, rover_name: str, weights: dict | None = None, layer_names: Iterable[str] = TERRAIN_LAYERS, binary_query: str = "") -> dict[str, Any]`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `backend/test_terrain.py`:
 
@@ -237,14 +237,14 @@ def test_manifest_binary_url_carries_the_caller_query():
     )
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && python -m pytest test_terrain.py -q`
 Expected: collection error — `ModuleNotFoundError: No module named 'app.terrain'`
 (bir taslak `app/terrain.py` zaten yazıldıysa: testler koşar ve bir kısmı geçer;
 o durumda geçmeyen her assert'i düzelt, taslağı bu testlerin dediğine uydur).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `backend/app/terrain.py`. Sabitler ve iki sözlük yukarıdaki "Produces" bloğunda;
 gövdeler:
@@ -295,12 +295,12 @@ def suggested_vertical_exaggeration(relief_m, span_m, target_ratio=0.2) -> float
 `units`/`description`/`validity`/`min`/`max`/`nodata`/`binary_url`/`json_url`
 taşır; `binary_url` = `f"/api/layers/{name}?format=f32"` + (varsa) `"&" + binary_query`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && python -m pytest test_terrain.py -q`
 Expected: 11 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/terrain.py backend/test_terrain.py
@@ -322,7 +322,7 @@ git commit -m "feat(terrain): binary layer encoding and 3-D scene manifest primi
   gövde tam olarak `rows*cols*4` bayt. `format=json` (varsayılan) mevcut yanıtı
   **birebir** korur.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `backend/test_terrain_api.py`:
 
@@ -418,13 +418,13 @@ def test_cors_exposes_every_binary_header(client):
         assert name.lower() in exposed
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && python -m pytest test_terrain_api.py -q`
 Expected: FAIL — `format` bilinmeyen sorgu parametresi olarak yok sayılır, yanıt
 JSON döner, `content-type` eşleşmez.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 3a. `main.py` importlarına ekle:
 
@@ -495,17 +495,17 @@ kontrolünden **önce** dallan:
         )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && python -m pytest test_terrain_api.py -q`
 Expected: 8 passed
 
-- [ ] **Step 5: Regression gate — nothing existing moved**
+- [x] **Step 5: Regression gate — nothing existing moved**
 
 Run: `cd backend && python -m pytest test_plan_endpoint.py test_layer_validity.py -q`
 Expected: all pass, 0 warnings
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/main.py backend/test_terrain_api.py
@@ -526,7 +526,7 @@ git commit -m "feat(api): serve grid layers as raw float32 for the 3-D client"
 - Produces: `GET /api/terrain?rover_id=&w_slope=&w_energy=&w_shadow=&w_thermal=`
   → JSON; `layers[*].binary_url` doğrudan `fetch` edilebilir.
 
-- [ ] **Step 1: Write the failing test** — `test_terrain_api.py` sonuna ekle:
+- [x] **Step 1: Write the failing test** — `test_terrain_api.py` sonuna ekle:
 
 ```python
 def test_terrain_manifest_describes_the_production_grid(client):
@@ -566,12 +566,12 @@ def test_manifest_layer_range_matches_the_binary_it_points_at(client):
     assert float(finite.max()) == pytest.approx(entry["max"], rel=1e-6)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && python -m pytest test_terrain_api.py -k terrain_manifest -q`
 Expected: FAIL — 404, uç nokta yok.
 
-- [ ] **Step 3: Write the implementation** — `main.py`, `get_layer`'dan sonra:
+- [x] **Step 3: Write the implementation** — `main.py`, `get_layer`'dan sonra:
 
 ```python
 @app.get("/api/terrain")
@@ -623,12 +623,12 @@ def terrain(
 döndürdüğü sözlükte ağırlık anahtarı yoksa manifest `weights: null` yayınlar,
 bu doğrudur — "bilmiyorum" ile "sıfır" karışmaz.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && python -m pytest test_terrain_api.py -q`
 Expected: 11 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/main.py backend/test_terrain_api.py
@@ -657,7 +657,7 @@ git commit -m "feat(api): add GET /api/terrain scene manifest"
 yerinde yok. Gölge rasterı "nerede karanlık" der, güneş açısı "neden karanlık"
 der — ışık, gölge ve arazi ancak ikisi birlikte tutarlı görünür.
 
-- [ ] **Step 1: Write the failing test** — `test_terrain.py` sonuna:
+- [x] **Step 1: Write the failing test** — `test_terrain.py` sonuna:
 
 ```python
 def test_sun_track_for_series_returns_one_entry_per_slice():
@@ -684,12 +684,12 @@ def test_sun_track_for_series_returns_one_entry_per_slice():
         assert -10.0 < entry["elevation_deg"] < 10.0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && python -m pytest test_terrain.py -k sun_track -q`
 Expected: FAIL — `ImportError: cannot import name 'sun_track_for_series'`
 
-- [ ] **Step 3: Write the implementation** — `illumination_series.py` sonuna ekle.
+- [x] **Step 3: Write the implementation** — `illumination_series.py` sonuna ekle.
 Mevcut hiçbir fonksiyon değişmez:
 
 ```python
@@ -754,12 +754,12 @@ def sun_track_for_series(
     return track
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && python -m pytest test_terrain.py -q`
 Expected: 12 passed (veya SPICE yoksa 11 passed 1 skipped)
 
-- [ ] **Step 5: Build the horizon cache**
+- [x] **Step 5: Build the horizon cache**
 
 Zaman serisi bu cache olmadan sessizce statiğe düşer — `build_shadow_series`
 `reason` alanında bunu söyler, ama animasyon çalışmaz.
@@ -777,7 +777,7 @@ Beklenen: `(72, 500, 500)`, açı değerleri radyan/derece aralığında ve heps
 `.gitignore:26` `*.npy` içerdiği için commit edilmez — bu doğru, 69 MB'lık türetilmiş
 artefakt depoya girmemeli. Task 6'nın belgesi bu komutu kurulum adımı olarak yazacak.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/illumination_series.py backend/test_terrain.py
@@ -810,7 +810,7 @@ yoksa 3-B görünüm planlayıcının gördüğünden başka bir yüzey gösteri
 3. Her dilimde hedef: `shadowed_equilibrium_c(sunlit, shadow_series[i])`
 4. `relax_surface_c(state, target, dt_s=slice_hours*3600, tau_s=REGOLITH_THERMAL_TAU_S)`
 
-- [ ] **Step 1: Write the failing test** — `test_terrain_api.py` sonuna:
+- [x] **Step 1: Write the failing test** — `test_terrain_api.py` sonuna:
 
 ```python
 SERIES = "/api/illumination-series"
@@ -883,12 +883,12 @@ def test_series_rejects_an_unknown_field(client):
     assert response.status_code == 422
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && python -m pytest test_terrain_api.py -k series -q`
 Expected: FAIL — 404.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `main.py` importlarına: `from .thermal_model import (REGOLITH_LAG_VALIDITY,
 REGOLITH_THERMAL_TAU_S, relax_surface_c, shadowed_equilibrium_c)` ve
@@ -1083,12 +1083,12 @@ Uyuşmazlık sürerse testi `cube[0]`'ı `build_cost_cube`'un ilk dilim yüzeyin
 sınayacak biçimde yeniden yaz — ölçüt "planlayıcıyla aynı", "benim tahminimle aynı"
 değil.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && python -m pytest test_terrain_api.py -q`
 Expected: 17 passed
 
-- [ ] **Step 5: Verify the series actually varies**
+- [x] **Step 5: Verify the series actually varies**
 
 ```bash
 cd backend && python -c "
@@ -1111,7 +1111,7 @@ Expected: `model: spice_horizon`, `varying: True`, ve aydınlık kesirleri
 dilimden dilime **değişiyor**. Hepsi aynıysa cache ya da epoch yolunda sorun var —
 `shadow_model.reason` sebebi söyler.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/main.py backend/test_terrain_api.py
@@ -1129,7 +1129,7 @@ git commit -m "feat(api): publish the time-sliced illumination and surface tempe
 - Consumes: Task 2, 3, 5'in uç noktaları.
 - Produces: frontend ekibinin tek oturumda bağlayabileceği belge.
 
-- [ ] **Step 1: Write the document**
+- [x] **Step 1: Write the document**
 
 İçerik, sırayla:
 
@@ -1218,7 +1218,7 @@ scene.add(sun)
 9. **Değişmeyenler** — `fetchLayer` ve mevcut tüm çağrılar aynen çalışır; `format`
    opsiyoneldir ve varsayılanı `json`'dur.
 
-- [ ] **Step 2: Verify every endpoint and field name in the document exists**
+- [x] **Step 2: Verify every endpoint and field name in the document exists**
 
 ```bash
 cd backend && python -c "
@@ -1238,7 +1238,7 @@ with c:
 ```
 Expected: `every name the document uses resolves`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/frontend/3b-veri-sozlesmesi.md
@@ -1249,7 +1249,7 @@ git commit -m "docs: 3-D data contract and a working three.js binding for the fr
 
 ## Task 7: Bütün suite ve kapanış
 
-- [ ] **Step 1: Run the full suite**
+- [x] **Step 1: Run the full suite**
 
 Run: `cd backend && python -m pytest -q`
 Expected: **683 passed, 1 skipped, 0 failed, 0 warnings**
@@ -1260,7 +1260,7 @@ ve sayım 682 passed / 2 skipped olur.)
 Herhangi bir **mevcut** test kırmızıya dönerse plan ihlal edilmiştir: bu iş
 toplamsal olmak zorunda. Testi değiştirme — kırılmayı yapan değişikliği geri al.
 
-- [ ] **Step 2: Confirm no commit carries a Co-Authored-By trailer**
+- [x] **Step 2: Confirm no commit carries a Co-Authored-By trailer**
 
 ```bash
 git log origin/backend/physics..HEAD --format='%H %s' &&
@@ -1268,7 +1268,7 @@ git log origin/backend/physics..HEAD --format='%B' | grep -ci 'co-authored-by' |
 ```
 Expected: `0 occurrences - clean`
 
-- [ ] **Step 3: Report, do not push**
+- [x] **Step 3: Report, do not push**
 
 Push edilmez. Kullanıcıya özet: hangi uç noktalar eklendi, ufuk cache'inin
 üretilmesi gerektiği, ölçülen test sayısı, ve push için onay sorusu.
@@ -1286,3 +1286,58 @@ Push edilmez. Kullanıcıya özet: hangi uç noktalar eklendi, ufuk cache'inin
   gerekir; bugün değil.
 - **Gerçek doku (ortofoto).** Elimizde LROC WAC global 1024 var (frontend'de),
   bu pencerenin kendi ortofotosu yok.
+
+---
+
+## Yürütme notları — plandan sapmalar
+
+Plan uygulandı ve tüm adımlar kapandı. Dört yerde plandan ayrıldım:
+
+**1. Testler iki değil üç dosyaya bölündü.** Plan `test_terrain_api.py` içinde
+üretim gridine (500×500, 1063,8 m kabartı, 49 525 NaN) dair iddialar taşıyordu.
+Ama `.npy` artefaktları `.gitignore`'da; o dosya taze bir klonda çökerdi. Depoda
+bunun için yerleşik bir desen var — `test_plan_4d_endpoint.py` (sentetik fixture)
+ile `test_plan_4d_real_grid.py` (`skipif`'li gerçek grid) — aynı ikiye böldüm:
+`test_terrain_api.py` sözleşmeyi 8×6 fixture üzerinde sınıyor (kare değil:
+transpoze hatası kare gridde hayatta kalır), `test_terrain_real_grid.py` üretim
+gridine dair sayıları. 12 + 19 + 11 = **42 yeni test**.
+
+**2. Task 2 ve Task 3 tek commit.** Aynı test dosyasını ve `main.py`'nin aynı
+bölgesini paylaşıyorlar; `git add` ile temiz ayrılmıyorlardı ve bir gözden
+geçiren zaten ikisine birlikte bakardı.
+
+**3. Planda olmayan bir hata bulundu ve düzeltildi — `_spice_shadow_series`.**
+`spice.str2et`, SPICE havuzunu yükleyen `sun_vector_body`'den önce çağrılıyordu.
+Soğuk süreçte ilk çağrı `SPICE(NOLEAPSECONDS)` fırlatıyor, geniş `except` bunu
+statik seriye çeviriyor, gerekçe olarak da "real illumination unavailable"
+yazılıyordu. Ölçüldü: taze süreçte `model="static"`; başka bir şey SPICE'a
+dokunduktan sonra aynı çağrı `model="spice_horizon"` ve gerçekten zamanla
+değişen seri. Yani `/api/plan-4d`, SPICE'ı ilk çağıran olduğunda donuk küp
+üzerinde planlıyordu — tur 3'ün M-1 bulgusunun bu modülü eklemesinin sebebi olan
+hatanın tam olarak kendisi.
+
+Bu **Global Constraints'in "hiçbir mevcut davranış değişmez" maddesini ihlal
+ediyor** ve bilinçli bir karardır: yeni uç noktanın manifesti ile işaret ettiği
+ikili yük, süreç-global SPICE durumunun çağrı sırasına bağlı olarak birbiriyle
+çelişiyordu. Havuzu açıkça yüklemek bu çelişkiyi kaldırdı ama `/api/plan-4d`'nin
+davranışını değiştirdi. 4-B ve aydınlanma testlerinin 98'i geçiyor.
+
+**4. `data_loader.py`'ye bir satır.** `window_offset` `metadata.json`'da vardı,
+bellekteki metadata'ya taşınmıyordu; `/api/terrain` onsuz pencereyi ham DEM'e
+oturtamıyor. Sözlüğe anahtar ekler, hiçbir davranışı değiştirmez.
+
+## Kapanış ölçümü
+
+| | plan öncesi | plan sonrası |
+|---|---|---|
+| test sayısı | 654 | **696** |
+| başarısız | 0 | 0 |
+| uyarı | 0 | 0 |
+| süre | 346 s | 527 s |
+
+Süre farkının 498 saniyesi iki mevcut heat1d testinde
+(`test_heat1d_binning_is_deterministic_and_covers_grid` 352 s,
+`test_heat1d_lookup_table_reflects_slope_and_aspect_physics` 146 s).
+`test_thermal_model.py` yalnızca `app.thermal_model`'i import ediyor ve o modüle
+dokunulmadı; fark makine değişkenliği, bu işin sonucu değil. Yeni testlerin en
+yavaşı 0,18 s.
