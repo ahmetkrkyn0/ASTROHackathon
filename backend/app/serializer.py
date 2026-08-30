@@ -220,6 +220,7 @@ def build_plan_response(
     rover_id: str | None = None,
     rover_name: str | None = None,
     corridor: dict[str, Any] | None = None,
+    route_statistics: dict[str, Any] | None = None,
 ) -> dict:
     """Assemble the final API response for a single plan request.
 
@@ -248,6 +249,7 @@ def build_plan_response(
         "summary": summary,
         "geojson": states_to_geojson(states, metadata),
         "corridor": corridor,
+        "route_statistics": route_statistics,
     }
     if rover_id is not None:
         response["rover"] = {

@@ -49,6 +49,7 @@ from .scenarios import (
     list_scenarios,
     load_scenario,
 )
+from .route_analysis import route_statistics as compute_route_statistics
 from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
 from .simulation import simulate_path, summarize_simulation
 
@@ -506,6 +507,7 @@ def plan(req: PlanRequest, request: Request):
             rover_id=req.rover_id,
             rover_name=rover["name"],
             corridor=corridor_payload,
+            route_statistics=compute_route_statistics(states),
         )
     except ValueError as exc:
         # pixel_to_lonlat rejects a grid whose pixels do not project into the
