@@ -41,7 +41,12 @@ from app.cost_engine import (
     thermal_barrier_terms,
 )
 from app.cost_vec import f_energy_cell_grid
-from app.thermal_model import PSR_ANNUAL_MAX_K, couple_shadow_to_thermal
+from app.thermal_model import (
+    PSR_ANNUAL_MAX_K,
+    annual_peak_c,
+    couple_shadow_to_thermal,
+    shadowed_equilibrium_c,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -212,28 +217,112 @@ def test_h2_both_slope_definitions_are_reported_under_distinct_names():
 # ══════════════════════════════════════════════════════════════════════════
 
 def test_h3_permanent_shadow_reaches_the_psr_floor():
+    """Round 3's finding, kept: a never-lit cell must not read as warm.
+
+    What changed in round 4 is WHICH statistic the blend produces. Round 3
+    stored a fourth-power TIME MEAN under the name of an annual PEAK, so a
+    cell lit a quarter of the time was reported 78 K colder than the
+    temperature it actually reaches whenever the Sun clears its horizon.
+    Both statistics are now named and both are exact at the two ends.
+    (Round 4 review, H-3.)
+    """
     sunlit = np.array([[20.0, 20.0], [20.0, 20.0]])
     shadow = np.array([[0.0, 0.5], [1.0, 1.0]])
-    coupled = couple_shadow_to_thermal(sunlit, shadow)
-
     psr_c = PSR_ANNUAL_MAX_K - 273.15
-    assert coupled[0, 0] == pytest.approx(20.0, abs=1e-3)   # full sun: unchanged
-    assert coupled[1, 0] == pytest.approx(psr_c, abs=1e-3)  # full shadow: floor
-    assert coupled[1, 1] == pytest.approx(psr_c, abs=1e-3)
-    # Partial shadow lands strictly between -- and ABOVE the arithmetic
-    # mean, because a fourth-power blend is dominated by the hotter term.
-    # That is the physics, not a fudge: radiated power goes as T^4, so half
-    # the year in sunlight leaves a surface much closer to its sunlit peak
-    # than to the cold-trap floor.
-    assert psr_c < coupled[0, 1] < 20.0
-    assert coupled[0, 1] > 0.5 * (20.0 + psr_c)
+
+    peak = annual_peak_c(sunlit, shadow)
+    assert peak[0, 0] == pytest.approx(20.0, abs=1e-3)   # full sun
+    assert peak[1, 0] == pytest.approx(psr_c, abs=1e-3)  # never lit: floor
+    assert peak[1, 1] == pytest.approx(psr_c, abs=1e-3)
+    # Lit half the time still REACHES the sunlit peak. This is the round-4
+    # correction: a maximum is not an average.
+    assert peak[0, 1] == pytest.approx(20.0, abs=1e-3)
+
+    equilibrium = shadowed_equilibrium_c(sunlit, shadow)
+    assert equilibrium[0, 0] == pytest.approx(20.0, abs=1e-3)
+    assert equilibrium[1, 0] == pytest.approx(psr_c, abs=1e-3)
+    # The cold end lands strictly between, and ABOVE the arithmetic mean,
+    # because a fourth-power blend is dominated by the hotter term. That is
+    # the physics, not a fudge.
+    assert psr_c < equilibrium[0, 1] < 20.0
+    assert equilibrium[0, 1] > 0.5 * (20.0 + psr_c)
+
+    # couple_shadow_to_thermal defaults to the statistic the stored field
+    # actually holds.
+    assert np.allclose(couple_shadow_to_thermal(sunlit, shadow), peak, equal_nan=True)
+    assert np.allclose(
+        couple_shadow_to_thermal(sunlit, shadow, statistic="equilibrium"),
+        equilibrium,
+        equal_nan=True,
+    )
 
 
 def test_h3_coupling_is_monotone_in_illumination():
+    """Both statistics fall monotonically as illumination falls.
+
+    The peak is flat until the cell stops being lit at all and then drops to
+    the floor -- a maximum has no reason to vary with duty cycle. The cold
+    end falls throughout. Neither may ever RISE with more shadow.
+    """
     sunlit = np.full(5, 10.0)
     shadow = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
-    coupled = couple_shadow_to_thermal(sunlit, shadow)
-    assert all(b < a for a, b in zip(coupled, coupled[1:]))
+
+    equilibrium = shadowed_equilibrium_c(sunlit, shadow)
+    assert all(b < a for a, b in zip(equilibrium, equilibrium[1:]))
+
+    peak = annual_peak_c(sunlit, shadow)
+    assert all(b <= a for a, b in zip(peak, peak[1:]))
+    assert np.allclose(peak[:4], 10.0, atol=1e-3)
+    assert peak[4] == pytest.approx(PSR_ANNUAL_MAX_K - 273.15, abs=1e-3)
+
+
+def test_h3_round4_the_correction_is_applied_exactly_once():
+    """The peak correction must be invertible wherever the cell is lit.
+
+    This is what stops app.cost_cube re-applying it. Before round 4 the
+    4-D planner coupled an already-coupled field, and the compounded result
+    ran 37 C colder than the 2-D planner's map for the same terrain at the
+    same instant. (Round 4 review, H-1.)
+    """
+    from app.thermal_model import sunlit_peak_from_annual_peak_c
+
+    sunlit = np.array([[24.0, 0.0, -50.0, 10.0]])
+    shadow = np.array([[0.0, 0.53, 0.9, 0.99]])
+    recovered = sunlit_peak_from_annual_peak_c(annual_peak_c(sunlit, shadow), shadow)
+    assert np.allclose(recovered, sunlit, atol=1e-2)
+
+
+def test_h3_round4_regolith_lag_separates_a_passing_shadow_from_a_cold_trap():
+    """A cell entering shadow does not reach the cold-trap floor instantly.
+
+    Round 3 had no dynamics, so any cell dark at instant t was scored at the
+    PSR floor at instant t -- below the -150 C traversability gate, hence
+    impassable, however briefly the shadow lasted. Three quarters of the
+    production grid sits above shadow_ratio 0.5. (Round 4 review, H-3.)
+    """
+    from app.constants import THERMAL_MIN_TRAVERSABLE_C
+    from app.thermal_model import REGOLITH_THERMAL_TAU_S, relax_surface_c
+
+    floor = np.array(PSR_ANNUAL_MAX_K - 273.15)
+    start = np.array(0.0)
+
+    after_one_hour = float(relax_surface_c(start, floor, 3600.0))
+    assert after_one_hour < 0.0, "the surface must actually cool"
+    assert after_one_hour > THERMAL_MIN_TRAVERSABLE_C, (
+        "one hour of shadow must not read as a cold trap"
+    )
+
+    # Given long enough it does get there, so a genuine cold trap still
+    # closes the cell.
+    after_a_day = float(relax_surface_c(start, floor, 24 * 3600.0))
+    assert after_a_day == pytest.approx(float(floor), abs=1.0)
+
+    # The lag is a lag, not a threshold: cooling is monotone in time.
+    temps = [
+        float(relax_surface_c(start, floor, h * REGOLITH_THERMAL_TAU_S))
+        for h in (0.5, 1.0, 2.0, 4.0)
+    ]
+    assert all(b < a for a, b in zip(temps, temps[1:]))
 
 
 def test_h3_coupling_preserves_nan():

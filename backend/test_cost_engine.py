@@ -208,7 +208,18 @@ check_inf("soc=0.15", log_barrier_penalty(10, 5, 0.15, 20))
 # the smooth approach to a wall that exists rather than a second, stricter
 # one nothing else honoured. For lpr_1 (thermal_offset_cold = 60) that is
 # an inner temperature of -90 C. (Round 3 review, H-1.)
-check_inf("T_inner=-90 (surface -150)", log_barrier_penalty(10, 5, 0.8, -90))
+# Exactly AT the wall is a legal, very expensive state, not an impossible
+# one: the traversability gate is inclusive (thermal >= -150) and the
+# barrier now agrees with it, so the same cell is not a legal start and an
+# illegal destination. Below the wall is still infinite.
+# (Round 4 review, L-12.)
+_at_wall = log_barrier_penalty(10, 5, 0.8, -90)
+if math.isfinite(_at_wall) and _at_wall > 1.0:
+    print(f"PASS T_inner=-90 (surface -150) = {_at_wall:.4f}, large but finite")
+else:
+    print(f"FAIL T_inner=-90 (surface -150): expected a large finite value, got {_at_wall}")
+    FAILURES += 1
+check_inf("T_inner=-91 (surface -151)", log_barrier_penalty(10, 5, 0.8, -91))
 
 # ...and -20 C inner, which used to be fatal, is now merely penalised.
 _cold = log_barrier_penalty(10, 5, 0.8, -20)

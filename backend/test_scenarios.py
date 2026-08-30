@@ -57,7 +57,20 @@ def test_profile_slope_ceilings_are_within_the_default_rovers_limit():
 def test_get_profile_returns_none_for_an_unknown_id():
     assert get_profile("no_such_profile") is None
     assert get_profile("balanced") is MISSION_PROFILES["balanced"]
-    assert list_profiles() is MISSION_PROFILES
+
+    # list_profiles no longer returns the registry itself: it annotates each
+    # constraint with HOW it is applied. A profile published four numbers
+    # that read as equally binding while the planner enforced one of them.
+    # (Round 4 review, M-4.)
+    listed = list_profiles()
+    assert set(listed) == set(MISSION_PROFILES)
+    for profile_id, profile in listed.items():
+        assert profile["constraints"] == MISSION_PROFILES[profile_id]["constraints"]
+        handling = profile["constraint_handling"]
+        assert set(handling) == set(profile["constraints"])
+        assert handling["max_slope_deg"] == "enforced_in_search"
+        for key in ("max_shadow_h", "max_energy_wh", "min_soc"):
+            assert handling[key] == "verified_after_simulation"
 
 
 def test_compare_results_handles_an_all_failed_set():

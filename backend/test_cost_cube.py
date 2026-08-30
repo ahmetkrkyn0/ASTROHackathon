@@ -16,10 +16,51 @@ SHAPE = (8, 8)
 def _base_grids() -> dict:
     return {
         "slope": np.full(SHAPE, 4.0),
+        # The stored field is the SUNLIT PEAK; the illumination-dependent
+        # statistics are derived from it exactly once. (Round 4 review, H-1.)
         "thermal": np.full(SHAPE, -60.0),
+        "shadow_ratio": np.zeros(SHAPE),
         "traversable": np.ones(SHAPE, dtype=bool),
-        "metadata": {"resolution_m": 80.0, "shape": list(SHAPE)},
+        "metadata": {
+            "resolution_m": 80.0,
+            "shape": list(SHAPE),
+            "thermal_field": "sunlit_peak",
+        },
     }
+
+
+def _reference_states(grids, series, coarsen=1, slice_hours=1.0):
+    """Per-slice surface temperature, integrated the way the builder does.
+
+    The builder no longer recomputes an instantaneous coupling per slice --
+    it INTEGRATES a first-order lag from the long-run equilibrium, because a
+    cell crossing into shadow does not reach the cold-trap floor within one
+    slice. Mirroring that here keeps the cube checked against an independent
+    implementation of the same physics rather than against a constant.
+    (Round 4 review, H-1 and H-3.)
+    """
+    from app.thermal_model import (
+        REGOLITH_THERMAL_TAU_S,
+        relax_surface_c,
+        shadowed_equilibrium_c,
+    )
+
+    sunlit = coarsen_grid(np.asarray(grids["thermal"], float), coarsen)
+    base_shadow = coarsen_grid(
+        np.asarray(grids.get("shadow_ratio", series[0]), float), coarsen
+    )
+    state = np.asarray(shadowed_equilibrium_c(sunlit, base_shadow), dtype=np.float64)
+    dt_s = slice_hours * 3600.0
+    out = []
+    for snapshot in series:
+        shadow_c = coarsen_grid(np.asarray(snapshot, float), coarsen)
+        target = np.asarray(shadowed_equilibrium_c(sunlit, shadow_c), dtype=np.float64)
+        state = np.asarray(
+            relax_surface_c(state, target, dt_s, REGOLITH_THERMAL_TAU_S),
+            dtype=np.float64,
+        )
+        out.append(state.copy())
+    return out
 
 
 def test_coarsen_grid_averages_blocks():
@@ -160,18 +201,17 @@ def test_cost_cube_matches_a_per_slice_reference():
     rover = get_rover()
     series = [np.full(SHAPE, r) for r in (0.0, 0.35, 0.8, 1.0)]
 
-    cube = build_cost_cube(grids, series, rover)
+    cube = build_cost_cube(grids, series, rover, slice_hours=1.0)
+    states = _reference_states(grids, series, slice_hours=1.0)
 
     cost_map = default_cost_map(rover)
     for index, snapshot in enumerate(series):
         reference = cost_map.total(
             PlanContext(
                 slope=np.asarray(grids["slope"], dtype=np.float64),
-                thermal=_coupled(grids["thermal"], snapshot),
+                thermal=states[index],
                 shadow_ratio=np.asarray(snapshot, dtype=np.float64),
-                traversable=_passable(
-                    grids["traversable"], _coupled(grids["thermal"], snapshot)
-                ),
+                traversable=_passable(grids["traversable"], states[index]),
                 resolution_m=80.0,
                 rover=rover,
             )
@@ -192,7 +232,8 @@ def test_cost_cube_matches_reference_with_coarsening_and_blocked_cells():
 
     rover = get_rover()
     series = [np.full(SHAPE, 0.2), np.full(SHAPE, 0.9)]
-    cube = build_cost_cube(grids, series, rover, coarsen=2)
+    cube = build_cost_cube(grids, series, rover, coarsen=2, slice_hours=1.0)
+    states = _reference_states(grids, series, coarsen=2, slice_hours=1.0)
 
     from app.cost_cube import coarsen_grid, coarsen_traversable
 
@@ -201,17 +242,10 @@ def test_cost_cube_matches_reference_with_coarsening_and_blocked_cells():
         reference = cost_map.total(
             PlanContext(
                 slope=coarsen_grid(slope, 2, how="max"),
-                thermal=_coupled(
-                    coarsen_grid(grids["thermal"], 2),
-                    coarsen_grid(np.asarray(snapshot, float), 2),
-                ),
+                thermal=states[index],
                 shadow_ratio=coarsen_grid(np.asarray(snapshot, float), 2),
                 traversable=_passable(
-                    coarsen_traversable(traversable, 2),
-                    _coupled(
-                        coarsen_grid(grids["thermal"], 2),
-                        coarsen_grid(np.asarray(snapshot, float), 2),
-                    ),
+                    coarsen_traversable(traversable, 2), states[index]
                 ),
                 resolution_m=160.0,
                 rover=rover,
@@ -328,18 +362,29 @@ def test_cost_cube_honours_shadow_reading_layers_regardless_of_name():
             get_rover(),
             couple_thermal=False,
         )
+        # Long enough in the dark for the surface to actually get there.
         coupled = module.build_cost_cube(
-            _base_grids(), [np.zeros(SHAPE), np.ones(SHAPE)], get_rover()
+            _base_grids(),
+            [np.zeros(SHAPE)] + [np.ones(SHAPE)] * 12,
+            get_rover(),
+            slice_hours=1.0,
         )
     finally:
         module.default_cost_map = original
 
     assert cube[1, 0, 0] > cube[0, 0, 0], "cube must vary with shadow"
     assert cube[1, 0, 0] == pytest.approx(1.0)
-    # ...and with the coupling on, permanent shadow is not merely expensive
-    # but impassable at that slice. (Round 3 review, H-3.)
-    assert np.isinf(coupled[1, 0, 0])
+    # With the dynamics on, SUSTAINED shadow is not merely expensive but
+    # impassable -- while a cell that has only just entered shadow is not.
+    # Round 3 made the transition instantaneous, which condemned a cell for
+    # a shadow it had been in for one slice; the regolith lag is what
+    # separates a passing shadow from a cold trap. (Round 4 review, H-3.)
     assert np.isfinite(coupled[0, 0, 0])
+    assert np.isfinite(coupled[1, 0, 0]), "one slice of shadow is not a cold trap"
+    assert np.isinf(coupled[-1, 0, 0]), "sustained shadow must close the cell"
+    dark = [coupled[i, 0, 0] for i in range(1, len(coupled))]
+    finite = [v for v in dark if np.isfinite(v)]
+    assert finite == sorted(finite), "cost must rise as the surface cools"
 
 
 

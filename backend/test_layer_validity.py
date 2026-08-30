@@ -16,6 +16,10 @@ _LAYERS = (
     "aspect",
     "shadow_ratio",
     "thermal",
+    # The cold-end equilibrium is its own layer with its own provenance --
+    # it mixes the MODEL thermal field with the DERIVED shadow field, so it
+    # cannot inherit either one's label. (Round 4 review, H-3.)
+    "thermal_min",
     "traversable",
     "cost",
 )

@@ -193,11 +193,29 @@ def test_a_stamped_cost_grid_is_reused_verbatim():
         }
     )
     result = astar(grids, (0, 0), (5, 5), rover=get_rover("lpr_1"))
-    # Five diagonal steps at 10*sqrt(2) m, each costing 1 + 0.25 with no
-    # barrier (flat, warm, gentle).
+    # Five diagonal steps at 10*sqrt(2) m, each costing 1 + 0.25. The marker
+    # value proves the stamped grid was reused rather than recomputed.
     per_step = 10.0 * math.sqrt(2.0) * 1.25
-    assert result["metrics"]["total_weighted_cost"] == pytest.approx(
+    assert result["metrics"]["total_weighted_cost_cells_only"] == pytest.approx(
         5 * per_step, rel=1e-3
+    )
+
+    # total_weighted_cost is the g-score the search actually minimised, so it
+    # carries the barrier as well -- these grids sit at -40 C, which is not
+    # at the cold wall but is not comfortably clear of it either. Reporting
+    # the cell-only sum under this name understated the objective by 14.75
+    # percent on the production route. (Round 4 review, M-1.)
+    from app.cost_engine import thermal_barrier_terms
+    from app.constants import LOG_BARRIER_MU
+
+    barrier = -LOG_BARRIER_MU * sum(thermal_barrier_terms(-40.0, get_rover("lpr_1")))
+    assert barrier > 0.0
+    expected = 5 * 10.0 * math.sqrt(2.0) * (1.25 + barrier)
+    assert result["metrics"]["total_weighted_cost"] == pytest.approx(
+        expected, rel=1e-3
+    )
+    assert result["metrics"]["barrier_share"] == pytest.approx(
+        (expected - 5 * per_step) / expected, rel=1e-3
     )
 
 

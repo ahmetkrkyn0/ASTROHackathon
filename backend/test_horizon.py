@@ -53,12 +53,16 @@ def test_azimuth_count_defines_first_axis():
 
 
 def test_max_steps_blocks_distant_obstruction_but_higher_cap_does_not():
-    """max_steps cap prevents ray from seeing distant obstacles beyond its reach.
+    """max_range_m bounds the reach; max_steps only bounds the SAMPLING.
 
-    Unlike linear ramps (scale-invariant horizon angle), a tall spike/obstruction
-    proves the step-count cap is doing real work: same grid with tighter max_steps
-    means the ray can't see the spike (low horizon angle), but with higher max_steps
-    it does (high horizon angle).
+    This test used to assert the opposite -- that a tight ``max_steps``
+    stopped the ray short of a distant spike. That WAS the behaviour, and it
+    was the bug: at 5 m/px the default cap silently cut the nominal 10 km
+    search to 1 km, and at a polar site the distant ridge seen at a low
+    elevation angle is exactly what casts the long shadow. The march is now
+    dense near and geometric far, so it reaches the full range whatever the
+    sample budget, and it is ``max_range_m`` that decides what the ray can
+    see. (Round 4 review, H-4 / L-10.)
     """
     fine_res_m = 5.0
     grid_size = 40
@@ -70,16 +74,17 @@ def test_max_steps_blocks_distant_obstruction_but_higher_cap_does_not():
     spike_height = 500.0  # Tall enough to create ~73° horizon at 150m distance.
     elevation[spike_row, spike_col] = spike_height
 
-    # With max_steps=20 (100m range), ray can't reach column 30 (150m away).
+    # A 100 m range genuinely cannot reach a spike 150 m away.
     capped = horizon_map(
-        elevation, fine_res_m, n_azimuth=4, max_range_m=10_000.0,
-        max_steps=20, curvature=False,
+        elevation, fine_res_m, n_azimuth=4, max_range_m=100.0,
+        max_steps=200, curvature=False,
     )
 
-    # With max_steps=50 (250m range), ray CAN reach column 30.
+    # A 10 km range reaches it -- on a budget of 20 samples, which under the
+    # old uniform march would have stopped at 100 m.
     uncapped = horizon_map(
         elevation, fine_res_m, n_azimuth=4, max_range_m=10_000.0,
-        max_steps=50, curvature=False,
+        max_steps=20, curvature=False,
     )
 
     # From pixel (spike_row, 0) looking east (azimuth=1 at n_azimuth=4):
