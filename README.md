@@ -14,6 +14,26 @@ LunaPath, Ay yüzeyi yükseklik verisinden türetilen analiz katmanları üzerin
 - **FastAPI** REST API (`/docs` ile denenebilir)
 - **React + TypeScript + Vite** ön yüzü; geliştirmede API proxy ile backend’e bağlanır
 - İsteğe bağlı **Matplotlib** panosu ile işlenmiş verinin görsel özeti
+- **LiDAR yük bütçesi**: bir LiDAR taşımanın enerji/termal maliyetini ölçen karşılaştırma (`scripts/lidar_payload_comparison.py`)
+
+---
+
+## Kapsam — LiDAR ve otonomi
+
+LunaPath **rover'ın üstünde çalışmaz**; yörünge verisinden **küresel rota planlayan**
+bir yer katmanı aracıdır. Bu yüzden:
+
+- **LiDAR yok, çünkü LunaPath rover'ın üstünde çalışmıyor.** Gerçek zamanlı algı,
+  engel kaçınma ve yerel yeniden planlama kapsam dışıdır.
+- LiDAR sisteme **algı olarak değil, bir kaynak bütçesi kalemi olarak** girer:
+  `backend/app/sensor_payload.py` bir LiDAR taşımanın sürekli güç + ısıtıcı
+  çekişini enerji bütçesine yansıtır.
+- `lunapath/src/virtual_lidar.py` bir **algı simülatörü değildir**. 80 m/px'lik
+  yörünge DEM'i gerçek bir LiDAR'ın gördüğü 30 cm'lik kayaları çözemez; bu modül
+  yalnızca `Corridor` sözleşmesinin bir yerel-katman tüketicisine yettiğini
+  kanıtlayan bir **arayüz provasıdır**.
+- Proje bir **"otonom navigasyon sistemi" değildir** — bkz.
+  [docs/research/09_olgunluk_kiyaslama.md](docs/research/09_olgunluk_kiyaslama.md).
 
 ---
 
