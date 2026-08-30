@@ -54,7 +54,7 @@ def _pose_body(x_m, y_m, **overrides) -> dict:
         "covariance_m": 2.0,
         "heading_covariance_deg": 1.0,
         "timestamp_utc": "2026-08-30T12:00:00Z",
-        "source": "visual_odometry",
+        "source": "dead_reckoning",
         "distance_travelled_m": 0.0,
     }
     body.update(overrides)

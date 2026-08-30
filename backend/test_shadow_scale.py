@@ -1,10 +1,15 @@
 """Shadow term scale regression tests.
 
-The AHP weight for shadow is 0.142 (LPR-1). A fully shadowed cell must
-therefore cost ~0.142 more than an identical fully lit cell. Before the
-Task 2 fix, compute_cost_grid fed f_shadow a SINGLE-EDGE duration
-(0.111 h) normalised against h_max_shadow_h (50 h), producing a
-contribution of ~0.00005 -- i.e. the criterion was effectively dead.
+The AHP weight for shadow is 0.142 (LPR-1). Before the Task 2 fix,
+compute_cost_grid fed f_shadow a SINGLE-EDGE duration (0.111 h) normalised
+against h_max_shadow_h (50 h), producing a contribution of ~0.00005 -- i.e.
+the criterion was effectively dead.
+
+Since round 3's H-4 fix, ShadowLayer is no longer the ONLY layer that reads
+illumination: the energy term measures net battery draw, which depends on
+the solar input a cell offers. So a fully shadowed cell costs w_shadow more
+on the shadow axis PLUS whatever the energy axis adds -- and the tests below
+assert that decomposition rather than a single weight.
 """
 
 from __future__ import annotations
@@ -19,11 +24,14 @@ RESOLUTION_M = 80.0
 # -120 C keeps the cell traversable (> -150 C) while making f_thermal ~1.0,
 # so the total cost stays well above the max(0.01, cost) clamp.
 THERMAL_C = -120.0
+# The cell slope the helper below uses; the energy term needs it to compute
+# its own shadow response.
+SLOPE_DEG = 0.0
 
 
 def _cost_for_shadow_ratio(ratio: float) -> float:
     shape = (1, 1)
-    slope = np.zeros(shape, dtype=np.float64)
+    slope = np.full(shape, SLOPE_DEG, dtype=np.float64)
     thermal = np.full(shape, THERMAL_C, dtype=np.float64)
     shadow = np.full(shape, ratio, dtype=np.float64)
     traversable = np.ones(shape, dtype=bool)
@@ -33,11 +41,34 @@ def _cost_for_shadow_ratio(ratio: float) -> float:
     return float(grid[0, 0])
 
 
-def test_fully_shadowed_cell_costs_full_shadow_weight():
-    """shadow_ratio 0 -> 1 must move the cell cost by ~w_shadow."""
-    w_shadow = float(get_rover()["w_shadow"])
+def test_fully_shadowed_cell_costs_both_shadow_driven_terms():
+    """shadow_ratio 0 -> 1 must move the cell cost by w_shadow PLUS the
+    energy term's own response to shadow.
+
+    This asserted w_shadow alone, on the premise that ShadowLayer was the
+    only layer reading illumination. That premise was the H-4 finding: the
+    energy layer read slope only, which made it rank-identical to the slope
+    layer (measured Spearman 1.000000) and left a quarter of the AHP weight
+    vector unable to reorder anything. Energy now measures the NET battery
+    draw -- draw minus the solar the cell offers -- so darkness costs energy
+    too, and the total delta is the sum of the two contributions.
+    (Round 3 review, H-4.)
+    """
+    from app.cost_engine import f_energy_cell
+
+    rover = get_rover()
+    w_shadow = float(rover["w_shadow"])
+    w_energy = float(rover["w_energy"])
+
     delta = _cost_for_shadow_ratio(1.0) - _cost_for_shadow_ratio(0.0)
-    assert delta == pytest.approx(w_shadow, rel=0.05)
+
+    shadow_part = w_shadow * (f_shadow_cell(1.0) - f_shadow_cell(0.0))
+    energy_part = w_energy * (
+        f_energy_cell(SLOPE_DEG, rover, 1.0) - f_energy_cell(SLOPE_DEG, rover, 0.0)
+    )
+    assert shadow_part == pytest.approx(w_shadow, rel=1e-9)
+    assert energy_part > 0.0, "energy must respond to shadow"
+    assert delta == pytest.approx(shadow_part + energy_part, rel=1e-6)
 
 
 def test_shadow_cost_is_monotonic():

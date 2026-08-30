@@ -205,6 +205,25 @@ def test_odometry_identity_orientation_reads_grid_east():
     assert payload["heading_deg"] == pytest.approx(90.0)
 
 
+def test_all_zero_covariance_is_unknown_not_certain():
+    """An all-zero 6x6 is what most publishers emit when nothing filled it
+    in; only a NEGATIVE variance used to be caught, so the common case was
+    laundered into perfect confidence. (Round 3 review, M-5.)"""
+    message = _odometry(var_x=0.0, var_y=0.0, var_yaw=0.0)
+    with pytest.raises(ValueError, match="covariance"):
+        odometry_to_pose_estimate(message, source="visual_odometry",
+                                  distance_travelled_m=1.0)
+
+    payload = odometry_to_pose_estimate(
+        message,
+        source="visual_odometry",
+        distance_travelled_m=1.0,
+        fallback_covariance_m=4.0,
+    )
+    assert payload["covariance_m"] == pytest.approx(4.0)
+    assert payload["heading_covariance_deg"] == pytest.approx(180.0)
+
+
 def test_unknown_covariance_without_a_fallback_is_refused():
     from lunapath_ros.conversions import odometry_to_pose_estimate
 

@@ -276,9 +276,22 @@ def test_planner_chooses_to_wait_with_real_cost_cubes():
     assert result["metrics"]["wait_steps"] > 0
 
 
-def test_real_cube_wait_is_cheaper_than_rushing():
-    """Sanity mirror of test_waiting_plan_is_cheaper_than_crossing_immediately,
-    but against the real cube builders instead of hand-picked values."""
+def test_real_cube_waiting_is_the_only_way_through_a_dark_stretch():
+    """Waiting is not merely cheaper than rushing -- rushing is impossible.
+
+    This used to compare two finite costs, because shadow only ever made a
+    cell MORE EXPENSIVE. Two changes turned that into a real decision:
+    a WAIT now costs the time it takes (round 3, M-2), so a free-wait
+    planner no longer wins by default; and the cost cube recomputes surface
+    temperature from each slice's own illumination (round 3, H-3), so a
+    cell in darkness is below the traversability threshold AT THAT SLICE
+    and passable once the Sun reaches it.
+
+    Priced fairly against a merely-expensive dark cell, waiting loses: a
+    slice of idling costs the same as a slice of driving, while the shadow
+    penalty differential is a fraction of that. It wins here because the
+    route does not exist yet -- which is the honest reason to wait.
+    """
     cost_cube, wait_cube, traversable, slope, slice_hours, corridor_len = (
         _real_cubes_shadowed_corridor(shadow_len=10, n_shadow_slices=3, corridor_len=12)
     )
@@ -293,8 +306,10 @@ def test_real_cube_wait_is_cheaper_than_rushing():
         slope_grid=slope,
     )
     waited = astar_4d(cost_cube, wait_cube, **kwargs)
-    rushed = astar_4d(cost_cube, np.full_like(wait_cube, 1e6), **kwargs)
+    forbidden = astar_4d(cost_cube, np.full_like(wait_cube, np.inf), **kwargs)
 
+    assert waited["error"] is None
     assert waited["metrics"]["wait_steps"] > 0
-    assert rushed["metrics"]["wait_steps"] == 0
-    assert waited["metrics"]["total_cost"] < rushed["metrics"]["total_cost"]
+    # A planner that cannot wait cannot get there at all.
+    assert forbidden["error"] is not None
+    assert forbidden["metrics"]["wait_steps"] == 0

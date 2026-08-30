@@ -125,11 +125,19 @@ def test_pixel_to_lonlat_corners():
 
 
 def test_pixel_to_lonlat_sanity_check():
-    """Force a bad pixel (very large col) to trigger the sanity check."""
+    """Force a bad pixel (very large col) to trigger the sanity check.
+
+    The offset is DERIVED from the module's resolution rather than written
+    as a literal: the fallback geometry is now read from the shipped
+    metadata (round 3, L-7), so a hardcoded column count silently stops
+    being far enough the moment the site changes. 1000 km from the pole is
+    about latitude -57, comfortably north of the -80 threshold at any
+    resolution.
+    """
+    far_col = int(1_000_000 / RESOLUTION_M)
     raised = False
     try:
-        # x_m = 156000 + 50000 * 80 = 4_156_000 m — far from south pole
-        pixel_to_lonlat(0, 50000)
+        pixel_to_lonlat(0, far_col)
     except ValueError:
         raised = True
     check(raised, "sanity check raises ValueError for far-off pixel")

@@ -82,11 +82,16 @@ from app.cost_cube import build_wait_cost_cube, wait_cost
 from app.cost_engine import resolve_weights
 
 
-def test_waiting_in_full_sun_is_free():
+def test_waiting_in_full_sun_costs_only_time():
     """Solar input exceeds idle+heater draw -> no energy penalty."""
     rover = get_rover()
     weights = resolve_weights(None, rover)
-    assert wait_cost(1.0, 1.0, rover, weights) == pytest.approx(0.0, abs=1e-12)
+    # Waiting in full sun costs nothing on the ENERGY or SHADOW axes -- but
+    # it still costs the time it takes. A free WAIT gave the planner no
+    # reason to prefer arriving sooner and made "go now" and "wait, then go"
+    # tie on cost. (Round 3 review, M-2.)
+    assert wait_cost(1.0, 1.0, rover, weights) == pytest.approx(1.0, abs=1e-12)
+    assert wait_cost(1.0, 2.0, rover, weights) == pytest.approx(2.0, abs=1e-12)
 
 
 def test_waiting_in_full_shadow_costs_more_than_in_sun():
@@ -118,6 +123,35 @@ def test_wait_cost_cube_shape_matches_series_and_coarsening():
 # ── Review finding M3: time-invariant layers must not be recomputed ───────────
 
 
+def _coupled(thermal, shadow):
+    """The per-slice thermal field build_cost_cube now derives.
+
+    A cell that is dark in THIS slice is colder in this slice: the cube
+    recomputes surface temperature from each snapshot's illumination rather
+    than freezing the annual field, which is what makes a WAIT edge able to
+    unlock a route instead of only making one marginally cheaper.
+    (Round 3 review, H-3 / M-2.)
+    """
+    from app.thermal_model import couple_shadow_to_thermal
+
+    return np.asarray(
+        couple_shadow_to_thermal(
+            np.asarray(thermal, dtype=np.float64),
+            np.asarray(shadow, dtype=np.float64),
+        ),
+        dtype=np.float64,
+    )
+
+
+def _passable(traversable, coupled_thermal):
+    """The slice's own traversable mask: the base mask AND warm enough now."""
+    from app.constants import THERMAL_MIN_TRAVERSABLE_C
+
+    return np.asarray(traversable, dtype=bool) & (
+        np.asarray(coupled_thermal) >= THERMAL_MIN_TRAVERSABLE_C
+    )
+
+
 def test_cost_cube_matches_a_per_slice_reference():
     """The optimised builder must agree with the naive one, bit for bit."""
     from app.costmap import PlanContext, default_cost_map
@@ -133,9 +167,11 @@ def test_cost_cube_matches_a_per_slice_reference():
         reference = cost_map.total(
             PlanContext(
                 slope=np.asarray(grids["slope"], dtype=np.float64),
-                thermal=np.asarray(grids["thermal"], dtype=np.float64),
+                thermal=_coupled(grids["thermal"], snapshot),
                 shadow_ratio=np.asarray(snapshot, dtype=np.float64),
-                traversable=np.asarray(grids["traversable"], dtype=bool),
+                traversable=_passable(
+                    grids["traversable"], _coupled(grids["thermal"], snapshot)
+                ),
                 resolution_m=80.0,
                 rover=rover,
             )
@@ -165,9 +201,18 @@ def test_cost_cube_matches_reference_with_coarsening_and_blocked_cells():
         reference = cost_map.total(
             PlanContext(
                 slope=coarsen_grid(slope, 2, how="max"),
-                thermal=coarsen_grid(grids["thermal"], 2),
+                thermal=_coupled(
+                    coarsen_grid(grids["thermal"], 2),
+                    coarsen_grid(np.asarray(snapshot, float), 2),
+                ),
                 shadow_ratio=coarsen_grid(np.asarray(snapshot, float), 2),
-                traversable=coarsen_traversable(traversable, 2),
+                traversable=_passable(
+                    coarsen_traversable(traversable, 2),
+                    _coupled(
+                        coarsen_grid(grids["thermal"], 2),
+                        coarsen_grid(np.asarray(snapshot, float), 2),
+                    ),
+                ),
                 resolution_m=160.0,
                 rover=rover,
             )
@@ -176,30 +221,37 @@ def test_cost_cube_matches_reference_with_coarsening_and_blocked_cells():
     assert np.isinf(cube[0, 0, 0])     # blocked block stays impassable
 
 
-def test_cost_cube_does_not_rebuild_invariant_layers_per_slice():
-    """Slope/energy/thermal do not vary with time; evaluating them once
-    per slice is what made a 168-slice cube take ~22 s. (Faz 3 review, M3.)"""
-    from app import cost_cube as module
+def test_cost_cube_evaluates_every_layer_per_slice_and_stays_fast():
+    """Every layer is evaluated per slice now, and that is not a regression.
 
-    calls = {"n": 0}
-    original = module.default_cost_map
+    The old builder evaluated "invariant" layers once, on the premise that
+    only the shadow layer varies with time. That premise died when thermal
+    became a function of illumination (round 3, H-3): freezing the thermal
+    layer at its annual value hid the very state change the 4-D planner
+    exists to reason about, and made a WAIT edge unable to unlock anything.
 
-    class _CountingMap:
-        def __init__(self, inner):
-            self._inner = inner
-            self.layers = inner.layers
+    The optimisation existed because np.vectorize made each layer a Python
+    loop (~22 s for a 168-slice cube). Review #8 replaced those with true
+    array forms, so the reason is gone: this asserts the cost is still small
+    at production scale rather than asserting the shortcut.
+    """
+    import time
 
-        def total(self, ctx):
-            calls["n"] += 1
-            return self._inner.total(ctx)
+    shape = (128, 128)
+    grids = {
+        "slope": np.full(shape, 5.0),
+        "thermal": np.full(shape, -60.0),
+        "traversable": np.ones(shape, dtype=bool),
+        "metadata": {"resolution_m": 20.0, "shape": list(shape)},
+    }
+    series = [np.full(shape, 0.3)] * 168
 
-    module.default_cost_map = lambda *a, **k: _CountingMap(original(*a, **k))
-    try:
-        build_cost_cube(_base_grids(), [np.full(SHAPE, 0.3)] * 20, get_rover())
-    finally:
-        module.default_cost_map = original
+    started = time.perf_counter()
+    cube = build_cost_cube(grids, series, get_rover())
+    elapsed = time.perf_counter() - started
 
-    assert calls["n"] <= 1, f"cost_map.total() ran {calls['n']}x for 20 slices"
+    assert cube.shape == (168, *shape)
+    assert elapsed < 5.0, f"168-slice cube took {elapsed:.1f} s"
 
 
 def test_wait_cost_cube_matches_scalar_wait_cost():
@@ -266,7 +318,17 @@ def test_cost_cube_honours_shadow_reading_layers_regardless_of_name():
     original = module.default_cost_map
     module.default_cost_map = lambda *a, **k: CostMap([_ShadowReadingLayer()])
     try:
+        # couple_thermal=False isolates what this test is about: whether the
+        # builder re-evaluates a shadow-reading layer per slice. With the
+        # coupling on, a fully shadowed cell is impassable on thermal
+        # grounds and the layer's value never gets to be compared.
         cube = module.build_cost_cube(
+            _base_grids(),
+            [np.zeros(SHAPE), np.ones(SHAPE)],
+            get_rover(),
+            couple_thermal=False,
+        )
+        coupled = module.build_cost_cube(
             _base_grids(), [np.zeros(SHAPE), np.ones(SHAPE)], get_rover()
         )
     finally:
@@ -274,6 +336,10 @@ def test_cost_cube_honours_shadow_reading_layers_regardless_of_name():
 
     assert cube[1, 0, 0] > cube[0, 0, 0], "cube must vary with shadow"
     assert cube[1, 0, 0] == pytest.approx(1.0)
+    # ...and with the coupling on, permanent shadow is not merely expensive
+    # but impassable at that slice. (Round 3 review, H-3.)
+    assert np.isinf(coupled[1, 0, 0])
+    assert np.isfinite(coupled[0, 0, 0])
 
 
 

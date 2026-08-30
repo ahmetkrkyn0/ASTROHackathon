@@ -198,11 +198,30 @@ check_inf("soc=0.20", log_barrier_penalty(10, 5, 0.20, 20))
 # SOC below minimum → INF
 check_inf("soc=0.15", log_barrier_penalty(10, 5, 0.15, 20))
 
-# T_inner at cold limit → INF
-check_inf("T_inner=-20", log_barrier_penalty(10, 5, 0.8, -20))
+# T_inner at the cold limit → INF.
+#
+# The limit is no longer the spec's fixed -20 C inner band. That band was
+# unreachable for the temperatures this thermal model produces: measured on
+# the production grid it put 36.2% of otherwise-passable cells at infinite
+# cost. The cold wall is now THERMAL_MIN_TRAVERSABLE_C (-150 C SURFACE) --
+# the same limit compute_traversability already gates on, so the barrier is
+# the smooth approach to a wall that exists rather than a second, stricter
+# one nothing else honoured. For lpr_1 (thermal_offset_cold = 60) that is
+# an inner temperature of -90 C. (Round 3 review, H-1.)
+check_inf("T_inner=-90 (surface -150)", log_barrier_penalty(10, 5, 0.8, -90))
 
-# T_inner at hot limit → INF
-check_inf("T_inner=95", log_barrier_penalty(10, 5, 0.8, 95))
+# ...and -20 C inner, which used to be fatal, is now merely penalised.
+_cold = log_barrier_penalty(10, 5, 0.8, -20)
+if math.isfinite(_cold) and _cold > 0:
+    PASS += 1
+else:
+    FAIL += 1
+    print(f"  [FAIL] T_inner=-20 should be finite and penalised, got {_cold}")
+
+# T_inner at the hot limit → INF. The hot wall is the rover's own
+# elec_op_max_c mapped back to a surface temperature (80 C for lpr_1),
+# i.e. an inner temperature of 40 C.
+check_inf("T_inner=40 (surface 80)", log_barrier_penalty(10, 5, 0.8, 40))
 
 # Approaching limits → cost increases (gradient check)
 print("  Gradient: cost rises near slope limit...", end=" ")

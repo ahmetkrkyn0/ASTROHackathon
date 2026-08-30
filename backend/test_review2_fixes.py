@@ -106,7 +106,7 @@ def test_h1_request_models_reject_non_finite_telemetry(model):
                 "covariance_m": 1.0,
                 "heading_covariance_deg": 1.0,
                 "timestamp_utc": "2026-08-30T12:00:00Z",
-                "source": "visual_odometry",
+                "source": "dead_reckoning",
                 "distance_travelled_m": 0.0,
             }
         }
@@ -433,7 +433,7 @@ def test_m3_non_finite_heading_is_rejected(bad):
             covariance_m=1.0,
             heading_covariance_deg=1.0,
             timestamp_utc="2026-08-30T12:00:00Z",
-            source="visual_odometry",
+            source="dead_reckoning",
             distance_travelled_m=0.0,
         )
 
@@ -541,7 +541,7 @@ def _pose_at(x, y, **overrides):
         "covariance_m": 2.0,
         "heading_covariance_deg": 1.0,
         "timestamp_utc": "2026-08-30T12:00:00Z",
-        "source": "visual_odometry",
+        "source": "dead_reckoning",
         "distance_travelled_m": 1430.0,
     }
     body.update(overrides)
@@ -699,9 +699,22 @@ def test_l1_the_fallback_origin_places_the_centre_pixel_where_the_comment_says()
     (176000, 48000)". Under y = origin - row * res that requires ADDING
     the row term to the origin; it was subtracted, putting the stored
     origin at the window's bottom edge, 40 km out."""
-    from app.serializer import ORIGIN_Y_M, RESOLUTION_M
+    from app.serializer import GRID_ROWS, ORIGIN_Y_M, RESOLUTION_M
+    from app.grid_frame import pixel_to_map_xy
 
-    assert ORIGIN_Y_M - 250 * RESOLUTION_M == pytest.approx(48000.0)
+    # The invariant is that the fallback and the metadata path agree about
+    # which edge the origin is: row 0 is the NORTH edge and y decreases with
+    # row. Pinning a literal 48000.0 pinned a window that no longer exists
+    # (round 3, L-7); pinning the RELATIONSHIP survives a new site.
+    metadata = {
+        "origin": {"x": 0.0, "y": ORIGIN_Y_M},
+        "resolution_m": RESOLUTION_M,
+        "shape": [GRID_ROWS, GRID_ROWS],
+    }
+    _, y_top = pixel_to_map_xy(0, 0, metadata)
+    _, y_bottom = pixel_to_map_xy(GRID_ROWS - 1, 0, metadata)
+    assert y_top == pytest.approx(ORIGIN_Y_M)
+    assert y_bottom < y_top
 
 
 def test_l1_the_fallback_still_lands_in_the_south_polar_region():
@@ -783,7 +796,7 @@ def test_l6_plan_and_pose_agree_on_the_corridor_identity():
                         "covariance_m": 2.0,
                         "heading_covariance_deg": 1.0,
                         "timestamp_utc": "2026-08-30T12:00:00Z",
-                        "source": "visual_odometry",
+                        "source": "dead_reckoning",
                         "distance_travelled_m": 0.0,
                     }
                 },

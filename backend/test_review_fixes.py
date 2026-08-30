@@ -33,17 +33,24 @@ def test_energy_penalty_is_zero_on_flat_ground():
 
 
 def test_energy_penalty_reaches_one_at_the_slope_limit():
+    # The normalisation spans the CHEAPEST cell (flat and fully lit) to the
+    # most expensive one (at the slope limit and fully shadowed), because
+    # the penalty reads shadow as well as slope now -- without that it was
+    # rank-identical to f_slope. So 1.0 lives at the corner, not on the
+    # slope axis alone. (Round 3 review, H-4.)
     for rover_id in ROVERS:
         rover = get_rover(rover_id)
         limit = float(rover["slope_max_deg"])
-        assert f_energy_cell(limit, rover) == pytest.approx(1.0)
+        assert f_energy_cell(limit, rover, 1.0) == pytest.approx(1.0)
+        assert f_energy_cell(0.0, rover, 0.0) == pytest.approx(0.0)
 
 
 def test_energy_penalty_is_monotonic_and_bounded():
     rover = get_rover("lpr_1")
-    values = [f_energy_cell(float(s), rover) for s in range(0, 26)]
-    assert all(0.0 <= v <= 1.0 for v in values)
-    assert all(b >= a for a, b in zip(values, values[1:]))
+    for shadow in (0.0, 0.5, 1.0):
+        values = [f_energy_cell(float(s), rover, shadow) for s in range(0, 26)]
+        assert all(0.0 <= v <= 1.0 for v in values)
+        assert all(b >= a for a, b in zip(values, values[1:]))
 
 
 def test_energy_penalty_is_infinite_above_the_slope_limit():
@@ -70,7 +77,12 @@ def test_energy_contributes_a_meaningful_share_of_cell_cost():
     """The bug was a term worth 0.04% of cost while weighted 25.9%."""
     rover = get_rover("lpr_1")
     weights = {"w_slope": 0.409, "w_energy": 0.259, "w_shadow": 0.142, "w_thermal": 0.190}
-    energy = weights["w_energy"] * f_energy_cell(10.0, rover)
+    # Evaluated on a cell that is partly shadowed. On a FLAT, FULLY LIT
+    # cell the net energy penalty is legitimately zero now -- the array
+    # outproduces the drive, so crossing it costs the battery nothing -- and
+    # a term that is zero exactly where the rover most wants to be is the
+    # correct answer, not the old inert one. (Round 3 review, H-4.)
+    energy = weights["w_energy"] * f_energy_cell(10.0, rover, 0.5)
     slope = weights["w_slope"] * f_slope(10.0, rover)
     thermal = weights["w_thermal"] * f_thermal(-100.0, rover)
     assert energy > 0.1 * slope
@@ -512,7 +524,12 @@ def _run_simulation(shadow_ratio: float, steps: int = 400) -> dict:
 def test_a_rover_in_full_shadow_cannot_recharge():
     dark = _run_simulation(1.0)
     assert dark["total_recharges"] == 0
-    assert dark["final_battery_pct"] == pytest.approx(0.0)
+    # It now stops AT its SOC reserve instead of driving on to a flat zero:
+    # soc_min_pct was declared and enforced nowhere. The traverse truncates
+    # there and the summary says so. (Round 3 review, H-1 / M-10.)
+    assert dark["stranded"] is True
+    reserve_pct = float(get_rover("lpr_1")["soc_min_pct"]) * 100.0
+    assert 0.0 < dark["final_battery_pct"] <= reserve_pct + 1e-6
 
 
 def test_recharging_in_sunlight_advances_the_clock():
@@ -575,10 +592,16 @@ def test_bfs_move_count_still_measures_correctly():
 
 
 def test_negative_slope_never_yields_a_discount():
-    from app.simulation import _slope_multiplier
+    # The piecewise table this used to check is gone (round 3, M-9); the
+    # property it protected -- a negative slope is bad input, not free
+    # energy -- now lives in cost_engine's clamp.
+    from app.constants import get_rover as _gr
+    from app.cost_engine import gross_energy_per_metre_wh
 
-    assert _slope_multiplier(-5.0) == pytest.approx(_slope_multiplier(0.0))
-    assert _slope_multiplier(-5.0) >= 1.0
+    rover = _gr("lpr_1")
+    assert gross_energy_per_metre_wh(-5.0, 0.0, rover) == pytest.approx(
+        gross_energy_per_metre_wh(0.0, 0.0, rover)
+    )
 
 
 # ── #17  the DEM cache key identifies the DEM ─────────────────────────────
