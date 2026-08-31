@@ -1,7 +1,7 @@
 {
   "origin": {
-    "x": -15500.0,
-    "y": -4000.0
+    "x": -32500.0,
+    "y": 11000.0
   },
   "resolution_m": 5.0,
   "shape": [
@@ -10,8 +10,8 @@
   ],
   "crs": "PROJCS[\"unnamed\",GEOGCS[\"unnamed ellipse\",DATUM[\"unknown\",SPHEROID[\"unnamed\",1737400,0]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]]],PROJECTION[\"Polar_Stereographic\"],PARAMETER[\"latitude_of_origin\",-90],PARAMETER[\"central_meridian\",0],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1],AXIS[\"Easting\",NORTH],AXIS[\"Northing\",NORTH]]",
   "window_offset": {
-    "row": 0,
-    "col": 700
+    "row": 2400,
+    "col": 2500
   },
   "grids": [
     "elevation_grid",
@@ -29,16 +29,16 @@
     "w_thermal": 0.19
   },
   "cost_model": "weighted_cell_cost_shadow_aware_energy_v3",
+  "thermal_field": "sunlit_peak",
+  "thermal_shadow_coupled": true,
   "layer_validity": {
     "elevation": "MEASURED",
     "slope": "DERIVED",
     "aspect": "DERIVED",
     "shadow_ratio": "DERIVED",
     "thermal": "DERIVED",
+    "thermal_min": "DERIVED",
     "traversable": "DERIVED",
-    "cost": "DERIVED",
-    "thermal_min": "DERIVED"
-  },
-  "thermal_shadow_coupled": true,
-  "thermal_field": "sunlit_peak"
+    "cost": "DERIVED"
+  }
 }

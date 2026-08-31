@@ -80,8 +80,17 @@ def test_layer_stats_all_nodata():
 
 
 def test_vertical_exaggeration_is_one_when_relief_already_reads():
-    # The production site: 1063.8 m over 2500 m.
+    # 1063.8 m over 2500 m: the relief of the Site01 window this project
+    # shipped before Site11. Kept as a fixed case for the >= target branch
+    # -- the function's answer for that input does not depend on which
+    # window is current.
     assert suggested_vertical_exaggeration(1063.8, 2500.0) == 1.0
+
+
+def test_vertical_exaggeration_lifts_the_current_site_slightly():
+    # The shipped Site11 window: 425.7 m over 2500 m is 1:5.9, just under
+    # the 1:5 target, so the ladder's first step up is the answer.
+    assert suggested_vertical_exaggeration(425.7, 2500.0) == 1.5
 
 
 def test_vertical_exaggeration_snaps_up_a_readable_ladder():

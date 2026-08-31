@@ -4,9 +4,16 @@ test_terrain_api.py asserts the contract on an 8x6 fixture, where the
 cell ceiling, the payload budget and the real distribution of no-data never
 come near their production values. The claims this file makes -- that the
 binary layer is a quarter the size of the JSON preview it replaces, that
-49 525 impassable cells arrive as NaN rather than infinity, that 1063.8 m
-of relief over 2.5 km needs no vertical exaggeration -- are claims about
-THIS repository's grid, and are worth nothing on a fixture.
+~40 000 impassable cells arrive as NaN rather than infinity, that 425.7 m
+of relief over 2.5 km wants a modest vertical exaggeration -- are claims
+about THIS repository's grid, and are worth nothing on a fixture.
+
+The grid is Site11 (de Gerlache Rim) window row=2400 col=2500, centred on
+88.920 S / 287.328 E. It replaced Site01 row=0 col=700, which was measured
+to be 94.7% a single tilted plane -- 1064 m of relief that rendered as a
+featureless ramp because almost none of it was terrain STRUCTURE. The
+window in use is 0.3% planar with five coherent impassable barriers, the
+largest 8.6 hectares, so the planner has something real to route around.
 
 Skips entirely when the P1 pipeline has not been run, matching
 test_plan_4d_real_grid.py: the `.npy` artefacts are gitignored, so a fresh
@@ -46,16 +53,19 @@ def test_manifest_describes_the_production_grid(client):
     assert manifest["grid"]["span_m"] == [2500.0, 2500.0]
     assert manifest["binary_format"]["bytes_per_layer"] == 500 * 500 * 4
     assert manifest["georeference"]["crs"]
-    assert manifest["georeference"]["window_offset"] == {"row": 0, "col": 700}
+    assert manifest["georeference"]["window_offset"] == {"row": 2400, "col": 2500}
 
 
-def test_true_scale_is_the_right_default_for_this_site(client):
-    """1063.8 m of relief over a 2.5 km span is 1:2.35. Terrain that steep
-    reads as terrain at 1:1 -- the exaggeration slider starts at neutral,
-    and the manifest says so rather than leaving the client to guess."""
+def test_exaggeration_default_follows_this_site_relief(client):
+    """425.7 m of relief over a 2.5 km span is 1:5.9 -- gentler than the
+    1:5 ratio at which terrain reads as terrain unaided, so the manifest
+    starts the slider slightly above neutral rather than leaving the client
+    to guess. (The previous window's 1064 m answered 1.0 here; that number
+    was real and still rendered as a ramp, which is why relief alone was
+    never the right measure of a site.)"""
     elevation = client.get("/api/terrain").json()["elevation"]
-    assert elevation["relief_m"] == pytest.approx(1063.8, abs=1.0)
-    assert elevation["vertical_exaggeration_suggested"] == 1.0
+    assert elevation["relief_m"] == pytest.approx(425.7, abs=1.0)
+    assert elevation["vertical_exaggeration_suggested"] == 1.5
 
 
 def test_binary_lifts_the_ceiling_that_caps_the_json_preview(client):
@@ -81,9 +91,9 @@ def test_impassable_cells_arrive_as_nan_not_infinity(client):
     values = np.frombuffer(binary.content, dtype=BINARY_DTYPE)
     assert not np.isinf(values).any()
     nan_count = int(np.isnan(values).sum())
-    # The round-4 grid has 49 525; assert the order, not the exact figure,
+    # The Site11 grid has 39 937; assert the order, not the exact figure,
     # so a legitimate re-run of the pipeline does not fail the suite.
-    assert 40_000 < nan_count < 60_000
+    assert 30_000 < nan_count < 60_000
     assert int(binary.headers["X-Layer-Nodata"]) == nan_count
 
 
@@ -112,7 +122,25 @@ def test_every_manifest_url_serves_the_full_grid(client):
 # -- the time-slice series ---------------------------------------------------
 
 SERIES = "/api/illumination-series"
-_QUERY = "start_utc=2026-09-01T00:00:00&n_slices=12&slice_hours=6&downsample=5"
+
+# The span has to cross a terminator, and at a polar site that is a question
+# of DAYS, not hours. Measured on this grid: the Sun's grid azimuth sweeps
+# only ~3 deg per 6 hours, while the local horizon toward azimuth 300-320 deg
+# stands at ~15 deg -- so from 2026-09-01 the site sits at 0% lit for six
+# straight days, and the previous 3-day query sampled nothing but that shadow.
+# The illumination cycle here is ~12 days lit / ~14 days dark; this window
+# starts just before the crossing and walks 0% -> 95% lit over six days,
+# which is the behaviour these tests exist to pin.
+#
+# The lesson generalises past this file: /api/plan-4d's defaults (24 slices
+# x 1 h) span a single day, over which nothing about the illumination at a
+# polar site changes at all.
+_QUERY = "start_utc=2026-09-07T00:00:00&n_slices=12&slice_hours=12&downsample=5"
+
+# The same cycle twelve days on: ~96% lit down to fully dark, -55 C to the
+# PSR floor. Both directions are exercised because a sign error in the
+# relaxation would survive a test that only ever watched the surface warm.
+_COOLING_QUERY = "start_utc=2026-09-19T00:00:00&n_slices=12&slice_hours=12&downsample=5"
 
 _HAS_HORIZON = os.path.exists(os.path.join(_P1_PROCESSED_DIR, "horizon_map.npy"))
 needs_horizon = pytest.mark.skipif(
@@ -157,18 +185,53 @@ def test_manifest_and_binary_report_the_same_model(client):
     assert varying == manifest["shadow_model"]["time_varying"]
 
 
-@needs_horizon
-def test_surface_cools_as_the_terrain_falls_into_shadow(client):
-    """The temperature series has to follow the illumination series, with
-    the regolith lag between them -- not jump to the floor the instant a
-    cell darkens, which is the behaviour round 4 (H-3) removed."""
+def _series_means(client, query: str, field: str) -> list[float]:
     cube = np.frombuffer(
-        client.get(f"{SERIES}?{_QUERY}&format=f32&field=surface_temp_c").content,
+        client.get(f"{SERIES}?{query}&format=f32&field={field}").content,
         dtype=BINARY_DTYPE,
     ).reshape(12, 100, 100)
-    means = [float(np.nanmean(cube[i])) for i in range(12)]
+    return [float(np.nanmean(cube[i])) for i in range(12)]
+
+
+@needs_horizon
+def test_surface_warms_as_the_terminator_arrives(client):
+    """Temperature has to follow illumination. _QUERY walks this site from
+    fully shadowed into ~95% lit over six days; the surface must come up
+    with it."""
+    means = _series_means(client, _QUERY, "surface_temp_c")
+    assert means[-1] > means[0], f"surface never warms: {means}"
+    assert means[0] < -150.0, "did not start from a genuinely dark state"
+
+
+@needs_horizon
+def test_surface_cools_as_the_terrain_falls_into_shadow(client):
+    """The other half of the same cycle, twelve days later: ~96% lit down to
+    fully dark. Tested separately because a series that only ever warms
+    would satisfy a direction-agnostic assertion while a sign error still
+    lurked in the relaxation."""
+    means = _series_means(client, _COOLING_QUERY, "surface_temp_c")
     assert means[0] > means[-1], f"surface never cools: {means}"
     assert means[-1] > -190.0, "cooled past the PSR floor"
+
+
+@needs_horizon
+def test_surface_lags_illumination_rather_than_tracking_it_instantly(client):
+    """The regolith has thermal inertia: the surface relaxes toward each
+    slice's equilibrium, it does not jump to it. Round 4 (H-3) removed the
+    instant-equilibrium behaviour, and nothing pinned it afterwards.
+
+    An instant model would dump nearly the whole temperature swing into the
+    single slice where illumination flips. A lagged one spreads it across
+    several, so no single step may carry most of the change.
+    """
+    means = _series_means(client, _COOLING_QUERY, "surface_temp_c")
+    total = abs(means[-1] - means[0])
+    assert total > 50.0, f"not enough swing to judge the lag: {means}"
+    steps = [abs(b - a) for a, b in zip(means[:-1], means[1:])]
+    assert max(steps) < 0.6 * total, (
+        f"one slice carries {max(steps) / total:.0%} of the swing -- "
+        f"that is an instant jump, not a lag: {means}"
+    )
 
 
 def test_sun_track_sweeps_azimuth_without_climbing(client):

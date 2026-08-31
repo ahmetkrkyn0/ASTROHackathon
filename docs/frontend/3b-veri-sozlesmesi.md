@@ -38,14 +38,14 @@ Tek çağrı. Bir bayt grid çekmeden önce sahneyi kurmak için gereken her şe
   "grid":   { "rows": 500, "cols": 500, "resolution_m": 5.0,
               "span_m": [2500.0, 2500.0], "cells": 250000 },
   "georeference": {
-    "origin": { "x": -15500.0, "y": -4000.0 },
+    "origin": { "x": -32500.0, "y": 11000.0 },
     "crs": "PROJCS[\"unnamed\",...Polar_Stereographic...]",
-    "window_offset": { "row": 0, "col": 700 },
+    "window_offset": { "row": 2400, "col": 2500 },
     "row_axis": "north-to-south",
     "col_axis": "west-to-east"
   },
-  "elevation": { "min_m": 203.07, "max_m": 1266.92, "relief_m": 1063.85,
-                 "vertical_exaggeration_suggested": 1.0 },
+  "elevation": { "min_m": 528.82, "max_m": 954.47, "relief_m": 425.65,
+                 "vertical_exaggeration_suggested": 1.5 },
   "binary_format": {
     "dtype": "float32", "endian": "little", "order": "row-major",
     "nodata": "NaN", "bytes_per_layer": 1000000,
@@ -55,7 +55,7 @@ Tek çağrı. Bir bayt grid çekmeden önce sahneyi kurmak için gereken her şe
   "weights": { "w_slope": 0.409, "w_energy": 0.259, "w_shadow": 0.142, "w_thermal": 0.19 },
   "layers": {
     "elevation": { "units": "m", "validity": "MEASURED",
-                   "min": 203.07, "max": 1266.92, "nodata": 0,
+                   "min": 528.82, "max": 954.47, "nodata": 0,
                    "binary_url": "/api/layers/elevation?format=f32&rover_id=lpr_1",
                    "json_url":   "/api/layers/elevation" }
     // slope, aspect, thermal, thermal_min, shadow_ratio, cost, traversable
@@ -86,8 +86,8 @@ Yanıt başlıkları (hepsi CORS'ta açık, tarayıcıdan okunabilir):
 |---|---|---|
 | `X-Layer-Rows` / `X-Layer-Cols` | `500` / `500` | dizi boyutu |
 | `X-Layer-Resolution-M` | `5.0` | **dönen gridin** adımı (downsample dahil) |
-| `X-Layer-Min` / `X-Layer-Max` | `203.07` / `1266.92` | sonlu değer aralığı — renk rampası için |
-| `X-Layer-Nodata` | `49525` | NaN hücre sayısı |
+| `X-Layer-Min` / `X-Layer-Max` | `528.82` / `954.47` | sonlu değer aralığı — renk rampası için |
+| `X-Layer-Nodata` | `39937` | NaN hücre sayısı |
 | `X-Layer-Validity` | `MEASURED` | ölçüm mü model mi |
 | `X-Layer-Dtype` / `-Endian` / `-Order` | `float32` / `little` / `row-major` | tel biçimi |
 
@@ -136,7 +136,7 @@ Bütçe: `T × satır × sütun × 4` bayt, tavan 64 MiB. Aşarsan 422 gelir ve 
 - **little-endian float32**, satır öncelikli (C order). Seride önce dilim,
   sonra satır.
 - **No-data yalnızca NaN.** Backend `+inf`'i de NaN'a çeviriyor — `cost`
-  katmanında 49 525 hücre geçilemez ve float32 sonsuzluğu renk rampasına ya
+  katmanında 39 937 hücre geçilemez ve float32 sonsuzluğu renk rampasına ya
   da vertex konumuna taşırsa sahne sessizce bozulur, hata vermez.
 - Dizi uzunluğu tam olarak `rows × cols` (seride `T × rows × cols`).
 
@@ -160,12 +160,25 @@ sessizce kaybolan bir sahneyle uğraşmayasın.
 
 | | |
 |---|---|
+| Kaynak | PGDA **Site11 — de Gerlache Rim**, LOLA 5 m/px (Barker+ 2021) |
+| Pencere | ham DTM'de row=2400, col=2500 |
+| Merkez | 88,920° G / 287,328° D |
 | Grid | 500×500 @ 5 m/px |
 | Açıklık | 2500 m × 2500 m |
-| Kabartı | 1063,8 m (203,1 → 1266,9 m) |
-| Oran | 1:2,35 — **dikey abartma gerekmiyor**, öneri 1,0 |
+| Kabartı | 425,7 m (528,8 → 954,5 m) |
+| Oran | 1:5,9 — öneri **1,5** (hafif abartma) |
 | Katman başına | 1,00 MB float32 |
-| `cost` NaN | 49 525 hücre (geçilemez) |
+| `cost` NaN | 39 937 hücre (geçilemez) |
+
+> **Pencere neden bu?** Altı PGDA sitesinin tamamında 500×500'lük tüm
+> pencereler tarandı (4700+ aday) ve *kabartıya* değil, kabartının ne
+> kadarının **gerçek arazi yapısı** olduğuna göre sıralandı. Önceki pencere
+> (Site01 row=0 col=700) 1064 m kabartı taşıyordu ama bunun %94,7'si tek bir
+> eğik düzlemdi — 19,3°'lik bir rampa, yani 3B sahnede eğik bir tabaka gibi
+> görünüyordu. Bu pencere **%0,3 düzlem**: kabartının neredeyse tamamı krater
+> çanağı, rim ve sırt. Ayrıca planlayıcı için gerçek engeller taşıyor: 5 adet
+> ≥50 hücrelik bariyer, en büyüğü 8,6 hektar. Enlem de gerçek kutup rejiminde
+> (Güneş yüksekliği ~1,2°), yani gölge fiziği anlamlı.
 
 ---
 

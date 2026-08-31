@@ -92,12 +92,17 @@ def test_grid_north_diverges_off_the_central_meridian():
     assert _circular_delta(az, 90.0) < 1e-3
 
 
-def test_grid_north_at_the_real_processed_window_center():
-    """Ground truth for the window in lunapath/data/processed/metadata.json.
+def test_grid_north_at_a_verified_south_polar_point():
+    """A fixed ground-truth point, not whichever window currently ships.
 
-    origin (-15500, -4000), 5.0 m/px, 500x500 -> center (-89.4991897,
-    -110.2248594). Independently reproduced by the Faz 1 final reviewer as
-    ~249.8 deg; a ~110 deg offset from true north, i.e. ~22 of 72 horizon bins.
+    (-89.4991897, -110.2248594) was the centre of the Site01 window this
+    project shipped when the Faz 1 final reviewer independently reproduced
+    this bearing as ~249.8 deg -- a ~110 deg offset from true north, i.e.
+    ~22 of 72 horizon bins. The shipped window has since moved to Site11,
+    but the point is kept: what this test pins is the projection maths at a
+    known latitude/longitude, and that answer does not change with the
+    window. Re-anchoring it to whatever ships today would discard an
+    independently verified value and prove nothing extra.
     """
     az = true_north_grid_azimuth(
         -89.4991897, -110.2248594, LUNAR_SOUTH_POLAR_WKT

@@ -28,18 +28,23 @@ if TYPE_CHECKING:
 #
 # They used to be hardcoded to a window that no longer exists: a comment
 # derived them from "centre pixel (250, 250) maps to (176000, 48000) m" at
-# 80 m/px, while the shipped grids have been origin (-15500, -4000) at
-# 5 m/px for some time. The numbers were wrong AND the comment presented the
-# derivation as current, so anyone reading it to understand the grid was
-# reading about a different site. They are now READ from the shipped
-# metadata at import time, so they cannot drift from the grids again, with
-# the literals below as the fallback's own fallback. (Round 3 review, L-7.)
+# 80 m/px, while the shipped grid at the time was origin (-15500, -4000) at
+# 5 m/px. The numbers were wrong AND the comment presented the derivation as
+# current, so anyone reading it to understand the grid was reading about a
+# different site. They are now READ from the shipped metadata at import
+# time, so they cannot drift from the grids again, with the literals below
+# as the fallback's own fallback. (Round 3 review, L-7.)
+#
+# That drift is exactly why these are read, not trusted: the shipped window
+# has since moved again, from Site01 (-15500, -4000) to Site11 (-32500,
+# 11000). The literals track the current window so a metadata-less caller
+# lands on the right site, but nothing in production depends on them.
 #
 # The y term is subtracted per row because rows increase southward, so the
 # origin (row 0) is the window's NORTH edge -- the convention grid_frame
 # defines and process_lunar_data writes. (Round 2 review, L-1.)
-_FALLBACK_ORIGIN_X_M: float = -15500.0
-_FALLBACK_ORIGIN_Y_M: float = -4000.0
+_FALLBACK_ORIGIN_X_M: float = -32500.0
+_FALLBACK_ORIGIN_Y_M: float = 11000.0
 _FALLBACK_RESOLUTION_M: float = 5.0
 _FALLBACK_ROWS: int = 500
 _FALLBACK_COLS: int = 500
