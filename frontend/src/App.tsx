@@ -7,6 +7,7 @@ import MapCanvas, {
   type MapCanvasHandle,
   type MapViewMode,
 } from './MapCanvas'
+import TerrainCanvas3D from './TerrainCanvas3D'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -122,6 +123,14 @@ export default function App() {
   const [layerError, setLayerError] = useState<string | null>(null)
 
   const [viewMode, setViewMode] = useState<MapViewMode>('surface')
+  // 2-D is the JSON layer path (downsampled, software hillshade); 3-D is the
+  // binary f32 path at native resolution. Same grid, same view modes.
+  const [dimension, setDimension] = useState<'2d' | '3d'>('2d')
+  const [sliceIndex, setSliceIndex] = useState(0)
+  const [terrainSlices, setTerrainSlices] = useState(0)
+  // Real LROC NAC imagery draped as albedo. Mutually exclusive with the
+  // simulated shadow cube -- the photograph carries its own 2010 shadows.
+  const [photoDrape, setPhotoDrape] = useState(false)
 
   const [clickMode, setClickMode] = useState<ClickMode>('idle')
   const [start, setStart] = useState<[number, number] | null>(null)
@@ -715,6 +724,22 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <div className="map-switch map-switch--dimension">
+                <button
+                  type="button"
+                  className={dimension === '2d' ? 'is-active' : ''}
+                  onClick={() => setDimension('2d')}
+                >
+                  2D
+                </button>
+                <button
+                  type="button"
+                  className={dimension === '3d' ? 'is-active' : ''}
+                  onClick={() => setDimension('3d')}
+                >
+                  3D
+                </button>
+              </div>
               <div className="map-mode-card">
                 <span className="eyebrow tight">View</span>
                 <strong>{activeMapView.title}</strong>
@@ -722,26 +747,84 @@ export default function App() {
             </div>
 
             <div className="map-canvas-shell">
-              <MapCanvas
-                ref={mapRef}
-                elevationGrid={elevationLayer?.data ?? null}
-                slopeGrid={slopeLayer?.data ?? null}
-                aspectGrid={aspectLayer?.data ?? null}
-                shadowGrid={shadowLayer?.data ?? null}
-                thermalGrid={thermalLayer?.data ?? null}
-                costGrid={costLayer?.data ?? null}
-                traversableGrid={traversableLayer?.data ?? null}
-                waypoints={planResult?.waypoints ?? null}
-                start={start}
-                goal={goal}
-                clickMode={clickMode}
-                viewMode={viewMode}
-                resolutionM={focusTelemetry.resolutionM}
-                onCellClick={handleCellClick}
-                onAnimationStepChange={setRoutePlaybackStep}
-                onHoverCellChange={setHoverPoint}
-              />
+              {dimension === '2d' ? (
+                <MapCanvas
+                  ref={mapRef}
+                  elevationGrid={elevationLayer?.data ?? null}
+                  slopeGrid={slopeLayer?.data ?? null}
+                  aspectGrid={aspectLayer?.data ?? null}
+                  shadowGrid={shadowLayer?.data ?? null}
+                  thermalGrid={thermalLayer?.data ?? null}
+                  costGrid={costLayer?.data ?? null}
+                  traversableGrid={traversableLayer?.data ?? null}
+                  waypoints={planResult?.waypoints ?? null}
+                  start={start}
+                  goal={goal}
+                  clickMode={clickMode}
+                  viewMode={viewMode}
+                  resolutionM={focusTelemetry.resolutionM}
+                  onCellClick={handleCellClick}
+                  onAnimationStepChange={setRoutePlaybackStep}
+                  onHoverCellChange={setHoverPoint}
+                />
+              ) : (
+                <TerrainCanvas3D
+                  viewMode={viewMode}
+                  waypoints={planResult?.waypoints ?? null}
+                  exaggeration={null}
+                  sliceIndex={sliceIndex}
+                  photo={photoDrape}
+                  onReady={({ slices, timeVarying, brightestSlice }) => {
+                    setTerrainSlices(timeVarying ? slices : 0)
+                    // Open on lit ground. This window starts in shadow and
+                    // only crosses the terminator days in, so slice 0 is a
+                    // black scene that looks like a bug.
+                    setSliceIndex(brightestSlice)
+                  }}
+                  onError={(message) =>
+                    pushToast({ tone: 'warning', title: '3B arazi', message })
+                  }
+                />
+              )}
             </div>
+
+            {dimension === '3d' && (
+              <div className="map-overlay map-overlay-bottom-right terrain3d-time">
+                <label className="terrain3d-photo">
+                  <input
+                    type="checkbox"
+                    checked={photoDrape}
+                    onChange={(event) => setPhotoDrape(event.target.checked)}
+                  />
+                  <span>Gerçek görüntü (LROC NAC, 1 m/px)</span>
+                </label>
+                {photoDrape ? (
+                  <span className="terrain3d-note">
+                    Tek bir an: 2010 gündönümü çekimi. Gölgeleri o çekime ait
+                    olduğu için gün değiştirilemez — zaman ekseni için tiki
+                    kaldırın.
+                  </span>
+                ) : (
+                  terrainSlices > 1 && (
+                    <>
+                      <span className="eyebrow tight">
+                        Güneş · gün {sliceIndex / 2}
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={terrainSlices - 1}
+                        step={1}
+                        value={sliceIndex}
+                        onChange={(event) =>
+                          setSliceIndex(Number(event.target.value))
+                        }
+                      />
+                    </>
+                  )
+                )}
+              </div>
+            )}
 
             <div className="map-overlay map-overlay-bottom-left">
               <div className="scale-line" />

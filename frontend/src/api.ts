@@ -66,7 +66,6 @@ export interface LayerResponse {
   layer: string
   shape: [number, number]
   data: (number | null)[][]
-  metadata: Record<string, unknown>
 }
 
 export interface PlanWeights {
@@ -112,16 +111,32 @@ export interface RoverCatalogResponse {
 
 // ── API calls ──────────────────────────────────────────────────────────────────
 
+/**
+ * One grid layer, fetched over the binary (f32) path.
+ *
+ * The JSON representation of the same endpoint is capped at MAX_LAYER_CELLS
+ * (65 536 cells, a 256x256 preview), so on the shipped 500x500 grid it rejects
+ * downsample=1 with a 422 and the map renders nothing. The f32 path carries no
+ * such cap -- the whole field is 1 MB of float32, less than the capped JSON
+ * preview costs -- so full resolution is both available and cheaper here.
+ *
+ * NaN is the binary path's only no-data value (the server folds +inf in `cost`
+ * into it), and it is mapped to null so the shape matches what the JSON path
+ * used to return and MapCanvas already expects.
+ */
 export async function fetchLayer(
   name: string,
-  downsample = 2,
+  downsample = 1,
   options?: {
     weights?: PlanWeights
     roverId?: string
     signal?: AbortSignal
   },
 ): Promise<LayerResponse> {
-  const query = new URLSearchParams({ downsample: String(downsample) })
+  const query = new URLSearchParams({
+    downsample: String(downsample),
+    format: 'f32',
+  })
   if (options?.roverId) {
     query.set('rover_id', options.roverId)
   }
@@ -136,7 +151,30 @@ export async function fetchLayer(
     signal: options?.signal,
   })
   if (!r.ok) throw new Error(`Layer fetch failed: ${name} (${r.status})`)
-  return r.json() as Promise<LayerResponse>
+
+  // Shape comes from the headers rather than being inferred from the payload
+  // length: a square grid would make a swapped rows/cols invisible.
+  const rows = Number(r.headers.get('X-Layer-Rows'))
+  const cols = Number(r.headers.get('X-Layer-Cols'))
+  const flat = new Float32Array(await r.arrayBuffer())
+  if (!rows || !cols || flat.length !== rows * cols) {
+    throw new Error(
+      `Layer ${name}: ${flat.length} values do not fill ${rows}x${cols}`,
+    )
+  }
+
+  const data: (number | null)[][] = new Array(rows)
+  for (let r0 = 0; r0 < rows; r0++) {
+    const row: (number | null)[] = new Array(cols)
+    const base = r0 * cols
+    for (let c = 0; c < cols; c++) {
+      const v = flat[base + c]
+      row[c] = Number.isNaN(v) ? null : v
+    }
+    data[r0] = row
+  }
+
+  return { layer: name, shape: [rows, cols], data }
 }
 
 export async function planRoute(
