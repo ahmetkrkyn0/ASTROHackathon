@@ -66,7 +66,6 @@ export interface LayerResponse {
   layer: string
   shape: [number, number]
   data: (number | null)[][]
-  metadata: Record<string, unknown>
 }
 
 export interface PlanWeights {
@@ -240,6 +239,7 @@ export async function fetchLayer(
       `Layer ${name}: expected ${rows}x${cols} = ${rows * cols} floats, got ${buf.length}`,
     )
   }
+
 
   return {
     layer: name,
