@@ -48,6 +48,7 @@ from .thermal_model import (
     shadowed_equilibrium_c,
 )
 from .pathfinder import astar
+from .profile_comparison import compare_all_profiles, solve_named_profiles
 from .localization import evaluate_pose
 from .pose import PoseEstimate
 from .replan_triggers import evaluate_triggers_detailed
@@ -1174,43 +1175,6 @@ def plan_4d(req: Plan4DRequest, request: Request):
     }
 
 
-def _attach_constraint_check(
-    result: dict, profile: dict, grids: dict, rover: dict
-) -> None:
-    """Simulate a profile's route and record which declared limits it met.
-
-    ``max_shadow_h``, ``max_energy_wh`` and ``min_soc`` are path-dependent,
-    so they cannot be enforced inside the search -- but they CAN be checked
-    against the route that came out, and until round 4 nothing did: three of
-    the four constraints every mission profile publishes appeared nowhere
-    outside scenarios.py. The simulation is the same one /api/plan runs and
-    costs well under a second on the production grid. (Round 4 review, M-4.)
-    """
-    summary = None
-    if not result.get("error") and result.get("path_pixels"):
-        try:
-            states = simulate_path(
-                result,
-                grids["cost"],
-                grids["slope"],
-                grids["thermal"],
-                grids["shadow_ratio"],
-                rover=rover,
-                pixel_size_m=float(grids["metadata"]["resolution_m"]),
-                elevation_grid=grids["elevation"],
-            )
-            summary = summarize_simulation(states, rover)
-        except Exception:
-            logger.warning(
-                "Constraint check skipped for %s: %s",
-                result.get("profile_id"),
-                traceback.format_exc(),
-            )
-            summary = None
-    result["constraint_check"] = check_profile_constraints(profile, summary)
-    result["simulation_summary"] = summary
-
-
 def _validate_pixel_endpoints(grids: dict, start, goal) -> None:
     """422 for an out-of-grid start/goal, matching /api/plan.
 
@@ -1234,35 +1198,9 @@ def plan_multi(req: PlanMultiRequest):
     base_grids = _get_grids()
     _validate_pixel_endpoints(base_grids, req.start, req.goal)
     rover = get_rover(req.rover_id)
-    results: list[dict[str, Any]] = []
-    for profile_id in req.profiles:
-        profile = get_profile(profile_id)
-        if profile is None:
-            results.append(
-                {
-                    "profile_id": profile_id,
-                    "profile_name": None,
-                    "color": "#64748B",
-                    "path_pixels": [],
-                    "metrics": {},
-                    "error": f"Unknown profile: {profile_id}",
-                }
-            )
-            continue
-        grids = grids_for_rover(base_grids, req.rover_id, profile["weights"])
-        result = astar(
-            grids,
-            tuple(req.start),
-            tuple(req.goal),
-            weights=profile["weights"],
-            constraints=profile["constraints"],
-            rover=rover,
-        )
-        result["profile_id"] = profile_id
-        result["profile_name"] = profile["name"]
-        result["color"] = profile["color"]
-        _attach_constraint_check(result, profile, grids, rover)
-        results.append(result)
+    results = solve_named_profiles(
+        base_grids, req.start, req.goal, req.rover_id, rover, req.profiles
+    )
     return {"results": results}
 
 
@@ -1271,22 +1209,9 @@ def compare(req: CompareRequest):
     base_grids = _get_grids()
     _validate_pixel_endpoints(base_grids, req.start, req.goal)
     rover = get_rover(req.rover_id)
-    results = []
-    for profile_id, profile in MISSION_PROFILES.items():
-        grids = grids_for_rover(base_grids, req.rover_id, profile["weights"])
-        result = astar(
-            grids,
-            tuple(req.start),
-            tuple(req.goal),
-            weights=profile["weights"],
-            constraints=profile["constraints"],
-            rover=rover,
-        )
-        result["profile_id"] = profile_id
-        result["profile_name"] = profile["name"]
-        result["color"] = profile["color"]
-        _attach_constraint_check(result, profile, grids, rover)
-        results.append(result)
+    results = compare_all_profiles(
+        base_grids, req.start, req.goal, req.rover_id, rover
+    )
     return {
         "start": req.start,
         "goal": req.goal,
