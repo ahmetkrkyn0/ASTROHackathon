@@ -21,6 +21,12 @@ import {
 } from './colormap'
 
 const CANVAS_SIZE = 500
+// Full resolution. fetchLayer reads the binary float32 layer, which carries
+// the whole 500x500 grid in 1.00 MB and is exempt from the MAX_LAYER_CELLS
+// ceiling that caps the JSON representation at a 256x256 preview. Rendering
+// is resolution-agnostic anyway -- cellPx is CANVAS_SIZE / rows and the
+// hillshade reads effectiveResolution -- and the click mapping is in canvas
+// pixels, which equal full-resolution grid indices at CANVAS_SIZE 500.
 const DOWNSAMPLE = 1
 
 export type ClickMode = 'start' | 'goal' | 'idle'

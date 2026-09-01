@@ -112,16 +112,46 @@ export interface RoverCatalogResponse {
 
 // ── API calls ──────────────────────────────────────────────────────────────────
 
+// Reshape a row-major Float32Array into the nested array every consumer is
+// typed against. Non-finite cells become null, not NaN: the JSON path sent
+// null (`np.where(np.isfinite(...), layer, None)`) and every reader branches
+// on `typeof value === 'number'`, which is true for NaN. Leaving NaN in
+// would poison the colour ramps and range scans silently rather than
+// visibly -- cost alone carries 39 937 impassable cells.
+function reshapeF32(buf: Float32Array, rows: number, cols: number): (number | null)[][] {
+  const grid: (number | null)[][] = new Array(rows)
+  for (let row = 0; row < rows; row += 1) {
+    const line: (number | null)[] = new Array(cols)
+    const base = row * cols
+    for (let col = 0; col < cols; col += 1) {
+      const value = buf[base + col]
+      line[col] = Number.isFinite(value) ? value : null
+    }
+    grid[row] = line
+  }
+  return grid
+}
+
+// Layers arrive as float32, not JSON. The JSON representation carries the
+// 500x500 grid as ~4.25 MB of text and is capped server-side at
+// MAX_LAYER_CELLS (65 536), which forced downsample=2 and a 250x250
+// preview. The same grid as float32 is 1.00 MB -- smaller than the capped
+// preview -- and the ceiling is deliberately not applied to the binary path
+// (backend/app/main.py, the `format == "f32"` branch). Hence downsample=1.
+// See docs/frontend/3b-veri-sozlesmesi.md.
 export async function fetchLayer(
   name: string,
-  downsample = 2,
+  downsample = 1,
   options?: {
     weights?: PlanWeights
     roverId?: string
     signal?: AbortSignal
   },
 ): Promise<LayerResponse> {
-  const query = new URLSearchParams({ downsample: String(downsample) })
+  const query = new URLSearchParams({
+    downsample: String(downsample),
+    format: 'f32',
+  })
   if (options?.roverId) {
     query.set('rover_id', options.roverId)
   }
@@ -136,7 +166,30 @@ export async function fetchLayer(
     signal: options?.signal,
   })
   if (!r.ok) throw new Error(`Layer fetch failed: ${name} (${r.status})`)
-  return r.json() as Promise<LayerResponse>
+
+  const rows = Number(r.headers.get('X-Layer-Rows'))
+  const cols = Number(r.headers.get('X-Layer-Cols'))
+  const buf = new Float32Array(await r.arrayBuffer())
+  if (!Number.isFinite(rows) || !Number.isFinite(cols) || buf.length !== rows * cols) {
+    // A short buffer read into a full-resolution geometry looks plausible
+    // and is wrong. Fail loudly instead.
+    throw new Error(
+      `Layer ${name}: expected ${rows}x${cols} = ${rows * cols} floats, got ${buf.length}`,
+    )
+  }
+
+  return {
+    layer: name,
+    shape: [rows, cols],
+    data: reshapeF32(buf, rows, cols),
+    metadata: {
+      resolution_m: Number(r.headers.get('X-Layer-Resolution-M')),
+      validity: r.headers.get('X-Layer-Validity'),
+      min: Number(r.headers.get('X-Layer-Min')),
+      max: Number(r.headers.get('X-Layer-Max')),
+      nodata: Number(r.headers.get('X-Layer-Nodata')),
+    },
+  }
 }
 
 export async function planRoute(
