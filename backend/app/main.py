@@ -47,6 +47,9 @@ from .thermal_model import (
     relax_surface_c,
     shadowed_equilibrium_c,
 )
+from .ai_chat import run_chat
+from .ai_contract import ChatRequest, ChatResponse
+from .ai_provider import AiProviderError, resolve_provider
 from .pathfinder import astar
 from .profile_comparison import compare_all_profiles, solve_named_profiles
 from .localization import evaluate_pose
@@ -1618,6 +1621,32 @@ def reference_missions():
 @app.get("/api/profiles")
 def profiles():
     return list_profiles()
+
+
+@app.post("/api/ai/chat", response_model=ChatResponse)
+def ai_chat(req: ChatRequest, request: Request):
+    """Answer one mission question from deterministic LunaPath evidence.
+
+    Read-only by construction: the registry handed to the model holds two
+    side-effect-free tools, so no sequence of model outputs can publish a
+    corridor, load a grid, or move the route the operator is looking at.
+    Orchestration lives in app.ai_chat; this stays a door.
+    """
+    grids = _active_grids(request)
+
+    # Tests inject a scripted provider here; production resolves from the
+    # environment on every call so a key added without a restart takes.
+    provider = getattr(request.app.state, "ai_provider", None)
+    if provider is None:
+        try:
+            provider = resolve_provider()
+        except AiProviderError as exc:
+            raise HTTPException(status_code=503, detail=exc.message) from exc
+
+    try:
+        return run_chat(provider, grids, req.mission, req.messages)
+    except AiProviderError as exc:
+        raise HTTPException(status_code=503, detail=exc.message) from exc
 
 
 @app.get("/api/scenarios")
