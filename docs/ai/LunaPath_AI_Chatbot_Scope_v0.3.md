@@ -6,53 +6,52 @@
 | **Backend temeli** | `fea37ef5d90d998b9a24cc2de6631954028347d0`, backend sürüm `0.3.0` |
 | **Kanıt** | `docs/BACKEND_ENVANTER.md`, `docs/backend_capabilities.json` |
 | **Öncülü** | `docs/ai/LunaPath_AI01_Kapsam_Revizyon_v02.md` (v0.2), bu dizinde değiştirilmeden saklanır |
+| **Jenerik sözleşme** | `docs/ai/LunaPath_AI01_Kapsam_ve_Arayuz_Sozlesmesi_v01.md` (AI-02 v0.1), bu dizinde değiştirilmeden saklanır |
 
 ---
 
 ## 0. Bu belgenin varlık nedeni
 
-v0.2 revizyon notu, `AI-02 "Kapsam ve Arayüz Sözleşmesi v0.1"` adlı bir belgenin §3
-(yasak listesi N-1…N-17), §5.1 (`Quantity` sözleşmesi) ve §6 (katman mimarisi)
-bölümlerine **normatif olarak atıf yapıyor** ama o bölümleri tekrarlamıyor.
+### 0.0 Normatif hiyerarşi
 
-`AI-02 v0.1` ve `AI-01` **kurtarılamaz durumda**. Beş bağımsız arama negatif döndü:
-depo geçmişinin tamamı ve her dal; makine genelinde dosya adı taraması; on adet oturum
-transcript dizini ve seksen altı oturum verisi dosyası; `.docx` iç metinleri; Windows
-Recent kısayol envanteri (v0.2 için kısayol var, AI-01/AI-02 için yok). Bu iki belge
-konuşma ürünüydü, hiçbir zaman dosya olmadı.
+Çelişki hâlinde sıra yukarıdan aşağıdır:
 
-Bu yüzden v0.3:
-
-1. v0.2'nin **hâlâ geçerli ve tam tanımlı** hükümlerini devralır;
-2. eksik AI-02 bölümlerine olan **asılı normatif bağımlılıkları kaldırır**;
-3. bugün gerçekten bildiğimiz ve onayladığımız kuralları **eksiksiz** yazar.
-
-**Kayıp N-1…N-17 kuralları yeniden üretilmemiştir.** Hayal ürünü bir kural listesi,
-olmayan bir listeden daha tehlikelidir. Aşağıdaki §3 bu özellik için geçerli davranış
-çerçevesinin **tamamıdır**; başka hiçbir numaralı kurala atıf yapılmaz.
-
-### 0.1 v0.2'den devralınan, hâlâ bağlayıcı hükümler
-
-| v0.2 bölümü | Konu | v0.3'teki karşılığı |
+| # | Kaynak | Rolü |
 |---|---|---|
-| §2 / N-18 | Asistan `POST /api/plan` çağırmaz | §5 (yasak listesi), §3 R-5 |
-| §2.1 | Ayrık ağırlık uzayı — dört profil örneklemesi | §7.2 |
-| §3 | Yetenek durum tablosu | §8 |
-| §4.1 | Kanonik alan adları | §4.1 |
-| §4.2 | Tuzaklar T-1…T-12 | §4.2 |
-| §4.3 / N-19 | BİLİNMİYOR alanları çıktıda geçemez | §3 R-9 |
-| §5 | Bütçe | §6 |
-| §7 | Üç kademeli izin | §5 |
-| §G | Provenance merdiveni | §9 |
+| 1 | **AI-02 v0.1** — `LunaPath_AI01_Kapsam_ve_Arayuz_Sozlesmesi_v01.md` | Jenerik, backend-bağımsız sözleşme |
+| 2 | **AI-01 Kapsam Revizyonu v0.2** — `LunaPath_AI01_Kapsam_Revizyon_v02.md` | Denetim sonrası açık geçersiz kılmalar |
+| 3 | `docs/BACKEND_ENVANTER.md` + `docs/backend_capabilities.json` | Somut backend gerçeği |
+| 4 | Ölçülmüş uygulama bulguları | T-13, T-14, compare ≈ 21.3 s |
+
+v0.2 **yalnızca** AI-02 §4, §8.2, §9, §11 ve §12/D-1 bölümlerini geçersiz kılar.
+Dolayısıyla AI-02'nin §1 (B-1…B-3), §2 (S-1…S-12), §3 (**N-1…N-17**), §5 (veri
+sözleşmesi), §6 (K1–K5 mimarisi), §7 (L1/L2/L3), §8.1 (`E-*` kodları), §8.3
+(K5 sayı-topraklaması) ve §10 (kabul ilkeleri) bölümleri **bağlayıcıdır**.
+
+### 0.1 Kaynak belge kurtarıldı — bu bölümün önceki iddiası geçersizdir
+
+v0.3'ün ilk sürümü `AI-02 v0.1`'i **kurtarılamaz** ilan etmiş, N-1…N-17'yi,
+`Quantity` sözleşmesini ve §6 katman mimarisini bilinmeyen sayarak yerlerine
+yerel bir `R-1…R-12` kümesi koymuştu.
+
+**Belge bulundu** ve `docs/ai/LunaPath_AI01_Kapsam_ve_Arayuz_Sozlesmesi_v01.md`
+olarak değiştirilmeden depoya alındı (AI-02 · TASLAK v0.1 · 1 Eylül 2026).
+O iddia burada geri çekilmiştir. Kayıp sayılan üç bölümün üçü de mevcut ve
+bağlayıcıdır; bu belge artık onları yeniden üretmez, **onlara atıf yapar**.
+
+`R-1…R-12` kümesi yerini kurtarılan **N-1…N-17**'ye bırakır. Yalnızca denetimden
+doğan iki kural yerel kalır: **N-18** (asistan `/api/plan` çağırmaz) ve **N-19**
+(doğrulanmamış alanlar çıktıda geçemez).
 
 ### 0.2 v0.2'nin numaralandırma tutarsızlığı
 
 v0.2 §10 *"v0.1 §3'teki 19 yasak (N-1…N-19)"* diyor; v0.2 §2 ise `N-18`'i **yeni**
 kural olarak §3.3'e ekliyor. N-18 aynı anda hem yeni hem de önceden var olan
-19'luk kümenin üyesi olamaz. Bu tutarsızlık kaynağın kendisinde vardır ve burada
-**çözülmemiştir**; yalnızca kayda geçirilmiştir. Muhtemel açıklama: v0.2, AI-02'nin
-v0.1'inden farklı bir sürümüne karşı yazılmış. v0.3 numaralı N-kurallarına atıf
-yapmaz; kendi `R-n` kural kümesini kullanır.
+19'luk kümenin üyesi olamaz. Kurtarılan AI-02 v0.1 §3 tam olarak **N-1…N-17**
+içeriyor; N-18 ve N-19 gerçekten denetim sonrası eklerdir. Yani v0.2 §10'un
+"§3'teki 19 yasak" ifadesi kaynağın kendisindeki bir yazım hatasıdır —
+v0.1 §3'te 17 yasak vardır. Tutarsızlık **çözülmemiş olarak kayda geçirilmez**;
+burada kurtarılan belgeye bakılarak giderilmiştir.
 
 ---
 
@@ -116,27 +115,54 @@ testler bunu zorlar.
 
 ---
 
-## 3. Davranış kuralları (R-1 … R-12)
+## 3. Davranış kuralları — N-1 … N-19
 
-Bu liste, bu özellik için davranış çerçevesinin **tamamıdır**.
+Bağlayıcı çerçeve, kurtarılan **AI-02 v0.1 §3**'tür. Aşağıdaki tablo o bölümü
+özetler; çelişki hâlinde kaynak belge geçerlidir. Yalnızca N-18 ve N-19 denetimden
+doğan yerel eklerdir.
+
+### 3.1 Hesaplama yasakları (AI-02 §3.1)
 
 | # | Kural |
 |---|---|
-| **R-1** | Asistan yanıtı kullanıcının dilinde verir. |
-| **R-2** | LunaPath TRL 3 civarı görev öncesi planlama ve karar destek aracıdır. "Otonom navigasyon", "gerçek zamanlı sürüş", "sertifikalı" gibi ifadeler kullanılmaz. (SRS `CON-12` ile hizalı.) |
-| **R-3** | Her teknik iddia, mevcut bağlamda verilmiş ya da araç çıktısından gelen kanıta dayanır. Kanıtı olmayan sayı söylenmez. |
-| **R-4** | Yapılmamış bir hesap yapılmış gibi anlatılmaz. |
-| **R-5** | Asistan rota üretmez, rota değiştirmez, misyon durumunu değiştirmez. `POST /api/plan` ve §5'teki diğer yasak uçlar hiçbir koşulda çağrılmaz. |
-| **R-6** | Ağırlıklar normalize edilmez. Toplamlarının 1 olduğu varsayılmaz, yüzdeye çevrilmez. |
-| **R-7** | Birimi doğrulanmamış bir sayı sunulmaz. Birim uydurulmaz. |
-| **R-8** | §4.2'deki dışlanan alanlar kullanılmaz, alıntılanmaz, özetlenmez. |
-| **R-9** | Backend envanterinin BİLİNMİYOR listesindeki hiçbir alan asistan çıktısında olgu olarak geçemez. (v0.2 §4.3 / N-19.) |
-| **R-10** | Kanıt yetersizse, neyin belirlenemediği açıkça söylenir. |
-| **R-11** | Mevcut plan olguları ile dört profilli karşı-olgusal sonuçlar birbirinden açıkça ayrılır. |
-| **R-12** | Profil karşılaştırması **ayrık duyarlılık**tır, tek değişkenli nedensel perturbasyon değildir. Bir profil enerjiye daha çok ağırlık verdiğinde **diğer ağırlıklar da değişir**; rotadaki farkın tamamı tek bir ağırlığa atfedilmez. |
+| **N-1** | Asistan hiçbir sayıyı kendisi hesaplamaz — toplama, çıkarma, çarpma, bölme, yüzde, oran, ortalama, birim çevirme dahil. Tek sayı kaynağı deterministik çekirdektir. |
+| **N-2** | Asistan yanıtında, aldığı analiz çıktısının `numeric_registry` alanında bulunmayan hiçbir sayı geçemez. Değerin "yükte bir yerde geçmesi" yeterli değildir; K1 onu açıkça kaydetmiş olmalıdır. |
+| **N-3** | Asistan rota üretmez, waypoint önermez, koordinat uydurmaz. |
+| **N-4** | Asistan maliyet fonksiyonunu, ağırlıkları veya fizik modelini değiştirmez. (Denetlenmiş `C-COMPARE` ayrık profil hesabı bunu ihlal etmez: hesabı deterministik K1 yapar ve mevcut profilleri kullanır.) |
+| **N-5** | Asistan veri katmanı üretmez, doldurmaz, tahmin etmez. Eksik veri → `E-NODATA`. |
+
+### 3.2 İddia yasakları (AI-02 §3.2)
+
+| # | Yasak ifade | Doğru ifade |
+|---|---|---|
+| **N-6** | "Otonom navigasyon" / "engel kaçınma yapıyoruz" | "Global rota planlama; yerel engel kaçınma kapsam dışı" |
+| **N-7** | "Gerçek NASA verisiyle çalışıyoruz" | Katmanın provenance etiketini olduğu gibi söyler |
+| **N-8** | "Bu rota güvenlidir" / "rover'ı korur" | "Bu rota, tanımlı kısıtları ihlal etmiyor" — ve yalnızca deterministik kanıt destekliyorsa |
+| **N-9** | "Bu alanda ilk/özgün/tek" | Karşılaştırmalı üstünlük iddiası kurmaz |
+| **N-10** | "Rover üzerinde çalışabilir" | Sınır B-1 |
+| **N-11** | "kesinlikle", "garanti", "%100" | Belirsizlik bandı varsa birlikte verilir |
+
+### 3.3 Davranış yasakları (AI-02 §3.3)
+
+| # | Kural |
+|---|---|
+| **N-12** | Asistan kullanıcıyı bir rotaya ikna etmeye çalışmaz; trade-off sunar, seçimi kullanıcıya bırakır. |
+| **N-13** | Anlatım seviyesi **sonucu değiştirmez** — yalnızca anlatımı değiştirir. |
+| **N-14** | Asistan güvenlik uyarılarını, kısıt ihlallerini veya belirsizlik beyanlarını hiçbir seviyede atlamaz veya yumuşatmaz. |
+| **N-15** | Arazi, DEM ve fiziksel sıcaklık "ayarlanabilir parametre" gibi sunulmaz. |
+| **N-16** | Asistan kısıt gevşetmeyi tavsiye etmez; yalnızca sonucunu gösterir. (Bu kesitte gevşetme analizi yeteneği zaten yok.) |
+| **N-17** | LunaPath dışı konular (genel Ay bilimi, kod yazma, ödev) → `E-SCOPE`. |
+
+### 3.4 Denetimden doğan yerel ekler
+
+| # | Kural |
+|---|---|
+| **N-18** | Asistan `POST /api/plan` çağırmaz. Kullanıcının başlattığı planı okur; kendi hesaplarını yan etkisiz uçlar üzerinden yapar. (v0.2 §2.) |
+| **N-19** | Backend envanterinin BİLİNMİYOR listesindeki hiçbir alan asistan çıktısında olgu olarak geçemez. (v0.2 §4.3.) |
 
 Provenance sınırlamaları, maddi olarak ilgili olduğunda iletilir. Her yanıt gereksiz
-uyarı yığınına boğulmaz.
+uyarı yığınına boğulmaz (N-14 ile çelişmez: zorunlu uyarılar `warnings` kanalında
+taşınır ve hiçbir seviyede gizlenemez).
 
 ---
 
@@ -422,7 +448,169 @@ Aşağıdakiler otomatik testlerle kanıtlanır:
 
 ---
 
-## 12. Kapsam dışı
+## 12. Katman mimarisi — K1…K5 (AI-02 §6)
+
+| Katman | Ne yapar | Ne YAPAMAZ | LLM? |
+|---|---|---|---|
+| **K1 — Analiz çekirdeği** | Tüm hesaplar; tüm sayıların tek kaynağı. `AnalysisEnvelope` üretir | Metin üretmek, seviye bilmek | Hayır |
+| **K2 — Yönlendirici** | Serbest metni yetenek kodu + parametreye çevirir | Sayı üretmek, cevap yazmak | Evet |
+| **K3 — Safeguard** | Yetenek varlığı, şema, aralık, izin, bağlam, bütçe denetimi | Yorum yapmak | Hayır |
+| **K4 — Sözelleştirici** | Yalnızca doğrulanmış zarfı seviyeye göre anlatır | Hesap yapmak, kayıt dışı sayı kullanmak | Evet |
+| **K5 — Çıkış denetimi** | Sayı-eşleme + yasak ifade taraması | Metni "düzeltmek" | Hayır |
+
+Üretim akışı:
+
+```
+KULLANICI → K2 (yapılandırılmış yönlendirme) → K3 (deterministik kapı)
+          → K1 / AnalysisProvider → AnalysisEnvelope
+          → K4 (sözelleştirme) → K5 (deterministik doğrulama) → KULLANICI
+```
+
+Mevcut plan özeti yolu ek hesap gerektirmez:
+
+```
+KULLANICI → K2 (answer_from_context) → K1 (snapshot'tan C-SUMMARY zarfı)
+          → K4 → K5 → KULLANICI
+```
+
+**K2 çıktı kısıtı.** K2 asla serbest metin üretmez:
+
+```ts
+type RouterOutput =
+  | { action: "invoke"; capability: string; params: object; rationale_key: string }
+  | { action: "clarify"; missing: string[] }
+  | { action: "refuse"; code: ErrorCode }
+  | { action: "answer_from_context" };
+```
+
+K2 anlamsal yetenek tanımlayıcıları görür; backend uç adı veya ham alan yolu
+**görmez**. K4 yalnızca `Metric` / `AnalysisEnvelope` verisi görür. Somut uç ve
+alan bağlamaları `AnalysisProvider` / K3 adaptör kodunda kalır.
+
+**K5 davranışı.** İhlal bulursa metni düzenlemez — **bloklar**, `E-GROUNDING`
+döner ve yalnızca kayıtlı değerlerden kurulmuş deterministik bir Türkçe özet
+gösterir. Sessiz düzeltme, hatanın görünmez hâle gelmesi demektir.
+
+---
+
+## 13. Veri sözleşmesi (AI-02 §5.1)
+
+```ts
+type Quantity   = { value: number; unit: string; precision?: number };
+type Provenance = { source: "MEASURED"|"DERIVED"|"MODEL"|"SYNTHETIC";
+                    layer?: string; dataset?: string; version?: string; note?: string };
+type Metric     = { key: string; label: string; quantity: Quantity;
+                    provenance: Provenance; uncertainty?: {...} };
+type NumericRegistry = Metric[];
+type Warning    = { code: string; severity: "info"|"caution"|"critical";
+                    message: string; suppressible: false };
+type AnalysisEnvelope<T> = {
+  capability; request_echo; ok; payload?; error?;
+  numeric_registry; warnings; provenance_summary; compute_ms; backend_version;
+};
+```
+
+**Dört basamaklı ham merdiven korunur.** En zayıf-girdi hesabı `SYNTHETIC <
+DERIVED < MODEL < MEASURED` üzerinde yapılır; §9'daki üç basamaklı
+`displayPedigree` yalnızca bir **arayüz gösterim eşlemesidir** ve iç modelin
+yerine geçmez.
+
+**Türetilmiş yüzdeler.** K1 bir oranı yüzdeye çevirdiğinde ortaya çıkan `Metric`
+`source: "DERIVED"` taşır ve kaynak metriği adıyla referanslar. Her oran için
+otomatik yüzde üretilmez — yalnızca ürünün gerçekten ihtiyaç duyduğu yerde.
+
+**Kanonik gösterim.** K1 her kayıtlı `Quantity` için tek bir kanonik gösterim
+dizgesi üretir (ondalık virgül, **binlik ayracı yok**). K4 analitik nicelikleri
+bu dizgeleri **birebir kopyalayarak** yazar; sayıyı serbestçe biçimlendiremez ve
+kelimeyle yazamaz. K5'in toleransı **sıfırdır**: yuvarlama bir kez, K1'de,
+`precision` uyarınca yapılır.
+
+### 13.1 `warnings` ve `limitations` — anlamına göre ayrı
+
+Bir madde **asla iki dizide birden** bulunmaz.
+
+| Kanal | Anlamı |
+|---|---|
+| **`warnings`** | Zorunlu, yapılandırılmış, `suppressible: false`. K4 düzyazısından **bağımsız** render edilir, L1/L2/L3 boyunca değişmez (N-14). Kanıt geçerliliği, topraklama, kısıt veya yorum **maddi olarak etkilendiğinde** kullanılır. |
+| **`limitations`** | Bilgilendirici kapsam/yetenek notu. Özelliğin neyi *kuramadığını* açıklar. Zorunlu uyarının yerine geçmez. |
+
+`warnings` örnekleri: `CELL_COST_BREAKDOWN_WEIGHT_MISMATCH` (ağırlık uyuşmazlığı
+`cost_breakdown`'ı mevcut planın açıklaması olarak geçersiz kılar) · zorunlu
+provenance/veri-geçerliliği kaydı · kısıt ihlali · `E-GROUNDING` sonrası
+kullanıcıya görünen uyarı.
+
+`limitations` örnekleri: "Rota geneli maliyet ayrışması mevcut değil" ·
+"Duyarlılık, önceden tanımlı profiller üzerinden ayrıktır" · "Bu sonuç, geometrik
+sapmanın kesin nedenini belirleyemez".
+
+**Kısıt uyarıları için icat edilmiş eşik yoktur.** Bir kısıt uyarısı yalnızca
+deterministik bir backend alanı gerektirdiğinde üretilir (`satisfied is False`
+ya da backend'in açıkça verdiği durum/marj). AI tanımlı "sınıra yakın" eşiği yok.
+
+---
+
+## 14. Anlatım seviyesi — L1 / L2 / L3 (AI-02 §7)
+
+| Seviye | Kullanıcı tanımı |
+|---|---|
+| **L1** | "Konuya yeniyim, genel hatlarıyla anlamak istiyorum" |
+| **L2** | "Mühendislik geçmişim var, sayıları ve gerekçeleri görmek istiyorum" (görsel varsayılan) |
+| **L3** | "Alan uzmanıyım, ham veri ve daha çok ayrıntı istiyorum" |
+
+Seçim **açıktır**; davranıştan gizli çıkarım yapılmaz. İlk normal sohbet turundan
+önce oturum-yerel **bir açık seçim/onay** istenir. Modal yok, kalıcılık yok.
+
+Seviye **yalnızca anlatımı** değiştirir (N-13): aynı `AnalysisEnvelope`, aynı
+`numeric_registry`, aynı `warnings`, aynı provenance. L3 arındırılmış zarfta
+olmayan bir alana erişemez; ham backend JSON'u hiçbir seviyede görünmez.
+
+---
+
+## 15. Hata kodları (AI-02 §8.1)
+
+| Kod | Anlamı | Örnek |
+|---|---|---|
+| `E-SCOPE` | Soru LunaPath kapsamı dışında | "Ay'ın yarıçapı nedir?", "Python kodu yaz" |
+| `E-UNSUPPORTED` | Yetenek denetlenmiş backend'de mevcut değil | `C-CONTRAST`, `C-RECOURSE` |
+| `E-SCHEMA` | Parametre şemaya uymuyor | K2 iki denemede geçerli `RouterOutput` üretemedi |
+| `E-RANGE` | Parametre izinli aralık dışında | Grid dışı `row`/`col` |
+| `E-BUDGET` | Hesap bütçesi aşıldı | Bir soruda ikinci `compare` |
+| `E-NODATA` | Gerekli veri katmanı yok | — |
+| `E-CONTEXT` | Analiz bağlamı yok/geçersiz | Plan yokken özet istendi |
+| `E-GROUNDING` | K5 çıkış denetimi başarısız | Kayıtta olmayan sayı |
+
+Her red **gerekçelidir**: kod + Türkçe neden. Alternatif yalnızca gerçekten
+desteklenen bir alternatif varsa önerilir; uydurulmaz.
+
+---
+
+## 16. İzlenebilirlik
+
+### AI-02 v0.1'den devralınan (bağlayıcı)
+
+`B-1…B-3` sert sınırlar · `S-1…S-12` kapsam · `N-1…N-17` yasaklar ·
+`Quantity` / `Provenance` / `Metric` / `NumericRegistry` / `Warning` /
+`AnalysisEnvelope` · `AnalysisProvider` portu · `K1…K5` katman mimarisi ·
+`L1/L2/L3` seviye modeli · `E-*` hata kodları · §8.3 K5 sayı-topraklaması ·
+§10 kabul ilkeleri (`A-1…A-8`).
+
+### v0.2 tarafından geçersiz kılınan
+
+AI-02 §4 eski yetenek varsayımları · §8.2 üç-koşum / 15 s bütçesi ·
+§9 backend teyit listesi · §11 faz planı · §12/D-1 izin varsayımı.
+
+### Denetimden sonra eklenen
+
+`N-18` (asistan `/api/plan` çağırmaz) · `N-19` (doğrulanmamış alan yüzeye çıkmaz) ·
+`T-1…T-12` (v0.2 §4.2) · `T-13` (`comparison.recommendation` dışlanır) ·
+`T-14` (grid olguları çalışma zamanından gelir) · ölçülen compare ≈ 21.3 s ·
+OpenAI Responses API sağlayıcı kararı.
+
+Tarihsel tutarsızlıklar silinmez; öncelik sırası §0.0'da kayıtlıdır.
+
+---
+
+## 17. Kapsam dışı
 
 Bu kesitte uygulanmaz: rota geneli maliyet ayrışması · `POST /api/score-path` ·
 `C-CONTRAST` · `C-RECOURSE` · keyfi ağırlıkla yeniden koşum · `dry_run` plan ·
