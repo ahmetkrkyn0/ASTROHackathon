@@ -19,6 +19,26 @@
   --font-body: 'Manrope', 'Segoe UI', sans-serif;
   --font-display: 'Outfit', 'Segoe UI', sans-serif;
   --font-data: 'IBM Plex Mono', 'Cascadia Code', monospace;
+
+  /* ── Mission deck ─────────────────────────────────────────────────────────
+     The console now floats over a moving lunar backdrop, so the panel fills
+     below are translucent where they used to be near-opaque. Anything above
+     encodes data (the risk ramp, --safe through --critical) and is left
+     alone: those are readings, not decoration.
+
+     The two accents are an axis rather than a brand pair. At this latitude
+     the sun grazes the horizon, so every cell is either lit or in permanent
+     shadow -- the same split the shadow_ratio and thermal layers carry.
+       --terminator  sunlit: energy, and the action you take
+       --umbra       shadowed: cold, and the data you read */
+  --terminator: #ffb84d;
+  --terminator-dim: rgba(255, 184, 77, 0.16);
+  --umbra: #5ad2ff;
+  --umbra-dim: rgba(90, 210, 255, 0.16);
+  --void: #05070d;
+  --glass: rgba(9, 13, 22, 0.62);
+  --glass-strong: rgba(9, 13, 22, 0.78);
+  --hairline: rgba(148, 163, 184, 0.22);
 }
 
 * {
@@ -34,13 +54,86 @@ body,
 
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at top, rgba(160, 160, 255, 0.08), transparent 30%),
-    linear-gradient(180deg, #151520 0%, #0f1017 100%);
+  /* Flat void rather than a gradient: the backdrop video supplies the
+     luminance now, and a gradient underneath it only showed through as a
+     colour cast on the vignette. */
+  background: var(--void);
   color: var(--text);
   font-family: var(--font-body);
   line-height: 1.5;
   overflow: hidden;
+}
+
+/* ── Backdrop ───────────────────────────────────────────────────────────────
+   Fixed behind everything, and inert: the console owns every interaction.
+
+   z-index 130 clears the landing screen (120) so the clip is visible from the
+   first frame of the session; the landing's own content sits above it again
+   at 131. Everywhere else the shell (1) is the only thing above 0, so no
+   panel needs its own stacking context. */
+.space-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--void);
+}
+
+.space-backdrop--ambient {
+  z-index: 130;
+}
+
+.space-backdrop--feature {
+  z-index: 130;
+}
+
+.space-backdrop-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: var(--backdrop-opacity, 1);
+  transform: scale(var(--backdrop-scale, 1));
+  transform-origin: center;
+  /* Long enough to read as a deliberate change of scene rather than a flicker,
+     and matched to the landing screen's own 0.75s exit. */
+  transition: opacity 0.75s ease, transform 1.2s ease;
+}
+
+/* The landing page has its own interactive moon dead centre. Un-zoomed, the
+   clip's disc sits beside it and reads as a second moon, so here the clip is
+   pushed in far enough to be lunar surface and starfield rather than an
+   object competing with the one you can actually drag. */
+.space-backdrop--ambient .space-backdrop-media {
+  --backdrop-scale: 2.1;
+}
+
+.space-backdrop-vignette {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.75s ease;
+}
+
+/* During the transition beat the clip is the subject, so the vignette that
+   exists to protect UI legibility gets out of the way. */
+.space-backdrop--feature .space-backdrop-vignette {
+  opacity: 0.45;
+}
+
+/* The sun, just under the horizon. Kept far dimmer than it wants to be --
+   it is atmosphere, and the amber that carries actual meaning is the rule
+   under the topbar and the primary action. */
+.space-backdrop-terminator {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 38vh;
+  background: radial-gradient(
+    120% 100% at 50% 100%,
+    rgba(255, 184, 77, 0.14),
+    transparent 70%
+  );
 }
 
 button,
@@ -50,14 +143,15 @@ select {
 }
 
 .app-shell {
+  position: relative;
+  z-index: 1;
   height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at top left, rgba(160, 160, 255, 0.06), transparent 24%),
-    radial-gradient(circle at top right, rgba(173, 198, 255, 0.05), transparent 22%),
-    linear-gradient(180deg, rgba(10, 10, 18, 0.96) 0%, rgba(19, 19, 27, 0.98) 100%);
+  /* Transparent: the backdrop is the background now. The old opaque gradient
+     stack is what the video would have been hidden behind. */
+  background: transparent;
   transition: opacity 0.6s ease, transform 0.6s ease, filter 0.6s ease;
   overflow: hidden;
 }
@@ -77,13 +171,21 @@ select {
   filter: blur(0);
 }
 
+/* Above the backdrop clip (130) so the pitch stays readable, but transparent
+   so the clip is what you see behind it -- the sequence starts here. */
 .landing-screen {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 131;
   overflow: hidden;
-  background: #03040a;
+  background: transparent;
   transition: opacity 0.75s ease, transform 0.75s ease, filter 0.75s ease;
+}
+
+/* The clip supplies the starfield now. Keeping both put a static field of
+   stars on top of a moving one. */
+.landing-star-bg {
+  display: none;
 }
 
 .landing-screen.is-exiting {
@@ -266,30 +368,64 @@ select {
   cursor: default;
 }
 
-.loading-screen {
+/* The transition beat. Above the backdrop (130) rather than opaque over it:
+   the clip is the screen here, and this is only the text on top of it. */
+.cinematic-screen {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  z-index: 131;
   display: grid;
-  place-items: center;
-  background: rgba(2, 3, 8, 0.94);
+  place-items: end center;
+  padding-bottom: 12vh;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition: opacity 0.45s ease, visibility 0.45s ease;
 }
 
-.loading-screen.is-active {
+.cinematic-screen.is-active {
   opacity: 1;
   visibility: visible;
-  pointer-events: all;
+  pointer-events: auto;
 }
 
-.loading-frame {
+.cinematic-frame {
   width: min(420px, calc(100vw - 40px));
   display: grid;
   gap: 18px;
+  padding: 22px 24px;
+  background: var(--glass-strong);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  backdrop-filter: blur(18px);
 }
+
+.cinematic-cta {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 184, 77, 0.45);
+  background: linear-gradient(135deg, rgba(255, 184, 77, 0.96), rgba(224, 142, 42, 0.92));
+  color: #2a1806;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.cinematic-cta:disabled {
+  background: rgba(9, 13, 22, 0.6);
+  border-color: var(--hairline);
+  color: var(--text-muted);
+  cursor: progress;
+}
+
+.cinematic-cta:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(255, 197, 106, 0.98), rgba(236, 154, 52, 0.95));
+}
+
 
 .loading-bar-track {
   height: 3px;
@@ -312,14 +448,34 @@ select {
 }
 
 .topbar {
+  position: relative;
   height: 54px;
   padding: 0 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(70, 70, 81, 0.3);
-  background: rgba(10, 10, 26, 0.92);
-  backdrop-filter: blur(14px);
+  /* No grey rule here: the terminator below IS the divider. Two lines
+     stacked read as a mistake. */
+  background: var(--glass-strong);
+  backdrop-filter: blur(18px);
+}
+
+/* The horizon the sun grazes -- the one thing on this deck allowed to be
+   bold. Full bleed, and the only place amber runs at strength besides the
+   primary action. */
+.topbar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--terminator) 12%,
+    var(--terminator) 88%,
+    transparent
+  );
+  box-shadow: 0 0 12px 1px rgba(255, 184, 77, 0.35);
 }
 
 .brand-lockup {
@@ -377,7 +533,7 @@ select {
 .left-rail,
 .right-rail {
   min-height: 0;
-  background: rgba(19, 19, 27, 0.92);
+  background: var(--glass-strong);
   backdrop-filter: blur(18px);
 }
 
@@ -448,11 +604,13 @@ select {
 .rail-section,
 .battery-card,
 .risk-card,
-.waypoint-card {
-  background: linear-gradient(180deg, rgba(31, 31, 40, 0.92), rgba(17, 18, 27, 0.98));
-  border: 1px solid rgba(70, 70, 81, 0.24);
+.waypoint-card,
+.payload-card {
+  background: var(--glass);
+  border: 1px solid var(--hairline);
   border-radius: 16px;
-  box-shadow: 0 16px 30px rgba(2, 3, 8, 0.18);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 16px 30px rgba(2, 3, 8, 0.35);
 }
 
 .rail-section {
@@ -604,8 +762,8 @@ select {
 }
 
 .rover-card.is-active {
-  background: rgba(160, 160, 255, 0.1);
-  border-color: rgba(160, 160, 255, 0.36);
+  background: var(--umbra-dim);
+  border-color: rgba(90, 210, 255, 0.4);
 }
 
 .rover-card-head,
@@ -895,11 +1053,16 @@ select {
   font-weight: 600;
 }
 
+/* The one action that spends energy, in the colour that means energy. */
 .primary-btn {
-  background: linear-gradient(135deg, rgba(160, 160, 255, 0.95), rgba(123, 123, 231, 0.9));
-  border: 1px solid rgba(160, 160, 255, 0.4);
-  color: #110d3d;
+  background: linear-gradient(135deg, rgba(255, 184, 77, 0.96), rgba(224, 142, 42, 0.92));
+  border: 1px solid rgba(255, 184, 77, 0.45);
+  color: #2a1806;
   font-weight: 700;
+}
+
+.primary-btn:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(255, 197, 106, 0.98), rgba(236, 154, 52, 0.95));
 }
 
 .primary-btn:disabled {
@@ -913,9 +1076,10 @@ select {
   min-width: 0;
   display: flex;
   overflow: hidden;
-  background:
-    radial-gradient(circle at center, rgba(255, 255, 255, 0.03), transparent 60%),
-    linear-gradient(180deg, #090910 0%, #05060b 100%);
+  /* Left open so the backdrop reads through the margins around the canvas --
+     the console frames a viewport rather than covering one. The canvas itself
+     paints its own ground, so the terrain is unaffected. */
+  background: rgba(5, 7, 13, 0.35);
 }
 
 .center-stage::before {
@@ -1090,9 +1254,10 @@ select {
   font-weight: 700;
 }
 
+/* Choosing a layer or a dimension is reading, not spending -- cyan. */
 .map-switch button.is-active {
-  background: var(--primary-container);
-  color: #0f0f39;
+  background: var(--umbra);
+  color: #04222e;
   font-weight: 700;
 }
 
@@ -1764,6 +1929,10 @@ select {
 .map-overlay-bottom-right {
   right: 24px;
   bottom: 24px;
+  /* At narrower widths this sits in the same band as the centred
+     legend-ribbon; without this it wins the paint order and the photo-drape
+     checkbox underneath becomes unclickable. */
+  z-index: 3;
 }
 
 .terrain3d-time {
@@ -1798,3 +1967,101 @@ select {
   line-height: 1.35;
   color: rgba(226, 232, 240, 0.6);
 }
+
+/* ── LiDAR payload budget ───────────────────────────────────────────────────
+   Cyan, not amber: this is a reading, and the amber is reserved for the two
+   places that mean "sunlit" -- the horizon rule and the primary action. */
+.payload-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.payload-note,
+.payload-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0.72;
+}
+
+.payload-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.payload-inputs label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.payload-inputs input {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 7px 9px;
+  background: rgba(5, 7, 13, 0.6);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.payload-inputs input:focus-visible {
+  outline: 2px solid var(--umbra);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.payload-unit {
+  grid-column: 2;
+  grid-row: 1;
+  color: var(--umbra);
+  font-family: var(--font-data);
+  opacity: 0.8;
+}
+
+.payload-readout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.payload-readout > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.payload-readout strong {
+  color: var(--umbra);
+  font-family: var(--font-data);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* ── Tailwind ───────────────────────────────────────────────────────────────
+   Last on purpose. Utilities and the rules above land at the same specificity
+   (one class), so source order decides -- putting them here means a utility
+   added to an element that already carries a legacy class wins, which is what
+   makes the reskin incremental. `base` emits almost nothing: preflight is off
+   in tailwind.config.js so the reset cannot flatten the rules above. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

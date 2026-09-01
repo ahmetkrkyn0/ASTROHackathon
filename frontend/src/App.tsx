@@ -7,6 +7,7 @@ import MapCanvas, {
   type MapCanvasHandle,
   type MapViewMode,
 } from './MapCanvas'
+import SpaceBackdrop from './SpaceBackdrop'
 import TerrainCanvas3D from './TerrainCanvas3D'
 import {
   checkHealth,
@@ -66,7 +67,13 @@ const WEIGHT_CONTROLS: Array<{
 
 type RiskLevel = (typeof RISK_LEVELS)[number]
 type BootstrapState = 'loading' | 'ready' | 'error'
-type AppPhase = 'landing' | 'loading' | 'app'
+/**
+ * landing   the pitch, over a dimmed clip
+ * cinematic the transition beat: the clip takes the screen while the grids
+ *           load behind it, and waits for the operator to step in
+ * app       the console
+ */
+type AppPhase = 'landing' | 'cinematic' | 'app'
 
 interface FocusTelemetry {
   row: number
@@ -112,6 +119,11 @@ export default function App() {
   const [loadingProgress, setLoadingProgress] = useState(0)
   const [loadingMessage, setLoadingMessage] = useState('Initializing navigation systems...')
   const [loadingFloorReached, setLoadingFloorReached] = useState(false)
+  const [cinematicReady, setCinematicReady] = useState(false)
+  // Latches on the first route-point selection and never unlatches: once the
+  // operator is placing points on the map, a moving backdrop behind a
+  // precision click target is a distraction, not atmosphere.
+  const [planningEngaged, setPlanningEngaged] = useState(false)
 
   const [elevationLayer, setElevationLayer] = useState<LayerResponse | null>(null)
   const [slopeLayer, setSlopeLayer] = useState<LayerResponse | null>(null)
@@ -132,9 +144,12 @@ export default function App() {
   // simulated shadow cube -- the photograph carries its own 2010 shadows.
   const [photoDrape, setPhotoDrape] = useState(false)
 
-  // Which renderer fills the map shell. viewMode is orthogonal: it picks the
-  // layer, and both renderers colour it with the same ramps.
-  const [dimension, setDimension] = useState<'2d' | '3d'>('2d')
+  // Payload spec the operator dials in. No rover in the catalog carries a
+  // sensor -- backend/app/sensor_payload.py exists to plan FOR one, and
+  // sensor_payload_w / sensor_heater_w come back null for all four. So these
+  // are an input, not a reading, and the card says so.
+  const [payloadW, setPayloadW] = useState(35)
+  const [heaterW, setHeaterW] = useState(10)
 
   const [clickMode, setClickMode] = useState<ClickMode>('idle')
   const [start, setStart] = useState<[number, number] | null>(null)
@@ -242,11 +257,11 @@ export default function App() {
   }, [])
 
   const handleEnterMission = useCallback(() => {
-    setPhase('loading')
+    setPhase('cinematic')
   }, [])
 
   useEffect(() => {
-    if (phase !== 'loading') {
+    if (phase !== 'cinematic') {
       return
     }
 
@@ -271,20 +286,25 @@ export default function App() {
     }
   }, [phase])
 
+  // The grids are in. This used to drop straight into the console; now it
+  // opens the way and lets the operator take it, so the clip gets a beat to
+  // play and entering the deck is a decision rather than a timeout.
   useEffect(() => {
-    if (phase !== 'loading' || !loadingFloorReached || bootstrapState === 'loading') {
+    if (phase !== 'cinematic' || !loadingFloorReached || bootstrapState === 'loading') {
       return
     }
 
     setLoadingProgress(100)
     setLoadingMessage(layerError ? 'Mission control online with warnings' : 'Mission ready')
-
-    const timer = window.setTimeout(() => {
-      setPhase('app')
-    }, 420)
-
-    return () => window.clearTimeout(timer)
+    setCinematicReady(true)
   }, [bootstrapState, layerError, loadingFloorReached, phase])
+
+  // Arming start or goal is the moment planning actually begins.
+  useEffect(() => {
+    if (clickMode !== 'idle') {
+      setPlanningEngaged(true)
+    }
+  }, [clickMode])
 
   useEffect(() => {
     if (bootstrapState === 'loading') {
@@ -495,6 +515,21 @@ export default function App() {
       ? (summary.total_distance_km * 1000) / (summary.total_elapsed_hours * 3600)
       : 0
 
+  // Same arithmetic as backend/app/sensor_payload.py: a continuous draw over
+  // the traverse, charged against the pack the selected rover actually has.
+  // Post-hoc on purpose -- it prices a payload against this route, it does
+  // not re-plan around one.
+  const payloadDrawW = Math.max(0, payloadW) + Math.max(0, heaterW)
+  const payloadOverheadWh = summary ? payloadDrawW * summary.total_elapsed_hours : null
+  const payloadOverheadPct =
+    payloadOverheadWh !== null && selectedRover && selectedRover.e_cap_wh > 0
+      ? (100 * payloadOverheadWh) / selectedRover.e_cap_wh
+      : null
+  const payloadAdjustedBatteryPct =
+    payloadOverheadPct !== null && summary
+      ? Math.max(0, summary.final_battery_pct - payloadOverheadPct)
+      : null
+
   const batteryPct = clamp(playbackWaypoint?.battery_pct ?? summary?.final_battery_pct ?? 100, 0, 100)
   const batteryStrokeOffset = BATTERY_CIRCUMFERENCE * (1 - batteryPct / 100)
   const batteryLabel = playbackWaypoint ? 'Live Playback' : summary ? 'Remaining' : 'Starting Reserve'
@@ -541,10 +576,18 @@ export default function App() {
 
   return (
     <>
+      {/* Mounted for every phase and never remounted: the clip has to survive
+          landing -> cinematic -> deck without restarting, since the whole
+          point of the sequence is that it is one continuous shot. */}
+      <SpaceBackdrop
+        stage={phase === 'landing' ? 'ambient' : phase === 'cinematic' ? 'feature' : 'deck'}
+        frozen={planningEngaged}
+      />
+
       {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
 
-      <div className={`loading-screen ${phase === 'loading' ? 'is-active' : ''}`}>
-        <div className="loading-frame">
+      <div className={`cinematic-screen ${phase === 'cinematic' ? 'is-active' : ''}`}>
+        <div className="cinematic-frame">
           <span className="loading-brand">LUNAPATH</span>
           <div className="loading-bar-track">
             <div className="loading-bar-fill" style={{ width: `${loadingProgress}%` }} />
@@ -553,6 +596,14 @@ export default function App() {
             <span className="loading-copy">{loadingMessage}</span>
             <span className="loading-percent">{Math.round(loadingProgress)}%</span>
           </div>
+          <button
+            type="button"
+            className="cinematic-cta"
+            onClick={() => setPhase('app')}
+            disabled={!cinematicReady}
+          >
+            {cinematicReady ? 'Plan a route' : 'Loading terrain...'}
+          </button>
         </div>
       </div>
 
@@ -917,6 +968,74 @@ export default function App() {
                   <span>{batteryLabel}</span>
                 </div>
               </div>
+            </section>
+
+            <section className="payload-card">
+              <div className="card-head">
+                <span className="eyebrow tight">LiDAR Payload</span>
+                <span className="card-meta">{payloadDrawW.toFixed(0)} W draw</span>
+              </div>
+              <p className="payload-note">
+                No rover in the catalog carries a sensor. Set a spec here to price one
+                against this route.
+              </p>
+              <div className="payload-inputs">
+                <label>
+                  <span>Payload</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={500}
+                    step={5}
+                    value={payloadW}
+                    onChange={(event) => setPayloadW(Number(event.target.value) || 0)}
+                  />
+                  <span className="payload-unit">W</span>
+                </label>
+                <label>
+                  <span>Heater</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={500}
+                    step={5}
+                    value={heaterW}
+                    onChange={(event) => setHeaterW(Number(event.target.value) || 0)}
+                  />
+                  <span className="payload-unit">W</span>
+                </label>
+              </div>
+              {payloadOverheadWh === null ? (
+                <p className="payload-empty">Plan a route to see what it costs.</p>
+              ) : (
+                <div className="payload-readout">
+                  <div>
+                    <span className="eyebrow tight">Over traverse</span>
+                    <strong>{payloadOverheadWh.toFixed(0)} Wh</strong>
+                  </div>
+                  <div>
+                    <span className="eyebrow tight">Battery cost</span>
+                    <strong>
+                      {payloadOverheadPct !== null ? `${payloadOverheadPct.toFixed(1)}%` : '--'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="eyebrow tight">Arrives with</span>
+                    <strong
+                      style={{
+                        color:
+                          payloadAdjustedBatteryPct !== null
+                            ? batteryToHex(payloadAdjustedBatteryPct)
+                            : undefined,
+                      }}
+                    >
+                      {payloadAdjustedBatteryPct !== null
+                        ? `${payloadAdjustedBatteryPct.toFixed(1)}%`
+                        : '--'}
+                    </strong>
+                  </div>
+                </div>
+              )}
             </section>
 
             <section className="risk-card">

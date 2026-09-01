@@ -25,6 +25,9 @@ data/processed/
 *.h5
 *.npy
 
+# Arka plan videosu (GitHub 100 MB üstünü reddeder; kaynak 4K klip 270 MB)
+*.mp4
+
 # Claude Code (kişisel ayarlar)
 .claude/settings.local.json
 

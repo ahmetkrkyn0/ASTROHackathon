@@ -66,6 +66,14 @@ export interface LayerResponse {
   layer: string
   shape: [number, number]
   data: (number | null)[][]
+  /** Per-layer header block from the binary path. Absent on older callers. */
+  metadata?: {
+    resolution_m: number
+    validity: string | null
+    min: number
+    max: number
+    nodata: number
+  }
 }
 
 export interface PlanWeights {
