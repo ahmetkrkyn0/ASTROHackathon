@@ -216,18 +216,51 @@ görsel fark yok.
 
 **Uç:** `GET /api/layers/{ad}` yanıt başlıkları + `cell-telemetry.layer_validity`
 
-**Okunan alanlar:** `X-Layer-Validity` (`MEASURED` / `MODELED` / `SYNTHETIC`),
-`X-Layer-Min`, `X-Layer-Max`, `X-Layer-Nodata`, `X-Layer-Resolution-M`
+**Validity sözlüğü — dört değer, sıralı** (`traversability.py:109`):
+
+```
+SYNTHETIC  <  DERIVED  <  MODEL  <  MEASURED
+en zayıf                            en güçlü
+```
+
+**Etiketler yükleme yoluna göre DEĞİŞİR** — bu yüzden asla sabit yazılmaz:
+
+| Katman | `/api/load-preprocessed` yolu (frontend'in kullandığı) | `/api/load-dem` yolu |
+|---|---|---|
+| `elevation` | `MEASURED` | `MEASURED` |
+| `slope`, `aspect` | `DERIVED` | `DERIVED` |
+| `shadow_ratio`, `thermal`, `thermal_min` | `DERIVED` | **`SYNTHETIC`** |
+| `traversable`, `cost` | girdilerinin en zayıfı | girdilerinin en zayıfı |
+
+Soldaki sütun `lunapath/data/processed/metadata.json`'dan geliyor (ufuk + SPICE
+hattının ürettiği gerçek gölge). Sağdaki `data_loader.py:366-373` — ham DEM'den
+sentetik üretim yolu, heat1d/ufuk/SPICE makinesine hiç dokunmaz.
+
+**Kural:** frontend hiçbir katmanın validity'sini sabit yazmaz. Her zaman
+`/api/terrain`'in `layers.<ad>.validity` alanından okur; `null` gelirse
+"bilinmiyor" gösterir.
+
+**Veri kaynağı: `GET /api/terrain`** — başlık okumak yerine manifest. Tek çağrı,
+katman başına `units`, `description`, `validity`, `min`, `max`, `nodata`,
+`binary_url` veriyor (`terrain.py:258-271`). `App.tsx`'in zaten yaptığı katman
+fetch'leri hiç değişmez.
+
+> `validity`, `min` ve `max` alanları **`null` gelebilir**: `validity` metadata'da
+> yoksa `null`, `min`/`max` katmanda sonlu değer yoksa `null` (`terrain.py:262-266`).
+> Aynı şekilde ikili yoldaki `X-Layer-Min` / `-Max` / `-Validity` başlıkları da
+> koşulludur (`terrain.py:227-229`). Modül bu yokluğu ele almak zorundadır.
 
 **Panel:** Sol ray — katman seçicinin yanında rozet; açılınca kart: bu katman
-ölçüm mü model mi, değer aralığı, kaç hücre veri yok, hangi çözünürlükte.
+ölçüm mü türetme mi model mi sentetik mi, değer aralığı, kaç hücre veri yok,
+hangi çözünürlükte.
 
 **Overlay:** yok.
 
 **Kabul:** Sekiz katmanın her biri (`elevation`, `slope`, `aspect`, `thermal`,
-`thermal_min`, `shadow_ratio`, `cost`, `traversable`) etiketini taşıyor;
-`SYNTHETIC` olan görsel olarak ayrışıyor; başlık okunamazsa "bilinmiyor" yazıyor,
-`MEASURED` varsayılmıyor.
+`thermal_min`, `shadow_ratio`, `cost`, `traversable`) etiketini taşıyor; dört
+validity değeri görsel olarak ayrışıyor (`SYNTHETIC` en dikkat çekici);
+**başlık eksikse "bilinmiyor" yazıyor, `MEASURED` varsayılmıyor**;
+`X-Layer-Min`/`-Max` yokken aralık alanı boş kalıyor, 0–0 gösterilmiyor.
 
 ---
 
@@ -409,7 +442,9 @@ Bunlar kaynaktan doğrulandı; her modül bunlara uymak zorunda.
 | T6 | `illumination-series` f32 küpü: slice-major sonra row-major, NaN = veri yok | Sıra varsayılmaz, manifestteki `binary_format.order` okunur |
 | T7 | Ufuk önbelleği yoksa `shadow_model.model === "static"` | Animasyon zamanla değişiyormuş gibi gösterilmez |
 | T8 | `f32` katman yolunda hücre tavanı yok; JSON yolunda 65 536 hücre tavanı var | Katmanlar `format=f32` ile çekilir (mevcut `fetchLayer` zaten böyle) |
-| T9 | Koridorlar yalnızca bellekte ve sınırlı sayıda tutulur; bilinmeyen `corridor_id` → 404 | 404 "koridor süresi doldu, yeniden planla" olarak gösterilir |
+| T9 | Koridorlar yalnızca bellekte ve **en fazla 32** tanesi tutulur (`main.py:106`); bilinmeyen `corridor_id` → 404 | 404 "koridor süresi doldu, yeniden planla" olarak gösterilir |
+| T11 | Validity dört değerli ve sıralı: `SYNTHETIC < DERIVED < MODEL < MEASURED`. `MODELED` diye bir değer **yok** | Sözlük sabit yazılmaz, gelen değer bilinmiyorsa en kötü durum varsayılır (backend'in `weakest_validity` davranışıyla aynı) |
+| T12 | `X-Layer-Min`, `X-Layer-Max`, `X-Layer-Validity` başlıkları **koşullu** — eksik gelebilir (`terrain.py:227-229`) | Eksik başlık "bilinmiyor" olarak gösterilir; 0 veya `MEASURED` varsayılmaz |
 | T10 | `backend/data/scenarios/` boş → `/api/scenarios` boş liste döner | Senaryo seçici boş listeyi hata değil "senaryo yok" olarak gösterir |
 
 ---

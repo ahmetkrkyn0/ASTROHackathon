@@ -210,6 +210,14 @@ Backend'e bağlanırken kaynaktan doğruladığımız şeyler:
   döner ve animasyon anlamsızdır. Bir kez:
   `python scripts/build_horizon_cache.py`
 - **`backend/data/scenarios/` şu an boş**, yani `/api/scenarios` boş liste döner.
+- **Validity dört değerli ve sıralı:** `SYNTHETIC < DERIVED < MODEL < MEASURED`
+  (`traversability.py:109`). `MODELED` diye bir değer yok. `traversable` ve
+  `cost` türetilmiş katmanlar — etiketleri girdilerinin en zayıfı, sabit değil.
+- **`X-Layer-Min`, `X-Layer-Max`, `X-Layer-Validity` başlıkları koşullu**
+  (`terrain.py:227-229`) — eksik gelebilirler. Eksikse "bilinmiyor" gösterin,
+  0 veya `MEASURED` varsaymayın.
+- **Koridorlar bellekte, en fazla 32 tanesi tutuluyor** (`main.py:106`).
+  Bilinmeyen `corridor_id` 404 döner.
 
 Daha uzun liste tasarım belgesinin "Tuzaklar" bölümünde.
 
