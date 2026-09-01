@@ -7,9 +7,13 @@ Run once:  python lunapath/src/fetch_kernels.py
 
 from __future__ import annotations
 
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "backend"))
+from app.ephemeris import ascii_safe_path  # noqa: E402
 
 NAIF = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels"
 
@@ -54,8 +58,13 @@ def main() -> None:
             raise
 
     entries = "\n".join(f"    '$K/{name}'" for _, name in KERNELS)
+    # PATH_VALUES has to survive the trip into CSPICE, which reads it as a
+    # narrow byte string -- see app.ephemeris.ascii_safe_path. A checkout
+    # under a non-ASCII path would otherwise write a meta-kernel that SPICE
+    # can open but whose KERNELS_TO_LOAD entries it cannot resolve, which
+    # reports as SPICE(NOSUCHFILE) against files that are plainly there.
     meta = META_KERNEL_TEMPLATE.format(
-        kernel_dir=str(kernel_dir).replace("\\", "/"), entries=entries
+        kernel_dir=ascii_safe_path(kernel_dir).replace("\\", "/"), entries=entries
     )
     meta_path = kernel_dir / "lunapath.tm"
     meta_path.write_text(meta, encoding="utf-8")
