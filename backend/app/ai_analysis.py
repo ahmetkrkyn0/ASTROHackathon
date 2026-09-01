@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import math
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Mapping, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -181,3 +181,191 @@ def percent_of_ratio(ratio: Metric, *, key: str, label: str) -> Metric:
             note=f"{ratio.key} oranından türetildi",
         ),
     )
+
+
+# ── envelope builders (K1) ───────────────────────────────────────────────────
+
+# Label and unit for each field a sanitizer may emit. A field absent from
+# here is never registered, which is what keeps the verbalizer's vocabulary
+# narrow: registering every raw number would defeat the point of a registry.
+_PLAN_QUANTITIES: tuple[tuple[str, str, str], ...] = (
+    ("distance", "Toplam mesafe", "km"),
+    ("energy", "Toplam enerji tüketimi", "Wh"),
+    ("max_continuous_shadow", "En uzun kesintisiz gölge", "h"),
+    ("min_battery", "Minimum batarya", "%"),
+    ("final_battery", "Varıştaki batarya", "%"),
+    ("elapsed", "Geçen süre", "h"),
+    ("max_slope", "En dik eğim", "deg"),
+)
+
+_PLAN_COUNTS: tuple[tuple[str, str], ...] = (
+    ("waypoint_count", "Rota düğüm sayısı"),
+    ("total_recharges", "Şarj sayısı"),
+    ("critical_steps_count", "Kritik adım sayısı"),
+    ("high_or_above_steps_count", "Yüksek riskli adım sayısı"),
+)
+
+_CELL_QUANTITIES: tuple[tuple[str, str, str], ...] = (
+    ("altitude", "Yükseklik", "m"),
+    ("thermal", "Yüzey sıcaklığı (tepe)", "degC"),
+    ("thermal_min", "Yüzey sıcaklığı (soğuk uç)", "degC"),
+    ("resolution", "Çözünürlük", "m"),
+    ("span", "Bölge genişliği", "km"),
+)
+
+_SIMULATION_QUANTITIES: tuple[tuple[str, str, str], ...] = (
+    ("total_distance_km", "mesafe", "km"),
+    ("total_energy_consumed_wh", "enerji", "Wh"),
+    ("max_continuous_shadow_h", "en uzun kesintisiz gölge", "h"),
+    ("min_battery_pct", "minimum batarya", "%"),
+    ("total_elapsed_hours", "geçen süre", "h"),
+)
+
+
+def _quantity_metric(
+    payload: Mapping[str, Any],
+    field: str,
+    key: str,
+    label: str,
+    unit: str,
+    provenance: "Provenance",
+) -> Optional[Metric]:
+    entry = payload.get(field)
+    if not isinstance(entry, Mapping):
+        return None
+    value = entry.get("value")
+    if value is None:
+        return None
+    try:
+        return make_metric(
+            key=key, label=label, value=float(value), unit=unit, provenance=provenance
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def plan_registry(
+    plan: Mapping[str, Any], provenance: "Provenance"
+) -> list[Metric]:
+    """Register the plan facts a summary may state."""
+    metrics: list[Metric] = []
+    for field, label, unit in _PLAN_QUANTITIES:
+        metric = _quantity_metric(plan, field, field, label, unit, provenance)
+        if metric is not None:
+            metrics.append(metric)
+    for field, label in _PLAN_COUNTS:
+        value = plan.get(field)
+        if isinstance(value, int) and not isinstance(value, bool):
+            metrics.append(
+                make_metric(
+                    key=field,
+                    label=label,
+                    value=value,
+                    unit=DIMENSIONLESS,
+                    provenance=provenance,
+                    precision=0,
+                )
+            )
+    return metrics
+
+
+def cell_registry(
+    cell: Mapping[str, Any], provenance: "Provenance"
+) -> list[Metric]:
+    """Register one cell's telemetry, and its decomposition when it is valid."""
+    metrics: list[Metric] = []
+    for field, label, unit in _CELL_QUANTITIES:
+        metric = _quantity_metric(cell, field, field, label, unit, provenance)
+        if metric is not None:
+            metrics.append(metric)
+    for field, label in (("row", "Satır"), ("col", "Sütun")):
+        value = cell.get(field)
+        if isinstance(value, int) and not isinstance(value, bool):
+            metrics.append(
+                make_metric(
+                    key=field, label=label, value=value, unit=DIMENSIONLESS,
+                    provenance=provenance, precision=0,
+                )
+            )
+    breakdown = cell.get("cost_breakdown")
+    if isinstance(breakdown, Mapping):
+        for component, value in breakdown.items():
+            if value is None:
+                continue
+            try:
+                metrics.append(
+                    make_metric(
+                        key=f"cost_{component}",
+                        label=f"Maliyet bileşeni: {component}",
+                        value=float(value),
+                        unit=DIMENSIONLESS,
+                        provenance=provenance,
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+    return metrics
+
+
+def compare_registry(
+    compare: Mapping[str, Any], provenance: "Provenance"
+) -> list[Metric]:
+    """Register the per-profile figures a comparison may state."""
+    profiles = compare.get("profiles") or []
+    metrics: list[Metric] = [
+        make_metric(
+            key="profile_count",
+            label="Karşılaştırılan profil sayısı",
+            value=len(profiles),
+            unit=DIMENSIONLESS,
+            provenance=provenance,
+            precision=0,
+        )
+    ]
+    for profile in profiles:
+        profile_id = profile.get("profile_id") or "?"
+        name = profile.get("profile_name") or profile_id
+        simulation = profile.get("simulation_summary") or {}
+        for field, label, unit in _SIMULATION_QUANTITIES:
+            value = simulation.get(field)
+            if value is None:
+                continue
+            try:
+                metrics.append(
+                    make_metric(
+                        key=f"{profile_id}.{field}",
+                        label=f"{name} — {label}",
+                        value=float(value),
+                        unit=unit,
+                        provenance=provenance,
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+    return metrics
+
+
+def constraint_warnings(compare: Mapping[str, Any]) -> list[EnvelopeWarning]:
+    """Warn only where a deterministic backend field says a limit was missed.
+
+    There is no AI-defined "near constraint" threshold: a proximity number we
+    invented would be an interpretation dressed as a measurement. Only an
+    explicit ``satisfied is False`` produces a warning.
+    """
+    warnings: list[EnvelopeWarning] = []
+    for profile in compare.get("profiles") or []:
+        name = profile.get("profile_name") or profile.get("profile_id") or "?"
+        for key, verdict in (profile.get("constraint_check") or {}).items():
+            if not isinstance(verdict, Mapping):
+                continue
+            if verdict.get("satisfied") is False:
+                warnings.append(
+                    EnvelopeWarning(
+                        code="CONSTRAINT_VIOLATED",
+                        severity="critical",
+                        message=(
+                            f"{name} profilinde {key} kısıtı sağlanmıyor."
+                        ),
+                    )
+                )
+    return warnings

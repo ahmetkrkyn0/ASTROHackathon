@@ -12,9 +12,16 @@ See docs/ai/LunaPath_AI_Chatbot_Scope_v0.3.md sections 5 and 7.
 from __future__ import annotations
 
 import math
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 # A conversation the user can plausibly have in one sitting. Beyond this the
 # window is being used as storage, which this stateless slice does not offer.
@@ -94,9 +101,122 @@ class AiMissionSnapshot(BaseModel):
         return list(v)
 
 
+# ── explanation level (AI-02 section 7) ──────────────────────────────────────
+
+# L2 is the visual default, but the operator must choose once per session
+# before the first normal turn: AI-02 forbids inferring the level from
+# behaviour, so the choice has to be made rather than guessed.
+ExplanationLevel = Literal["L1", "L2", "L3"]
+DEFAULT_EXPLANATION_LEVEL: ExplanationLevel = "L2"
+
+
+# ── K2 router output (AI-02 section 6) ───────────────────────────────────────
+
+# Only capabilities the audited backend actually has. C-CONTRAST and
+# C-RECOURSE are described by the generic contract but are not available
+# here, so the router cannot even name them.
+RoutableCapability = Literal["C-SUMMARY", "C-POINT", "C-COMPARE"]
+
+# Closed vocabulary. A free-text rationale would be somewhere the router
+# could hide prose or a number, which is exactly what K2 must not produce.
+RationaleKey = Literal[
+    "cell_question",
+    "profile_tradeoff",
+    "plan_summary",
+    "constraint_margin",
+    "provenance_question",
+    "already_in_context",
+    "ambiguous_target",
+    "out_of_scope",
+    "mutating_request",
+]
+
+MissingContext = Literal["start", "goal", "cell", "rover", "plan"]
+RefusalCode = Literal["OUT_OF_SCOPE", "MUTATING_REQUEST", "UNSUPPORTED_CAPABILITY"]
+
+
+class RouterInvoke(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["invoke"]
+    capability: RoutableCapability
+    params: dict[str, Any] = Field(default_factory=dict)
+    rationale_key: RationaleKey
+
+
+class RouterClarify(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["clarify"]
+    missing: list[MissingContext] = Field(min_length=1, max_length=4)
+
+
+class RouterRefuse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["refuse"]
+    code: RefusalCode
+
+
+class RouterAnswerFromContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["answer_from_context"]
+
+
+RouterOutput = Annotated[
+    Union[RouterInvoke, RouterClarify, RouterRefuse, RouterAnswerFromContext],
+    Field(discriminator="action"),
+]
+
+ROUTER_ADAPTER: TypeAdapter = TypeAdapter(RouterOutput)
+
+
+def parse_router_output(payload: Any):
+    """Validate a router reply. Raises on anything the contract forbids."""
+    return ROUTER_ADAPTER.validate_python(payload)
+
+
+def router_json_schema() -> dict[str, Any]:
+    """Schema handed to the provider, generated from the validator itself.
+
+    Generated rather than hand-written so the two can never drift.
+    """
+    return ROUTER_ADAPTER.json_schema()
+
+
+class RouterFailure(BaseModel):
+    """The router could not produce a valid decision within its attempts."""
+
+    code: Literal["E-SCHEMA"] = "E-SCHEMA"
+    detail: Optional[str] = None
+
+    @property
+    def action(self) -> str:
+        return "failure"
+
+
+# ── wire types for warnings and grounding ────────────────────────────────────
+
+class WarningItem(BaseModel):
+    """Mandatory and never hidden.
+
+    Distinct from LimitationItem by meaning, not by severity: a warning says
+    the evidence's validity, grounding or constraints are materially affected,
+    and N-14 forbids any explanation level from dropping one. A limitation
+    says what the feature cannot establish. Nothing appears in both.
+    """
+
+    code: str
+    severity: Literal["info", "caution", "critical"]
+    message: str
+    suppressible: Literal[False] = False
+
+
+GroundingStatus = Literal["verified", "blocked", "not_applicable"]
+
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=MAX_MESSAGES)
     mission: AiMissionSnapshot
+    # Additive: an older client that omits it still gets the default level.
+    explanationLevel: ExplanationLevel = DEFAULT_EXPLANATION_LEVEL
 
     @model_validator(mode="after")
     def _ends_with_a_question(self) -> "ChatRequest":
@@ -135,5 +255,12 @@ class ToolUsage(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     evidence: list[EvidenceItem] = Field(default_factory=list)
+    # Informational scope notes. Never carries a mandatory warning; the two
+    # channels are disjoint by meaning and an item is never in both.
     limitations: list[LimitationItem] = Field(default_factory=list)
+    # Mandatory, rendered independently of the prose, identical at every level.
+    warnings: list[WarningItem] = Field(default_factory=list)
     toolUsage: ToolUsage = Field(default_factory=ToolUsage)
+    errorCode: Optional[str] = None
+    groundingStatus: GroundingStatus = "not_applicable"
+    explanationLevel: ExplanationLevel = DEFAULT_EXPLANATION_LEVEL

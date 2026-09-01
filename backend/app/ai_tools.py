@@ -22,11 +22,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Optional
 
 import numpy as np
 
-from .ai_contract import AiMissionSnapshot
+from .ai_contract import AiMissionSnapshot, CellRef
 from .ai_evidence import sanitize_cell_telemetry, sanitize_compare
 from .constants import UnknownRoverError, get_rover
 from .costmap import PlanContext, default_cost_map
@@ -276,3 +276,156 @@ def tool_specifications() -> list[dict[str, Any]]:
             },
         },
     ]
+
+
+# ── AnalysisProvider (AI-02 section 5.2) ─────────────────────────────────────
+
+# Semantic descriptors. K2 and K3 see these; they never see an endpoint name,
+# a function name, or a backend field path -- that binding lives in _DISPATCH
+# below and goes no further up the stack.
+CAPABILITIES: dict[str, dict[str, Any]] = {
+    "C-SUMMARY": {
+        "code": "C-SUMMARY",
+        "label_tr": "Mevcut planın özeti",
+        "available": True,
+        "writes": False,
+        "cost_class": "free",
+        "notes": "Kullanıcının hâlihazırda ürettiği plandan okunur; yeniden hesap yok.",
+    },
+    "C-POINT": {
+        "code": "C-POINT",
+        "label_tr": "Tek hücre telemetrisi",
+        "available": True,
+        "writes": False,
+        "cost_class": "read",
+        "notes": "Konum, yükseklik, sıcaklık aralığı ve -- ağırlıklar uyuşuyorsa -- maliyet ayrışımı.",
+    },
+    "C-COMPARE": {
+        "code": "C-COMPARE",
+        "label_tr": "Dört görev profilinin karşılaştırması",
+        "available": True,
+        "writes": False,
+        "cost_class": "expensive",
+        "notes": "Yan etkisiz. Yaklaşık 20 saniye sürer ve soru başına en fazla bir kez kullanılabilir.",
+    },
+    # Described by the generic contract, absent from the audited backend.
+    # Present here so the router can be told they exist and are closed,
+    # rather than discovering an unexplained failure.
+    "C-DECOMPOSE": {
+        "code": "C-DECOMPOSE",
+        "label_tr": "Rota geneli maliyet ayrışması",
+        "available": False,
+        "writes": False,
+        "cost_class": "read",
+        "notes": "Yalnızca hücre bazında mevcut; rota geneli toplam biriktirilmiyor.",
+    },
+    "C-BINDING": {
+        "code": "C-BINDING",
+        "label_tr": "Bağlayıcı kısıt",
+        "available": False,
+        "writes": False,
+        "cost_class": "expensive",
+        "notes": "Kısmi: kısıt marjları C-COMPARE yanıtı içinde taşınır.",
+    },
+    "C-INFEASIBLE": {
+        "code": "C-INFEASIBLE",
+        "label_tr": "Fizibilitesizlik açıklaması",
+        "available": False,
+        "writes": False,
+        "cost_class": "expensive",
+        "notes": "Kısmi: reddedilen kenar sayaçları C-COMPARE yanıtı içinde taşınır.",
+    },
+    "C-SENSITIVITY": {
+        "code": "C-SENSITIVITY",
+        "label_tr": "Duyarlılık",
+        "available": False,
+        "writes": False,
+        "cost_class": "expensive",
+        "notes": "Yalnızca dört sabit profil üzerinden ayrık; serbest ağırlık perturbasyonu yok.",
+    },
+    "C-CONTRAST": {
+        "code": "C-CONTRAST",
+        "label_tr": "Karşıtsal açıklama",
+        "available": False,
+        "writes": False,
+        "cost_class": "expensive",
+        "notes": "Kullanıcı yolunu puanlayan bir uç yok.",
+    },
+    "C-RECOURSE": {
+        "code": "C-RECOURSE",
+        "label_tr": "Hedef odaklı öneri",
+        "available": False,
+        "writes": False,
+        "cost_class": "expensive",
+        "notes": "Ağırlık uzayında arama gerektirir; faz dışı.",
+    },
+}
+
+# The ONLY place a capability code meets an implementation name.
+_DISPATCH: dict[str, str] = {
+    "C-POINT": "inspect_cell",
+    "C-COMPARE": "compare_mission_profiles",
+}
+
+# Params each capability accepts, for K3's schema check.
+PARAM_MODELS: dict[str, Optional[type]] = {
+    "C-SUMMARY": None,
+    "C-POINT": CellRef,
+    "C-COMPARE": None,
+}
+
+
+@dataclass
+class AnalysisProvider:
+    """The AI layer's whole view of the backend.
+
+    An adapter, not a rewrite: ``invoke`` is a dict lookup followed by the
+    existing ``ToolRegistry.call``. The two deterministic implementations are
+    untouched, and endpoint names stop at this boundary.
+    """
+
+    grids: dict
+    snapshot: AiMissionSnapshot
+    budget: ToolBudget = field(default_factory=ToolBudget)
+
+    def __post_init__(self) -> None:
+        self._registry = ToolRegistry(
+            grids=self.grids, snapshot=self.snapshot, budget=self.budget
+        )
+
+    def get_capabilities(self) -> list[dict[str, Any]]:
+        return [dict(spec) for spec in CAPABILITIES.values()]
+
+    def get_context(self) -> dict[str, Any]:
+        """What K2 needs to route -- and deliberately no metric values.
+
+        A number here is a number the router could echo into its decision,
+        so the context carries shape and presence only.
+        """
+        metadata = self.grids.get("metadata") or {}
+        shape = metadata.get("shape") or []
+        return {
+            "grid": {
+                "rows": int(shape[0]) if len(shape) > 0 else None,
+                "cols": int(shape[1]) if len(shape) > 1 else None,
+                "resolution_m": metadata.get("resolution_m"),
+            },
+            "rover_id": self.snapshot.roverId,
+            "has_plan": self.snapshot.currentPlan is not None,
+            "has_endpoints": self.snapshot.start is not None
+            and self.snapshot.goal is not None,
+            "has_focused_cell": self.snapshot.focusedCell is not None,
+        }
+
+    def invoke(
+        self, capability: str, params: Mapping[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if capability == "C-SUMMARY":
+            # Already sanitized by ai_evidence before it reached the snapshot.
+            return {"plan": self.snapshot.currentPlan}
+        name = _DISPATCH.get(capability)
+        if name is None:
+            raise AiToolError(
+                "UNKNOWN_TOOL", f"{capability!r} is not an available capability."
+            )
+        return self._registry.call(name, params or {})

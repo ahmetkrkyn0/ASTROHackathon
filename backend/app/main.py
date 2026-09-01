@@ -1644,7 +1644,13 @@ def ai_chat(req: ChatRequest, request: Request):
             raise HTTPException(status_code=503, detail=exc.message) from exc
 
     try:
-        return run_chat(provider, grids, req.mission, req.messages)
+        return run_chat(
+            provider,
+            grids,
+            req.mission,
+            req.messages,
+            explanation_level=req.explanationLevel,
+        )
     except AiProviderError as exc:
         raise HTTPException(status_code=503, detail=exc.message) from exc
 

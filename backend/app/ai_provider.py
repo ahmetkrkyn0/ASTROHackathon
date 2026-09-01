@@ -61,9 +61,31 @@ class StubProvider:
 
     model = "stub"
 
-    def __init__(self, script: Optional[Sequence[ProviderReply]] = None) -> None:
+    def __init__(
+        self,
+        script: Optional[Sequence[ProviderReply]] = None,
+        structured_script: Optional[Sequence[str]] = None,
+    ) -> None:
         self._script = list(script or [])
+        self._structured_script = list(structured_script or [])
         self.calls: list[dict[str, Any]] = []
+        self.structured_calls: list[dict[str, Any]] = []
+
+    def respond_structured(
+        self,
+        *,
+        system: str,
+        messages: Sequence[Mapping[str, Any]],
+        schema_name: str,
+        json_schema: Mapping[str, Any],
+        max_output_tokens: int = 400,
+    ) -> str:
+        self.structured_calls.append(
+            {"system": system, "messages": list(messages), "schema": schema_name}
+        )
+        if self._structured_script:
+            return self._structured_script.pop(0)
+        return '{"action": "answer_from_context"}'
 
     def respond(
         self,
@@ -93,6 +115,9 @@ class OpenAiProvider:
         self._api_key = api_key
         self.model = model
         self._client: Any = None
+        # Cached after one probe so an unsupported parameter costs at
+        # most a single extra call per provider instance.
+        self._structured_supported: Optional[bool] = None
 
     def __repr__(self) -> str:  # pragma: no cover - trivial
         return f"OpenAiProvider(model={self.model!r})"
@@ -108,6 +133,70 @@ class OpenAiProvider:
                 ) from exc
             self._client = OpenAI(api_key=self._api_key)
         return self._client
+
+    def respond_structured(
+        self,
+        *,
+        system: str,
+        messages: Sequence[Mapping[str, Any]],
+        schema_name: str,
+        json_schema: Mapping[str, Any],
+        max_output_tokens: int = 400,
+    ) -> str:
+        """Ask for a JSON reply constrained by *json_schema*.
+
+        Returns the raw JSON text; parsing and validation belong to the
+        caller, which validates with Pydantic whether or not the provider
+        honoured the schema. Structured Outputs is an optimization here, not
+        the guarantee -- so a provider that rejects the parameter degrades to
+        an unconstrained call rather than failing the turn.
+
+        The parameter shape was read off the installed SDK
+        (openai==3.6.0): responses.create takes `text`, and its format config
+        is flat -- type/name/schema/strict together, not nested under a
+        `json_schema` key. There is no `response_format` on this API.
+        """
+        client = self._get_client()
+        kwargs: dict[str, Any] = dict(
+            model=self.model,
+            instructions=system,
+            input=list(messages),
+            reasoning={"effort": DEFAULT_REASONING_EFFORT},
+            max_output_tokens=max_output_tokens,
+        )
+        if self._structured_supported is not False:
+            kwargs["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": schema_name,
+                    "schema": dict(json_schema),
+                    "strict": False,
+                }
+            }
+
+        try:
+            response = client.responses.create(**kwargs)
+        except TypeError:
+            self._structured_supported = False
+            kwargs.pop("text", None)
+            response = client.responses.create(**kwargs)
+        except Exception as exc:
+            if _looks_unsupported(exc) and "text" in kwargs:
+                self._structured_supported = False
+                kwargs.pop("text", None)
+                try:
+                    response = client.responses.create(**kwargs)
+                except Exception as retry_exc:
+                    raise AiProviderError(
+                        "AI_UPSTREAM_ERROR",
+                        f"The language model call failed: {retry_exc}",
+                    ) from retry_exc
+            else:
+                raise AiProviderError(
+                    "AI_UPSTREAM_ERROR", f"The language model call failed: {exc}"
+                ) from exc
+
+        return (_parse_response(response).text or "").strip()
 
     def respond(
         self,
@@ -207,3 +296,12 @@ def resolve_provider(env: Optional[Mapping[str, str]] = None):
 
     model = (environment.get("LUNAPATH_OPENAI_MODEL") or "").strip() or DEFAULT_MODEL
     return OpenAiProvider(api_key=api_key, model=model)
+
+
+def _looks_unsupported(exc: Exception) -> bool:
+    """Whether an upstream error reads as "that parameter is not allowed"."""
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in ("unsupported", "unknown parameter", "unrecognized", "invalid_request")
+    )

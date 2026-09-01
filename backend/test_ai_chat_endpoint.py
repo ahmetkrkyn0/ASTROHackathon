@@ -91,53 +91,48 @@ def _teardown() -> None:
     app.state.ai_provider = None
 
 
-# ── the happy path ───────────────────────────────────────────────────────────
+def _routed(decision: dict, *drafts: str) -> StubProvider:
+    """A stub scripted for one routing decision and its verbalization."""
+    return StubProvider(
+        script=[ProviderReply(text=d, tool_calls=[]) for d in drafts],
+        structured_script=[json.dumps(decision)],
+    )
 
-def test_a_direct_answer_comes_back_typed():
-    _install(StubProvider(script=[ProviderReply(text="Rota 3.1 km.", tool_calls=[])]))
+
+def test_a_summary_answers_from_context_without_a_comparison():
+    _install(_routed({"action": "answer_from_context"},
+                     "Rota kaydı okundu; ek hesap yapılmadı."))
     try:
         response = client.post("/api/ai/chat", json=_payload())
         assert response.status_code == 200
         body = response.json()
-        assert body["answer"] == "Rota 3.1 km."
+        assert body["answer"] == "Rota kaydı okundu; ek hesap yapılmadı."
         assert body["toolUsage"]["comparisonUsed"] is False
-        assert body["toolUsage"]["readCalls"] == 0
+        assert body["groundingStatus"] == "verified"
     finally:
         _teardown()
 
 
-def test_a_tool_call_then_a_final_answer():
-    _install(
-        StubProvider(
-            script=[
-                ProviderReply(
-                    text=None,
-                    tool_calls=[("inspect_cell", {"row": 5, "col": 5}, "call_1")],
-                ),
-                ProviderReply(text="Hucre -50 C.", tool_calls=[]),
-            ]
-        )
-    )
+def test_a_cell_question_routes_to_the_point_capability():
+    _install(_routed(
+        {"action": "invoke", "capability": "C-POINT",
+         "params": {"row": 5, "col": 5}, "rationale_key": "cell_question"},
+        "Seçili hücre için telemetri okundu.",
+    ))
     try:
         body = client.post("/api/ai/chat", json=_payload()).json()
-        assert body["answer"] == "Hucre -50 C."
         assert body["toolUsage"]["readCalls"] == 1
+        assert body["evidence"][0]["source"] == "cell-telemetry"
     finally:
         _teardown()
 
 
 def test_a_comparison_is_reported_in_tool_usage():
-    _install(
-        StubProvider(
-            script=[
-                ProviderReply(
-                    text=None,
-                    tool_calls=[("compare_mission_profiles", {}, "call_1")],
-                ),
-                ProviderReply(text="Dort profil karsilastirildi.", tool_calls=[]),
-            ]
-        )
-    )
+    _install(_routed(
+        {"action": "invoke", "capability": "C-COMPARE",
+         "params": {}, "rationale_key": "profile_tradeoff"},
+        "Dört profil yan yana çözüldü.",
+    ))
     try:
         body = client.post("/api/ai/chat", json=_payload()).json()
         assert body["toolUsage"]["comparisonUsed"] is True
@@ -145,95 +140,182 @@ def test_a_comparison_is_reported_in_tool_usage():
         _teardown()
 
 
-def test_the_system_prompt_is_sent_and_is_not_client_controlled():
-    provider = StubProvider(script=[ProviderReply(text="ok", tool_calls=[])])
+def test_the_verbalizer_prompt_is_turkish_only_and_not_client_controlled():
+    provider = _routed({"action": "answer_from_context"}, "Tamam.")
     _install(provider)
     try:
         client.post("/api/ai/chat", json=_payload())
         system = provider.calls[0]["system"]
-        assert "LunaPath" in system
-        assert "total_shadow_exposure" in system
+        assert "Her zaman Türkçe yanıt ver" in system
+        # Correction 7: no raw backend field path reaches the model.
+        for leak in ("summary.total_energy_consumed_wh", "astar_metrics", "/api/"):
+            assert leak not in system, leak
     finally:
         _teardown()
 
 
-def test_only_the_two_approved_tools_are_offered_to_the_model():
-    provider = StubProvider(script=[ProviderReply(text="ok", tool_calls=[])])
+def test_the_router_is_offered_capabilities_not_endpoints():
+    provider = _routed({"action": "answer_from_context"}, "Tamam.")
     _install(provider)
     try:
         client.post("/api/ai/chat", json=_payload())
-        offered = {tool["name"] for tool in provider.calls[0]["tools"]}
-        assert offered == {"inspect_cell", "compare_mission_profiles"}
+        blob = json.dumps(provider.structured_calls[0], default=str)
+        assert "C-SUMMARY" in blob
+        for leak in ("inspect_cell", "compare_mission_profiles", "/api/"):
+            assert leak not in blob, leak
     finally:
         _teardown()
 
 
-def test_the_current_plan_evidence_reaches_the_model():
-    provider = StubProvider(script=[ProviderReply(text="ok", tool_calls=[])])
+def test_the_verbalizer_receives_registered_display_strings():
+    provider = _routed({"action": "answer_from_context"}, "Tamam.")
     _install(provider)
     try:
         client.post("/api/ai/chat", json=_payload())
         blob = json.dumps(provider.calls[0]["messages"], default=str)
-        assert "1490.23" in blob
+        # The canonical rendering, not the raw float.
+        assert "1490,23 Wh" in blob
+    finally:
+        _teardown()
+
+
+def test_an_ungrounded_draft_is_blocked_and_replaced_by_registered_values():
+    _install(_routed({"action": "answer_from_context"},
+                     "Rota yaklaşık 1,49 kWh harcıyor."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["errorCode"] == "E-GROUNDING"
+        assert body["groundingStatus"] == "blocked"
+        assert "1,49 kWh" not in body["answer"]
+        assert "1490,23 Wh" in body["answer"]
+        assert any(w["code"] == "E-GROUNDING" for w in body["warnings"])
+    finally:
+        _teardown()
+
+
+def test_a_forbidden_claim_is_blocked_even_with_no_numbers():
+    _install(_routed({"action": "answer_from_context"}, "Bu rota güvenlidir."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["errorCode"] == "E-GROUNDING"
+        assert "güvenlidir" not in body["answer"]
     finally:
         _teardown()
 
 
 # ── the model is not the authorization boundary ──────────────────────────────
 
-def test_a_forbidden_tool_request_is_refused_and_the_turn_continues():
-    provider = StubProvider(
-        script=[
-            ProviderReply(text=None, tool_calls=[("plan_route", {}, "call_1")]),
-            ProviderReply(text="Rota uretemem.", tool_calls=[]),
-        ]
-    )
-    _install(provider)
+def test_an_out_of_scope_question_is_refused_deterministically():
+    _install(_routed({"action": "refuse", "code": "OUT_OF_SCOPE"}))
     try:
         body = client.post("/api/ai/chat", json=_payload()).json()
-        assert body["answer"] == "Rota uretemem."
-        # The refusal was reported back to the model rather than executed.
-        blob = json.dumps(provider.calls[1]["messages"], default=str)
-        assert "UNKNOWN_TOOL" in blob
+        assert body["errorCode"] == "E-SCOPE"
+        assert "yalnızca" in body["answer"].lower()
     finally:
         _teardown()
 
 
-def test_a_second_comparison_in_one_question_is_refused():
-    provider = StubProvider(
-        script=[
-            ProviderReply(
-                text=None, tool_calls=[("compare_mission_profiles", {}, "c1")]
-            ),
-            ProviderReply(
-                text=None, tool_calls=[("compare_mission_profiles", {}, "c2")]
-            ),
-            ProviderReply(text="Tek karsilastirma yapildi.", tool_calls=[]),
-        ]
-    )
-    _install(provider)
+def test_a_request_to_change_the_route_is_refused():
+    _install(_routed({"action": "refuse", "code": "MUTATING_REQUEST"}))
     try:
-        body = client.post("/api/ai/chat", json=_payload()).json()
-        blob = json.dumps(provider.calls[2]["messages"], default=str)
-        assert "BUDGET_EXCEEDED" in blob
-        assert body["toolUsage"]["comparisonUsed"] is True
+        assert client.post("/api/ai/chat", json=_payload()).json()["errorCode"] == "E-SCOPE"
     finally:
         _teardown()
 
 
-def test_the_loop_terminates_when_the_model_keeps_asking_for_tools():
-    provider = StubProvider(
-        script=[
-            ProviderReply(text=None, tool_calls=[("inspect_cell", {"row": i, "col": 1}, f"c{i}")])
-            for i in range(10)
-        ]
-    )
+def test_an_unavailable_capability_answers_e_unsupported():
+    _install(_routed({"action": "refuse", "code": "UNSUPPORTED_CAPABILITY"}))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["errorCode"] == "E-UNSUPPORTED"
+    finally:
+        _teardown()
+
+
+def test_a_router_that_never_produces_valid_json_answers_e_schema():
+    _install(StubProvider(structured_script=["nope", "still nope"]))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["errorCode"] == "E-SCHEMA"
+    finally:
+        _teardown()
+
+
+def test_a_summary_without_a_plan_answers_e_context():
+    _install(_routed({"action": "answer_from_context"}, "Tamam."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload(currentPlan=None)).json()
+        assert body["errorCode"] == "E-CONTEXT"
+    finally:
+        _teardown()
+
+
+def test_a_clarify_decision_names_what_is_missing():
+    _install(_routed({"action": "clarify", "missing": ["cell"]}))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["errorCode"] == "E-CONTEXT"
+        assert "hücre" in body["answer"]
+    finally:
+        _teardown()
+
+
+# ── explanation levels ───────────────────────────────────────────────────────
+
+def test_the_default_explanation_level_is_l2():
+    _install(_routed({"action": "answer_from_context"}, "Tamam."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["explanationLevel"] == "L2"
+    finally:
+        _teardown()
+
+
+@pytest.mark.parametrize("level", ["L1", "L2", "L3"])
+def test_the_level_reaches_the_verbalizer_and_comes_back(level):
+    provider = _routed({"action": "answer_from_context"}, "Tamam.")
     _install(provider)
     try:
-        response = client.post("/api/ai/chat", json=_payload())
-        # Bounded, not hung, and honest that it produced no answer.
-        assert response.status_code == 200
-        assert response.json()["answer"]
+        payload = _payload()
+        payload["explanationLevel"] = level
+        body = client.post("/api/ai/chat", json=payload).json()
+        assert body["explanationLevel"] == level
+        assert level in json.dumps(provider.calls[0]["messages"], default=str)
+    finally:
+        _teardown()
+
+
+def test_the_level_changes_no_number_and_no_warning():
+    # N-13 and N-14: same envelope, same registry, same warnings at every level.
+    seen = []
+    for level in ("L1", "L2", "L3"):
+        provider = _routed({"action": "answer_from_context"}, "Tamam.")
+        _install(provider)
+        try:
+            payload = _payload()
+            payload["explanationLevel"] = level
+            body = client.post("/api/ai/chat", json=payload).json()
+            briefing = json.loads(
+                provider.calls[0]["messages"][0]["content"].split("\n", 1)[1]
+            )
+            seen.append(
+                (
+                    [m["display"] for m in briefing["metrics"]],
+                    briefing["warnings"],
+                    body["warnings"],
+                )
+            )
+        finally:
+            _teardown()
+    assert seen[0] == seen[1] == seen[2]
+
+
+def test_an_invalid_level_is_rejected():
+    _install(StubProvider())
+    try:
+        payload = _payload()
+        payload["explanationLevel"] = "L9"
+        assert client.post("/api/ai/chat", json=payload).status_code == 422
     finally:
         _teardown()
 
