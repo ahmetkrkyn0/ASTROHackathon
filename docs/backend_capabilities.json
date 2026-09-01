@@ -1,0 +1,283 @@
+{
+  "backend_version": "fea37ef5d90d998b9a24cc2de6631954028347d0",
+  "backend_version_short": "fea37ef",
+  "backend_self_reported_version": "0.3.0",
+  "generated_at": "2026-09-01T00:00:00Z",
+  "audit_notes": {
+    "scope": "HTTP surface only (backend/app). lunapath_ros imports the same domain layer directly and was NOT audited.",
+    "working_tree": "Dirty in frontend/ only; backend/ clean at this commit.",
+    "evidence_sources": [
+      "source read",
+      "backend/test_*.py assertions",
+      "read-only HTTP probes against a running localhost:8000"
+    ],
+    "not_probed": [
+      "POST /api/load-dem",
+      "POST /api/load-preprocessed",
+      "POST /api/scenarios/{scenario_id}/load",
+      "POST /api/pose"
+    ],
+    "response_fields_note": "Every response_fields entry below was observed in a live probe or read directly from the response-construction code cited in evidence.",
+    "non_deterministic_response_fields": [
+      "corridor.corridor_id",
+      "astar_metrics.computation_time_ms"
+    ],
+    "trap_fields": {
+      "astar_metrics.total_energy_wh": "Always null. Real energy is summary.total_energy_consumed_wh.",
+      "astar_metrics.total_shadow_hours": "Always null. Real shadow is summary.max_continuous_shadow_h."
+    },
+    "name_spaces": {
+      "cost_component": ["slope", "energy", "shadow", "thermal"],
+      "weight_key": ["w_slope", "w_energy", "w_shadow", "w_thermal"],
+      "grid_layer": ["elevation", "slope", "aspect", "thermal", "thermal_min", "shadow_ratio", "cost", "traversable"],
+      "warning": "The shadow cost component is named 'shadow' but its grid layer is named 'shadow_ratio'. Do not conflate."
+    }
+  },
+
+  "capabilities": [
+    {
+      "code": "C-SUMMARY",
+      "available": true,
+      "backend_route": "POST /api/plan",
+      "params_schema": {
+        "start": {"type": "object", "oneOf": ["{row:int, col:int}", "{lon:float, lat:float}"], "required": true},
+        "goal": {"type": "object", "oneOf": ["{row:int, col:int}", "{lon:float, lat:float}"], "required": true},
+        "rover_id": {"type": "string", "required": false, "default": "lpr_1", "enum": ["lpr_1", "luvmi_m", "nasa_viper", "cnsa_yutu_2"]},
+        "weights": {"type": "object", "required": false, "properties": {"w_slope": "float [0,2]", "w_energy": "float [0,2]", "w_shadow": "float [0,2]", "w_thermal": "float [0,2]"}},
+        "include_simulation": {"type": "boolean", "required": false, "default": true}
+      },
+      "response_fields": [
+        "status",
+        "astar_metrics.constraints_applied",
+        "astar_metrics.edges_rejected",
+        "astar_metrics.total_distance_m",
+        "astar_metrics.total_energy_wh",
+        "astar_metrics.total_shadow_hours",
+        "astar_metrics.max_slope_deg",
+        "astar_metrics.max_segment_slope_deg",
+        "astar_metrics.max_cell_slope_deg",
+        "astar_metrics.slope_definitions",
+        "astar_metrics.max_thermal_risk",
+        "astar_metrics.min_surface_temp_c",
+        "astar_metrics.max_surface_temp_c",
+        "astar_metrics.total_weighted_cost",
+        "astar_metrics.total_weighted_cost_cells_only",
+        "astar_metrics.barrier_share",
+        "astar_metrics.cost_units",
+        "astar_metrics.path_length_nodes",
+        "astar_metrics.computation_time_ms",
+        "astar_metrics.nodes_expanded",
+        "summary.total_distance_km",
+        "summary.total_elapsed_hours",
+        "summary.final_battery_pct",
+        "summary.min_battery_pct",
+        "summary.max_slope_deg",
+        "summary.max_segment_slope_deg",
+        "summary.total_energy_consumed_wh",
+        "summary.total_shadow_exposure",
+        "summary.critical_steps_count",
+        "summary.high_or_above_steps_count",
+        "summary.waypoint_count",
+        "summary.total_recharges",
+        "summary.stranded",
+        "summary.stranded_at_step",
+        "summary.max_continuous_shadow_h",
+        "summary.shadow_limit_h",
+        "summary.shadow_limit_exceeded",
+        "summary.peak_power_exceeded_steps",
+        "route_statistics.waypoint_count",
+        "route_statistics.slope_histogram",
+        "route_statistics.risk_breakdown_pct",
+        "route_statistics.min_surface_temp_c",
+        "route_statistics.max_surface_temp_c",
+        "execution.stranded",
+        "execution.planned_nodes",
+        "execution.executable_nodes",
+        "execution.truncated",
+        "execution.reason",
+        "geojson",
+        "corridor",
+        "rover.id",
+        "rover.name",
+        "waypoints"
+      ],
+      "writes": true,
+      "typical_ms": 2840,
+      "evidence": "backend/app/main.py:576-737; backend/app/serializer.py:310-327; backend/app/pathfinder.py:726-783",
+      "notes": "WRITES STATE: publishes app.state.active_corridor, active_corridor_id, active_corridor_rover_id and appends to app.state.corridors (32-entry FIFO), main.py:722-735. Not a pure read. typical_ms is wall time from one live probe on a 500x500 grid, (60,60)->(440,440); observed range across 4 runs was 2840-4848 ms and the server ran under --reload, so treat it as an order of magnitude, not a benchmark."
+    },
+    {
+      "code": "C-POINT",
+      "available": true,
+      "backend_route": "GET /api/cell-telemetry",
+      "params_schema": {
+        "row": {"type": "integer", "required": true, "validation": "0 <= row < rows"},
+        "col": {"type": "integer", "required": true, "validation": "0 <= col < cols"},
+        "rover_id": {"type": "string", "required": false, "default": "the loaded grid's rover"}
+      },
+      "response_fields": [
+        "row", "col", "lon", "lat", "altitude_m",
+        "thermal_c", "thermal_min_c", "resolution_m", "span_km",
+        "cost_breakdown.slope", "cost_breakdown.energy", "cost_breakdown.shadow",
+        "cost_breakdown.thermal", "cost_breakdown.total",
+        "layer_validity"
+      ],
+      "writes": false,
+      "typical_ms": null,
+      "evidence": "backend/app/main.py:498-573",
+      "notes": "Accepts rover_id but NOT weight overrides, so the breakdown always uses metadata['cost_weights'] (main.py:549). Non-finite contributions serialise as null, never inf/NaN (costmap.py:124-129). Pure read."
+    },
+    {
+      "code": "C-DECOMPOSE",
+      "available": true,
+      "backend_route": "GET /api/cell-telemetry",
+      "params_schema": {
+        "row": {"type": "integer", "required": true},
+        "col": {"type": "integer", "required": true},
+        "rover_id": {"type": "string", "required": false}
+      },
+      "response_fields": [
+        "cost_breakdown.slope",
+        "cost_breakdown.energy",
+        "cost_breakdown.shadow",
+        "cost_breakdown.thermal",
+        "cost_breakdown.total"
+      ],
+      "writes": false,
+      "typical_ms": null,
+      "evidence": "backend/app/costmap.py:121-159; backend/app/main.py:552,571",
+      "notes": "PER-CELL ONLY. There is no route-wide component decomposition anywhere in the backend: CostMap.explain has exactly one caller and it passes a single (row, col). To answer 'what share of this route's cost came from slope', the AI layer must call this endpoint once per waypoint and aggregate client-side, which is N requests for an N-waypoint route (485 on the reference route). Values are already weight-multiplied contributions, so they sum to total."
+    },
+    {
+      "code": "C-SENSITIVITY",
+      "available": true,
+      "backend_route": "POST /api/plan",
+      "params_schema": {
+        "start": {"type": "object", "required": true},
+        "goal": {"type": "object", "required": true},
+        "weights": {"type": "object", "required": false, "properties": {"w_slope": "float [0,2]", "w_energy": "float [0,2]", "w_shadow": "float [0,2]", "w_thermal": "float [0,2]"}},
+        "rover_id": {"type": "string", "required": false, "enum": ["lpr_1", "luvmi_m", "nasa_viper", "cnsa_yutu_2"]}
+      },
+      "response_fields": ["astar_metrics", "summary", "route_statistics", "execution", "waypoints"],
+      "writes": true,
+      "typical_ms": 2840,
+      "evidence": "backend/app/main.py:344-349,576-737; backend/app/cost_engine.py:51-63",
+      "notes": "Re-running with perturbed weights works and is deterministic for a fixed input (two identical live runs: total_distance_m 3028.34, nodes_expanded 111770, both times). NO CACHING: the repeat run was not cheaper (4848 ms vs 2840 ms), so each perturbation costs a full solve. Weights are NOT normalised - resolve_weights only overwrites defaults, no sum constraint (cost_engine.py:51-63). Every call writes corridor state."
+    },
+    {
+      "code": "C-COMPARE",
+      "available": true,
+      "backend_route": "POST /api/compare",
+      "params_schema": {
+        "start": {"type": "array", "items": "integer", "minItems": 2, "maxItems": 2, "required": true},
+        "goal": {"type": "array", "items": "integer", "minItems": 2, "maxItems": 2, "required": true},
+        "rover_id": {"type": "string", "required": false, "default": "lpr_1"}
+      },
+      "response_fields": [
+        "start", "goal",
+        "results[].profile_id",
+        "results[].profile_name",
+        "results[].color",
+        "results[].path_pixels",
+        "results[].metrics",
+        "results[].error",
+        "results[].constraint_check",
+        "results[].simulation_summary",
+        "comparison.shortest_profile",
+        "comparison.safest_profile",
+        "comparison.most_efficient_profile",
+        "comparison.recommendation"
+      ],
+      "writes": false,
+      "typical_ms": null,
+      "evidence": "backend/app/main.py:1269-1295",
+      "notes": "Runs all four MISSION_PROFILES (balanced, energy_saver, fast_recon, shadow_traverse). Does not write app.state - no corridor is published, grids_for_rover derives per-profile grids without storing them (main.py:1276). Safe read despite being a POST. PIXEL COORDINATES ONLY - unlike /api/plan it does not accept {lon,lat}. comparison.recommendation states its own limitation verbatim: 'Energy and shadow totals are not tracked in fast mode, so neither ranking is an energy claim.' A sibling route POST /api/plan-multi takes an explicit profiles[] list with the same result shape."
+    },
+    {
+      "code": "C-BINDING",
+      "available": true,
+      "backend_route": "POST /api/compare",
+      "params_schema": {
+        "start": {"type": "array", "items": "integer", "minItems": 2, "maxItems": 2, "required": true},
+        "goal": {"type": "array", "items": "integer", "minItems": 2, "maxItems": 2, "required": true},
+        "rover_id": {"type": "string", "required": false, "default": "lpr_1"}
+      },
+      "response_fields": [
+        "results[].constraint_check.max_slope_deg.limit",
+        "results[].constraint_check.max_slope_deg.actual",
+        "results[].constraint_check.max_slope_deg.satisfied",
+        "results[].constraint_check.max_slope_deg.enforced_in_search",
+        "results[].constraint_check.max_slope_deg.checked",
+        "results[].constraint_check.max_shadow_h.limit",
+        "results[].constraint_check.max_shadow_h.actual",
+        "results[].constraint_check.max_shadow_h.satisfied",
+        "results[].constraint_check.max_energy_wh.limit",
+        "results[].constraint_check.max_energy_wh.actual",
+        "results[].constraint_check.max_energy_wh.satisfied",
+        "results[].constraint_check.min_soc.limit",
+        "results[].constraint_check.min_soc.actual",
+        "results[].constraint_check.min_soc.satisfied",
+        "astar_metrics.barrier_share"
+      ],
+      "writes": false,
+      "typical_ms": null,
+      "evidence": "backend/app/scenarios.py:99-161; backend/app/main.py:1210,1264,1288",
+      "notes": "PARTIAL. Margin = limit - actual is derivable for max_shadow_h (h), max_energy_wh (Wh) and min_soc (0-1 fraction). Live example, balanced profile: shadow 40.0 vs 3.3154, energy 4000.0 vs 1457.53, soc 0.2 vs 0.7311. max_slope_deg.actual is always null because it is structural (enforced in search). TWO LIMITS: (1) only /api/compare and /api/plan-multi produce constraint_check - POST /api/plan never does, so a single planned route carries no margin data; (2) the log-barrier slack values are NOT available at any granularity - see the C-BINDING entry under 'unavailable'."
+    },
+    {
+      "code": "C-INFEASIBLE",
+      "available": true,
+      "backend_route": "POST /api/compare",
+      "params_schema": {
+        "start": {"type": "array", "items": "integer", "minItems": 2, "maxItems": 2, "required": true},
+        "goal": {"type": "array", "items": "integer", "minItems": 2, "maxItems": 2, "required": true},
+        "rover_id": {"type": "string", "required": false, "default": "lpr_1"}
+      },
+      "response_fields": [
+        "results[].error",
+        "results[].metrics.edges_rejected.step_slope",
+        "results[].metrics.edges_rejected.lateral_slope",
+        "results[].metrics.edges_rejected.thermal_barrier",
+        "results[].metrics.edges_rejected.slope_barrier",
+        "results[].metrics.edges_rejected.lateral_barrier",
+        "results[].metrics.nodes_expanded"
+      ],
+      "writes": false,
+      "typical_ms": null,
+      "evidence": "backend/app/pathfinder.py:812-825,828-865; backend/app/main.py:1240-1265",
+      "notes": "edges_rejected is populated on SUCCESSFUL runs too, not only failures - live probe on a successful compare returned {step_slope:25, lateral_slope:4928, thermal_barrier:0, slope_barrier:0, lateral_barrier:0} alongside a valid path. It is therefore usable to explain why a route DETOURED, not just why one was impossible. On POST /api/plan the same counters are present in astar_metrics.edges_rejected for successful plans; only the FAILURE case drops them. AVAILABLE ONLY VIA /api/compare AND /api/plan-multi, which return HTTP 200 and carry the failure inside results[] with metrics intact. POST /api/plan is the opposite: main.py:627-628 raises HTTPException(404, detail=astar_result['error']) and DISCARDS metrics, so the structured edges_rejected counters and nodes_expanded are computed and thrown away - see the C-INFEASIBLE entry under 'unavailable'. The error string itself is prose built by _no_path_reason(), e.g. 'No path found for NASA VIPER: 412 edges exceeded the 15 deg roll-over (cross-slope) limit; ...'. Do not parse it - read edges_rejected instead. No partial path is ever returned (path_pixels is []). This path could not be triggered live during the audit (the loaded grid is 84.0% traversable); verified by source read plus backend/test_pathfinder.py:92, backend/test_review3_fixes.py:102, backend/test_review4_fixes.py:152."
+    }
+  ],
+
+  "unavailable": [
+    {
+      "code": "C-CONTRAST",
+      "reason": "No endpoint scores a caller-supplied path or route. cost_engine.total_edge_cost() implements the full weighted+barrier edge cost but no HTTP route calls it; the only way to price a path is to let the planner produce one.",
+      "evidence": "backend/app/cost_engine.py:742 (defined); no reference in backend/app/main.py"
+    },
+    {
+      "code": "C-BINDING",
+      "sub_code": "C-BINDING-BARRIER",
+      "reason": "Log-barrier slack values are computed but never retained. In every one of the four barrier functions the pattern is identical: compute slack as a local, pass it straight into math.log(), append to a terms list, sum, return a single float. slack_slope, slack_lat, slack_soc, slack_cold and slack_hot never leave their function. When a slack reaches zero the function returns inf, so even the identity of the binding constraint is lost. The only exposed aggregate is astar_metrics.barrier_share, a single ratio with no per-constraint breakdown.",
+      "evidence": "backend/app/cost_engine.py:628,633 (edge_barrier_penalty); :673,674 (geometric_barrier_terms); :705,710,717 (log_barrier_penalty); :589,600 (thermal_barrier_terms); barrier_share at backend/app/pathfinder.py:768-773"
+    },
+    {
+      "code": "C-BINDING",
+      "sub_code": "C-BINDING-SINGLE-ROUTE",
+      "reason": "POST /api/plan does not run check_profile_constraints, so a single planned route carries no limit/actual pairs. _attach_constraint_check exists and is called only from /api/plan-multi and /api/compare.",
+      "evidence": "backend/app/main.py:1177-1211 (defined), :1264,:1288 (only callers); absent from main.py:576-737"
+    },
+    {
+      "code": "C-INFEASIBLE",
+      "sub_code": "C-INFEASIBLE-PLAN",
+      "reason": "On POST /api/plan the structured failure diagnosis is discarded. _empty_result carries edges_rejected and nodes_expanded inside metrics, but main.py reads only astar_result['error'] and puts that prose string in a 404 detail. The response body is {'detail': '<sentence>'} with no structured field and no partial path.",
+      "evidence": "backend/app/pathfinder.py:812-825 (metrics built); backend/app/main.py:627-628 (metrics dropped)"
+    },
+    {
+      "code": "C-DECOMPOSE",
+      "sub_code": "C-DECOMPOSE-ROUTE",
+      "reason": "No route-wide cost decomposition. Per-edge component penalties are summed into a scalar and discarded; nothing accumulates a per-component total along the path. CostMap.explain is per-cell and has a single caller passing one (row, col).",
+      "evidence": "backend/app/costmap.py:121-159 (per-cell only); backend/app/main.py:552 (sole caller); backend/app/pathfinder.py:726-783 (path metrics carry no component split)"
+    }
+  ]
+}
