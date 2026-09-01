@@ -7,6 +7,7 @@ import MapCanvas, {
   type MapCanvasHandle,
   type MapViewMode,
 } from './MapCanvas'
+import TerrainView3D from './TerrainView3D'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -122,6 +123,10 @@ export default function App() {
   const [layerError, setLayerError] = useState<string | null>(null)
 
   const [viewMode, setViewMode] = useState<MapViewMode>('surface')
+
+  // Which renderer fills the map shell. viewMode is orthogonal: it picks the
+  // layer, and both renderers colour it with the same ramps.
+  const [dimension, setDimension] = useState<'2d' | '3d'>('2d')
 
   const [clickMode, setClickMode] = useState<ClickMode>('idle')
   const [start, setStart] = useState<[number, number] | null>(null)
@@ -703,6 +708,22 @@ export default function App() {
               </div>
             </div>
             <div className="map-overlay-top-right">
+              <div className="map-switch dimension-switch">
+                <button
+                  type="button"
+                  className={dimension === '2d' ? 'is-active' : ''}
+                  onClick={() => setDimension('2d')}
+                >
+                  2D
+                </button>
+                <button
+                  type="button"
+                  className={dimension === '3d' ? 'is-active' : ''}
+                  onClick={() => setDimension('3d')}
+                >
+                  3D
+                </button>
+              </div>
               <div className="map-switch">
                 {MAP_VIEW_OPTIONS.map((option) => (
                   <button
@@ -722,6 +743,19 @@ export default function App() {
             </div>
 
             <div className="map-canvas-shell">
+              {dimension === '3d' ? (
+                <TerrainView3D
+                  viewMode={viewMode}
+                  waypoints={planResult?.waypoints ?? null}
+                  routeStep={routePlaybackStep}
+                  roverId={selectedRoverId}
+                  weights={weights}
+                  clickMode={clickMode}
+                  start={start}
+                  goal={goal}
+                  onCellClick={handleCellClick}
+                />
+              ) : (
               <MapCanvas
                 ref={mapRef}
                 elevationGrid={elevationLayer?.data ?? null}
@@ -741,6 +775,7 @@ export default function App() {
                 onAnimationStepChange={setRoutePlaybackStep}
                 onHoverCellChange={setHoverPoint}
               />
+              )}
             </div>
 
             <div className="map-overlay map-overlay-bottom-left">

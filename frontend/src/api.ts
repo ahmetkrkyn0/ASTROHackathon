@@ -76,6 +76,69 @@ export interface PlanWeights {
   w_thermal: number
 }
 
+// ── 3-D scene contract (docs/frontend/3b-veri-sozlesmesi.md) ──────────────────
+
+export interface TerrainLayerEntry {
+  units: string
+  description: string
+  validity: string
+  min: number
+  max: number
+  binary_url: string
+  json_url: string
+}
+
+export interface TerrainManifest {
+  grid: {
+    rows: number
+    cols: number
+    resolution_m: number
+    span_m: [number, number]
+    cells: number
+  }
+  georeference: {
+    origin: { x: number; y: number }
+    crs: string
+    window_offset: { row: number; col: number }
+    // Row 0 is the NORTH edge, col 0 the WEST edge. Ignoring this draws a
+    // mirrored site that looks entirely plausible.
+    row_axis: string
+    col_axis: string
+  }
+  elevation: {
+    min_m: number
+    max_m: number
+    relief_m: number
+    vertical_exaggeration_suggested: number
+  }
+  layers: Record<string, TerrainLayerEntry>
+}
+
+export interface SunSample {
+  index: number
+  utc: string
+  azimuth_true_deg: number
+  azimuth_grid_deg: number
+  elevation_deg: number
+}
+
+export interface IlluminationSeries {
+  slices: number
+  slice_hours: number
+  start_utc: string
+  grid: { rows: number; cols: number; resolution_m: number; downsample: number }
+  // model "static" means the horizon cache is missing and the cube is frozen.
+  // Never animate a frozen cube and call it physics -- `reason` says why.
+  shadow_model: {
+    model: string
+    time_varying: boolean
+    reason?: string
+  }
+  sun: SunSample[]
+  fields: Record<string, { units: string; min: number; max: number; binary_url: string }>
+  binary_format: { shape: [number, number, number] }
+}
+
 export interface ProfileEntry {
   id: string
   name: string
@@ -190,6 +253,61 @@ export async function fetchLayer(
       nodata: Number(r.headers.get('X-Layer-Nodata')),
     },
   }
+}
+
+// One call, before a byte of grid is fetched: mesh dimensions, the
+// georeference, the elevation range the displacement scales by, and a
+// binary_url per layer. Fetch those URLs verbatim -- cost and traversable
+// are rover- and weight-dependent and the manifest has already embedded
+// the right query string.
+export async function fetchTerrainManifest(
+  options?: { roverId?: string; weights?: PlanWeights; signal?: AbortSignal },
+): Promise<TerrainManifest> {
+  const query = new URLSearchParams()
+  if (options?.roverId) query.set('rover_id', options.roverId)
+  if (options?.weights) {
+    query.set('w_slope', String(options.weights.w_slope))
+    query.set('w_energy', String(options.weights.w_energy))
+    query.set('w_shadow', String(options.weights.w_shadow))
+    query.set('w_thermal', String(options.weights.w_thermal))
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  const r = await fetch(`${BASE}/terrain${suffix}`, { signal: options?.signal })
+  if (!r.ok) throw new Error(`Terrain manifest failed (${r.status})`)
+  return r.json() as Promise<TerrainManifest>
+}
+
+export async function fetchIlluminationSeries(
+  params: { startUtc: string; nSlices: number; sliceHours: number; downsample: number },
+  signal?: AbortSignal,
+): Promise<IlluminationSeries> {
+  const query = new URLSearchParams({
+    start_utc: params.startUtc,
+    n_slices: String(params.nSlices),
+    slice_hours: String(params.sliceHours),
+    downsample: String(params.downsample),
+  })
+  const r = await fetch(`${BASE}/illumination-series?${query.toString()}`, { signal })
+  if (!r.ok) throw new Error(`Illumination series failed (${r.status})`)
+  return r.json() as Promise<IlluminationSeries>
+}
+
+// Raw float32 straight off a manifest-supplied binary_url. `expected` is the
+// element count the caller's geometry assumes; a mismatch means a
+// downsampled grid is about to be read into a full-resolution mesh, which
+// renders plausibly and is wrong.
+export async function fetchBinaryGrid(
+  url: string,
+  expected?: number,
+  signal?: AbortSignal,
+): Promise<Float32Array> {
+  const r = await fetch(url, { signal })
+  if (!r.ok) throw new Error(`Binary grid fetch failed: ${url} (${r.status})`)
+  const buf = new Float32Array(await r.arrayBuffer())
+  if (expected !== undefined && buf.length !== expected) {
+    throw new Error(`Binary grid ${url}: expected ${expected} floats, got ${buf.length}`)
+  }
+  return buf
 }
 
 export async function planRoute(
