@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import LandingPage from './LandingPage'
 import MapCanvas, {
@@ -8,6 +8,8 @@ import MapCanvas, {
   type MapViewMode,
 } from './MapCanvas'
 import TerrainView3D from './TerrainView3D'
+import ChatPanel from './ChatPanel'
+import { buildMissionSnapshot } from './aiContext'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -411,6 +413,26 @@ export default function App() {
   const waypoints = planResult?.waypoints ?? []
   const activeMapView = MAP_VIEW_OPTIONS.find((option) => option.id === viewMode) ?? MAP_VIEW_OPTIONS[0]
   const selectedRover = rovers.find((entry) => entry.id === selectedRoverId) ?? null
+
+  // A value snapshot for the assistant. Deliberately built from state rather
+  // than passed as state: the panel receives what the operator has chosen and
+  // no way to change any of it.
+  const missionSnapshot = useMemo(
+    () =>
+      buildMissionSnapshot({
+        start,
+        goal,
+        roverId: selectedRoverId,
+        weights,
+        focusedCell: hoverPoint
+          ? { row: hoverPoint[0], col: hoverPoint[1] }
+          : goal
+            ? { row: goal[0], col: goal[1] }
+            : null,
+        plan: planResult,
+      }),
+    [start, goal, selectedRoverId, weights, hoverPoint, planResult],
+  )
 
   useEffect(() => {
     if (hoverPoint === null && routePlaybackStep !== null) {
@@ -938,6 +960,8 @@ export default function App() {
                 ))}
               </div>
             </section>
+
+            <ChatPanel mission={missionSnapshot} />
           </div>
             </>
           )}
