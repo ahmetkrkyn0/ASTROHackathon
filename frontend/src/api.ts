@@ -420,14 +420,37 @@ export interface AiLimitation {
   message: string
 }
 
+/**
+ * Mandatory and never hidden.
+ *
+ * Distinct from AiLimitation by meaning, not severity: a warning says the
+ * evidence's validity, grounding or constraints are materially affected, and
+ * no explanation level may drop one. A limitation says what the feature
+ * cannot establish. Nothing ever appears in both arrays.
+ */
+export interface AiWarning {
+  code: string
+  severity: 'info' | 'caution' | 'critical'
+  message: string
+  suppressible: false
+}
+
+export type ExplanationLevel = 'L1' | 'L2' | 'L3'
+
+export type GroundingStatus = 'verified' | 'blocked' | 'not_applicable' 
+
 export interface AiChatResponse {
   answer: string
   evidence: AiEvidenceItem[]
   limitations: AiLimitation[]
+  warnings: AiWarning[]
   toolUsage: {
     comparisonUsed: boolean
     readCalls: number
   }
+  errorCode: string | null
+  groundingStatus: GroundingStatus
+  explanationLevel: ExplanationLevel
 }
 
 /**
@@ -443,12 +466,13 @@ export interface AiChatResponse {
 export async function postAiChat(
   messages: AiChatMessage[],
   mission: unknown,
+  explanationLevel: ExplanationLevel,
   signal?: AbortSignal,
 ): Promise<AiChatResponse> {
   const r = await fetch(`${BASE}/ai/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, mission }),
+    body: JSON.stringify({ messages, mission, explanationLevel }),
     signal,
   })
   if (!r.ok) {
