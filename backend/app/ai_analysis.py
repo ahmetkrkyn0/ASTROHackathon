@@ -95,6 +95,12 @@ class Metric(BaseModel):
     quantity: Quantity
     provenance: Provenance
     display: str = Field(min_length=1)
+    # Exact phrases K1 explicitly permits as alternative renderings of THIS
+    # metric, e.g. "dort profil" for a registered count. Never generated
+    # automatically: an auto-derived numeral word would let the verbalizer
+    # spell any registered value, which is what the grounding check exists
+    # to prevent.
+    display_alt: list[str] = Field(default_factory=list)
 
 
 class EnvelopeWarning(BaseModel):
@@ -147,6 +153,7 @@ def make_metric(
     unit: str,
     provenance: Provenance,
     precision: Optional[int] = None,
+    display_alt: Optional[list[str]] = None,
 ) -> Metric:
     """Register one number, with its unit and its canonical rendering."""
     quantity = Quantity(value=float(value), unit=unit, precision=precision)
@@ -156,6 +163,7 @@ def make_metric(
         quantity=quantity,
         provenance=provenance,
         display=format_display(float(value), unit, precision),
+        display_alt=list(display_alt or []),
     )
 
 

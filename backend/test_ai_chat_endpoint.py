@@ -515,3 +515,149 @@ def test_the_route_creates_no_ai_session_state():
         assert not hasattr(app.state, "ai_conversations")
     finally:
         _teardown()
+
+
+# ── partial capabilities: scope must reach the operator ─────────────────────
+
+def _invoked(capability: str, params: dict, key: str, draft: str) -> StubProvider:
+    return StubProvider(
+        script=[ProviderReply(text=draft, tool_calls=[])],
+        structured_script=[json.dumps({
+            "action": "invoke", "capability": capability,
+            "params": params, "rationale_key": key,
+        })],
+    )
+
+
+def test_discrete_sensitivity_is_answerable_and_reports_a_comparison():
+    _install(_invoked("C-SENSITIVITY", {}, "profile_tradeoff",
+                      "Enerji tasarrufu profilinde sonuç farklı çıkıyor."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["errorCode"] is None
+        assert body["toolUsage"]["comparisonUsed"] is True
+        assert body["evidence"][0]["source"] == "profile-comparison"
+    finally:
+        _teardown()
+
+
+def test_binding_evidence_is_scoped_to_the_predefined_profiles():
+    # It must not read as a statement about the operator's custom-weight route.
+    _install(_invoked("C-BINDING", {}, "constraint_margin",
+                      "Kısıt marjları raporlandı."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        codes = [w["code"] for w in body["warnings"]]
+        assert "SCOPE_COMPARE_PROFILE_CONSTRAINTS" in codes
+        message = next(w["message"] for w in body["warnings"]
+                       if w["code"] == "SCOPE_COMPARE_PROFILE_CONSTRAINTS")
+        assert "ÖNTANIMLI" in message
+    finally:
+        _teardown()
+
+
+def test_infeasibility_evidence_says_it_cannot_explain_the_current_plan():
+    _install(_invoked("C-INFEASIBLE", {}, "constraint_margin",
+                      "Bir profil çözülemedi."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        codes = [w["code"] for w in body["warnings"]]
+        assert "SCOPE_COMPARE_PROFILE_FAILURES_ONLY" in codes
+    finally:
+        _teardown()
+
+
+def test_sensitivity_evidence_declares_itself_discrete():
+    _install(_invoked("C-SENSITIVITY", {}, "profile_tradeoff", "Fark var."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        codes = [w["code"] for w in body["warnings"]]
+        assert "SCOPE_DISCRETE_PREDEFINED_PROFILES" in codes
+    finally:
+        _teardown()
+
+
+def test_cell_decomposition_declares_itself_cell_only():
+    _install(_invoked("C-DECOMPOSE", {"row": 5, "col": 5}, "cell_question",
+                      "Hücre ayrışması okundu."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        codes = [w["code"] for w in body["warnings"]]
+        assert "SCOPE_CELL_ONLY" in codes
+    finally:
+        _teardown()
+
+
+def test_the_scope_statement_is_identical_at_every_level():
+    # N-14: a scope statement is not something a level may soften.
+    seen = []
+    for level in ("L1", "L2", "L3"):
+        _install(_invoked("C-BINDING", {}, "constraint_margin", "Marjlar."))
+        try:
+            payload = _payload()
+            payload["explanationLevel"] = level
+            body = client.post("/api/ai/chat", json=payload).json()
+            seen.append([(w["code"], w["message"]) for w in body["warnings"]])
+        finally:
+            _teardown()
+    assert seen[0] == seen[1] == seen[2]
+
+
+# ── arbitrary perturbation is not available ─────────────────────────────────
+
+@pytest.mark.parametrize("code", ["UNSUPPORTED_CAPABILITY"])
+def test_an_arbitrary_weight_perturbation_is_refused(code):
+    # "Enerji agirligini %10 artirirsam?" / "w_energy = 0.35"
+    _install(StubProvider(
+        structured_script=[json.dumps({"action": "refuse", "code": code})]))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["errorCode"] == "E-UNSUPPORTED"
+    finally:
+        _teardown()
+
+
+def test_route_wide_decomposition_is_refused_not_fabricated():
+    _install(StubProvider(structured_script=[json.dumps(
+        {"action": "refuse", "code": "UNSUPPORTED_CAPABILITY"})]))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["errorCode"] == "E-UNSUPPORTED"
+        assert "açık değil" in body["answer"]
+    finally:
+        _teardown()
+
+
+# ── one physical comparison per question, across every alias ────────────────
+
+def test_a_second_compare_backed_alias_is_refused_with_e_budget():
+    _install(StubProvider(
+        script=[ProviderReply(text="Marjlar.", tool_calls=[]),
+                ProviderReply(text="Fark.", tool_calls=[])],
+        structured_script=[
+            json.dumps({"action": "invoke", "capability": "C-BINDING",
+                        "params": {}, "rationale_key": "constraint_margin"}),
+            json.dumps({"action": "invoke", "capability": "C-SENSITIVITY",
+                        "params": {}, "rationale_key": "profile_tradeoff"}),
+        ]))
+    try:
+        first = client.post("/api/ai/chat", json=_payload()).json()
+        assert first["errorCode"] is None
+        assert first["toolUsage"]["comparisonUsed"] is True
+    finally:
+        _teardown()
+
+
+@pytest.mark.parametrize(
+    "capability,key",
+    [("C-COMPARE", "profile_tradeoff"), ("C-BINDING", "constraint_margin"),
+     ("C-INFEASIBLE", "constraint_margin"), ("C-SENSITIVITY", "profile_tradeoff")],
+)
+def test_every_compare_backed_alias_reports_comparison_used(capability, key):
+    _install(_invoked(capability, {}, key, "Sonuç raporlandı."))
+    try:
+        body = client.post("/api/ai/chat", json=_payload()).json()
+        assert body["errorCode"] is None, capability
+        assert body["toolUsage"]["comparisonUsed"] is True, capability
+    finally:
+        _teardown()

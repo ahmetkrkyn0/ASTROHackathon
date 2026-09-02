@@ -304,3 +304,101 @@ def test_invoke_of_an_unknown_capability_raises():
 
 def test_there_is_no_capability_that_writes():
     assert all(c["writes"] is False for c in _provider().get_capabilities())
+
+
+# ── partial capability status and scope ──────────────────────────────────────
+
+def _spec(code: str) -> dict:
+    return {c["code"]: c for c in _provider().get_capabilities()}[code]
+
+
+def test_full_capabilities_report_status_full():
+    for code in ("C-SUMMARY", "C-POINT", "C-COMPARE"):
+        assert _spec(code)["status"] == "full", code
+
+
+def test_partial_capabilities_are_partial_not_unavailable():
+    # They were previously collapsed into the same bucket as the two genuinely
+    # absent ones, which lost the semantic intent entirely.
+    for code in ("C-DECOMPOSE", "C-BINDING", "C-INFEASIBLE", "C-SENSITIVITY"):
+        spec = _spec(code)
+        assert spec["status"] == "partial", code
+        assert spec["available"] is True, code
+
+
+def test_each_partial_capability_declares_its_scope():
+    assert _spec("C-BINDING")["scope"] == "compare_profile_constraints"
+    assert _spec("C-INFEASIBLE")["scope"] == "compare_profile_failures_only"
+    assert _spec("C-SENSITIVITY")["scope"] == "discrete_predefined_profiles"
+    assert _spec("C-DECOMPOSE")["scope"] == "cell_only"
+
+
+def test_genuinely_absent_capabilities_stay_unavailable():
+    for code in ("C-CONTRAST", "C-RECOURSE"):
+        spec = _spec(code)
+        assert spec["status"] == "unavailable", code
+        assert spec["available"] is False, code
+
+
+def test_the_router_can_name_every_partial_capability():
+    for code in ("C-DECOMPOSE", "C-BINDING", "C-INFEASIBLE", "C-SENSITIVITY"):
+        decision = parse_router_output(
+            {"action": "invoke", "capability": code,
+             "params": {"row": 5, "col": 5} if code == "C-DECOMPOSE" else {},
+             "rationale_key": "constraint_margin"}
+        )
+        assert decision.capability == code
+
+
+def test_the_router_still_cannot_name_an_absent_capability():
+    for code in ("C-CONTRAST", "C-RECOURSE"):
+        with pytest.raises(Exception):
+            parse_router_output(
+                {"action": "invoke", "capability": code, "params": {},
+                 "rationale_key": "profile_tradeoff"}
+            )
+
+
+# ── one physical comparison, shared by every compare-backed alias ────────────
+
+def test_compare_backed_aliases_share_one_budget():
+    provider = _provider()
+    first = gate(_invoke("C-BINDING", key="constraint_margin"),
+                 provider=provider, budget=provider.budget)
+    assert first.ok
+    provider.invoke("C-BINDING", {})
+
+    second = gate(_invoke("C-SENSITIVITY", key="profile_tradeoff"),
+                  provider=provider, budget=provider.budget)
+    assert not second.ok
+    assert second.code == "E-BUDGET"
+
+
+def test_every_compare_backed_alias_needs_endpoints():
+    provider = _provider(start=None, goal=None)
+    for code in ("C-COMPARE", "C-BINDING", "C-INFEASIBLE", "C-SENSITIVITY"):
+        result = gate(_invoke(code, key="profile_tradeoff"),
+                      provider=provider, budget=provider.budget)
+        assert not result.ok, code
+        assert result.code == "E-CONTEXT", code
+
+
+def test_a_compare_backed_alias_reaches_the_existing_implementation():
+    for code in ("C-BINDING", "C-INFEASIBLE", "C-SENSITIVITY"):
+        payload = _provider().invoke(code, {})
+        assert len(payload["profiles"]) == 4, code
+
+
+def test_decompose_reaches_the_existing_cell_implementation():
+    payload = _provider().invoke("C-DECOMPOSE", {"row": 5, "col": 5})
+    assert payload["row"] == 5
+
+
+def test_decompose_without_a_cell_is_refused_rather_than_answered():
+    # Route-wide decomposition does not exist; answering anyway would be a
+    # fabricated result.
+    provider = _provider()
+    result = gate(_invoke("C-DECOMPOSE", {}, key="cell_question"),
+                  provider=provider, budget=provider.budget)
+    assert not result.ok
+    assert result.code == "E-SCHEMA"

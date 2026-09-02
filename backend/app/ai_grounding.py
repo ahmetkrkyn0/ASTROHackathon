@@ -163,6 +163,25 @@ def _mask_displays(text: str, displays: Sequence[str]) -> str:
     return text
 
 
+def _mask_aliases(text: str, aliases: Sequence[str]) -> str:
+    """Mask the lexical phrases K1 explicitly registered for a metric.
+
+    Case-insensitive, unlike the canonical displays: an alias is words, and
+    the verbalizer will capitalise it at the start of a sentence. Canonical
+    displays stay case-sensitive so a unit cannot be loosened (``Wh`` is not
+    ``wh``).
+    """
+    for alias in sorted(aliases, key=len, reverse=True):
+        if not alias:
+            continue
+        pattern = re.compile(
+            r"(?<![\w-])" + re.escape(alias) + _SUFFIX + r"(?![\w-])",
+            re.IGNORECASE,
+        )
+        text = pattern.sub(_SENTINEL, text)
+    return text
+
+
 # ── leftover scans ───────────────────────────────────────────────────────────
 
 _LEFTOVER_DIGIT = re.compile(r"\d")
@@ -176,7 +195,9 @@ _LEFTOVER_UNCERTAINTY = re.compile(r"±")
 _NUMERAL_WORDS = (
     "iki", "üç", "dört", "beş", "altı", "yedi", "sekiz", "dokuz", "on",
     "yirmi", "otuz", "kırk", "elli", "altmış", "yetmiş", "seksen", "doksan",
-    "yüz", "bin", "milyon", "yarım", "çeyrek",
+    # "yüz" is guarded against "yüzey" (surface), which is ordinary prose in
+    # this domain and would otherwise read as the numeral "hundred".
+    "yüz(?!ey)", "bin", "milyon", "yarım", "çeyrek", "buçuk",
     "birinci", "ikinci", "üçüncü", "dördüncü", "beşinci",
 )
 
@@ -187,10 +208,33 @@ _COUNTED_NOUNS = (
     "kenar", "metrik", "rota", "waypoint",
 )
 
+# Units a spelled-out quantity would be followed by. Closed vocabulary: the
+# canonical unit tokens K1 emits, plus the Turkish words a verbalizer would
+# reach for. Nothing here decodes a value; this is not a unit parser.
+_UNIT_WORDS = (
+    "wh", "kwh", "km", "m", "h", "deg", "degc", "weighted_metres",
+    "watt-saat", "kilovat-saat", "kilovat", "watt",
+    "saat", "dakika", "metre", "kilometre", "derece", "santigrat",
+)
+
+# A numeral word next to a quantity noun OR a unit. The scan runs on the
+# MASKED text, so a unit belonging to a registered display string has already
+# been deleted -- only an unaccounted-for unit can pair with a numeral, which
+# is what keeps the false-positive surface narrow.
 _NUMERAL_BIGRAM = re.compile(
     r"\b(?:" + "|".join(_NUMERAL_WORDS) + r")\w*\s+(?:\w+\s+){0,1}(?:"
-    + "|".join(_COUNTED_NOUNS)
+    + "|".join(_COUNTED_NOUNS + _UNIT_WORDS)
     + r")\w*",
+)
+
+# A compound numeral is a number even with nothing after it: "bin dort yuz
+# doksan" needs no unit to be a quantity. Two high-confidence numeral tokens
+# close together is the signal. One alone is not -- a single word is ordinary
+# prose often enough that firing on it would block normal answers.
+_NUMERAL_RUN = re.compile(
+    r"\b(?:" + "|".join(_NUMERAL_WORDS) + r")\w*"
+    r"(?:\s+\w+){0,1}\s+"
+    r"(?:" + "|".join(_NUMERAL_WORDS) + r")\w*\b",
 )
 
 
@@ -333,6 +377,13 @@ def validate_draft(
     text = _mask_displays(
         text, tuple(metric.display for metric in envelope.numeric_registry)
     )
+    # Aliases are registered by K1 and masked here, so an approved phrase such
+    # as "dort profil" survives while an unregistered spelling does not.
+    aliases: list[str] = []
+    for metric in envelope.numeric_registry:
+        aliases.extend(getattr(metric, "display_alt", ()) or ())
+    if aliases:
+        text = _mask_aliases(text, tuple(aliases))
 
     violations: list[GroundingViolation] = []
 
@@ -357,7 +408,8 @@ def validate_draft(
                 "UNREGISTERED_UNCERTAINTY", _excerpt(text, match.start(), match.end())
             )
         )
-    match = _NUMERAL_BIGRAM.search(tr_fold(text))
+    folded = tr_fold(text)
+    match = _NUMERAL_BIGRAM.search(folded) or _NUMERAL_RUN.search(folded)
     if match:
         violations.append(
             GroundingViolation(

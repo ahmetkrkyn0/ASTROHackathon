@@ -35,6 +35,8 @@ from .ai_contract import (
 from .ai_prompt import ROUTER_PROMPT
 from .ai_tools import (
     CAPABILITIES,
+    CELL_BACKED,
+    COMPARE_BACKED,
     PARAM_MODELS,
     AiToolError,
     AnalysisProvider,
@@ -220,7 +222,9 @@ def gate(
     if decision.capability == "C-SUMMARY" and provider.snapshot.currentPlan is None:
         return GateResult(False, "E-CONTEXT", gate_message("E-CONTEXT"))
 
-    if decision.capability == "C-COMPARE":
+    # Every compare-backed alias shares one physical computation, so it also
+    # shares one budget: renaming the question must not buy a second run.
+    if decision.capability in COMPARE_BACKED:
         if provider.snapshot.start is None or provider.snapshot.goal is None:
             return GateResult(False, "E-CONTEXT", gate_message("E-CONTEXT"))
         # Read-only predicate: does not spend, so a refusal costs nothing.
@@ -228,7 +232,7 @@ def gate(
             return GateResult(False, "E-BUDGET", gate_message("E-BUDGET"))
 
     # Range is left to the implementation, which already owns the grid extent.
-    if decision.capability == "C-POINT":
+    if decision.capability in CELL_BACKED:
         metadata = provider.grids.get("metadata") or {}
         shape = metadata.get("shape") or []
         if len(shape) >= 2:

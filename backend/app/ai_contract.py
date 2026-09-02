@@ -115,7 +115,17 @@ DEFAULT_EXPLANATION_LEVEL: ExplanationLevel = "L2"
 # Only capabilities the audited backend actually has. C-CONTRAST and
 # C-RECOURSE are described by the generic contract but are not available
 # here, so the router cannot even name them.
-RoutableCapability = Literal["C-SUMMARY", "C-POINT", "C-COMPARE"]
+# Full and partial capabilities are both routable; only the two genuinely
+# absent ones are excluded, so the router cannot name what does not exist.
+RoutableCapability = Literal[
+    "C-SUMMARY",
+    "C-POINT",
+    "C-COMPARE",
+    "C-DECOMPOSE",
+    "C-BINDING",
+    "C-INFEASIBLE",
+    "C-SENSITIVITY",
+]
 
 # Closed vocabulary. A free-text rationale would be somewhere the router
 # could hide prose or a number, which is exactly what K2 must not produce.

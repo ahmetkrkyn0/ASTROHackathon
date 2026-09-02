@@ -48,7 +48,13 @@ from .ai_evidence import display_pedigree, weakest_validity
 from .ai_grounding import deterministic_fallback, validate_draft, whitelist_tokens
 from .ai_prompt import VERBALIZER_PROMPT
 from .ai_router import gate, gate_message, refusal_code, route, tool_error_code
-from .ai_tools import AiToolError, AnalysisProvider, ToolBudget
+from .ai_tools import (
+    CAPABILITIES,
+    COMPARE_BACKED,
+    AiToolError,
+    AnalysisProvider,
+    ToolBudget,
+)
 
 # Informational scope notes. Disjoint from warnings by meaning: these say what
 # the feature cannot establish, never that evidence validity is compromised.
@@ -87,6 +93,32 @@ _CLARIFY_TEXT: dict[str, str] = {
 }
 
 
+# What each partial capability's evidence actually covers. K4 is handed the
+# matching sentence so it cannot present predefined-profile evidence as a fact
+# about the operator's current custom-weight route.
+_SCOPE_STATEMENTS: dict[str, str] = {
+    "cell_only": (
+        "Bu ayrışma YALNIZCA seçili tek hücre içindir. Rota geneli bir maliyet "
+        "ayrışması mevcut değildir ve üretilemez."
+    ),
+    "compare_profile_constraints": (
+        "Bu kısıt marjları ÖNTANIMLI DÖRT PROFİLİN karşılaştırmasından gelir. "
+        "Kullanıcının ekrandaki özel ağırlıklı rotası için kısıt marjı "
+        "hesaplanmadı; bu sonuçları o rotaya ait gibi anlatma."
+    ),
+    "compare_profile_failures_only": (
+        "Bu kanıt YALNIZCA öntanımlı profil karşılaştırmasında bir profilin "
+        "çözülememesini açıklayabilir. Kullanıcının mevcut ya da özel planının "
+        "neden başarısız olduğunu açıklamaz."
+    ),
+    "discrete_predefined_profiles": (
+        "Bu AYRIK bir duyarlılıktır: dört sabit profil, ağırlık uzayında dört "
+        "örneklenmiş noktadır. Tek değişkenli bir perturbasyon değildir ve "
+        "serbest ağırlık değişimi hesaplanmamıştır."
+    ),
+}
+
+
 def _provenance_for(grids: Mapping[str, Any]) -> Provenance:
     """The weakest input rung across the loaded layers.
 
@@ -110,11 +142,14 @@ def _build_envelope(
     provenance = _provenance_for(grids)
     payload = provider.invoke(capability, params)
 
+    spec = CAPABILITIES.get(capability) or {}
+    scope = spec.get("scope")
+
     warnings: list[EnvelopeWarning] = []
     if capability == "C-SUMMARY":
         plan = payload.get("plan") or {}
         registry = plan_registry(plan, provenance)
-    elif capability == "C-POINT":
+    elif capability in ("C-POINT", "C-DECOMPOSE"):
         registry = cell_registry(payload, provenance)
         for item in payload.get("limitations") or []:
             # The weight mismatch invalidates the decomposition as an
@@ -129,9 +164,28 @@ def _build_envelope(
         registry = compare_registry(payload, provenance)
         warnings.extend(constraint_warnings(payload))
 
+    if scope and _SCOPE_STATEMENTS.get(scope):
+        # Not a warning: nothing is invalid. It is a statement of what the
+        # evidence covers, and K4 must repeat its substance rather than let
+        # the operator assume a broader claim.
+        warnings.append(
+            EnvelopeWarning(
+                code=f"SCOPE_{scope.upper()}",
+                severity="info",
+                message=_SCOPE_STATEMENTS[scope],
+            )
+        )
+
     return AnalysisEnvelope(
+        # The SEMANTIC code, not the underlying operation: a discrete
+        # sensitivity question and a comparison question share one physical
+        # computation but are not the same question.
         capability=capability,
-        request_echo=dict(params),
+        request_echo={
+            **dict(params),
+            "semantic_intent": capability,
+            "scope": scope,
+        },
         ok=True,
         payload=dict(payload),
         numeric_registry=registry,
@@ -180,12 +234,20 @@ def _evidence_for(envelope: AnalysisEnvelope) -> list[EvidenceItem]:
     source = {
         "C-SUMMARY": "current-plan",
         "C-POINT": "cell-telemetry",
+        "C-DECOMPOSE": "cell-telemetry",
         "C-COMPARE": "profile-comparison",
+        "C-BINDING": "profile-comparison",
+        "C-INFEASIBLE": "profile-comparison",
+        "C-SENSITIVITY": "profile-comparison",
     }.get(envelope.capability, envelope.capability)
     label = {
         "C-SUMMARY": "Ekrandaki mevcut rota",
         "C-POINT": "Seçili hücre telemetrisi",
+        "C-DECOMPOSE": "Seçili hücrenin maliyet ayrışması",
         "C-COMPARE": "Dört görev profili, yan yana",
+        "C-BINDING": "Öntanımlı profillerin kısıt marjları",
+        "C-INFEASIBLE": "Öntanımlı profil karşılaştırmasının başarısızlıkları",
+        "C-SENSITIVITY": "Dört profil üzerinden ayrık duyarlılık",
     }.get(envelope.capability, envelope.capability)
     raw = envelope.provenance_summary[0].source if envelope.provenance_summary else None
     return [

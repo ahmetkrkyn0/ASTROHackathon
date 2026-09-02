@@ -283,95 +283,116 @@ def tool_specifications() -> list[dict[str, Any]]:
 # Semantic descriptors. K2 and K3 see these; they never see an endpoint name,
 # a function name, or a backend field path -- that binding lives in _DISPATCH
 # below and goes no further up the stack.
+def _cap(
+    code: str,
+    label_tr: str,
+    status: str,
+    scope: Optional[str],
+    cost_class: str,
+    notes: str,
+) -> dict[str, Any]:
+    """One semantic capability descriptor.
+
+    ``status`` carries the audited truth in three values, because a boolean
+    cannot say *partial* and collapsing partial into unavailable loses the
+    user's intent: a discrete-sensitivity question and a comparison question
+    become indistinguishable. ``available`` stays derived so the gate and the
+    router keep one thing to check.
+    """
+    return {
+        "code": code,
+        "label_tr": label_tr,
+        "status": status,
+        "scope": scope,
+        "available": status != "unavailable",
+        "writes": False,
+        "cost_class": cost_class,
+        "notes": notes,
+    }
+
+
 CAPABILITIES: dict[str, dict[str, Any]] = {
-    "C-SUMMARY": {
-        "code": "C-SUMMARY",
-        "label_tr": "Mevcut planın özeti",
-        "available": True,
-        "writes": False,
-        "cost_class": "free",
-        "notes": "Kullanıcının hâlihazırda ürettiği plandan okunur; yeniden hesap yok.",
-    },
-    "C-POINT": {
-        "code": "C-POINT",
-        "label_tr": "Tek hücre telemetrisi",
-        "available": True,
-        "writes": False,
-        "cost_class": "read",
-        "notes": "Konum, yükseklik, sıcaklık aralığı ve -- ağırlıklar uyuşuyorsa -- maliyet ayrışımı.",
-    },
-    "C-COMPARE": {
-        "code": "C-COMPARE",
-        "label_tr": "Dört görev profilinin karşılaştırması",
-        "available": True,
-        "writes": False,
-        "cost_class": "expensive",
-        "notes": "Yan etkisiz. Yaklaşık 20 saniye sürer ve soru başına en fazla bir kez kullanılabilir.",
-    },
-    # Described by the generic contract, absent from the audited backend.
-    # Present here so the router can be told they exist and are closed,
-    # rather than discovering an unexplained failure.
-    "C-DECOMPOSE": {
-        "code": "C-DECOMPOSE",
-        "label_tr": "Rota geneli maliyet ayrışması",
-        "available": False,
-        "writes": False,
-        "cost_class": "read",
-        "notes": "Yalnızca hücre bazında mevcut; rota geneli toplam biriktirilmiyor.",
-    },
-    "C-BINDING": {
-        "code": "C-BINDING",
-        "label_tr": "Bağlayıcı kısıt",
-        "available": False,
-        "writes": False,
-        "cost_class": "expensive",
-        "notes": "Kısmi: kısıt marjları C-COMPARE yanıtı içinde taşınır.",
-    },
-    "C-INFEASIBLE": {
-        "code": "C-INFEASIBLE",
-        "label_tr": "Fizibilitesizlik açıklaması",
-        "available": False,
-        "writes": False,
-        "cost_class": "expensive",
-        "notes": "Kısmi: reddedilen kenar sayaçları C-COMPARE yanıtı içinde taşınır.",
-    },
-    "C-SENSITIVITY": {
-        "code": "C-SENSITIVITY",
-        "label_tr": "Duyarlılık",
-        "available": False,
-        "writes": False,
-        "cost_class": "expensive",
-        "notes": "Yalnızca dört sabit profil üzerinden ayrık; serbest ağırlık perturbasyonu yok.",
-    },
-    "C-CONTRAST": {
-        "code": "C-CONTRAST",
-        "label_tr": "Karşıtsal açıklama",
-        "available": False,
-        "writes": False,
-        "cost_class": "expensive",
-        "notes": "Kullanıcı yolunu puanlayan bir uç yok.",
-    },
-    "C-RECOURSE": {
-        "code": "C-RECOURSE",
-        "label_tr": "Hedef odaklı öneri",
-        "available": False,
-        "writes": False,
-        "cost_class": "expensive",
-        "notes": "Ağırlık uzayında arama gerektirir; faz dışı.",
-    },
+    "C-SUMMARY": _cap(
+        "C-SUMMARY", "Mevcut planın özeti", "full", None, "free",
+        "Kullanıcının hâlihazırda ürettiği plandan okunur; yeniden hesap yok.",
+    ),
+    "C-POINT": _cap(
+        "C-POINT", "Tek hücre telemetrisi", "full", None, "read",
+        "Konum, yükseklik, sıcaklık aralığı ve -- ağırlıklar uyuşuyorsa -- "
+        "maliyet ayrışımı.",
+    ),
+    "C-COMPARE": _cap(
+        "C-COMPARE", "Dört görev profilinin karşılaştırması", "full", None,
+        "expensive",
+        "Yan etkisiz. Yaklaşık 20 saniye sürer ve soru başına en fazla bir kez.",
+    ),
+    # Partial: real, but narrower than the generic contract's definition. The
+    # scope is carried explicitly so the verbalizer can say what the evidence
+    # actually covers instead of implying it describes the operator's own
+    # custom-weight route.
+    "C-DECOMPOSE": _cap(
+        "C-DECOMPOSE", "Maliyet ayrışması", "partial", "cell_only", "read",
+        "Yalnızca tek hücre için. Rota geneli bileşen toplamı hiçbir yerde "
+        "biriktirilmiyor, dolayısıyla rota geneli ayrışma yapılamaz.",
+    ),
+    "C-BINDING": _cap(
+        "C-BINDING", "Bağlayıcı kısıt", "partial",
+        "compare_profile_constraints", "expensive",
+        "Kısıt marjları yalnızca dört ÖNTANIMLI PROFİLİN karşılaştırmasından "
+        "gelir; kullanıcının mevcut özel ağırlıklı rotası için değildir.",
+    ),
+    "C-INFEASIBLE": _cap(
+        "C-INFEASIBLE", "Fizibilitesizlik açıklaması", "partial",
+        "compare_profile_failures_only", "expensive",
+        "Yalnızca öntanımlı profil karşılaştırmasında bir profil çözülemezse "
+        "açıklanabilir; mevcut/özel planın başarısızlığını açıklamaz.",
+    ),
+    "C-SENSITIVITY": _cap(
+        "C-SENSITIVITY", "Duyarlılık", "partial",
+        "discrete_predefined_profiles", "expensive",
+        "Yalnızca dört sabit profil üzerinden AYRIK. Serbest ağırlık "
+        "perturbasyonu (ör. 'w_energy 0.35 olsa') mevcut değil.",
+    ),
+    # Genuinely absent. Described by the generic contract, not built here.
+    "C-CONTRAST": _cap(
+        "C-CONTRAST", "Karşıtsal açıklama", "unavailable", None, "expensive",
+        "Kullanıcının çizdiği yolu puanlayan bir uç yok.",
+    ),
+    "C-RECOURSE": _cap(
+        "C-RECOURSE", "Hedef odaklı öneri", "unavailable", None, "expensive",
+        "Ağırlık uzayında arama gerektirir; faz dışı.",
+    ),
 }
 
 # The ONLY place a capability code meets an implementation name.
 _DISPATCH: dict[str, str] = {
     "C-POINT": "inspect_cell",
+    "C-DECOMPOSE": "inspect_cell",
     "C-COMPARE": "compare_mission_profiles",
+    "C-BINDING": "compare_mission_profiles",
+    "C-INFEASIBLE": "compare_mission_profiles",
+    "C-SENSITIVITY": "compare_mission_profiles",
 }
+
+# Semantic aliases over ONE physical computation. They share the single
+# per-question comparison budget: asking the same expensive question under a
+# different name must not buy a second run.
+COMPARE_BACKED: frozenset[str] = frozenset(
+    {"C-COMPARE", "C-BINDING", "C-INFEASIBLE", "C-SENSITIVITY"}
+)
+CELL_BACKED: frozenset[str] = frozenset({"C-POINT", "C-DECOMPOSE"})
 
 # Params each capability accepts, for K3's schema check.
 PARAM_MODELS: dict[str, Optional[type]] = {
     "C-SUMMARY": None,
     "C-POINT": CellRef,
+    # Cell-only by scope: without a cell there is nothing truthful to answer,
+    # and route-wide decomposition does not exist.
+    "C-DECOMPOSE": CellRef,
     "C-COMPARE": None,
+    "C-BINDING": None,
+    "C-INFEASIBLE": None,
+    "C-SENSITIVITY": None,
 }
 
 
