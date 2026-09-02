@@ -24,7 +24,12 @@ os.environ["LUNAPATH_SKIP_STARTUP"] = "YES"
 import numpy as np
 import pytest
 
-from app.ai_contract import AiMissionSnapshot, RouterFailure, parse_router_output
+from app.ai_contract import (
+    AiMissionSnapshot,
+    RouterFailure,
+    parse_router_output,
+    router_json_schema,
+)
 from app.ai_provider import StubProvider
 from app.ai_router import gate, route
 from app.ai_tools import AnalysisProvider, ToolBudget
@@ -402,3 +407,69 @@ def test_decompose_without_a_cell_is_refused_rather_than_answered():
                   provider=provider, budget=provider.budget)
     assert not result.ok
     assert result.code == "E-SCHEMA"
+# appended to test_ai_router.py
+
+
+# The schema handed to Structured Outputs is not a free-form document: the API
+# rejects anything whose root is not an object, and the rejection used to be
+# swallowed as "parameter unsupported", so every live question came back
+# E-SCHEMA. These pin the shape the API actually accepts.
+
+def test_router_schema_root_is_an_object():
+    schema = router_json_schema()
+    assert schema["type"] == "object"
+    assert "oneOf" not in schema
+    assert schema["required"] == ["decision"]
+
+
+def test_router_schema_keeps_the_variants_separate():
+    # A flattened superset made the model emit every field at once, which
+    # validates against no variant, because they are all extra="forbid".
+    schema = router_json_schema()
+    refs = schema["properties"]["decision"]["anyOf"]
+    assert len(refs) == 4
+    names = {ref["$ref"].rsplit("/", 1)[-1] for ref in refs}
+    assert names == {
+        "RouterInvoke", "RouterClarify", "RouterRefuse", "RouterAnswerFromContext",
+    }
+
+
+def test_router_schema_references_resolve_to_carried_defs():
+    schema = router_json_schema()
+    for ref in schema["properties"]["decision"]["anyOf"]:
+        assert ref["$ref"].rsplit("/", 1)[-1] in schema["$defs"]
+
+
+def test_router_schema_variants_stay_closed():
+    for variant in router_json_schema()["$defs"].values():
+        assert variant["additionalProperties"] is False
+
+
+def test_a_wrapped_decision_is_unwrapped():
+    decision = parse_router_output(
+        {"decision": {"action": "refuse", "code": "OUT_OF_SCOPE"}}
+    )
+    assert decision.action == "refuse"
+    assert decision.code == "OUT_OF_SCOPE"
+
+
+def test_a_superset_payload_is_still_rejected():
+    # The failure that shipped: one object carrying every variant's fields.
+    with pytest.raises(Exception):
+        parse_router_output({
+            "action": "clarify", "missing": ["plan"], "capability": "C-SUMMARY",
+            "params": {}, "rationale_key": "ambiguous_target",
+            "code": "UNSUPPORTED_CAPABILITY",
+        })
+
+
+def test_every_router_decision_still_validates_against_the_real_union():
+    # The schema is permissive by design; Pydantic remains the gate.
+    for payload in (
+        {"action": "answer_from_context"},
+        {"action": "refuse", "code": "OUT_OF_SCOPE"},
+        {"action": "clarify", "missing": ["plan"]},
+        {"action": "invoke", "capability": "C-SUMMARY", "params": {},
+         "rationale_key": "plan_summary"},
+    ):
+        assert parse_router_output(payload) is not None

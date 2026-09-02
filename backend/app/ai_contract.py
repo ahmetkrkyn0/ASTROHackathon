@@ -11,6 +11,7 @@ See docs/ai/LunaPath_AI_Chatbot_Scope_v0.3.md sections 5 and 7.
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Annotated, Any, Literal, Optional, Union
 
@@ -179,16 +180,68 @@ ROUTER_ADAPTER: TypeAdapter = TypeAdapter(RouterOutput)
 
 
 def parse_router_output(payload: Any):
-    """Validate a router reply. Raises on anything the contract forbids."""
+    """Validate a router reply. Raises on anything the contract forbids.
+
+    The schema nests the decision under ``decision`` so the root can be an
+    object; a provider that honours it replies wrapped, one that ignores it
+    replies bare. Both are unwrapped to the same variant here, and nothing
+    downstream learns which happened.
+    """
+    if (
+        isinstance(payload, dict)
+        and "action" not in payload
+        and isinstance(payload.get("decision"), dict)
+    ):
+        payload = payload["decision"]
     return ROUTER_ADAPTER.validate_python(payload)
 
 
 def router_json_schema() -> dict[str, Any]:
     """Schema handed to the provider, generated from the validator itself.
 
-    Generated rather than hand-written so the two can never drift.
+    Derived from the validator rather than hand-written so the two cannot
+    drift -- but flattened into a single object, because a discriminated
+    union needs an object wrapped around it.
+
+    ``TypeAdapter.json_schema()`` describes the union the only way JSON Schema
+    can: a root-level ``oneOf`` with no ``type``. OpenAI Structured Outputs
+    rejects that outright ("schema must be a JSON Schema of 'type: object'"),
+    and the rejection reads as an invalid_request error, which the provider
+    used to mistake for "this parameter is unsupported" -- so it silently
+    dropped the schema, the model answered in prose, and every question came
+    back E-SCHEMA.
+
+    The union is therefore nested under a single ``decision`` property. The
+    obvious alternative -- flattening every variant's fields into one object
+    with an ``action`` enum -- was tried first and is worse: it describes
+    fields that do not belong together, and the model duly returned all of
+    them at once ("clarify" carrying a capability, a rationale_key and a
+    refusal code). The variants are ``extra="forbid"``, so that superset
+    validated against nothing. Keeping the variants intact lets the model
+    produce exactly one of them.
+
+    ``parse_router_output`` accepts the wrapper or a bare decision, so a
+    provider that ignores the schema entirely still parses.
     """
-    return ROUTER_ADAPTER.json_schema()
+    union = ROUTER_ADAPTER.json_schema()
+    variants = union.get("$defs", {})
+    if not variants:
+        raise ValueError("router schema has no variants to describe")
+
+    return {
+        "type": "object",
+        "$defs": variants,
+        "properties": {
+            # anyOf, not oneOf: the variants are mutually exclusive on their
+            # action const anyway, and anyOf is the composition OpenAI's
+            # Structured Outputs actually documents.
+            "decision": {
+                "anyOf": [{"$ref": f"#/$defs/{name}"} for name in sorted(variants)]
+            }
+        },
+        "required": ["decision"],
+        "additionalProperties": False,
+    }
 
 
 class RouterFailure(BaseModel):
