@@ -52,6 +52,34 @@ class GroundingVerdict:
     masked_text: str = ""
 
 
+# Claim rules are identified by their contract number; everything else is
+# already a category. Named here so the diagnostic can tell the two apart
+# without a second list to keep in step.
+_CLAIM_CODES = frozenset({"N-6", "N-7", "N-8", "N-9", "N-10", "N-11"})
+
+
+def diagnostic(verdict: GroundingVerdict) -> tuple[dict[str, str], ...]:
+    """Why a draft was refused, in a form that is safe to record.
+
+    A blocked draft is discarded, which is right -- but it left nothing behind
+    saying what tripped, so a rejection could not be told apart from a false
+    positive after the fact. This carries the reason and nothing else.
+
+    Codes only. ``GroundingViolation.excerpt`` is a fragment of the rejected
+    draft and is deliberately dropped here: it is what makes a verdict useful
+    to a developer reading it in the moment, and exactly what must not be
+    logged, persisted or returned. A category and, for a claim rule, its
+    contract number are enough to reproduce the decision from the registry.
+    """
+    out: list[dict[str, str]] = []
+    for violation in verdict.violations:
+        if violation.code in _CLAIM_CODES:
+            out.append({"code": "FORBIDDEN_CLAIM", "rule": violation.code})
+        else:
+            out.append({"code": violation.code})
+    return tuple(out)
+
+
 # ── normalisation ────────────────────────────────────────────────────────────
 
 _SPACEY = dict.fromkeys(map(ord, "    "), " ")

@@ -10,6 +10,7 @@ No test reaches the network. The stub provider is selected explicitly.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import sys
@@ -661,3 +662,73 @@ def test_every_compare_backed_alias_reports_comparison_used(capability, key):
         assert body["toolUsage"]["comparisonUsed"] is True, capability
     finally:
         _teardown()
+
+
+# ── mission immutability, end to end in one process ──────────────────────────
+# The assistant reads the mission and must never become a way to change it.
+# The tool layer is read-only by construction, but that is an argument; this
+# plans a real route, runs the two turn shapes that touch the most machinery,
+# and compares the server's own state field for field on either side.
+
+
+def _mission_state() -> dict:
+    """Everything about the mission the assistant must not be able to move."""
+    grids = app.state.grids
+    metadata = grids["metadata"]
+    return {
+        "active_corridor_id": getattr(app.state, "active_corridor_id", None),
+        "corridor_count": len(getattr(app.state, "corridors", {}) or {}),
+        "corridors": copy.deepcopy(getattr(app.state, "corridors", {}) or {}),
+        "grid_shape": list(metadata["shape"]),
+        "grid_resolution_m": metadata["resolution_m"],
+        "grid_cost_weights": dict(metadata["cost_weights"]),
+        "grid_default_rover": metadata.get("default_rover_id"),
+        # The layers themselves, not just their description.
+        "cost_digest": float(np.asarray(grids["cost"]).sum()),
+        "slope_digest": float(np.asarray(grids["slope"]).sum()),
+        "traversable_digest": int(np.asarray(grids["traversable"]).sum()),
+    }
+
+
+def test_the_assistant_never_changes_the_mission_on_screen():
+    _install(_routed({"action": "answer_from_context"}, "Rota özetlendi."))
+
+    planned = client.post("/api/plan", json={
+        "start": {"row": 2, "col": 2},
+        "goal": {"row": 8, "col": 8},
+        "rover_id": "lpr_1",
+        "weights": dict(_WEIGHTS),
+        "include_simulation": True,
+    })
+    assert planned.status_code == 200, planned.text[:300]
+    route = planned.json()
+
+    before = _mission_state()
+    assert before["corridor_count"] >= 1        # there is something to protect
+
+    # A: an ordinary summary turn.
+    first = client.post("/api/ai/chat", json=_payload())
+    assert first.status_code == 200
+    assert first.json()["toolUsage"]["comparisonUsed"] is False
+
+    # B: a compare-backed turn, which runs the real deterministic comparison
+    # over all four profiles. Provider swapped directly rather than through
+    # _install, so the grids this test is watching are not replaced underneath
+    # it.
+    app.state.ai_provider = _routed(
+        {"action": "invoke", "capability": "C-SENSITIVITY", "params": {},
+         "rationale_key": "profile_tradeoff"},
+        "Enerji tasarrufu profili ayrık bir duyarlılıktır.",
+    )
+    second = client.post("/api/ai/chat", json=_payload())
+    assert second.status_code == 200
+    assert second.json()["toolUsage"]["comparisonUsed"] is True
+
+    after = _mission_state()
+    for field, expected in before.items():
+        assert after[field] == expected, field
+
+    # The comparison solved four alternative routes; none of them replaced the
+    # corridor the operator is looking at.
+    assert after["active_corridor_id"] == route["corridor"]["corridor_id"]
+    _teardown()

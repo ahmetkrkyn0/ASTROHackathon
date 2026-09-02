@@ -13,6 +13,7 @@ Contract: docs/ai/LunaPath_AI_Chatbot_Scope_v0.3.md sections 12 and 15.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -26,9 +27,11 @@ from app.ai_analysis import (
     Provenance,
     make_metric,
     percent_of_ratio,
+    plan_registry,
 )
 from app.ai_grounding import (
     deterministic_fallback,
+    diagnostic,
     tr_fold,
     validate_draft,
     whitelist_tokens,
@@ -429,3 +432,72 @@ def test_an_unregistered_lexical_alias_is_still_blocked():
         "Dört profil karşılaştırıldı.", _envelope(_count()), EMPTY
     )
     assert not verdict.ok
+
+
+# ── K5 rejection diagnostics ─────────────────────────────────────────────────
+# A blocked draft is discarded, so without these the reason is unrecoverable
+# and a real rejection cannot be told from a false positive. The diagnostic
+# carries the reason and never the prose.
+
+
+def _summary_env():
+    plan = {
+        "distance": {"value": 1.1131, "unit": "km"},
+        "energy": {"value": 2552.24, "unit": "Wh"},
+        "min_battery": {"value": 36.19, "unit": "%"},
+    }
+    provenance = Provenance(source="DERIVED")
+    return AnalysisEnvelope(
+        capability="C-SUMMARY", request_echo={}, ok=True, payload={"plan": plan},
+        numeric_registry=plan_registry(plan, provenance), warnings=[],
+        provenance_summary=[provenance], compute_ms=1.0, backend_version="",
+    )
+
+
+def _diagnose(draft: str):
+    envelope = _summary_env()
+    tokens = whitelist_tokens(envelope, rover_names=[], profile_names=[])
+    return diagnostic(validate_draft(draft, envelope, tokens))
+
+
+def test_a_registered_summary_reports_no_violation():
+    codes = _diagnose(
+        "Rota 1,113 km uzunluğunda ve toplam 2552,24 Wh enerji tüketiyor. "
+        "Minimum batarya 36,2 % seviyesinde kalıyor."
+    )
+    assert codes == ()
+
+
+def test_an_unregistered_digit_reports_unregistered_number():
+    codes = _diagnose("Rota 1,113 km ve yaklaşık 2550 Wh enerji tüketiyor.")
+    assert {"code": "UNREGISTERED_NUMBER"} in codes
+
+
+def test_a_spelled_quantity_reports_unregistered_number_word():
+    codes = _diagnose("Toplam enerji iki bin beş yüz elli iki Wh civarındadır.")
+    assert {"code": "UNREGISTERED_NUMBER_WORD"} in codes
+
+
+def test_a_safety_claim_reports_the_n8_rule():
+    codes = _diagnose("Bu rota güvenlidir; toplam 2552,24 Wh enerji tüketiyor.")
+    assert {"code": "FORBIDDEN_CLAIM", "rule": "N-8"} in codes
+
+
+def test_a_certainty_claim_reports_the_n11_rule():
+    codes = _diagnose("Rota 1,113 km ve kesinlikle 2552,24 Wh enerji tüketiyor.")
+    assert {"code": "FORBIDDEN_CLAIM", "rule": "N-11"} in codes
+
+
+def test_the_diagnostic_never_carries_draft_prose():
+    # The excerpt is what makes a verdict readable and is exactly what must
+    # not survive into a log; only codes may.
+    draft = "Bu rota güvenlidir ve yaklaşık 2550 Wh tüketiyor."
+    envelope = _summary_env()
+    tokens = whitelist_tokens(envelope, rover_names=[], profile_names=[])
+    verdict = validate_draft(draft, envelope, tokens)
+    assert any(v.excerpt for v in verdict.violations)     # available internally
+    serialised = json.dumps(diagnostic(verdict), ensure_ascii=False)
+    assert "güvenli" not in serialised
+    assert "2550" not in serialised
+    for entry in diagnostic(verdict):
+        assert set(entry) <= {"code", "rule"}

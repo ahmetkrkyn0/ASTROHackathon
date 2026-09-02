@@ -17,6 +17,7 @@ Contract: docs/ai/LunaPath_AI_Chatbot_Scope_v0.3.md sections 12, 14 and 15.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any, Mapping, Optional
 
@@ -45,7 +46,12 @@ from .ai_contract import (
     WarningItem,
 )
 from .ai_evidence import display_pedigree, weakest_validity
-from .ai_grounding import deterministic_fallback, validate_draft, whitelist_tokens
+from .ai_grounding import (
+    deterministic_fallback,
+    diagnostic,
+    validate_draft,
+    whitelist_tokens,
+)
 from .ai_prompt import VERBALIZER_PROMPT
 from .ai_router import gate, gate_message, refusal_code, route, tool_error_code
 from .ai_tools import (
@@ -83,6 +89,8 @@ _CAPABILITY_LIMITATIONS: dict[str, tuple[tuple[str, str], ...]] = {
         ),
     ),
 }
+
+logger = logging.getLogger(__name__)
 
 _CLARIFY_TEXT: dict[str, str] = {
     "start": "başlangıç noktası",
@@ -362,6 +370,15 @@ def run_chat(
         # Blocked, not repaired. A silent correction hides the failure.
         answer = deterministic_fallback(envelope)
         status, error_code = "blocked", "E-GROUNDING"
+        # Server-side only, and codes only: enough to tell a real rejection
+        # from a false positive later, without the rejected prose existing
+        # anywhere outside this function.
+        logger.warning(
+            "K5 blocked a draft: capability=%s level=%s reasons=%s",
+            envelope.capability,
+            explanation_level,
+            list(diagnostic(ground)) if ground is not None else [{"code": "EMPTY_DRAFT"}],
+        )
 
     warnings = [
         WarningItem(code=w.code, severity=w.severity, message=w.message)
