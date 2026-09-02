@@ -800,7 +800,8 @@ select {
 .toast-stack {
   position: fixed;
   right: 22px;
-  bottom: 22px;
+  /* Clears the assistant launcher, which owns this corner. */
+  bottom: 78px;
   z-index: 150;
   width: min(360px, calc(100vw - 32px));
   display: flex;
@@ -1752,38 +1753,128 @@ select {
   margin-bottom: 8px;
 }
 
-/* ── Decision-support chat panel ─────────────────────────────────────────── */
-/* Its own region of the right rail rather than a card inside the telemetry
-   scroller: the conversation has to scroll on its own, and the composer has to
-   stay put while it does. */
+/* ── Decision-support assistant ──────────────────────────────── */
+/* A tool the operator opens, not a tenant of the right rail. The launcher and
+   the window are fixed siblings of the toast stack; the rail is left exactly as
+   it was before the assistant existed. */
 
-.telemetry-header {
-  /* Pinned: the rail now splits its height three ways, and the header is the
-     one part with nothing to give. */
-  flex-shrink: 0;
+/* Above every ordinary surface in the app (map overlays reach 3), below the
+   loading and landing screens (110, 120) and below toasts (150), which stay
+   readable whatever else is on screen. */
+.chat-launcher {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 100;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(70, 70, 81, 0.55);
+  background: linear-gradient(180deg, rgba(31, 31, 40, 0.98), rgba(17, 18, 27, 0.99));
+  box-shadow: 0 10px 26px rgba(2, 3, 8, 0.45);
+  color: rgba(214, 212, 224, 0.86);
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
-.telemetry-scroll {
-  /* A zero basis, not auto. Flex distributes shrinkage in proportion to the
-     basis, and the telemetry column's content basis is ~1800px: against that
-     the chat panel would absorb nearly all of the shortfall and collapse to
-     its floor. */
-  flex: 1 1 0;
-  min-height: 140px;
+.chat-launcher svg {
+  width: 22px;
+  height: 22px;
 }
 
+.chat-launcher:hover {
+  border-color: rgba(160, 160, 255, 0.5);
+  color: var(--text);
+}
+
+.chat-launcher:focus-visible {
+  outline: 2px solid rgba(160, 160, 255, 0.7);
+  outline-offset: 2px;
+}
+
+/* Open is a state of the same control, not a different one. */
+.chat-launcher.is-open {
+  border-color: rgba(160, 160, 255, 0.55);
+  background: linear-gradient(180deg, rgba(60, 60, 110, 0.6), rgba(28, 28, 46, 0.95));
+  color: rgba(232, 232, 240, 0.96);
+}
+
+/* One dot, no count: an answer arrived while the window was hidden. */
+.chat-launcher-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--safe);
+  border: 2px solid rgba(17, 18, 27, 1);
+}
+
+.chat-window {
+  position: fixed;
+  right: 22px;
+  /* Sits above the launcher rather than on top of it. */
+  bottom: 80px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 404px;
+  max-width: calc(100vw - 24px);
+  /* Every bound is viewport-relative, so a short window cannot push the
+     assistant off the top of the screen: height, floor and ceiling all shrink
+     together and 80px + height stays inside the viewport. */
+  height: min(640px, calc(100vh - 120px));
+  min-height: min(480px, calc(100vh - 92px));
+  max-height: calc(100vh - 92px);
+  opacity: 0;
+  transform: translateY(8px) scale(0.985);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    visibility 0s linear 0.15s;
+}
+
+.chat-window.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-window,
+  .chat-window.is-open {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Fills the window it lives in. The .rail-section surface it already carries
+   becomes the window surface, lifted for a floating context. */
 .chat-panel {
-  /* Fixed share rather than a negotiated one, for the same reason. The floor
-     leaves the conversation about 200px once the header, level control and
-     composer have taken their ~220px. */
-  flex: 0 0 48%;
-  min-height: 420px;
+  /* Zero basis, for the same reason the rail split needed one: the height comes
+     from the window, not from the conversation's content. */
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin: 0 18px 18px;
+  margin: 0;
   padding: 14px 16px;
   overflow: hidden;
+  border-color: rgba(70, 70, 81, 0.5);
+  box-shadow: 0 24px 60px rgba(2, 3, 8, 0.55);
 }
 
 .chat-header {
@@ -1792,6 +1883,31 @@ select {
   justify-content: space-between;
   gap: 10px;
   flex-shrink: 0;
+}
+
+.chat-minimize {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(70, 70, 81, 0.4);
+  background: rgba(12, 13, 20, 0.7);
+  color: rgba(199, 197, 211, 0.75);
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+
+.chat-minimize svg {
+  width: 16px;
+  height: 16px;
+}
+
+.chat-minimize:hover {
+  border-color: rgba(160, 160, 255, 0.45);
+  color: var(--text);
 }
 
 .chat-identity .panel-title {
@@ -2402,25 +2518,60 @@ select {
   outline-offset: 2px;
 }
 
-/* Below the stacked breakpoint the rail is auto-height, so a percentage basis
-   resolves against nothing. The panel flows at its natural size instead, with
-   the conversation still capped so the composer stays reachable. */
+/* An open assistant owns the bottom-right corner. Rather than stacking a toast
+   on top of the conversation, the stack moves clear of the window's 404px
+   footprint and back down beside the launcher. */
+.toast-stack.is-chat-open {
+  right: 442px;
+  bottom: 22px;
+  /* Bounded by the gap that actually exists: the window and its margin take
+     442px on the right and the left rail 230px on the other side. A looser
+     bound lets the toast slide under the left rail between 981 and 1024px. */
+  width: min(360px, calc(100vw - 700px));
+}
+
+/* On a genuinely narrow screen a 404px anchored window has nowhere to sit, so
+   the assistant becomes a near-full-screen utility. Same component, same flex
+   chain -- only the shell changes shape. */
 @media (max-width: 980px) {
-  .chat-panel {
-    flex: 0 0 auto;
-    min-height: 0;
+  .chat-launcher {
+    right: 16px;
+    bottom: 16px;
   }
 
-  .telemetry-scroll {
-    flex: 0 0 auto;
-    min-height: 0;
+  /* The window covers the screen here and its header carries the minimize
+     control, so a second way out would only be in the way. */
+  .chat-launcher.is-open {
+    display: none;
   }
 
+  .chat-window {
+    inset: 10px;
+    width: auto;
+    height: auto;
+    max-width: none;
+    min-height: 0;
+    max-height: none;
+  }
+
+  /* No vh cap on the conversation: inside a full-height window the flex chain
+     already gives it everything the header and composer do not use. */
   .chat-log {
-    max-height: 46vh;
+    max-height: none;
   }
 
   .chat-turn--user {
     max-width: 92%;
+  }
+
+  /* With the assistant filling the screen there is no clear space to move a
+     toast into. Below the header keeps it off the minimize control, the
+     conversation body and the composer. */
+  .toast-stack.is-chat-open {
+    top: 92px;
+    right: 16px;
+    bottom: auto;
+    left: 16px;
+    width: auto;
   }
 }

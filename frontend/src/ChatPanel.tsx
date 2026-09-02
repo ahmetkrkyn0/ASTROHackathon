@@ -111,9 +111,27 @@ const NEAR_BOTTOM_PX = 48
 interface ChatPanelProps {
   /** A value snapshot. The panel gets no setters, by design. */
   mission: AiMissionSnapshot
+  /**
+   * Whether the panel is on screen.
+   *
+   * The panel is never unmounted -- the floating shell hides it -- so this is
+   * how it learns that it is out of sight. It moves focus when it comes back,
+   * and reports an answer that landed while nobody was looking. It changes
+   * nothing else: a hidden panel still sends, still waits, still receives.
+   */
+  isVisible?: boolean
+  /** Rendered as a header control when the panel lives in a floating shell. */
+  onMinimize?: () => void
+  /** A reply arrived while hidden. Used for one dot, nothing more. */
+  onAnswerWhileHidden?: () => void
 }
 
-export default function ChatPanel({ mission }: ChatPanelProps) {
+export default function ChatPanel({
+  mission,
+  isVisible = true,
+  onMinimize,
+  onAnswerWhileHidden,
+}: ChatPanelProps) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
@@ -133,10 +151,32 @@ export default function ChatPanel({ mission }: ChatPanelProps) {
   // Bumped by "Yeni sohbet" so a reply still in flight cannot land in a
   // conversation the operator has already cleared.
   const generationRef = useRef(0)
+  // Read inside send(), which is created before the reply arrives: visibility
+  // can change while the request is in flight, so the flag is read late.
+  const visibleRef = useRef(isVisible)
+
+  useEffect(() => {
+    visibleRef.current = isVisible
+  }, [isVisible])
 
   useEffect(() => {
     return () => abortRef.current?.abort()
   }, [])
+
+  // Coming back into view: put the caret where the operator will type, unless
+  // the level is still unchosen and the composer is therefore disabled.
+  useEffect(() => {
+    if (!isVisible) return
+    const composer = composerRef.current
+    if (composer && !composer.disabled) {
+      composer.focus()
+      return
+    }
+    levelRefs.current[LEVELS.findIndex((option) => option.id === level)]?.focus()
+    // level is deliberately not a dependency: this runs on becoming visible,
+    // not every time the operator picks a different level.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVisible])
 
   // Auto-grow, and shrink back when the draft is cleared or reset.
   useEffect(() => {
@@ -212,6 +252,7 @@ export default function ChatPanel({ mission }: ChatPanelProps) {
           },
         ])
         setStatusCue('Yanıt hazır.')
+        if (!visibleRef.current) onAnswerWhileHidden?.()
       } catch (err) {
         if (controller.signal.aborted || generationRef.current !== generation) return
         // The detail is never rendered: a 503 from this route can name a server
@@ -233,7 +274,7 @@ export default function ChatPanel({ mission }: ChatPanelProps) {
         if (generationRef.current === generation) setPending(false)
       }
     },
-    [level, levelChosen, mission, pending, turns],
+    [level, levelChosen, mission, onAnswerWhileHidden, pending, turns],
   )
 
   const startNewChat = useCallback(() => {
@@ -353,6 +394,28 @@ export default function ChatPanel({ mission }: ChatPanelProps) {
             Yeni sohbet
           </button>
         </div>
+        {/* Minimize only. Clearing the conversation is "Yeni sohbet", which
+            stays its own control -- the two must never be the same button. */}
+        {onMinimize && (
+          <button
+            type="button"
+            className="chat-minimize"
+            onClick={onMinimize}
+            aria-label="Analiz Asistanını Küçült"
+            title="Analiz Asistanını Küçült"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path
+                d="M4 6.5 8 10.5 12 6.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
       </header>
 
       <div className="chat-level">
