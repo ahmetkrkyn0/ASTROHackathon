@@ -299,8 +299,18 @@ def resolve_provider(env: Optional[Mapping[str, str]] = None):
 
 
 def _looks_unsupported(exc: Exception) -> bool:
-    """Whether an upstream error reads as "that parameter is not allowed"."""
+    """Whether an upstream error reads as "that parameter is not allowed".
+
+    A rejected *schema* is not a rejected *parameter*. Both arrive as
+    invalid_request errors, and treating the first as the second is how a
+    malformed schema turned into a silent downgrade: the provider dropped
+    Structured Outputs, the model replied in prose, and the router reported
+    E-SCHEMA for every question with nothing naming the real cause. A schema
+    the API refuses is a bug in this codebase and has to surface as one.
+    """
     text = str(exc).lower()
+    if "invalid_json_schema" in text or "invalid schema" in text:
+        return False
     return any(
         marker in text
         for marker in ("unsupported", "unknown parameter", "unrecognized", "invalid_request")

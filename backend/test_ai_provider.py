@@ -100,3 +100,27 @@ def test_stub_records_what_it_was_asked():
     provider = StubProvider()
     provider.respond(system="RULES", messages=[{"role": "user", "content": "hi"}], tools=[])
     assert provider.calls[0]["system"] == "RULES"
+
+
+# A schema the API refuses is a bug here, not a provider limitation. Reading it
+# as "parameter unsupported" made the provider drop Structured Outputs and
+# answer in prose, which surfaced as E-SCHEMA with nothing naming the cause.
+
+def test_rejected_schema_is_not_mistaken_for_an_unsupported_parameter():
+    from app.ai_provider import _looks_unsupported
+
+    rejection = Exception(
+        "Error code: 400 - {'error': {'message': \"Invalid schema for "
+        "response_format 'router_output': schema must be a JSON Schema of "
+        "'type: \\\"object\\\"', got 'type: \\\"None\\\"'.\", 'type': "
+        "'invalid_request_error', 'code': 'invalid_json_schema'}}"
+    )
+    assert _looks_unsupported(rejection) is False
+
+
+def test_a_genuinely_unsupported_parameter_still_degrades():
+    from app.ai_provider import _looks_unsupported
+
+    assert _looks_unsupported(Exception("Unknown parameter: 'text.format'."))
+    assert _looks_unsupported(Exception("Unsupported parameter: 'text'."))
+    assert _looks_unsupported(Exception("Unrecognized request argument: 'text'."))
