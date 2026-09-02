@@ -1,5 +1,24 @@
 const BASE = '/api'
 
+/**
+ * A failed HTTP call, with the status kept.
+ *
+ * The status is what lets a caller tell a transport/configuration failure from
+ * a semantic one without reading the message: the AI endpoint answers a refused
+ * question with 200 and an errorCode, and reserves 503 for "the server cannot
+ * serve this at all". The detail string is carried for logs, never for display
+ * -- a 503 from the assistant route can name a server environment variable.
+ */
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface Waypoint {
@@ -408,6 +427,16 @@ export interface AiChatMessage {
   content: string
 }
 
+/**
+ * The server's limits on one request, mirrored so the client can respect them.
+ *
+ * ChatRequest rejects more than MAX_AI_MESSAGES messages and a message longer
+ * than MAX_AI_MESSAGE_CHARS with a 422, which is a validation failure the
+ * operator can do nothing about. Both are enforced before the request is built.
+ */
+export const MAX_AI_MESSAGES = 12
+export const MAX_AI_MESSAGE_CHARS = 4000
+
 export interface AiEvidenceItem {
   source: string
   label: string
@@ -477,7 +506,10 @@ export async function postAiChat(
   })
   if (!r.ok) {
     const err = await r.json().catch(() => ({ detail: r.statusText }))
-    throw new Error((err as { detail?: string }).detail ?? 'Chat request failed')
+    throw new ApiError(
+      r.status,
+      (err as { detail?: string }).detail ?? 'Chat request failed',
+    )
   }
   return r.json() as Promise<AiChatResponse>
 }

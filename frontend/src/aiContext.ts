@@ -1,4 +1,4 @@
-import type { PlanResponse, PlanWeights } from './api'
+import { MAX_AI_MESSAGES, type AiChatMessage, type PlanResponse, type PlanWeights } from './api'
 
 /**
  * The read-only view of the mission the chat panel is allowed to send.
@@ -130,6 +130,47 @@ export function sanitizePlanForAi(plan: PlanResponse | null): SanitizedPlan | nu
   }
 
   return out
+}
+
+/**
+ * The cell the assistant may treat as chosen.
+ *
+ * Deliberately NOT the map's hover cell. onHoverCellChange fires as the pointer
+ * moves and clears on leave, so a hover cell is a transient pointer position,
+ * not a selection: it would make the assistant's answer depend on where the
+ * mouse happened to rest, and it would make a "analyse the selected cell"
+ * suggestion appear and vanish under the operator's hand.
+ *
+ * Start and goal are set by an explicit click and persist, so they are the only
+ * stable cell context this app has. The preference order mirrors the map's own
+ * focusPoint rule (goal, then start), and the result is null when neither has
+ * been placed -- fail closed, rather than inventing a focus.
+ */
+export function stableFocusCell(
+  start: [number, number] | null,
+  goal: [number, number] | null,
+): { row: number; col: number } | null {
+  const point = goal ?? start
+  return point ? { row: point[0], col: point[1] } : null
+}
+
+/**
+ * The most recent messages that will fit in one request.
+ *
+ * ChatRequest caps a request at MAX_AI_MESSAGES and 422s past it, so a long
+ * local conversation has to be trimmed before it is sent. The window is a plain
+ * tail slice: no summarization and no model call, because either would put text
+ * nobody wrote into the history the router reads.
+ *
+ * The tail is what keeps the request valid in the other direction too -- the
+ * server requires the last message to be the user's question, and the newest
+ * message always survives a tail slice.
+ */
+export function windowMessages(
+  messages: AiChatMessage[],
+  limit: number = MAX_AI_MESSAGES,
+): AiChatMessage[] {
+  return limit > 0 && messages.length > limit ? messages.slice(-limit) : messages
 }
 
 export function buildMissionSnapshot(input: {

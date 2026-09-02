@@ -9,7 +9,7 @@ import MapCanvas, {
 } from './MapCanvas'
 import TerrainView3D from './TerrainView3D'
 import ChatPanel from './ChatPanel'
-import { buildMissionSnapshot } from './aiContext'
+import { buildMissionSnapshot, stableFocusCell } from './aiContext'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -424,14 +424,11 @@ export default function App() {
         goal,
         roverId: selectedRoverId,
         weights,
-        focusedCell: hoverPoint
-          ? { row: hoverPoint[0], col: hoverPoint[1] }
-          : goal
-            ? { row: goal[0], col: goal[1] }
-            : null,
+        // The hover cell is deliberately not used here; see stableFocusCell.
+        focusedCell: stableFocusCell(start, goal),
         plan: planResult,
       }),
-    [start, goal, selectedRoverId, weights, hoverPoint, planResult],
+    [start, goal, selectedRoverId, weights, planResult],
   )
 
   useEffect(() => {
@@ -960,9 +957,9 @@ export default function App() {
                 ))}
               </div>
             </section>
-
-            <ChatPanel mission={missionSnapshot} />
           </div>
+
+          <ChatPanel mission={missionSnapshot} />
             </>
           )}
         </aside>
