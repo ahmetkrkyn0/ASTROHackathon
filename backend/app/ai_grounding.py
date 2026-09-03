@@ -131,6 +131,11 @@ def whitelist_tokens(
     tokens: set[str] = set(_STATIC_TOKENS)
     tokens.update(name for name in (rover_names or ()) if name)
     tokens.update(name for name in (profile_names or ()) if name)
+    # Product identifiers and phrasings K1 authorised for THIS answer. Empty
+    # for every analysis capability, so their strictness is unchanged; the
+    # entries are exact strings, never patterns, so authorising "2D" does not
+    # authorise a bare digit anywhere else.
+    tokens.update(token for token in getattr(envelope, "lexicon", ()) or () if token)
 
     if envelope.backend_version:
         tokens.add(envelope.backend_version)
@@ -181,11 +186,20 @@ def _mask_displays(text: str, displays: Sequence[str]) -> str:
         # leading one it would mask the tail of 31490,23. They must still let
         # a sentence-ending period through, so a bare "." only blocks the
         # match when a digit follows it.
+        #
+        # The comma half of the trailing guard applies ONLY when the display
+        # ends in a digit. A dimensionless "495" really can be the head of
+        # "495,2", so it stays guarded -- but "1490,23 Wh" ends in a unit, and
+        # no comma can continue that number. Guarding it anyway meant an
+        # ordinary Turkish sentence ("... 3,100 km, ... 1490,23 Wh.") failed to
+        # mask its own registered values and was blocked as an unregistered
+        # number: a correct answer refused for a punctuation mark. This is a
+        # narrower guard, not a looser check -- the digit lookahead, the
+        # decimal-point lookahead and the leading guard are unchanged, and the
+        # tolerance is still zero.
+        trailing = r"(?![\d,])(?!\.\d)" if display[-1].isdigit() else r"(?!\d)(?!\.\d)"
         pattern = re.compile(
-            r"(?<![\d,])(?<!\d\.)"
-            + re.escape(display)
-            + _SUFFIX
-            + r"(?![\d,])(?!\.\d)"
+            r"(?<![\d,])(?<!\d\.)" + re.escape(display) + _SUFFIX + trailing
         )
         text = pattern.sub(_SENTINEL, text)
     return text
@@ -231,9 +245,16 @@ _NUMERAL_WORDS = (
 
 # Closed on purpose: exactly the nouns K1 emits count metrics for. Adding a
 # count metric and adding its noun is one change, in one file.
+# "ağırlık" is deliberately absent: the verbalizer prompt itself contains
+# "diğer üç ağırlık da değişir" as the CORRECT way to describe a profile, and
+# adding the noun here would block the answer that instruction asks for.
 _COUNTED_NOUNS = (
     "profil", "hücre", "katman", "kısıt", "adım", "uyarı", "ihlal",
     "kenar", "metrik", "rota", "waypoint",
+    # Nouns the planning guide counts. Each has a registered count metric with
+    # an explicit display_alt, so the legitimate phrasing survives and an
+    # unregistered one does not.
+    "rover", "öncelik", "görünüm",
 )
 
 # Units a spelled-out quantity would be followed by. Closed vocabulary: the
@@ -457,6 +478,12 @@ def validate_draft(
 _FALLBACK_HEAD = (
     "Yanıtı doğrulayamadım, bu yüzden yalnızca kayıtlı değerleri gösteriyorum:"
 )
+# A guide answer can be entirely prose, in which case "only the registered
+# values" would describe an empty list and read as a lie in the one case it
+# fires.
+_FALLBACK_HEAD_FACTS = (
+    "Yanıtı doğrulayamadım, bu yüzden yalnızca kayıtlı bilgileri gösteriyorum:"
+)
 _FALLBACK_TAIL = (
     "Bu özet, doğrulanmış analiz kayıtlarından üretildi; ek bir hesap yapılmadı."
 )
@@ -469,7 +496,14 @@ def deterministic_fallback(envelope: AnalysisEnvelope) -> str:
     passes this module's own check by construction -- there is a test asserting
     exactly that. Performs no arithmetic of any kind.
     """
-    lines: list[str] = [_FALLBACK_HEAD]
+    facts = list(getattr(envelope, "facts", ()) or ())
+    head = _FALLBACK_HEAD if envelope.numeric_registry else _FALLBACK_HEAD_FACTS
+    lines: list[str] = [head if (envelope.numeric_registry or facts) else _FALLBACK_HEAD]
+    # K1's own canonical sentences. Safe by construction for the same reason
+    # the displays are: the operator is shown exactly what the registry holds,
+    # with nothing generated in between.
+    for fact in facts:
+        lines.append(f"- {fact.text}")
     for metric in envelope.numeric_registry:
         lines.append(f"- {metric.label}: {metric.display} ({metric.provenance.source})")
     for warning in envelope.warnings:

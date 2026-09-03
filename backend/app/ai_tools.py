@@ -28,7 +28,8 @@ import numpy as np
 
 from .ai_contract import AiMissionSnapshot, CellRef
 from .ai_evidence import sanitize_cell_telemetry, sanitize_compare
-from .constants import UnknownRoverError, get_rover
+from .ai_guide import GuideParams, guide_evidence
+from .constants import UnknownRoverError, get_rover, rover_catalog
 from .costmap import PlanContext, default_cost_map
 from .profile_comparison import compare_all_profiles
 from .serializer import pixel_to_lonlat
@@ -353,6 +354,15 @@ CAPABILITIES: dict[str, dict[str, Any]] = {
         "Yalnızca dört sabit profil üzerinden AYRIK. Serbest ağırlık "
         "perturbasyonu (ör. 'w_energy 0.35 olsa') mevcut değil.",
     ),
+    # Product help. Free, read-only and -- unlike every capability above --
+    # answerable with no plan, no endpoints and no selected cell, because the
+    # question is about LunaPath rather than about a route.
+    "C-GUIDE": _cap(
+        "C-GUIDE", "LunaPath planlama rehberi", "full", None, "free",
+        "Ürün davranışı, iş akışı, rota öncelikleri, katmanlar, görünüm, görev "
+        "kontrolleri ve rover kataloğu. Rota analizi değildir ve rota "
+        "gerektirmez.",
+    ),
     # Genuinely absent. Described by the generic contract, not built here.
     "C-CONTRAST": _cap(
         "C-CONTRAST", "Karşıtsal açıklama", "unavailable", None, "expensive",
@@ -385,6 +395,10 @@ CELL_BACKED: frozenset[str] = frozenset({"C-POINT", "C-DECOMPOSE"})
 # Params each capability accepts, for K3's schema check.
 PARAM_MODELS: dict[str, Optional[type]] = {
     "C-SUMMARY": None,
+    # A closed topic/subject vocabulary, validated by K3 before anything runs.
+    # Free text here would put the router back in the business of describing
+    # what to say rather than what to run.
+    "C-GUIDE": GuideParams,
     "C-POINT": CellRef,
     # Cell-only by scope: without a cell there is nothing truthful to answer,
     # and route-wide decomposition does not exist.
@@ -432,6 +446,10 @@ class AnalysisProvider:
                 "resolution_m": metadata.get("resolution_m"),
             },
             "rover_id": self.snapshot.roverId,
+            # Identifiers only, so the router can name the rovers a comparison
+            # question is about. Still no spec values: a number here is a
+            # number K2 could echo into its decision.
+            "rover_ids": [str(entry["id"]) for entry in rover_catalog()],
             "has_plan": self.snapshot.currentPlan is not None,
             "has_endpoints": self.snapshot.start is not None
             and self.snapshot.goal is not None,
@@ -444,6 +462,12 @@ class AnalysisProvider:
         if capability == "C-SUMMARY":
             # Already sanitized by ai_evidence before it reached the snapshot.
             return {"plan": self.snapshot.currentPlan}
+        if capability == "C-GUIDE":
+            # Deliberately short of _DISPATCH: the guide has no handler in the
+            # tool registry, so read-only is a property of the wiring rather
+            # than a check that could be removed. Reads the catalogue and the
+            # closed fact table, and nothing else.
+            return guide_evidence(params or {}, rover_catalog())
         name = _DISPATCH.get(capability)
         if name is None:
             raise AiToolError(

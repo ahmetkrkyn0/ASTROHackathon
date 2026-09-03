@@ -46,6 +46,8 @@ _UNIT_PRECISION: dict[str, int] = {
     "deg": 2,
     "degC": 1,
     "weighted_metres": 1,
+    "kg": 0,
+    "m/s": 2,
     DIMENSIONLESS: 5,
 }
 _DEFAULT_PRECISION = 2
@@ -75,6 +77,41 @@ def format_display(value: float, unit: str, precision: Optional[int] = None) -> 
     if unit == DIMENSIONLESS:
         return text
     return f"{text} {unit}"
+
+
+# Alternative renderings of the SAME digits, per unit. Turkish prose writes
+# "%34,2" where the canonical display is "34,2 %", and "12,34 derece" where it
+# is "12,34 deg" -- so a correct, faithful answer was being blocked for a
+# convention, not for a fabricated number.
+#
+# Strictly digit-preserving: every entry embeds the canonical numeric text
+# verbatim, so nothing here can spell a value the registry does not hold. This
+# is NOT the general auto-derivation Metric.display_alt warns about -- a numeral
+# WORD would let the verbalizer say any registered number, and none is produced
+# here. A test pins both properties.
+#
+# Wh/kWh are deliberately absent: _mask_aliases is case-insensitive, and case is
+# exactly what keeps "Wh" from being loosened into "wh".
+_UNIT_ALIAS_FORMS: dict[str, tuple[str, ...]] = {
+    "%": ("%{n}",),
+    "deg": ("{n}°", "{n} derece"),
+    "degC": ("{n} °C", "{n}°C", "{n} derece"),
+    "h": ("{n} saat",),
+    "km": ("{n} kilometre",),
+    "m": ("{n} metre",),
+    "m/s": ("{n} m/sn",),
+}
+
+
+def unit_aliases(display: str, unit: str) -> list[str]:
+    """Digit-preserving alternative renderings of one canonical display."""
+    forms = _UNIT_ALIAS_FORMS.get(unit)
+    if not forms:
+        return []
+    numeric = display[: -len(unit)].strip() if display.endswith(unit) else display
+    if not numeric:
+        return []
+    return [form.format(n=numeric) for form in forms]
 
 
 class Provenance(BaseModel):
@@ -118,6 +155,24 @@ class EnvelopeWarning(BaseModel):
     suppressible: Literal[False] = False
 
 
+class GuideFact(BaseModel):
+    """One canonical product statement K4 may paraphrase.
+
+    ``key`` is drawn from a closed deterministic registry, so a fact is always
+    traceable to the entry K1 selected. K4 receives only the SELECTED facts and
+    is instructed to add no product claim outside them.
+
+    Honest about the boundary: K5 verifies registered numbers and the forbidden
+    claim rules. It does not -- and this pass does not build anything that does
+    -- prove semantic equivalence between a fact and the sentence K4 wrote from
+    it. The containment is that the deterministic registry is the only source
+    of product statements reaching the model at all.
+    """
+
+    key: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+
+
 class ErrorInfo(BaseModel):
     code: str
     message: str
@@ -132,6 +187,13 @@ class AnalysisEnvelope(BaseModel):
     payload: Optional[dict[str, Any]] = None
     error: Optional[ErrorInfo] = None
     numeric_registry: list[Metric] = Field(default_factory=list)
+    # Canonical non-numeric product statements. Empty for every analysis
+    # capability, so their briefing is byte-for-byte what it was.
+    facts: list[GuideFact] = Field(default_factory=list)
+    # Exact strings K1 authorises the draft to contain: product identifiers
+    # ("2D", "LPR-1") and phrases whose wording would otherwise trip a leftover
+    # scan. Bounded by construction and empty unless K1 filled it.
+    lexicon: list[str] = Field(default_factory=list)
     warnings: list[EnvelopeWarning] = Field(default_factory=list)
     provenance_summary: list[Provenance] = Field(default_factory=list)
     compute_ms: float = 0.0
@@ -157,13 +219,18 @@ def make_metric(
 ) -> Metric:
     """Register one number, with its unit and its canonical rendering."""
     quantity = Quantity(value=float(value), unit=unit, precision=precision)
+    display = format_display(float(value), unit, precision)
+    aliases = list(display_alt or [])
+    for alias in unit_aliases(display, unit):
+        if alias not in aliases:
+            aliases.append(alias)
     return Metric(
         key=key,
         label=label,
         quantity=quantity,
         provenance=provenance,
-        display=format_display(float(value), unit, precision),
-        display_alt=list(display_alt or []),
+        display=display,
+        display_alt=aliases,
     )
 
 

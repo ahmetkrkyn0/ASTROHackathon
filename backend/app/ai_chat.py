@@ -24,6 +24,7 @@ from typing import Any, Mapping, Optional
 from .ai_analysis import (
     AnalysisEnvelope,
     EnvelopeWarning,
+    GuideFact,
     Provenance,
     cell_registry,
     compare_registry,
@@ -53,7 +54,15 @@ from .ai_grounding import (
     whitelist_tokens,
 )
 from .ai_prompt import VERBALIZER_PROMPT
-from .ai_router import gate, gate_message, refusal_code, route, tool_error_code
+from .ai_guide import guide_facts, guide_lexicon, guide_registry
+from .ai_router import (
+    gate,
+    gate_message,
+    refusal_code,
+    refusal_message,
+    route,
+    tool_error_code,
+)
 from .ai_tools import (
     CAPABILITIES,
     COMPARE_BACKED,
@@ -86,6 +95,18 @@ _CAPABILITY_LIMITATIONS: dict[str, tuple[tuple[str, str], ...]] = {
         (
             "NO_CAUSAL_ATTRIBUTION",
             "Bu özet, geometrik sapmaların kesin nedenini belirleyemez.",
+        ),
+    ),
+    "C-GUIDE": (
+        (
+            "PRODUCT_SCOPE_ONLY",
+            "Bu yanıt LunaPath'in ürün davranışını açıklar; arazi ya da rota "
+            "analizi değildir.",
+        ),
+        (
+            "READ_ONLY_GUIDANCE",
+            "Asistan hiçbir denetimi kendisi değiştirmez; anlatılan adımları "
+            "operatör uygular.",
         ),
     ),
 }
@@ -127,6 +148,16 @@ _SCOPE_STATEMENTS: dict[str, str] = {
 }
 
 
+# Where guide evidence comes from. Not the loaded grids: a rover specification
+# is a configuration parameter of the model, and inheriting the terrain layers'
+# validity rung would attach a claim about the DEM to a claim about a rover.
+_GUIDE_PROVENANCE = Provenance(
+    source="MODEL",
+    layer="rover_catalog",
+    note="LunaPath rover kataloğu ve ürün davranışı kaydı",
+)
+
+
 def _provenance_for(grids: Mapping[str, Any]) -> Provenance:
     """The weakest input rung across the loaded layers.
 
@@ -147,14 +178,23 @@ def _build_envelope(
 ) -> AnalysisEnvelope:
     """K1: run the deterministic analysis and register what may be said."""
     started = time.perf_counter()
-    provenance = _provenance_for(grids)
+    provenance = (
+        _GUIDE_PROVENANCE if capability == "C-GUIDE" else _provenance_for(grids)
+    )
     payload = provider.invoke(capability, params)
 
     spec = CAPABILITIES.get(capability) or {}
     scope = spec.get("scope")
 
+    facts: list[GuideFact] = []
+    lexicon: list[str] = []
+
     warnings: list[EnvelopeWarning] = []
-    if capability == "C-SUMMARY":
+    if capability == "C-GUIDE":
+        registry = guide_registry(payload, provenance)
+        facts = guide_facts(payload)
+        lexicon = guide_lexicon(payload)
+    elif capability == "C-SUMMARY":
         plan = payload.get("plan") or {}
         registry = plan_registry(plan, provenance)
     elif capability in ("C-POINT", "C-DECOMPOSE"):
@@ -197,6 +237,8 @@ def _build_envelope(
         ok=True,
         payload=dict(payload),
         numeric_registry=registry,
+        facts=facts,
+        lexicon=lexicon,
         warnings=warnings,
         provenance_summary=[provenance],
         compute_ms=round((time.perf_counter() - started) * 1000.0, 1),
@@ -208,7 +250,7 @@ def _verbalizer_input(
     envelope: AnalysisEnvelope, question: str, level: ExplanationLevel
 ) -> list[dict[str, Any]]:
     """What K4 sees: registered metrics and nothing raw."""
-    briefing = {
+    briefing: dict[str, Any] = {
         "capability": envelope.capability,
         "explanation_level": level,
         "metrics": [
@@ -226,6 +268,12 @@ def _verbalizer_input(
         ],
         "provenance_summary": [p.source for p in envelope.provenance_summary],
     }
+    # Emitted only when K1 selected some, so an analysis briefing is byte-for-
+    # byte what it was. These are the ONLY product statements the model gets.
+    if envelope.facts:
+        briefing["facts"] = [
+            {"key": fact.key, "text": fact.text} for fact in envelope.facts
+        ]
     return [
         {
             "role": "user",
@@ -240,6 +288,7 @@ def _verbalizer_input(
 
 def _evidence_for(envelope: AnalysisEnvelope) -> list[EvidenceItem]:
     source = {
+        "C-GUIDE": "planning-guide",
         "C-SUMMARY": "current-plan",
         "C-POINT": "cell-telemetry",
         "C-DECOMPOSE": "cell-telemetry",
@@ -249,6 +298,7 @@ def _evidence_for(envelope: AnalysisEnvelope) -> list[EvidenceItem]:
         "C-SENSITIVITY": "profile-comparison",
     }.get(envelope.capability, envelope.capability)
     label = {
+        "C-GUIDE": "LunaPath planlama rehberi",
         "C-SUMMARY": "Ekrandaki mevcut rota",
         "C-POINT": "Seçili hücre telemetrisi",
         "C-DECOMPOSE": "Seçili hücrenin maliyet ayrışması",
@@ -320,7 +370,12 @@ def run_chat(
     if isinstance(decision, RouterFailure):
         return _refusal("E-SCHEMA", budget, explanation_level)
     if isinstance(decision, RouterRefuse):
-        return _refusal(refusal_code(decision.code), budget, explanation_level)
+        return _refusal(
+            refusal_code(decision.code),
+            budget,
+            explanation_level,
+            message=refusal_message(decision.code),
+        )
     if isinstance(decision, RouterClarify):
         wanted = ", ".join(_CLARIFY_TEXT.get(m, m) for m in decision.missing)
         return _refusal(
@@ -411,11 +466,21 @@ def run_chat(
 
 
 def _rover_names() -> list[str]:
+    """Rover identifiers K5 may see a digit inside.
+
+    Both forms of the name travel. The catalogue publishes "LPR-1
+    (Varsayilan)", but a sentence contains "LPR-1" -- and without the bare form
+    its digit survives the mask and blocks an answer that named the rover
+    correctly.
+    """
+    from .ai_guide import short_name
     from .constants import rover_catalog
 
     names: list[str] = []
     for entry in rover_catalog():
         names.extend(str(entry[key]) for key in ("id", "name") if entry.get(key))
+        if entry.get("name"):
+            names.append(short_name(str(entry["name"])))
     return names
 
 

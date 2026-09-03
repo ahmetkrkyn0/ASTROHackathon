@@ -90,6 +90,19 @@ _REFUSAL_TO_GATE: dict[str, str] = {
     "UNSUPPORTED_CAPABILITY": "E-UNSUPPORTED",
 }
 
+# One gate code, two different things worth telling the operator. A mutating
+# request is refused as an ACTION but is a legitimate question: the operator can
+# be told which control to use. An out-of-scope question cannot. Both still
+# report E-SCOPE, so no new wire code appears and nothing pretends the assistant
+# performed anything.
+_REFUSAL_MESSAGES: dict[str, str] = {
+    "MUTATING_REQUEST": (
+        "Asistan salt okunur; bu değeri değiştiremem. Değişikliği sol "
+        "paneldeki ilgili denetimden kendin yapabilirsin, ardından rotayı "
+        "Generate Route ile yeniden üret."
+    ),
+}
+
 
 def gate_message(code: str) -> str:
     return _GATE_MESSAGES.get(code, _GATE_MESSAGES["E-SCHEMA"])
@@ -101,6 +114,11 @@ def tool_error_code(error: AiToolError) -> str:
 
 def refusal_code(code: str) -> str:
     return _REFUSAL_TO_GATE.get(code, "E-SCOPE")
+
+
+def refusal_message(code: str) -> str:
+    """The Turkish text for one router refusal. Deterministic, never generated."""
+    return _REFUSAL_MESSAGES.get(code) or gate_message(refusal_code(code))
 
 
 @dataclass(frozen=True)

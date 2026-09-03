@@ -126,6 +126,11 @@ RoutableCapability = Literal[
     "C-BINDING",
     "C-INFEASIBLE",
     "C-SENSITIVITY",
+    # Product help. Deliberately ONE capability with a topic parameter rather
+    # than six: a physical tool per help topic would be capability explosion,
+    # and the router picks better from a closed topic enum than from six
+    # near-identical codes.
+    "C-GUIDE",
 ]
 
 # Closed vocabulary. A free-text rationale would be somewhere the router
@@ -140,6 +145,7 @@ RationaleKey = Literal[
     "ambiguous_target",
     "out_of_scope",
     "mutating_request",
+    "product_help",
 ]
 
 MissingContext = Literal["start", "goal", "cell", "rover", "plan"]
