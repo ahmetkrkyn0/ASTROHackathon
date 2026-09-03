@@ -159,11 +159,17 @@ export interface ReplanResponse {
 // ── POST /api/plan-4d ──────────────────────────────────────────────────────
 
 export interface ShadowModel {
-  /** "static" means the cube did NOT vary with time -- do not animate it. */
+  /**
+   * "static" means the cube did NOT vary with time -- do not animate it.
+   * The usual cause is a request with no start_utc: illumination is a
+   * function of time and the backend says so in `reason`.
+   */
   model: string
   time_varying?: boolean
   reason?: string
   horizon_cache?: string
+  /** Echoed back only when the series is time-varying. */
+  start_utc?: string
 }
 
 export interface Plan4DResponse {
