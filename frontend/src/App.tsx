@@ -25,6 +25,15 @@ import {
   type Waypoint,
 } from './api'
 import { batteryToHex, riskToHex } from './colormap'
+import { MissionProvider } from './mission/MissionContext'
+import type { FocusTelemetry, MissionValue } from './mission/types'
+import {
+  BottomDock,
+  CanvasOverlaySlot,
+  GlobalOverlaySlot,
+  LeftRailSlot,
+  RightRailSlot,
+} from './shell/slots'
 
 const DEFAULT_WEIGHTS: PlanWeights = {
   w_slope: 0.409,
@@ -71,17 +80,6 @@ const WEIGHT_CONTROLS: Array<{
 type RiskLevel = (typeof RISK_LEVELS)[number]
 type BootstrapState = 'loading' | 'ready' | 'error'
 type AppPhase = 'landing' | 'loading' | 'app'
-
-interface FocusTelemetry {
-  row: number
-  col: number
-  lat: number
-  lon: number
-  altitudeM: number | null
-  thermalC: number | null
-  resolutionM: number
-  spanKm: number
-}
 
 const DEFAULT_FOCUS_TELEMETRY: FocusTelemetry = {
   row: DEFAULT_POINT[0],
@@ -423,6 +421,41 @@ export default function App() {
   const activeMapView = MAP_VIEW_OPTIONS.find((option) => option.id === viewMode) ?? MAP_VIEW_OPTIONS[0]
   const selectedRover = rovers.find((entry) => entry.id === selectedRoverId) ?? null
 
+  // Grid geometry, taken from the bootstrap layer rather than from the
+  // coordinate readout. X-Layer-Resolution-M is unconditional and already the
+  // *effective* pitch (backend/app/terrain.py), so at DOWNSAMPLE=1 it is the
+  // same number the scale line shows -- with none of the readout's churn.
+  const gridRows = elevationLayer?.shape[0] ?? null
+  const gridCols = elevationLayer?.shape[1] ?? null
+  const gridResolutionM = readResolutionM(elevationLayer)
+  const gridMeta = useMemo(
+    () =>
+      gridRows !== null && gridCols !== null && gridResolutionM !== null
+        ? { rows: gridRows, cols: gridCols, resolutionM: gridResolutionM }
+        : null,
+    [gridCols, gridResolutionM, gridRows],
+  )
+
+  // Values App already owns, republished for features. Memoised on the fields
+  // themselves so the object identity survives every render that changed
+  // something else -- a pointer move, a playback tick, a toast appearing.
+  const missionValue = useMemo<MissionValue>(
+    () => ({
+      gridMeta,
+      roverId: selectedRoverId,
+      weights,
+      start,
+      goal,
+      planResult,
+      // Null on purpose, and not a placeholder: this cockpit has no control
+      // that selects a cell as a cell. See mission/types.ts.
+      selectedCell: null,
+      activeViewMode: viewMode,
+      dimension,
+    }),
+    [dimension, goal, gridMeta, planResult, selectedRoverId, start, viewMode, weights],
+  )
+
   // A value snapshot for the assistant. Deliberately built from state rather
   // than passed as state: the panel receives what the operator has chosen and
   // no way to change any of it.
@@ -602,7 +635,7 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(true)
 
   return (
-    <>
+    <MissionProvider value={missionValue} focusTelemetry={focusTelemetry}>
       {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
 
       <div className={`loading-screen ${phase === 'loading' ? 'is-active' : ''}`}>
@@ -724,6 +757,8 @@ export default function App() {
                     ))}
                   </div>
                 </section>
+
+                <LeftRailSlot />
               </div>
             </>
           )}
@@ -863,6 +898,8 @@ export default function App() {
                 </span>
               ))}
             </div>
+
+            <CanvasOverlaySlot />
           </div>
         </section>
 
@@ -1008,11 +1045,20 @@ export default function App() {
                 ))}
               </div>
             </section>
+
+            <RightRailSlot />
           </div>
             </>
           )}
         </aside>
       </main>
+
+      <BottomDock />
+
+      {/* Application-level floating utilities. Must stay a sibling of, and
+          ahead of, the toast stack: shell.css moves the toasts clear of an open
+          assistant with a sibling combinator. */}
+      <GlobalOverlaySlot />
 
       {/* The assistant floats above the mission rather than sitting inside it.
           Both parts stay mounted: hiding the window is a CSS state, so the
@@ -1087,7 +1133,7 @@ export default function App() {
         ))}
       </div>
       </div>
-    </>
+    </MissionProvider>
   )
 }
 
@@ -1106,6 +1152,18 @@ function TelemetryWell({
       <strong className="telemetry-value">{value}</strong>
     </div>
   )
+}
+
+/**
+ * The layer's effective cell pitch, or null when the header did not arrive.
+ *
+ * X-Layer-Min, -Max and -Validity are conditional; -Resolution-M is not, but a
+ * missing or unparseable value still has to read as "unknown" rather than as a
+ * plausible metre count.
+ */
+function readResolutionM(layer: LayerResponse | null): number | null {
+  const value = layer?.metadata.resolution_m
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function mapFocusTelemetryResponse(response: FocusTelemetryResponse): FocusTelemetry {
