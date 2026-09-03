@@ -545,11 +545,17 @@ export interface Plan4DResponse {
 }
 
 export interface ShadowModel {
-  /** "static" means the cube did NOT vary with time -- do not animate it. */
+  /**
+   * "static" means the cube did NOT vary with time -- do not animate it.
+   * The usual cause is a request with no start_utc: illumination is a
+   * function of time and the backend says so in `reason`.
+   */
   model: string
   time_varying?: boolean
   reason?: string
   horizon_cache?: string
+  /** Echoed back only when the series is time-varying. */
+  start_utc?: string
 }
 
 // ── GET /api/illumination-series ───────────────────────────────────────────
@@ -3748,13 +3754,18 @@ ama makul görünen bir şey oynatır.
   - `type SeriesCube = { data: Float32Array; slices: number; rows: number; cols: number; sliceAt(index): Float32Array }`
   - `planRoute4D(body, signal): Promise<Plan4DResponse>`
 
-- [ ] **Adım 1: `net/series.ts` oluştur**
+- [x] **Adım 1: `net/series.ts` oluştur**
 
 ```ts
 import { getFloat32, getJson } from './client'
 import type { SeriesManifest } from './types'
 
 export interface SeriesParams {
+  /**
+   * Without a start epoch the backend cannot vary illumination with time and
+   * returns shadow_model.model === 'static' with four identical slices. Pass
+   * one whenever the caller intends to animate.
+   */
   startUtc?: string
   nSlices?: number
   sliceHours?: number
@@ -3839,7 +3850,7 @@ export async function fetchSeriesCube(
 }
 ```
 
-- [ ] **Adım 2: `net/series.test.ts` oluştur**
+- [x] **Adım 2: `net/series.test.ts` oluştur**
 
 Vitest'in üçüncü ve son gerekçesi. Küp `(T, rows, cols)` sıralı ve yanlış
 stride ile okunduğunda **hata vermez** — sadece yanlış anı oynatır.
@@ -3885,13 +3896,20 @@ describe('cubeFrom', () => {
     expect(() => cube.sliceAt(2)).toThrow(RangeError)
     expect(() => cube.sliceAt(-1)).toThrow(RangeError)
   })
+
+  it('returns a view, not a copy, so a slice costs nothing per frame', () => {
+    // The time axis reads one slice per frame off a cube that is 250x250xN.
+    // A copy here would allocate a megabyte a frame while the slider moves.
+    const cube = cubeFrom(DATA, { slices: 2, rows: 2, cols: 3 })
+    expect(cube.sliceAt(1).buffer).toBe(DATA.buffer)
+  })
 })
 ```
 
 Run: `cd frontend && npm test`
-Expected: `20 passed` — önceki 16'ya buradaki 4 ekleniyor.
+Expected: `23 passed` — önceki 18'e buradaki 5 ekleniyor.
 
-- [ ] **Adım 3: `net/plan4d.ts` oluştur**
+- [x] **Adım 3: `net/plan4d.ts` oluştur**
 
 ```ts
 import { postJson } from './client'
@@ -3919,7 +3937,7 @@ export async function planRoute4D(
 }
 ```
 
-- [ ] **Adım 4: Küpü elle doğrula**
+- [x] **Adım 4: Küpü elle doğrula**
 
 Backend çalışırken:
 
@@ -3931,7 +3949,7 @@ Expected: JSON manifest dönüyor; `binary_format.shape` `[4, 50, 50]`,
 `binary_format.order` `"slice-major, then row-major"`.
 
 ```bash
-curl -s "http://localhost:8000/api/illumination-series?n_slices=4&slice_hours=1&downsample=10&format=f32&field=shadow" --output /tmp/cube.bin && wc -c /tmp/cube.bin
+curl -s "http://localhost:8000/api/illumination-series?n_slices=4&slice_hours=1&downsample=10&format=f32&field=shadow" --output "$TEMP/cube.bin" && wc -c "$TEMP/cube.bin"
 ```
 
 Expected: `40000` bayt (4 × 50 × 50 × 4). Farklıysa `fetchSeriesCube`'un uzunluk
@@ -3939,15 +3957,29 @@ kontrolü doğru çalışıyor demektir — ama şekli manifest'ten okuduğundan
 
 `shadow_model.model` alanını da not al:
 - `"spice_horizon"` → zaman serisi gerçek, F3 animasyonu anlamlı
-- `"static"` → ufuk önbelleği yok; **önce `python scripts/build_horizon_cache.py`
-  çalıştır**, yoksa Görev 11'in kabulü yapılamaz
+- `"static"` → dilimler birbirinin aynısı, animasyon anlamsız
 
-- [ ] **Adım 5: Derlemeyi doğrula**
+> **Plan düzeltmesi (uygulama sırasında, `de1a2c2`):** bu adım "static" görünce
+> ufuk önbelleğinin eksik olduğunu ve `build_horizon_cache.py` çalıştırılması
+> gerektiğini söylüyordu. **Önbellek eksik değil** — backend diskteki
+> `horizon_map.npy`'yi adıyla bildiriyor. Seri, istekte `start_utc`
+> **olmadığı** için static: yanıtın `shadow_model.reason` alanı bunu açıkça
+> yazıyor ("no start epoch given; illumination is a function of time and
+> cannot vary without one"). Aynı isteğe `start_utc` eklendiğinde model
+> `spice_horizon`, `time_varying: true` oluyor. Görev 11'in ihtiyacı bir
+> başlangıç epoch'u, yeniden kurulmuş bir önbellek değil.
+>
+> Aynı koşuda doğrulananlar: `shape` `[4, 50, 50]`, `order` "slice-major,
+> then row-major", `nodata` "NaN", ikili yanıt **tam 40000 bayt**, ve
+> `binary_url` gerçekten `/api` önekiyle geliyor — `fetchSeriesCube`'un önek
+> kırpması bunun için.
+
+- [x] **Adım 5: Derlemeyi doğrula**
 
 Run: `cd frontend && npm run typecheck && npm run lint`
 Expected: temiz
 
-- [ ] **Adım 6: Commit**
+- [x] **Adım 6: Commit**
 
 ```bash
 git add frontend/src/net/series.ts frontend/src/net/series.test.ts frontend/src/net/plan4d.ts
