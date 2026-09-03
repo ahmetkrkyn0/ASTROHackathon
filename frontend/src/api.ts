@@ -1,23 +1,17 @@
-const BASE = '/api'
-
 /**
- * A failed HTTP call, with the status kept.
+ * The legacy endpoint client.
  *
- * The status is what lets a caller tell a transport/configuration failure from
- * a semantic one without reading the message: the AI endpoint answers a refused
- * question with 200 and an errorCode, and reserves 503 for "the server cannot
- * serve this at all". The detail string is carried for logs, never for display
- * -- a 503 from the assistant route can name a server environment variable.
+ * Frozen, not deprecated: everything here works and keeps working. New endpoint
+ * families do not come here -- they go to api/<family>.ts, alongside
+ * api/assistant.ts, so that adding one is not an edit to a file five other
+ * people are also editing. The shared transport primitives live in api/client.ts
+ * so a new family never has to import this module to get them.
  */
-export class ApiError extends Error {
-  readonly status: number
+import { BASE } from './api/client'
 
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-  }
-}
+// Transitional re-export for callers that still reach for it here. New code
+// imports ApiError from api/client, or from its own api/<family> module.
+export { ApiError } from './api/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -418,100 +412,6 @@ export async function fetchCellTelemetry(
     throw new Error((err as { detail?: string }).detail ?? 'Cell telemetry request failed')
   }
   return r.json() as Promise<FocusTelemetryResponse>
-}
-
-// ── AI decision-support chat ──────────────────────────────────────────────────
-
-export interface AiChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-/**
- * The server's limits on one request, mirrored so the client can respect them.
- *
- * ChatRequest rejects more than MAX_AI_MESSAGES messages and a message longer
- * than MAX_AI_MESSAGE_CHARS with a 422, which is a validation failure the
- * operator can do nothing about. Both are enforced before the request is built.
- */
-export const MAX_AI_MESSAGES = 12
-export const MAX_AI_MESSAGE_CHARS = 4000
-
-export interface AiEvidenceItem {
-  source: string
-  label: string
-  rawValidity: string | null
-  displayPedigree: string | null
-}
-
-export interface AiLimitation {
-  code: string
-  message: string
-}
-
-/**
- * Mandatory and never hidden.
- *
- * Distinct from AiLimitation by meaning, not severity: a warning says the
- * evidence's validity, grounding or constraints are materially affected, and
- * no explanation level may drop one. A limitation says what the feature
- * cannot establish. Nothing ever appears in both arrays.
- */
-export interface AiWarning {
-  code: string
-  severity: 'info' | 'caution' | 'critical'
-  message: string
-  suppressible: false
-}
-
-export type ExplanationLevel = 'L1' | 'L2' | 'L3'
-
-export type GroundingStatus = 'verified' | 'blocked' | 'not_applicable' 
-
-export interface AiChatResponse {
-  answer: string
-  evidence: AiEvidenceItem[]
-  limitations: AiLimitation[]
-  warnings: AiWarning[]
-  toolUsage: {
-    comparisonUsed: boolean
-    readCalls: number
-  }
-  errorCode: string | null
-  groundingStatus: GroundingStatus
-  explanationLevel: ExplanationLevel
-}
-
-/**
- * Ask the decision-support assistant one question.
- *
- * There is deliberately no /api/compare client here. The comparison stays
- * behind the server-side tool boundary, where its once-per-question budget is
- * counted somewhere the page cannot raise it -- and where the OpenAI key
- * lives, which is why the browser only ever talks to this one route.
- *
- * A comparison takes ~21 s, so callers should not impose a short timeout.
- */
-export async function postAiChat(
-  messages: AiChatMessage[],
-  mission: unknown,
-  explanationLevel: ExplanationLevel,
-  signal?: AbortSignal,
-): Promise<AiChatResponse> {
-  const r = await fetch(`${BASE}/ai/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, mission, explanationLevel }),
-    signal,
-  })
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({ detail: r.statusText }))
-    throw new ApiError(
-      r.status,
-      (err as { detail?: string }).detail ?? 'Chat request failed',
-    )
-  }
-  return r.json() as Promise<AiChatResponse>
 }
 
 export async function checkHealth(): Promise<{ dem_loaded: boolean }> {

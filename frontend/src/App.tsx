@@ -8,8 +8,6 @@ import MapCanvas, {
   type MapViewMode,
 } from './MapCanvas'
 import TerrainView3D from './TerrainView3D'
-import ChatPanel from './ChatPanel'
-import { buildMissionSnapshot, stableFocusCell } from './aiContext'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -27,6 +25,7 @@ import {
 import { batteryToHex, riskToHex } from './colormap'
 import { MissionProvider } from './mission/MissionContext'
 import { OverlayProvider } from './overlay/OverlayContext'
+import './shell/shell.css'
 import type { FocusTelemetry, MissionValue } from './mission/types'
 import {
   BottomDock,
@@ -48,8 +47,6 @@ const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
 const BATTERY_RADIUS = 58
 const BATTERY_CIRCUMFERENCE = 2 * Math.PI * BATTERY_RADIUS
 const TOAST_DURATION_MS = 5200
-// Stable, because the launcher's aria-controls has to point at it.
-const CHAT_WINDOW_ID = 'analysis-assistant-window'
 const LOADING_STEPS = [
   { delayMs: 160, progress: 28, message: 'Loading terrain matrices...' },
   { delayMs: 640, progress: 56, message: 'Resolving thermal field...' },
@@ -145,13 +142,6 @@ export default function App() {
   const [routePlaybackStep, setRoutePlaybackStep] = useState<number | null>(null)
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
-
-  // The assistant is a tool the operator opens, not a permanent tenant of the
-  // right rail. Only its visibility lives here; the conversation stays inside
-  // ChatPanel, which is never unmounted.
-  const [isChatOpen, setIsChatOpen] = useState(false)
-  const [chatUnread, setChatUnread] = useState(false)
-  const chatLauncherRef = useRef<HTMLButtonElement>(null)
 
   const mapRef = useRef<MapCanvasHandle>(null)
   const toastIdRef = useRef(0)
@@ -455,65 +445,6 @@ export default function App() {
       dimension,
     }),
     [dimension, goal, gridMeta, planResult, selectedRoverId, start, viewMode, weights],
-  )
-
-  // A value snapshot for the assistant. Deliberately built from state rather
-  // than passed as state: the panel receives what the operator has chosen and
-  // no way to change any of it.
-  const openChat = useCallback(() => {
-    setIsChatOpen(true)
-    // Cleared on open, deterministically: the dot means "you have not looked
-    // since the answer arrived", and opening is looking.
-    setChatUnread(false)
-  }, [])
-
-  const closeChat = useCallback(() => {
-    setIsChatOpen(false)
-    // The launcher is where the operator came from, so it is where they end up.
-    chatLauncherRef.current?.focus()
-  }, [])
-
-  const toggleChat = useCallback(() => {
-    if (isChatOpen) closeChat()
-    else openChat()
-  }, [closeChat, isChatOpen, openChat])
-
-  const markChatUnread = useCallback(() => setChatUnread(true), [])
-
-  /**
-   * Escape minimizes the assistant, from anywhere.
-   *
-   * The window is not modal and does not trap focus, so the operator can click
-   * the map with the assistant still open -- at which point a handler bound to
-   * the window element would never see the key. The listener is document-wide
-   * and installed only while the assistant is open.
-   *
-   * It minimizes and nothing else. No conversation is ever cleared by a key.
-   */
-  useEffect(() => {
-    if (!isChatOpen) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      // Escape during IME composition cancels the composition, not the panel.
-      if (event.isComposing || event.keyCode === 229) return
-      closeChat()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [closeChat, isChatOpen])
-
-  const missionSnapshot = useMemo(
-    () =>
-      buildMissionSnapshot({
-        start,
-        goal,
-        roverId: selectedRoverId,
-        weights,
-        // The hover cell is deliberately not used here; see stableFocusCell.
-        focusedCell: stableFocusCell(start, goal),
-        plan: planResult,
-      }),
-    [start, goal, selectedRoverId, weights, planResult],
   )
 
   useEffect(() => {
@@ -1062,60 +993,7 @@ export default function App() {
           assistant with a sibling combinator. */}
       <GlobalOverlaySlot />
 
-      {/* The assistant floats above the mission rather than sitting inside it.
-          Both parts stay mounted: hiding the window is a CSS state, so the
-          conversation, the chosen level, a half-typed draft and a request still
-          in flight all survive being minimized. */}
-      <button
-        type="button"
-        ref={chatLauncherRef}
-        className={`chat-launcher ${isChatOpen ? 'is-open' : ''} ${
-          chatUnread ? 'has-unread' : ''
-        }`}
-        aria-label="Analiz Asistanını Aç"
-        title="Analiz Asistanını Aç"
-        aria-expanded={isChatOpen}
-        aria-controls={CHAT_WINDOW_ID}
-        onClick={toggleChat}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path
-            d="M4.5 5.5h15v10h-8.5L6.5 19v-3.5h-2z"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M9 12.5v-2.5M12 12.5v-4.5M15 12.5v-1.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-        {chatUnread && <span className="chat-launcher-dot" aria-hidden="true" />}
-      </button>
-
-      <div
-        id={CHAT_WINDOW_ID}
-        className={`chat-window ${isChatOpen ? 'is-open' : ''}`}
-        role="dialog"
-        aria-label="Analiz Asistanı"
-      >
-        <ChatPanel
-          mission={missionSnapshot}
-          isVisible={isChatOpen}
-          onMinimize={closeChat}
-          onAnswerWhileHidden={markChatUnread}
-        />
-      </div>
-
-      <div
-        className={`toast-stack ${isChatOpen ? 'is-chat-open' : ''}`}
-        aria-live="polite"
-        aria-atomic="true"
-      >
+      <div className="toast-stack" aria-live="polite" aria-atomic="true">
         {toasts.map((toast) => (
           <div key={toast.id} className={`toast-card toast-card--${toast.tone}`} role="status">
             <div className="toast-copy">

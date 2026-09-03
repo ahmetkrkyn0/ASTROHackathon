@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react'
+import { Assistant } from './assistant'
 
 /**
  * Where a feature mounts.
@@ -31,4 +32,8 @@ export interface FeatureRegistration {
  * here, which is the whole point -- App.tsx knows the slots, not the features,
  * so two people adding two unrelated features touch this line and nothing else.
  */
-export const FEATURES: readonly FeatureRegistration[] = []
+export const FEATURES: readonly FeatureRegistration[] = [
+  // Floating, not railed: the assistant is opened over the mission and closed
+  // again, and it must keep working with both rails collapsed.
+  { id: 'assistant', slot: 'globalOverlay', Component: Assistant },
+]

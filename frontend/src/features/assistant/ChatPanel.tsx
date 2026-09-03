@@ -6,7 +6,7 @@ import {
   type AiChatMessage,
   type AiChatResponse,
   type ExplanationLevel,
-} from './api'
+} from '../../api/assistant'
 import { windowMessages, type AiMissionSnapshot } from './aiContext'
 
 interface ChatTurn {
