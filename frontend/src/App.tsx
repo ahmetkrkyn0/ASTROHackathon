@@ -17,6 +17,7 @@ import { LeftRailSlot, RightRailSlot, BottomDock, CanvasOverlaySlot } from './sh
 import { LayerProvenance } from './features/layer-provenance'
 import { CostExplain } from './features/cost-explain'
 import { CorridorFeature } from './features/corridor'
+import { Replan } from './features/replan'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -719,6 +720,7 @@ export default function App() {
 
                 <LeftRailSlot>
                   <LayerProvenance />
+                  <Replan />
                 </LeftRailSlot>
               </div>
             </>

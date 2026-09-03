@@ -129,13 +129,29 @@ export interface TriggerRef {
   detail: string
 }
 
+/**
+ * A check that could NOT run, and the telemetry keys it wanted.
+ *
+ * An object, not a bare id: replan_triggers.evaluate_triggers_detailed
+ * appends `{trigger_id, missing}` (replan_triggers.py:219-223), and
+ * /api/pose adds `reason` when it can explain why the keys are absent
+ * (localization.py:317-327). Typing this as string[] makes every
+ * membership test silently false, which renders an unevaluated trigger as
+ * clear -- the exact failure `skipped` exists to prevent.
+ */
+export interface SkippedTrigger {
+  trigger_id: TriggerId
+  missing: string[]
+  reason?: string
+}
+
 export interface ReplanResponse {
   replanned: boolean
   triggers: TriggerRef[]
   /** Trigger ids that WERE evaluated. */
   evaluated: string[]
-  /** Trigger ids that could NOT be evaluated -- telemetry fields missing. */
-  skipped: string[]
+  /** Checks that could NOT be evaluated -- telemetry fields missing. */
+  skipped: SkippedTrigger[]
   reason?: string
   plan?: unknown
 }
@@ -221,7 +237,7 @@ export interface PoseResponse {
   pose_source: string
   fired_triggers: TriggerRef[]
   evaluated: string[]
-  skipped: string[]
+  skipped: SkippedTrigger[]
   trigger_state: Record<string, number>
   recommended_action: string
 }
