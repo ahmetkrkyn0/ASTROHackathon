@@ -24,7 +24,7 @@ Bu kısıtlar **her görev** için geçerlidir. Görevler bunları tekrar etmez.
 - **`src/api.ts` ile `src/net/` bir arada yaşar.** Yeni uç istemcileri `net/` altındadır, `api/` altında **değil**: `src/api.ts` dosyası dururken bir `src/api/` klasörü açmak `'../api'` importunu iki hedefe birden çözülebilir hale getirir. `net/` bu belirsizliği tamamen kaldırır.
 - **`App.css`'e dokunulmaz.** Her modül kendi CSS dosyasını `features/<modül>/<x>.css` içinde getirir ve **kendi yazdığı** her sınıf adı `.lp-<modül>-` ön ekiyle başlar.
 - **`App.css`'ten ödünç alınan tam olarak iki sınıf var:** modülün en dış sarmalayıcısındaki `rail-section` (`App.css:458`) ve `panel-kicker` (`App.css:495`). Bunlar raydaki bölümlerin ortak çerçevesi ve tipografisi; `.lp-` altında yeniden yazmak dokuz paneli komşularından görsel olarak ayrıştırırdı. Bu ikisi **okunur, değiştirilmez** ve modüllerin `App.css`'e olan tek bağıdır — üçüncü bir mevcut sınıf eklenmez.
-- **`api.ts`'e dokunulmaz.** Mevcut yedi çağrı yerinde kalır; yeni uçlar `src/net/` altında ayrı dosyalara yazılır. Tek istisna: Görev 2'deki `AstarMetrics` tip düzeltmesi.
+- **`api.ts`'e dokunulmaz.** Mevcut yedi çağrı yerinde kalır; yeni uçlar `src/net/` altında ayrı dosyalara yazılır. İki istisna var, ikisi de aynı sınıftan — `api.ts`'in backend'i yanlış tiplemesi: Görev 2'deki `AstarMetrics` düzeltmesi ve Görev 5'teki `fetchCellTelemetry` dönüş tipi. Yapı değiştirilmez, yalnızca yanlış tip doğrusuyla değiştirilir.
 - **`App.tsx`'e yapılan her değişiklik kendi commit'idir**, içine başka iş karışmaz.
 - **Modül dışa yalnızca `index.tsx`'ini açar.** Başka bir modülün iç dosyası import edilmez.
 - **Koordinat birimi:** `OverlayLayer` içindeki her koordinat **fine grid pikselidir** (`{row, col}`). CRS metresi veya coarse piksel `grid/geo.ts` ile çevrilir.
@@ -117,7 +117,8 @@ cd frontend && npm run dev
 | `src/overlay/useOverlays.ts` | Overlay kayıt defteri: context + `useOverlays` kancası | 4 |
 | `src/overlay/OverlayProvider.tsx` | Yalnızca `OverlayProvider` bileşeni — Fast Refresh için ayrı dosya | 4 |
 | `src/overlay/draw2d.ts` | `OverlayLayer[]` → 2B canvas çizimi | 4 |
-| `src/mission/MissionContext.tsx` | Read-only durum + `setStart`/`setGoal` | 5 |
+| `src/mission/MissionContext.ts` | Read-only durum tipleri, context ve `useMission` | 5 |
+| `src/mission/MissionProvider.tsx` | Yalnızca `MissionProvider` bileşeni — Fast Refresh için ayrı dosya | 5 |
 | `src/shell/slots.tsx` | `LeftRailSlot` · `RightRailSlot` · `BottomDock` · `CanvasOverlaySlot` | 5 |
 | `src/net/terrain.ts` | `GET /api/terrain` | 6 |
 | `src/mission/useTerrainManifest.ts` | Manifesti **bir kez** çekip paylaşan hook — F1, F2a ve F7 aynı geoyu istiyor | 6 |
@@ -1603,8 +1604,10 @@ yapısal değişiklik (sarmalayıcılar + dört yuva). Görev 6'dan sonra `App.t
 faz başına yalnızca bir satır eklenecek.
 
 **Files:**
-- Create: `frontend/src/mission/MissionContext.tsx`
+- Create: `frontend/src/mission/MissionContext.ts`
+- Create: `frontend/src/mission/MissionProvider.tsx`
 - Create: `frontend/src/shell/slots.tsx`
+- Modify: `frontend/src/api.ts` (`fetchCellTelemetry` dönüş tipi)
 - Modify: `frontend/src/App.tsx`
 
 **Interfaces:**
@@ -1614,7 +1617,26 @@ faz başına yalnızca bir satır eklenecek.
   - `useMission(): MissionState & MissionActions`
   - `LeftRailSlot`, `RightRailSlot`, `BottomDock`, `CanvasOverlaySlot` bileşenleri
 
-- [ ] **Adım 1: `mission/MissionContext.tsx` oluştur**
+- [ ] **Adım 1: `mission/MissionContext.ts` + `mission/MissionProvider.tsx` oluştur**
+
+> **Plan düzeltmesi (uygulama sırasında, `a24c053`):** Görev 4'tekiyle aynı
+> bölünme. Aşağıdaki kod tek dosyada `MissionProvider` bileşeniyle `useMission`
+> kancasını birlikte dışa açıyordu; `react-refresh/only-export-components` bunu
+> hata saydı ve haklıydı — bu sağlayıcı tüm kokpiti sarıyor, yani context'in
+> şeklindeki her düzenleme uygulamayı bastan yükletirdi. Context, tipler ve
+> `useMission` `MissionContext.ts`'te kaldı (bu sayede F1–F7 modüllerinin
+> `useMission` importu **değişmiyor**); bileşen `MissionProvider.tsx`'e taşındı.
+>
+> **İkinci düzeltme:** Adım 3 ham telemetriyi saklamak istiyor ama
+> `fetchCellTelemetry` `FocusTelemetryResponse` döndürüyordu — uç nokta on bir
+> alan gönderirken sekizini tipleyen, ve eksik üçün ikisi tam da bu görevin
+> saklamak istediği `cost_breakdown` ile `layer_validity`. Çalışan backend'e
+> soruldu, on bir alanın hepsi geliyor. `api.ts`'in dönüş tipi
+> `CellTelemetryResponse` ile değiştirildi; dar tip, sekiz alanı okuyan telemetri
+> kuyuları için duruyor.
+
+`frontend/src/mission/MissionContext.ts` — tipler, context ve kanca (JSX yok).
+`frontend/src/mission/MissionProvider.tsx` — yalnızca bileşen:
 
 ```tsx
 import React, { createContext, useContext } from 'react'
@@ -1664,7 +1686,23 @@ export interface MissionActions {
 
 export type MissionValue = MissionState & MissionActions
 
-const MissionContext = createContext<MissionValue | null>(null)
+export const MissionContext = createContext<MissionValue | null>(null)
+
+export function useMission(): MissionValue {
+  const ctx = useContext(MissionContext)
+  if (!ctx) {
+    throw new Error('useMission must be used inside <MissionProvider>')
+  }
+  return ctx
+}
+```
+
+`MissionProvider.tsx`:
+
+```tsx
+import React from 'react'
+import { MissionContext } from './MissionContext'
+import type { MissionValue } from './MissionContext'
 
 export function MissionProvider({
   value,
@@ -1674,14 +1712,6 @@ export function MissionProvider({
   children: React.ReactNode
 }) {
   return <MissionContext.Provider value={value}>{children}</MissionContext.Provider>
-}
-
-export function useMission(): MissionValue {
-  const ctx = useContext(MissionContext)
-  if (!ctx) {
-    throw new Error('useMission must be used inside <MissionProvider>')
-  }
-  return ctx
 }
 ```
 
@@ -1753,16 +1783,10 @@ import type { CellTelemetryResponse } from './net/types'
 
 - [ ] **Adım 4: `App.tsx` — sağlayıcıları ve yuvaları yerleştir**
 
-`App.tsx:1` şu anda `useMemo`'yu import etmiyor — React import'una ekle:
+`useMemo` `App.tsx`'in React import'unda **zaten var** (`3c76198` ekledi). Kalan importları ekle:
 
 ```ts
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-```
-
-Sonra kalan importları ekle:
-
-```ts
-import { MissionProvider } from './mission/MissionContext'
+import { MissionProvider } from './mission/MissionProvider'
 import type { MissionValue } from './mission/MissionContext'
 import { OverlayProvider } from './overlay/OverlayProvider'
 import { useOverlays } from './overlay/useOverlays'
@@ -1893,7 +1917,7 @@ boş yuva sarmalayıcısı var ama hiçbiri render etmiyor.
 - [ ] **Adım 8: Commit**
 
 ```bash
-git add frontend/src/mission/ frontend/src/App.tsx
+git add frontend/src/mission/ frontend/src/shell/ frontend/src/App.tsx frontend/src/api.ts
 git commit -m "feat(frontend): publish the cockpit's state and open four mount points
 
 Nine phase modules are coming and App.tsx is 1236 lines that three people
