@@ -263,14 +263,18 @@ def percent_of_ratio(ratio: Metric, *, key: str, label: str) -> Metric:
 # Label and unit for each field a sanitizer may emit. A field absent from
 # here is never registered, which is what keeps the verbalizer's vocabulary
 # narrow: registering every raw number would defeat the point of a registry.
+# Ordered by what a route summary leads with: route, then energy, then
+# terrain/risk. K4 used to be handed the registry in registration order and had
+# no way to tell a core fact from a secondary one, so it opened on whichever
+# metric happened to come first.
 _PLAN_QUANTITIES: tuple[tuple[str, str, str], ...] = (
     ("distance", "Toplam mesafe", "km"),
+    ("elapsed", "Geçen süre", "h"),
     ("energy", "Toplam enerji tüketimi", "Wh"),
-    ("max_continuous_shadow", "En uzun kesintisiz gölge", "h"),
     ("min_battery", "Minimum batarya", "%"),
     ("final_battery", "Varıştaki batarya", "%"),
-    ("elapsed", "Geçen süre", "h"),
     ("max_slope", "En dik eğim", "deg"),
+    ("max_continuous_shadow", "En uzun kesintisiz gölge", "h"),
 )
 
 _PLAN_COUNTS: tuple[tuple[str, str], ...] = (
@@ -279,6 +283,28 @@ _PLAN_COUNTS: tuple[tuple[str, str], ...] = (
     ("critical_steps_count", "Kritik adım sayısı"),
     ("high_or_above_steps_count", "Yüksek riskli adım sayısı"),
 )
+
+# The grouping K4 is told about, so ordering survives a metric it does not
+# recognise. A key absent from here carries no section and is secondary by
+# omission rather than by K4 guessing.
+_SUMMARY_SECTIONS: dict[str, str] = {
+    "distance": "route",
+    "elapsed": "route",
+    "waypoint_count": "route",
+    "energy": "energy",
+    "min_battery": "energy",
+    "final_battery": "energy",
+    "total_recharges": "energy",
+    "max_slope": "terrain",
+    "max_continuous_shadow": "terrain",
+    "critical_steps_count": "terrain",
+    "high_or_above_steps_count": "terrain",
+}
+
+
+def summary_section(key: str) -> Optional[str]:
+    """Which part of a route summary a registered metric belongs to."""
+    return _SUMMARY_SECTIONS.get(key)
 
 _CELL_QUANTITIES: tuple[tuple[str, str, str], ...] = (
     ("altitude", "Yükseklik", "m"),

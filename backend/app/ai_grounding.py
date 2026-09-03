@@ -340,7 +340,9 @@ FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
             r"\brota\w*\s+(?:\w+\s+){0,2}güvenli(?!k)"
             r"|\bgüvenli(?!k)\s+(?:bir\s+)?(rota|güzergah|yol)\b"
             r"|\brover['’]?\w*\s*(?:\w+\s+)?(korur|koruyor|koruyacak)"
-            r"|\b(risksiz|tehlikesiz|zarar\s+görmez)\b"
+            # \w* rather than \b: "risksizdir" is the same claim as
+            # "risksiz", and Turkish attaches the copula to the stem.
+            r"|\b(risksiz|tehlikesiz|zarar\s+görmez)\w*\b"
             r"|\b(this\s+)?(route|path)\s+is\s+safe\b|\bprotects\s+the\s+rover\b"
         ),
         exempt=_p(
@@ -354,9 +356,9 @@ FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
         code="N-9",
         trigger=_p(
             r"\b(ilk|tek|biricik|benzersiz|eşsiz)\s+(?:\w+\s+)?"
-            r"(çözüm|sistem|araç|platform|yaklaşım)\b"
+            r"(çözüm|sistem|araç|platform|yaklaşım)\w*\b"
             r"|\bdünyada\s+(ilk|tek)\b"
-            r"|\ben\s+iyi\s+(çözüm|sistem|araç|rota)\b"
+            r"|\ben\s+iyi\s+(çözüm|sistem|araç|rota)\w*\b"
             r"|\bworld'?s\s+first\b|\bstate[- ]of[- ]the[- ]art\b"
         ),
         exempt=_p(
@@ -369,8 +371,8 @@ FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
         code="N-10",
         trigger=_p(
             r"\b(uçuş|görev)\s+yazılım"
-            r"|\bkart\s*üstü\b|\bgömülü\s+(yazılım|sistem)\b"
-            r"|\bsertifikalı\b|\buçuşa\s+hazır\b"
+            r"|\bkart\s*üstü\w*\b|\bgömülü\s+(yazılım|sistem)\w*\b"
+            r"|\bsertifikalı\w*\b|\buçuşa\s+hazır\w*\b"
             r"|\brover\s+üzerinde\s+çalış"
             r"|\bflight[- ]software\b|\bspace[- ]qualified\b"
         ),
@@ -379,7 +381,13 @@ FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
     ClaimRule(
         code="N-11",
         trigger=_p(
-            r"\bkesinlikle\b|\bkesin(?!lik\b)\w*\b"
+            # "kesinti" and its family mean interruption, not certainty, and
+            # "En uzun kesintisiz gölge" is one of K1's own metric labels -- so
+            # this rule used to block the deterministic fallback it exists to
+            # protect. Excluding that stem removes a false positive; every
+            # actual certainty claim ("kesin", "kesindir", "kesinlikle") still
+            # fires.
+            r"\bkesinlikle\b|\bkesin(?!lik\b)(?!ti)\w*\b"
             r"|\bmutlaka\b|\bşüphesiz\b"
             r"|\bgaranti(?!\s+edilemez)\w*\b"
             r"|\byüzde\s+yüz\b"

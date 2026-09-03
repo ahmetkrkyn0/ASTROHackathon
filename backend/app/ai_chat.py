@@ -30,6 +30,7 @@ from .ai_analysis import (
     compare_registry,
     constraint_warnings,
     plan_registry,
+    summary_section,
 )
 from .ai_contract import (
     AiMissionSnapshot,
@@ -259,6 +260,14 @@ def _verbalizer_input(
                 "label": metric.label,
                 "display": metric.display,
                 "provenance": metric.provenance.source,
+                # Which part of a summary this belongs to. Present only where
+                # K1 knows; a metric with no section is secondary by omission
+                # rather than by the verbalizer guessing.
+                **(
+                    {"section": section}
+                    if (section := summary_section(metric.key))
+                    else {}
+                ),
             }
             for metric in envelope.numeric_registry
         ],
