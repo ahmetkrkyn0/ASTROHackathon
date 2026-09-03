@@ -40,6 +40,12 @@ from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
 from .pathfinder_4d import astar_4d, gated_move_count
 from .data_loader import DATA_DIR, load_and_preprocess_dem, load_preprocessed_grids
+from .earth_visibility import (
+    build_earth_visibility_series,
+    comm_window_from_metadata,
+    earth_track_for_series,
+)
+from .grid_frame import map_xy_to_pixel
 from .illumination_series import build_shadow_series, sun_track_for_series
 from .thermal_model import (
     REGOLITH_LAG_VALIDITY,
@@ -381,6 +387,18 @@ class ReplanRequest(BaseModel):
         description="Telemetry snapshot evaluated against the replan triggers.",
     )
     force: bool = False
+    # With an epoch the backend computes comm_minutes_remaining itself, from
+    # the rover's cell and the Earth's position, when the caller did not
+    # supply one. (A4.)
+    utc: Optional[str] = Field(
+        default=None,
+        description=(
+            "UTC instant of this telemetry, e.g. '2026-09-03T12:00:00'. When "
+            "given and the horizon cube is cached, comm_minutes_remaining is "
+            "computed from the Earth's geometry unless state already carries "
+            "it; the computed window is reported as comm_window either way."
+        ),
+    )
 
     _check_state = field_validator("state")(_reject_non_finite_telemetry)
 
@@ -426,6 +444,18 @@ class Plan4DRequest(BaseModel):
             "(0-1]. The route must keep the battery above the rover's "
             "soc_min_pct reserve; starting under the reserve is allowed only "
             "where waiting in sunlight can charge it back."
+        ),
+    )
+    # VIPER's teleoperation rule: drive only with a direct-to-Earth link.
+    # Off by default -- the Earth field is always reported when it can be
+    # computed; this makes it a constraint. (A4.)
+    require_earth_visibility: bool = Field(
+        default=False,
+        description=(
+            "Refuse any move that arrives in a cell with no line of sight to "
+            "Earth at the arrival slice (waiting is never restricted). Needs "
+            "start_utc and the horizon cube; without them the request is a "
+            "422 rather than a silently unconstrained plan."
         ),
     )
 
@@ -752,10 +782,51 @@ def plan(req: PlanRequest, request: Request):
     return response
 
 
+def _comm_window_or_none(
+    grids: dict | None, row: int, col: int, utc: str | None
+) -> dict[str, Any] | None:
+    """The Earth link at a cell and instant, or None when it cannot be known.
+
+    None covers "no epoch", "no grids" and "no horizon cube" alike; the
+    trigger evaluator then reports comm_window as skipped, which is the
+    honest answer. A cell outside the grid is the caller's mistake and a
+    422; any other failure (a missing kernel, say) is logged and treated
+    as unknown rather than allowed to take the endpoint down.
+    """
+    if not utc or grids is None:
+        return None
+    try:
+        return comm_window_from_metadata(grids["metadata"], int(row), int(col), utc)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("comm window unavailable: %s", exc)
+        return None
+
+
+def _state_with_comm(
+    state: dict[str, float], window: dict[str, Any] | None
+) -> dict[str, float]:
+    """Fill comm_minutes_remaining from the computed window unless the
+    caller supplied it: telemetry from the radio beats geometry from the
+    map, but geometry beats nothing at all."""
+    merged = dict(state)
+    if window is not None and "comm_minutes_remaining" not in merged:
+        merged["comm_minutes_remaining"] = float(window["trigger_minutes_remaining"])
+    return merged
+
+
 @app.post("/api/replan")
 def replan(req: ReplanRequest, request: Request):
     """Re-plan from the rover's current position when a trigger fires."""
-    evaluation = evaluate_triggers_detailed(req.state, get_rover(req.rover_id))
+    window = None
+    if req.utc:
+        grids = _current_grids()
+        if grids is not None:
+            row, col = _to_pixel(req.current, "current", grids["metadata"])
+            window = _comm_window_or_none(grids, row, col, req.utc)
+    state = _state_with_comm(req.state, window)
+    evaluation = evaluate_triggers_detailed(state, get_rover(req.rover_id))
     fired = evaluation["fired"]
     if not fired and not req.force:
         # "skipped" is reported so an empty trigger list is never mistaken
@@ -767,6 +838,7 @@ def replan(req: ReplanRequest, request: Request):
             "triggers": [],
             "evaluated": evaluation["evaluated"],
             "skipped": skipped,
+            "comm_window": window,
             "reason": (
                 "no replan trigger fired"
                 if not skipped
@@ -792,6 +864,9 @@ def replan(req: ReplanRequest, request: Request):
         ],
         "evaluated": evaluation["evaluated"],
         "skipped": evaluation["skipped"],
+        # The Earth link the trigger was judged against, when it was
+        # computed here rather than supplied. (A4.)
+        "comm_window": window,
         "plan": payload,
     }
 
@@ -874,10 +949,24 @@ def pose(req: PoseRequest, request: Request):
             ),
         )
 
+    # A pose carries everything the Earth-link geometry needs -- where the
+    # rover is and when -- so the comm-window trigger no longer waits for a
+    # hand-fed number. A pose off the grid simply gets no window. (A4.)
+    window = None
+    grids = _current_grids()
+    if grids is not None:
+        try:
+            row, col = map_xy_to_pixel(req.pose.x_m, req.pose.y_m, grids["metadata"])
+        except ValueError:
+            row = col = None
+        if row is not None:
+            window = _comm_window_or_none(grids, row, col, req.pose.timestamp_utc)
+    state = _state_with_comm(req.state, window)
+
     result = evaluate_pose(
         req.pose,
         corridor,
-        req.state,
+        state,
         previous_along_track_m=req.previous_along_track_m,
         rover=get_rover(corridor_rover_id) if corridor_rover_id else None,
     )
@@ -894,7 +983,41 @@ def pose(req: PoseRequest, request: Request):
         "skipped": result["skipped"],
         "trigger_state": result["trigger_state"],
         "recommended_action": result["recommended_action"],
+        "comm_window": window,
     }
+
+
+@app.get("/api/comm-window")
+def comm_window_endpoint(
+    row: int = Query(..., ge=0),
+    col: int = Query(..., ge=0),
+    utc: str = Query(..., description="UTC instant, e.g. '2026-09-03T12:00:00'"),
+    step_minutes: float = Query(30.0, gt=0.0, le=1440.0),
+    max_hours: float = Query(336.0, gt=0.0, le=24.0 * 60.0),
+):
+    """When does this cell's direct-to-Earth link next open or close?
+
+    ``trigger_minutes_remaining`` is the number ``POST /api/replan`` and
+    ``POST /api/pose`` feed to the comm-window trigger; the rest says why.
+    Needs the horizon cube beside the processed grids (409 without it).
+    """
+    grids = _get_grids()
+    try:
+        window = comm_window_from_metadata(
+            grids["metadata"], row, col, utc, step_minutes=step_minutes, max_hours=max_hours
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if window is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No horizon cube beside the processed grids, so Earth "
+                "visibility cannot be computed; run "
+                "scripts/build_horizon_cache.py and reload."
+            ),
+        )
+    return window
 
 
 @app.post("/api/plan-4d")
@@ -1128,6 +1251,38 @@ def plan_4d(req: Plan4DRequest, request: Request):
         [coarsen_grid(snapshot, req.coarsen) for snapshot in shadow_series], axis=0
     )
 
+    # Direct-to-Earth visibility per slice, on the planner's grid. Always
+    # reported when it can be computed; enforced on request. Coarsened the
+    # way traversability is -- a coarse cell has a link only if every fine
+    # cell in it does -- so the rule is conservative at the block edges.
+    # (A4.)
+    earth_base = grids_for_plan.get("earth_visibility")
+    earth_series, earth_provenance = build_earth_visibility_series(
+        None if earth_base is None else np.asarray(earth_base, dtype=np.float64),
+        metadata,
+        n_slices,
+        slice_hours,
+        req.start_utc,
+    )
+    if earth_series:
+        earth_cube = np.stack(
+            [
+                coarsen_traversable(np.asarray(snapshot) > 0.5, req.coarsen)
+                for snapshot in earth_series
+            ],
+            axis=0,
+        )
+    else:
+        earth_cube = None
+    if req.require_earth_visibility and earth_cube is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "require_earth_visibility needs an Earth visibility field and "
+                f"none could be computed: {earth_provenance.get('reason')}"
+            ),
+        )
+
     result = astar_4d(
         cost_cube,
         wait_cube,
@@ -1145,6 +1300,8 @@ def plan_4d(req: Plan4DRequest, request: Request):
         elevation_grid=coarse_elevation,
         shadow_cube=shadow_cube,
         initial_soc_frac=req.initial_soc_pct,
+        earth_visible_cube=earth_cube,
+        require_earth_visibility=req.require_earth_visibility,
     )
     if result["error"]:
         # move_count already accounted for the edge gates, so a failure here
@@ -1177,6 +1334,25 @@ def plan_4d(req: Plan4DRequest, request: Request):
                     f" The site is dark until {first_lit * slice_hours:.1f} h "
                     f"into the {horizon_h:.1f} h horizon."
                 )
+        # Same courtesy for the Earth: when the rule closed the route, say
+        # whether the link ever opens anywhere in the window.
+        if req.require_earth_visibility and earth_cube is not None:
+            linked = [float(np.mean(snapshot)) for snapshot in earth_cube]
+            first_linked = next(
+                (index for index, value in enumerate(linked) if value > 0.0), None
+            )
+            horizon_h = n_slices * slice_hours
+            if first_linked is None:
+                detail += (
+                    f" No cell has Earth visibility at any slice of the "
+                    f"{horizon_h:.1f} h horizon from start_utc, so no move is "
+                    "allowed under require_earth_visibility."
+                )
+            elif first_linked > 0:
+                detail += (
+                    f" Earth visibility opens {first_linked * slice_hours:.1f} h "
+                    f"into the {horizon_h:.1f} h horizon."
+                )
         raise HTTPException(status_code=404, detail=detail)
 
     # The planner solves on the coarse grid, but the caller asked in fine
@@ -1207,12 +1383,18 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # continuous shadow the rover had accrued on arrival there.
         "path_battery_pct": result["path_battery_pct"],
         "path_dark_hours": result["path_dark_hours"],
+        # One entry per state: whether the cell saw the Earth at that slice.
+        # None when the field was unavailable (see earth_model.reason).
+        "path_earth_visible": result["path_earth_visible"],
         "metrics": metrics,
         # Whether the cube this plan solved actually varied with time, and
         # why not when it did not. A caller reading wait_steps needs this to
         # know whether a zero means "waiting did not help" or "waiting could
         # not have helped". (Round 3 review, M-1.)
         "shadow_model": shadow_provenance,
+        # Same three-way honesty for the Earth field: spice_horizon, static
+        # (the long-run layer) or unavailable, with the reason. (A4.)
+        "earth_model": earth_provenance,
         "n_slices": n_slices,
         "slice_hours": slice_hours,
         "slice_hours_source": slice_hours_source,
@@ -1380,6 +1562,7 @@ def get_layer(
         "shadow_ratio",
         "cost",
         "traversable",
+        "earth_visibility",
     )
     if layer_name not in valid_layers:
         raise HTTPException(status_code=400, detail=f"Layer must be one of {valid_layers}")
@@ -1406,14 +1589,20 @@ def get_layer(
     metadata["rover_name"] = rover["name"]
 
     if layer_name not in grids:
-        raise HTTPException(
-            status_code=404,
-            detail=(
+        if layer_name == "earth_visibility":
+            detail = (
+                "earth_visibility is not present in the loaded grids. It is "
+                "an optional cache: run scripts/build_earth_visibility_cache.py "
+                "(needs horizon_map.npy and the NAIF kernels), then reload "
+                "with POST /api/load-preprocessed."
+            )
+        else:
+            detail = (
                 f"{layer_name} is not present in the loaded grids. It is "
                 "derived at load time from the sunlit-peak thermal field; "
                 "reload with POST /api/load-preprocessed."
-            ),
-        )
+            )
+        raise HTTPException(status_code=404, detail=detail)
     layer = grids[layer_name]
     if downsample > 1:
         layer = layer[::downsample, ::downsample]
@@ -1564,6 +1753,51 @@ def _series_field_cube(
     return out
 
 
+def _check_series_budget(
+    n_slices: int, shape: tuple[int, int], step: int
+) -> tuple[int, int]:
+    """Refuse a series that would not fit the wire or the working set.
+
+    Shared by ``/api/illumination-series`` and ``/api/earth-series`` so the
+    two answer with the same numbers and the same advice. Returns the
+    decimated (rows, cols).
+    """
+    rows = len(range(0, int(shape[0]), step))
+    cols = len(range(0, int(shape[1]), step))
+    size = int(shape[0]) * int(shape[1])
+    needed = int(n_slices) * rows * cols * 4
+    if needed > MAX_SERIES_BYTES:
+        fits = math.ceil(math.sqrt((int(n_slices) * size * 4) / MAX_SERIES_BYTES))
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{n_slices} slices at downsample={step} is "
+                f"{needed / 2**20:.0f} MiB, over the "
+                f"{MAX_SERIES_BYTES // 2**20} MiB series budget. "
+                f"Use downsample={fits} or higher, or ask for fewer slices."
+            ),
+        )
+
+    # Real check on the WORKING set, independent of downsample -- see
+    # MAX_SERIES_WORKING_BYTES above. This is what actually protects the
+    # process; the response-size check above only protects the wire.
+    working_needed = int(n_slices) * size * 8
+    if working_needed > MAX_SERIES_WORKING_BYTES:
+        fits = max(1, MAX_SERIES_WORKING_BYTES // max(1, size * 8))
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{n_slices} slices at native resolution needs "
+                f"{working_needed / 2**20:.0f} MiB to build the series before "
+                f"any downsampling, over the "
+                f"{MAX_SERIES_WORKING_BYTES // 2**20} MiB working-set budget. "
+                f"Ask for at most {fits} slices; downsample does not reduce "
+                "this cost."
+            ),
+        )
+    return rows, cols
+
+
 @app.get("/api/illumination-series")
 def illumination_series(
     start_utc: Optional[str] = None,
@@ -1591,40 +1825,7 @@ def illumination_series(
     base_shadow = np.asarray(grids["shadow_ratio"], dtype=np.float64)
 
     step = int(downsample)
-    rows = len(range(0, base_shadow.shape[0], step))
-    cols = len(range(0, base_shadow.shape[1], step))
-    needed = int(n_slices) * rows * cols * 4
-    if needed > MAX_SERIES_BYTES:
-        fits = math.ceil(
-            math.sqrt((int(n_slices) * base_shadow.size * 4) / MAX_SERIES_BYTES)
-        )
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"{n_slices} slices at downsample={downsample} is "
-                f"{needed / 2**20:.0f} MiB, over the "
-                f"{MAX_SERIES_BYTES // 2**20} MiB series budget. "
-                f"Use downsample={fits} or higher, or ask for fewer slices."
-            ),
-        )
-
-    # Real check on the WORKING set, independent of downsample -- see
-    # MAX_SERIES_WORKING_BYTES above. This is what actually protects the
-    # process; the response-size check above only protects the wire.
-    working_needed = int(n_slices) * base_shadow.size * 8
-    if working_needed > MAX_SERIES_WORKING_BYTES:
-        fits = max(1, MAX_SERIES_WORKING_BYTES // max(1, base_shadow.size * 8))
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"{n_slices} slices at native resolution needs "
-                f"{working_needed / 2**20:.0f} MiB to build the series before "
-                f"any downsampling, over the "
-                f"{MAX_SERIES_WORKING_BYTES // 2**20} MiB working-set budget. "
-                f"Ask for at most {fits} slices; downsample does not reduce "
-                "this cost."
-            ),
-        )
+    rows, cols = _check_series_budget(int(n_slices), base_shadow.shape, step)
 
     shadow_series, provenance = build_shadow_series(
         base_shadow, metadata, int(n_slices), float(slice_hours), start_utc
@@ -1715,6 +1916,135 @@ def illumination_series(
             "validity": REGOLITH_LAG_VALIDITY,
         },
         "sun": sun,
+        "fields": fields,
+        "binary_format": {
+            "dtype": "float32",
+            "endian": "little",
+            "order": "slice-major, then row-major",
+            "shape": [int(n_slices), rows, cols],
+            "nodata": "NaN",
+        },
+    }
+
+
+@app.get("/api/earth-series")
+def earth_series(
+    start_utc: Optional[str] = None,
+    n_slices: int = Query(24, ge=1, le=MAX_PLAN_4D_SLICES),
+    slice_hours: float = Query(1.0, gt=0.0, le=24.0),
+    downsample: int = Query(1, ge=1, le=50),
+    format: str = Query("json", pattern="^(json|f32)$"),
+    field: str = Query("earth_visible", pattern="^(earth_visible)$"),
+):
+    """Direct-to-Earth visibility over time, beside the illumination series.
+
+    Same parameters, same budget, same binary contract as
+    ``/api/illumination-series``; one field, ``earth_visible`` (1.0 where
+    the Earth clears the cell's terrain horizon, 0.0 where it does not).
+    ``earth`` carries the Earth's azimuth/elevation per slice and the share
+    of the grid with a link, which is what a timeline needs to show WHEN the
+    site loses contact.
+
+    Three honest outcomes in ``earth_model``: ``spice_horizon`` (epoch +
+    horizon cube + kernels), ``static`` (the long-run layer repeated, with
+    the reason), or ``unavailable`` (no field at all -- ``fields`` is empty
+    and the binary request is a 404, never a cube of zeros).
+    """
+    grids = _get_grids()
+    metadata = grids["metadata"]
+    shape = tuple(int(v) for v in np.asarray(grids["elevation"]).shape)
+
+    step = int(downsample)
+    rows, cols = _check_series_budget(int(n_slices), shape, step)
+
+    base = grids.get("earth_visibility")
+    series, provenance = build_earth_visibility_series(
+        None if base is None else np.asarray(base, dtype=np.float64),
+        metadata,
+        int(n_slices),
+        float(slice_hours),
+        start_utc,
+    )
+    available = len(series) > 0
+
+    if format == "f32":
+        if not available:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Earth visibility is unavailable for these grids: "
+                    f"{provenance.get('reason', 'no field could be computed')}"
+                ),
+            )
+        cube = np.stack(
+            [np.asarray(snapshot, dtype=np.float64)[::step, ::step] for snapshot in series]
+        )
+        return Response(
+            content=encode_layer_f32(cube.reshape(-1, cube.shape[-1])),
+            media_type=BINARY_MEDIA_TYPE,
+            headers={
+                "X-Series-Field": field,
+                "X-Series-Slices": str(int(n_slices)),
+                "X-Series-Rows": str(rows),
+                "X-Series-Cols": str(cols),
+                "X-Series-Downsample": str(step),
+                "X-Series-Resolution-M": repr(float(metadata["resolution_m"]) * step),
+                "X-Series-Dtype": "float32",
+                "X-Series-Endian": "little",
+                "X-Series-Order": "slice-major, then row-major",
+            },
+        )
+
+    earth: list[dict[str, Any]] = []
+    if start_utc and provenance.get("time_varying"):
+        try:
+            earth = earth_track_for_series(
+                metadata, int(n_slices), float(slice_hours), start_utc
+            )
+        except Exception as exc:
+            # Same reasoning as the Sun track: degrade and say so.
+            logger.warning("Earth track unavailable: %s", exc)
+            earth = []
+        for entry, snapshot in zip(earth, series):
+            # Share of the grid with a link at this slice. The slices are
+            # binary, so this is the mean of the field itself.
+            entry["visible_fraction"] = float(np.mean(np.asarray(snapshot, dtype=np.float64)))
+
+    fields: dict[str, Any] = {}
+    if available:
+        query_params: dict[str, Any] = {
+            "n_slices": n_slices,
+            "slice_hours": slice_hours,
+            "downsample": step,
+            "format": "f32",
+        }
+        if start_utc:
+            query_params["start_utc"] = start_utc
+        cube = np.stack(
+            [np.asarray(snapshot, dtype=np.float64)[::step, ::step] for snapshot in series]
+        )
+        finite = cube[np.isfinite(cube)]
+        fields["earth_visible"] = {
+            "units": "fraction",
+            "min": float(finite.min()) if finite.size else None,
+            "max": float(finite.max()) if finite.size else None,
+            "binary_url": (
+                f"/api/earth-series?{urlencode(query_params)}&field=earth_visible"
+            ),
+        }
+
+    return {
+        "slices": int(n_slices),
+        "slice_hours": float(slice_hours),
+        "start_utc": start_utc,
+        "grid": {
+            "rows": rows,
+            "cols": cols,
+            "resolution_m": float(metadata["resolution_m"]) * step,
+            "downsample": step,
+        },
+        "earth_model": provenance,
+        "earth": earth,
         "fields": fields,
         "binary_format": {
             "dtype": "float32",

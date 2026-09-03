@@ -44,3 +44,11 @@ log/
 # Superpowers subagent-driven-development scratch workspaces
 .superpowers/
 bags/
+
+# Derived-artefact provenance written beside the gitignored .npy caches
+# (scripts/build_horizon_cache.py, scripts/build_earth_visibility_cache.py);
+# they carry absolute local paths and are rebuilt with the caches.
+lunapath/data/processed/horizon_map_meta.json
+lunapath/data/processed/earth_visibility_meta.json
+# PDS3 labels fetched next to LOLA .img products
+*.lbl

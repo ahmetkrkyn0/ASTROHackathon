@@ -95,6 +95,7 @@ LAYER_UNITS: dict[str, str] = {
     "shadow_ratio": "fraction",
     "cost": "dimensionless",
     "traversable": "boolean",
+    "earth_visibility": "fraction",
 }
 
 #: What each layer means to someone building the scene, in one line.
@@ -107,6 +108,10 @@ LAYER_DESCRIPTIONS: dict[str, str] = {
     "shadow_ratio": "Fraction of the sampled window the cell spends shadowed.",
     "cost": "Weighted multi-criteria traverse cost; NaN where impassable.",
     "traversable": "1.0 passable, 0.0 not.",
+    "earth_visibility": (
+        "Fraction of the sampled span in which the Earth is above the local "
+        "horizon: where a direct-to-Earth radio link is geometrically possible."
+    ),
 }
 
 #: Layers both representations serve, in the order the manifest lists them.
@@ -119,6 +124,9 @@ TERRAIN_LAYERS: tuple[str, ...] = (
     "shadow_ratio",
     "cost",
     "traversable",
+    # Optional: present only when scripts/build_earth_visibility_cache.py
+    # has run. terrain_manifest skips layers the grids do not carry.
+    "earth_visibility",
 )
 
 

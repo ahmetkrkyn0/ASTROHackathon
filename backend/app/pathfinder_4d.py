@@ -42,6 +42,10 @@ REJECTION_KEYS: tuple[str, ...] = (
     # continuous shadow longer than it survives.
     "soc_floor",
     "shadow_endurance",
+    # Direct-to-Earth: a MOVE whose arrival cell has no line of sight to
+    # Earth at the arrival slice, refused only when the caller asked for the
+    # VIPER teleoperation rule (require_earth_visibility). (A4.)
+    "earth_visibility",
 )
 
 
@@ -73,6 +77,7 @@ def no_path_reason_4d(
     unknown = rejections.get("nan_elevation", 0)
     soc = rejections.get("soc_floor", 0)
     endurance = rejections.get("shadow_endurance", 0)
+    dte = rejections.get("earth_visibility", 0)
 
     parts: list[str] = []
     # The envelope first: when the battery or the darkness closed the route,
@@ -87,6 +92,12 @@ def no_path_reason_4d(
         parts.append(
             f"{endurance} edges would have kept the rover in continuous shadow "
             f"beyond its {float(rover['h_max_shadow_h']):g} h endurance"
+        )
+    if dte:
+        parts.append(
+            f"{dte} edges would have driven the rover into a cell with no "
+            "Earth visibility (require_earth_visibility: drive only with a "
+            "direct-to-Earth link)"
         )
     if lateral:
         parts.append(
@@ -114,7 +125,9 @@ def no_path_reason_4d(
             "passable cells at this coarsen factor."
         )
     lead = "No path found"
-    if horizon and not (lateral or along or blocked or unknown or soc or endurance):
+    if horizon and not (
+        lateral or along or blocked or unknown or soc or endurance or dte
+    ):
         lead = "No path found within the time horizon"
     return (
         f"{lead} for {rover.get('name', rover.get('id', 'this rover'))}: "
@@ -286,6 +299,7 @@ def _empty(
     return {
         "path_states": [],
         "path_pixels": [],
+        "path_earth_visible": None,
         "metrics": {
             "wait_steps": 0,
             "move_steps": 0,
@@ -299,6 +313,8 @@ def _empty(
             "edges_rejected": tally,
             "edges_dropped_at_horizon": tally.get("horizon", 0),
             "horizon_truncated": tally.get("horizon", 0) > 0,
+            "moves_out_of_earth_view": None,
+            "earth_visibility_enforced": False,
         },
         "error": error,
     }
@@ -399,8 +415,22 @@ def astar_4d(
     elevation_grid: np.ndarray | None = None,
     shadow_cube: np.ndarray | None = None,
     initial_soc_frac: float = 1.0,
+    earth_visible_cube: np.ndarray | None = None,
+    require_earth_visibility: bool = False,
 ) -> dict[str, Any]:
     """Plan through space and time. Returns path_states, path_pixels, metrics.
+
+    Direct-to-Earth visibility (A4)
+    -------------------------------
+    *earth_visible_cube*, when supplied, is the (T, H, W) boolean field of
+    which cells have a line of sight to Earth at which slice. It is always
+    REPORTED: ``path_earth_visible`` per state and
+    ``metrics.moves_out_of_earth_view``. With *require_earth_visibility* it
+    is also ENFORCED, as VIPER's teleoperation rule: a MOVE may only arrive
+    in a cell that sees the Earth at the arrival slice. Waiting is never
+    restricted -- the rule is about driving blind, not about parking -- so
+    a rover that starts out of view may sit until the link opens. Refusals
+    are tallied as ``earth_visibility``.
 
     *elevation_grid*, when supplied, enables the same two hard edge
     constraints the 2-D planner enforces: the along-track step slope against
@@ -455,6 +485,17 @@ def astar_4d(
     shadow = None if shadow_cube is None else np.asarray(shadow_cube, dtype=np.float64)
     if shadow is not None and shadow.shape != cost.shape:
         return _empty("shadow_cube shape must match cost_cube")
+    earth = (
+        None if earth_visible_cube is None else np.asarray(earth_visible_cube, dtype=bool)
+    )
+    if earth is not None and earth.shape != cost.shape:
+        return _empty("earth_visible_cube shape must match cost_cube")
+    enforce_dte = bool(require_earth_visibility)
+    if enforce_dte and earth is None:
+        return _empty(
+            "earth_visible_cube is required to enforce Earth visibility "
+            "(require_earth_visibility=True without a field to check against)"
+        )
 
     def in_bounds(r: int, c: int) -> bool:
         return 0 <= r < height and 0 <= c < width
@@ -740,6 +781,12 @@ def astar_4d(
                 rejections["horizon"] += 1
                 continue
 
+            # VIPER's rule: drive only into a cell that sees the Earth when
+            # you get there. (A4.)
+            if enforce_dte and not earth[arrival, nr, nc]:
+                rejections["earth_visibility"] += 1
+                continue
+
             from_cost = cost[slice_index, row, col]
             to_cost = cost[arrival, nr, nc]
             if not (math.isfinite(from_cost) and math.isfinite(to_cost)):
@@ -808,11 +855,26 @@ def astar_4d(
     energy_drawn = sum(max(0.0, a - b) for a, b in zip(batteries[:-1], batteries[1:]))
     energy_charged = sum(max(0.0, b - a) for a, b in zip(batteries[:-1], batteries[1:]))
 
+    if earth is None:
+        path_earth_visible = None
+        moves_out_of_view = None
+    else:
+        path_earth_visible = [bool(earth[t, r, c]) for r, c, t in states]
+        moves_out_of_view = sum(
+            1
+            for previous, current in zip(states[:-1], states[1:])
+            if previous[:2] != current[:2]
+            and not earth[current[2], current[0], current[1]]
+        )
+
     return {
         "path_states": states,
         "path_pixels": [(r, c) for r, c, _ in states],
         "path_battery_pct": battery_pct,
         "path_dark_hours": [round(d, 4) for d in darks],
+        # One entry per state: whether that cell saw the Earth at that
+        # slice. None when no field was supplied -- never a list of True.
+        "path_earth_visible": path_earth_visible,
         "metrics": {
             "wait_steps": wait_steps,
             "move_steps": len(states) - 1 - wait_steps,
@@ -837,6 +899,10 @@ def astar_4d(
             "energy_drawn_wh": round(energy_drawn, 3),
             "energy_charged_wh": round(energy_charged, 3),
             "envelope_tracked": track,
+            # MOVE edges that arrived in a cell with no Earth line of sight
+            # (None without a field); whether such moves were refused.
+            "moves_out_of_earth_view": moves_out_of_view,
+            "earth_visibility_enforced": enforce_dte,
         },
         "error": None,
     }

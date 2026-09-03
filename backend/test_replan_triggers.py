@@ -147,3 +147,90 @@ def test_replan_produces_a_new_route_when_a_trigger_fires(replan_client):
     assert payload["triggers"][0]["trigger_id"] == "soc_deviation"
     coordinates = payload["plan"]["geojson"]["geometry"]["coordinates"]
     assert len(coordinates) >= 2
+
+
+# ── A4: comm_minutes_remaining computed from the Earth geometry ────────────
+#
+# check_comm_window has existed since Phase 4 with its input expected from
+# outside. With an epoch and the horizon cube the backend now computes it
+# from where the rover is and where the Earth is. Faked here: the geometry
+# is pinned in test_earth_visibility.py; this is the wiring.
+
+
+def _fake_window(minutes: float, visible: bool = True):
+    def _window(metadata, row, col, utc, **kwargs):
+        return {
+            "utc": utc,
+            "row": row,
+            "col": col,
+            "visible_now": visible,
+            "minutes_remaining": minutes if visible else None,
+            "minutes_until_visible": None if visible else minutes,
+            "next_change_utc": None,
+            "search_limited": False,
+            "trigger_minutes_remaining": minutes if visible else 0.0,
+            "earth_elevation_deg": 3.0,
+            "earth_azimuth_true_deg": 100.0,
+            "earth_azimuth_grid_deg": 350.0,
+            "horizon_deg": 1.0,
+        }
+
+    return _window
+
+
+def test_replan_computes_the_comm_window_from_the_epoch(replan_client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "comm_window_from_metadata", _fake_window(5.0))
+    body = _body({"actual_soc": 0.8, "planned_soc": 0.8})
+    body["utc"] = "2026-09-03T12:00:00"
+    payload = replan_client.post("/api/replan", json=body).json()
+
+    assert payload["replanned"] is True
+    assert [t["trigger_id"] for t in payload["triggers"]] == ["comm_window"]
+    assert "5.0 min" in payload["triggers"][0]["detail"]
+    assert payload["comm_window"]["row"] == 5 and payload["comm_window"]["col"] == 5
+    assert payload["comm_window"]["utc"] == "2026-09-03T12:00:00"
+    assert payload["comm_window"]["trigger_minutes_remaining"] == 5.0
+
+
+def test_replan_keeps_a_caller_supplied_comm_value(replan_client, monkeypatch):
+    """Telemetry from the radio beats geometry from the map; the computed
+    window is still reported beside it."""
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "comm_window_from_metadata", _fake_window(5.0))
+    body = _body({"actual_soc": 0.8, "planned_soc": 0.8, "comm_minutes_remaining": 90.0})
+    body["utc"] = "2026-09-03T12:00:00"
+    payload = replan_client.post("/api/replan", json=body).json()
+
+    assert payload["replanned"] is False
+    assert "comm_window" in payload["evaluated"]
+    assert payload["comm_window"]["trigger_minutes_remaining"] == 5.0
+
+
+def test_replan_without_a_horizon_cube_still_reports_comm_as_skipped(replan_client):
+    body = _body({"actual_soc": 0.8, "planned_soc": 0.8})
+    body["utc"] = "2026-09-03T12:00:00"
+    payload = replan_client.post("/api/replan", json=body).json()
+
+    assert payload["replanned"] is False
+    assert payload["comm_window"] is None
+    assert "comm_window" in [entry["trigger_id"] for entry in payload["skipped"]]
+
+
+def test_replan_without_an_epoch_does_not_compute_a_window(replan_client, monkeypatch):
+    import app.main as main_module
+
+    calls = []
+
+    def _spy(metadata, row, col, utc, **kwargs):
+        calls.append((row, col, utc))
+        return None
+
+    monkeypatch.setattr(main_module, "comm_window_from_metadata", _spy)
+    payload = replan_client.post(
+        "/api/replan", json=_body({"actual_soc": 0.8, "planned_soc": 0.8})
+    ).json()
+    assert calls == []
+    assert payload["comm_window"] is None

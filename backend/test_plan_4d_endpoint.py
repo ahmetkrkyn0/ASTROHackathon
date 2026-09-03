@@ -265,3 +265,98 @@ def test_plan_4d_starting_under_the_reserve_waits_to_charge(client):
     ]
     assert moves_end_at, "the route must contain at least one move"
     assert min(moves_end_at) >= reserve_pct - 1e-6
+
+
+# ── A4: Direct-to-Earth visibility through the endpoint ────────────────────
+
+
+def test_plan_4d_says_when_earth_visibility_could_not_be_computed(client):
+    """The fixture has no horizon cube and no long-run layer: the plan is
+    still made, and the response says the Earth field was unavailable
+    rather than pretending every cell had a link."""
+    payload = client.post("/api/plan-4d", json=_body()).json()
+    assert payload["earth_model"]["model"] == "unavailable"
+    assert payload["earth_model"]["reason"]
+    assert payload["path_earth_visible"] is None
+    assert payload["metrics"]["earth_visibility_enforced"] is False
+    assert payload["metrics"]["moves_out_of_earth_view"] is None
+
+
+def test_requiring_earth_visibility_without_a_field_is_a_422(client):
+    response = client.post(
+        "/api/plan-4d", json=_body(require_earth_visibility=True)
+    )
+    assert response.status_code == 422
+    assert "Earth visibility" in response.json()["detail"]
+
+
+def _earth_series_with_a_dark_band(open_from_slice: int | None):
+    """(16, 16) slices with fine columns 8..11 -- coarse column 2 at
+    coarsen=4 -- out of Earth view until *open_from_slice* (never, if None).
+    Goal (12, 12) sits in coarse column 3, so the band is the only way."""
+
+    def _fake(base, metadata, n_slices, slice_hours, start_utc=None):
+        series = []
+        for index in range(int(n_slices)):
+            snapshot = np.ones(SHAPE, dtype=np.float64)
+            if open_from_slice is None or index < open_from_slice:
+                snapshot[:, 8:12] = 0.0
+            series.append(snapshot)
+        return series, {"model": "spice_horizon", "time_varying": True}
+
+    return _fake
+
+
+def test_plan_4d_enforces_earth_visibility_when_asked(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(
+        main_module, "build_earth_visibility_series", _earth_series_with_a_dark_band(None)
+    )
+    response = client.post(
+        "/api/plan-4d",
+        json=_body(require_earth_visibility=True, start_utc="2026-09-01T00:00:00"),
+    )
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert "Earth visibility" in detail
+
+
+def test_plan_4d_waits_for_the_link_when_asked(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(
+        main_module, "build_earth_visibility_series", _earth_series_with_a_dark_band(12)
+    )
+    response = client.post(
+        "/api/plan-4d",
+        json=_body(require_earth_visibility=True, start_utc="2026-09-01T00:00:00"),
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["earth_model"]["model"] == "spice_horizon"
+    assert payload["metrics"]["earth_visibility_enforced"] is True
+    assert payload["metrics"]["moves_out_of_earth_view"] == 0
+    assert len(payload["path_earth_visible"]) == len(payload["path_states"])
+    assert all(payload["path_earth_visible"])
+    # The band (coarse column 2) is entered only once the link is open.
+    # How the planner passes the time before that -- a WAIT edge or a
+    # shuffle between two linked cells -- is a pricing question the 1 h
+    # fixture slice does not settle; the rule is what is pinned here.
+    band_arrivals = [t for _r, c, t in payload["path_states"] if c == 2]
+    assert band_arrivals and min(band_arrivals) >= 12
+    assert payload["metrics"]["arrival_slice"] >= 12
+
+
+def test_plan_4d_reports_earth_view_along_an_unconstrained_route(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(
+        main_module, "build_earth_visibility_series", _earth_series_with_a_dark_band(None)
+    )
+    payload = client.post(
+        "/api/plan-4d", json=_body(start_utc="2026-09-01T00:00:00")
+    ).json()
+    assert payload["metrics"]["earth_visibility_enforced"] is False
+    assert payload["metrics"]["moves_out_of_earth_view"] >= 1
+    assert False in payload["path_earth_visible"]

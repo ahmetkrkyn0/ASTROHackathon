@@ -3,8 +3,10 @@
 Split deliberately in two:
 
 * pure geometry (``sun_azel_from_vector``) -- no external data, unit tested
-* SPICE-backed ephemeris (``sun_vector_body``, ``sun_track``) -- needs NAIF
-  kernels fetched by ``lunapath/src/fetch_kernels.py``; not unit tested
+* SPICE-backed ephemeris (``body_vector_body`` and its ``sun_vector_body`` /
+  ``earth_vector_body`` wrappers, ``sun_track``) -- needs NAIF kernels
+  fetched by ``lunapath/src/fetch_kernels.py``; unit tested only against a
+  faked spiceypy
 
 Azimuth convention matches :mod:`app.horizon`: 0 = North, 90 = East,
 range [0, 360).
@@ -216,8 +218,17 @@ def utc_to_et(utc: str, meta_kernel: str = DEFAULT_META_KERNEL) -> float:
     return float(spice.str2et(utc))
 
 
-def sun_vector_body(et: float, meta_kernel: str = DEFAULT_META_KERNEL) -> np.ndarray:
-    """Sun position in MOON_ME at ephemeris time *et*. Requires NAIF kernels."""
+def body_vector_body(
+    body: str, et: float, meta_kernel: str = DEFAULT_META_KERNEL
+) -> np.ndarray:
+    """Position of NAIF target *body* in MOON_ME at ephemeris time *et*.
+
+    Light-time and stellar-aberration corrected, seen from the Moon's
+    centre. Requires NAIF kernels. The Sun and the Earth are the same query
+    with a different target name: Direct-to-Earth visibility (A4) needs
+    exactly the geometry illumination already gets, so the target is a
+    parameter here and the two public helpers below are one-line wrappers.
+    """
     try:
         import spiceypy as spice
     except ImportError as exc:  # pragma: no cover - environment dependent
@@ -227,8 +238,26 @@ def sun_vector_body(et: float, meta_kernel: str = DEFAULT_META_KERNEL) -> np.nda
         ) from exc
 
     _ensure_kernels(spice, meta_kernel)
-    position, _light_time = spice.spkpos("SUN", et, _MOON_BODY_FRAME, "LT+S", "MOON")
+    position, _light_time = spice.spkpos(
+        str(body), et, _MOON_BODY_FRAME, "LT+S", "MOON"
+    )
     return np.asarray(position, dtype=np.float64)
+
+
+def sun_vector_body(et: float, meta_kernel: str = DEFAULT_META_KERNEL) -> np.ndarray:
+    """Sun position in MOON_ME at ephemeris time *et*. Requires NAIF kernels."""
+    return body_vector_body("SUN", et, meta_kernel)
+
+
+def earth_vector_body(et: float, meta_kernel: str = DEFAULT_META_KERNEL) -> np.ndarray:
+    """Earth position in MOON_ME at ephemeris time *et*. Requires NAIF kernels.
+
+    Feeds :mod:`app.earth_visibility`: a cell has a Direct-to-Earth link
+    when this vector's local elevation clears the terrain horizon in its
+    azimuth -- the same test :func:`app.illumination.illuminated_mask`
+    applies to the Sun.
+    """
+    return body_vector_body("EARTH", et, meta_kernel)
 
 
 def sun_track(

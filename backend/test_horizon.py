@@ -120,3 +120,42 @@ def test_max_steps_does_not_affect_coarse_grids_within_budget():
         max_steps=1_000_000, curvature=False,
     )
     assert np.array_equal(capped, uncapped)
+
+
+# ── min_range_m: a far-field pass that starts where the near field stopped ──
+#
+# A4's validation against NASA's Earth-visibility product showed the 10 km
+# ray budget truncating the FAR horizon: from a crater rim the terrain
+# drops 20 deg into the floor within 10 km and the ray stops there, so the
+# far wall and the plateau beyond -- which bring the horizon back up to
+# ~0 deg -- were never seen. The remedy is a second pass over a coarse,
+# wide-area DEM from the local range outward; min_range_m is what lets that
+# pass skip the ground the fine pass already covered.
+
+
+def test_min_range_skips_near_obstructions_but_keeps_far_ones():
+    """A 10 deg wall at 3 cells and a 5 deg ridge at 10 cells: the full
+    march reports the wall; a march that starts past it reports the ridge."""
+    elevation = np.zeros((4, 20), dtype=np.float64)
+    elevation[:, 3] = 3 * RES_M * np.tan(np.radians(10.0))
+    elevation[:, 10] = 10 * RES_M * np.tan(np.radians(5.0))
+    full = horizon_map(elevation, RES_M, n_azimuth=4, max_range_m=20 * RES_M, curvature=False)
+    far = horizon_map(
+        elevation, RES_M, n_azimuth=4, max_range_m=20 * RES_M,
+        min_range_m=5 * RES_M, curvature=False,
+    )
+    # East (index 1) from column 0.
+    assert full[1, 1, 0] == pytest.approx(10.0, abs=0.05)
+    assert far[1, 1, 0] == pytest.approx(5.0, abs=0.05)
+
+
+def test_min_range_beyond_max_range_is_an_error():
+    with pytest.raises(ValueError):
+        horizon_map(np.zeros((4, 4)), RES_M, n_azimuth=4, max_range_m=160.0, min_range_m=800.0)
+
+
+def test_min_range_of_zero_is_the_default_march():
+    elevation = np.random.default_rng(1).random((8, 8)) * 50.0
+    a = horizon_map(elevation, RES_M, n_azimuth=4, max_range_m=400.0)
+    b = horizon_map(elevation, RES_M, n_azimuth=4, max_range_m=400.0, min_range_m=0.0)
+    np.testing.assert_array_equal(a, b)

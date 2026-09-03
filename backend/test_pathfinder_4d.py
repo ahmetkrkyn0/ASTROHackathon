@@ -479,3 +479,102 @@ def test_rejection_tally_always_carries_the_envelope_keys():
     result = _run(*_uniform_case(n_slices=8))
     tally = result["metrics"]["edges_rejected"]
     assert "soc_floor" in tally and "shadow_endurance" in tally
+
+
+# ── A4: Direct-to-Earth visibility in the planner ──────────────────────────
+#
+# VIPER drives only with a link to Earth; it may sit anywhere. So the rule
+# is on MOVE arrivals, never on WAIT. The toy strip is 1x4 with cell (0, 2)
+# the only way through, which makes "is the rule enforced" unambiguous.
+
+
+def _earth_cube(n_slices=6, shape=(1, 4)) -> np.ndarray:
+    return np.ones((n_slices, *shape), dtype=bool)
+
+
+def _run_with_earth(earth_cube, require, n_slices=6):
+    cost_cube, wait_cube, traversable = _uniform_case(n_slices=n_slices)
+    return astar_4d(
+        cost_cube,
+        wait_cube,
+        traversable,
+        start=(0, 0),
+        goal=(0, 3),
+        resolution_m=RES_M,
+        slice_hours=SLICE_H,
+        rover=get_rover(),
+        earth_visible_cube=earth_cube,
+        require_earth_visibility=require,
+    )
+
+
+def test_enforced_earth_visibility_refuses_a_move_into_a_cell_with_no_link():
+    earth = _earth_cube()
+    earth[:, 0, 2] = False  # never a link at the only cell on the way
+    result = _run_with_earth(earth, require=True)
+    assert result["error"] is not None
+    assert "Earth visibility" in result["error"]
+    assert result["metrics"]["edges_rejected"]["earth_visibility"] > 0
+
+
+def test_enforced_earth_visibility_waits_for_the_link_to_open():
+    earth = _earth_cube(n_slices=8)
+    earth[:3, 0, 2] = False  # link at (0, 2) opens at slice 3
+    result = _run_with_earth(earth, require=True, n_slices=8)
+    assert result["error"] is None
+    assert result["metrics"]["wait_steps"] >= 1
+    assert all(result["path_earth_visible"])
+    assert result["metrics"]["moves_out_of_earth_view"] == 0
+    assert result["metrics"]["earth_visibility_enforced"] is True
+    # The state that reaches (0, 2) must sit at slice 3 or later.
+    arrival_at_2 = next(t for r, c, t in result["path_states"] if (r, c) == (0, 2))
+    assert arrival_at_2 >= 3
+
+
+def test_unenforced_earth_visibility_is_reported_not_imposed():
+    earth = _earth_cube()
+    earth[:, 0, 2] = False
+    result = _run_with_earth(earth, require=False)
+    assert result["error"] is None
+    assert result["metrics"]["earth_visibility_enforced"] is False
+    assert result["metrics"]["edges_rejected"]["earth_visibility"] == 0
+    assert len(result["path_earth_visible"]) == len(result["path_states"])
+    visible_at = {
+        (r, c): v for (r, c, _t), v in zip(result["path_states"], result["path_earth_visible"])
+    }
+    assert visible_at[(0, 2)] is False and visible_at[(0, 3)] is True
+    assert result["metrics"]["moves_out_of_earth_view"] == 1
+
+
+def test_waiting_in_a_cell_without_a_link_is_allowed():
+    """The rule is on driving, not on sitting: a rover that starts out of
+    view may wait there until the link and then move."""
+    earth = _earth_cube(n_slices=8)
+    earth[:2, :, :] = False  # nothing has a link for the first two slices
+    result = _run_with_earth(earth, require=True, n_slices=8)
+    assert result["error"] is None
+    # A move launched at slice 0 would arrive at slice 1, still without a
+    # link; the only legal opening is to wait once and arrive at slice 2.
+    assert result["metrics"]["wait_steps"] >= 1
+    assert result["path_states"][0] == (0, 0, 0)
+    assert all(c == 0 for _r, c, t in result["path_states"] if t < 2)
+
+
+def test_without_an_earth_cube_nothing_is_reported():
+    result = _run(*_uniform_case())
+    assert result["path_earth_visible"] is None
+    assert result["metrics"]["moves_out_of_earth_view"] is None
+    assert result["metrics"]["earth_visibility_enforced"] is False
+    assert "earth_visibility" in result["metrics"]["edges_rejected"]
+
+
+def test_enforcing_without_a_cube_is_an_error_not_a_silent_pass():
+    result = _run_with_earth(None, require=True)
+    assert result["error"] is not None
+    assert "earth_visible_cube" in result["error"]
+
+
+def test_earth_cube_of_the_wrong_shape_is_refused():
+    result = _run_with_earth(np.ones((6, 2, 2), dtype=bool), require=False)
+    assert result["error"] is not None
+    assert "earth_visible_cube" in result["error"]

@@ -173,6 +173,74 @@ def _window_centre_latlon(metadata: dict[str, Any]) -> tuple[float, float]:
     return float(lat), float(lon)
 
 
+def _grid_north_azimuth(metadata: dict[str, Any]) -> float:
+    """Grid-frame bearing of true north at the window centre, 0.0 when the
+    metadata carries no usable CRS (the synthetic test grids)."""
+    from .ephemeris import true_north_grid_azimuth
+
+    lat_deg, lon_deg = _window_centre_latlon(metadata)
+    crs_wkt = metadata.get("crs")
+    if crs_wkt and crs_wkt != "unknown":
+        return float(true_north_grid_azimuth(lat_deg, lon_deg, str(crs_wkt)))
+    return 0.0
+
+
+def _parse_start_utc(start_utc: str):
+    from datetime import datetime, timezone
+
+    start = datetime.fromisoformat(str(start_utc).replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return start
+
+
+def body_track_for_series(
+    metadata: dict[str, Any],
+    n_slices: int,
+    slice_hours: float,
+    start_utc: str,
+    body: str = "SUN",
+) -> list[dict[str, Any]]:
+    """Azimuth and elevation of NAIF target *body* at each slice of a series.
+
+    One implementation for the Sun and the Earth: Direct-to-Earth
+    visibility (A4) is the illumination question asked of a different body,
+    and two copies of this loop would be two places for the frame rotation
+    to go wrong. ``sun_track_for_series`` and
+    ``earth_visibility.earth_track_for_series`` are the named entry points.
+
+    Raises whatever spiceypy raises when kernels are missing; the caller
+    decides whether that is fatal.
+    """
+    from datetime import timedelta
+
+    from . import ephemeris
+
+    lat_deg, lon_deg = _window_centre_latlon(metadata)
+    north_grid_az = _grid_north_azimuth(metadata)
+    start = _parse_start_utc(start_utc)
+
+    track: list[dict[str, Any]] = []
+    for index in range(int(n_slices)):
+        moment = start + timedelta(hours=float(slice_hours) * index)
+        et = ephemeris.utc_to_et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
+        true_az, elev = ephemeris.sun_azel_from_vector(
+            ephemeris.body_vector_body(body, et), lat_deg, lon_deg
+        )
+        track.append(
+            {
+                "index": index,
+                "utc": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "azimuth_true_deg": float(true_az) % 360.0,
+                "azimuth_grid_deg": float(
+                    ephemeris.true_azimuth_to_grid_azimuth(true_az, north_grid_az)
+                ) % 360.0,
+                "elevation_deg": float(elev),
+            }
+        )
+    return track
+
+
 def sun_track_for_series(
     metadata: dict[str, Any],
     n_slices: int,
@@ -198,42 +266,4 @@ def sun_track_for_series(
     way :func:`build_shadow_series` treats the same failure: degrade, and say
     so, rather than take the endpoint down.
     """
-    from datetime import datetime, timedelta, timezone
-
-    from .ephemeris import (
-        sun_azel_from_vector,
-        sun_vector_body,
-        true_azimuth_to_grid_azimuth,
-        true_north_grid_azimuth,
-        utc_to_et,
-    )
-
-    lat_deg, lon_deg = _window_centre_latlon(metadata)
-    crs_wkt = metadata.get("crs")
-    north_grid_az = (
-        true_north_grid_azimuth(lat_deg, lon_deg, str(crs_wkt))
-        if crs_wkt and crs_wkt != "unknown"
-        else 0.0
-    )
-
-    start = datetime.fromisoformat(str(start_utc).replace("Z", "+00:00"))
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
-
-    track: list[dict[str, Any]] = []
-    for index in range(int(n_slices)):
-        moment = start + timedelta(hours=float(slice_hours) * index)
-        et = utc_to_et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
-        true_az, elev = sun_azel_from_vector(sun_vector_body(et), lat_deg, lon_deg)
-        track.append(
-            {
-                "index": index,
-                "utc": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "azimuth_true_deg": float(true_az) % 360.0,
-                "azimuth_grid_deg": float(
-                    true_azimuth_to_grid_azimuth(true_az, north_grid_az)
-                ) % 360.0,
-                "elevation_deg": float(elev),
-            }
-        )
-    return track
+    return body_track_for_series(metadata, n_slices, slice_hours, start_utc, body="SUN")

@@ -131,6 +131,15 @@ def load_preprocessed_grids(
 
     stored_validity = dict(metadata.get("layer_validity", {}))
 
+    # ── Optional: the long-run Earth-visibility layer (A4) ──────────────
+    # Written by scripts/build_earth_visibility_cache.py from the horizon
+    # cube and the ephemeris; absent on a fresh pipeline run. Absent means
+    # NO layer, not a layer of UNKNOWN provenance -- /api/terrain simply
+    # does not list it, and /api/layers says what to run.
+    earth_layer, earth_meta = _load_earth_visibility(d, tuple(result["elevation"].shape))
+    if earth_layer is not None:
+        result["earth_visibility"] = earth_layer
+
     # ── Illumination correction, applied exactly once ────────────────────
     # The thermal layer the surface model writes is a (slope x aspect) lookup
     # at fixed latitude: it never reads shadow_ratio, so a permanently
@@ -216,6 +225,10 @@ def load_preprocessed_grids(
     validity["cost"] = weakest_validity(
         validity.get("slope", "UNKNOWN"), thermal_validity, shadow_validity
     )
+    if earth_layer is not None:
+        # Derived from MEASURED elevation (the horizon cube) and the
+        # ephemeris; the same label shadow_ratio carries.
+        validity["earth_visibility"] = "DERIVED"
 
     result["metadata"] = {
         "origin": metadata.get("origin"),
@@ -239,8 +252,37 @@ def load_preprocessed_grids(
         "thermal_shadow_coupled": True,  # legacy alias; see thermal_field
         "layer_validity": validity,
     }
+    if earth_meta is not None:
+        result["metadata"]["earth_visibility"] = earth_meta
 
     return result
+
+
+def _load_earth_visibility(
+    processed_dir: str, expected_shape: tuple[int, int]
+) -> tuple[np.ndarray | None, dict[str, Any] | None]:
+    """The cached Earth-visibility fraction and its provenance, if present."""
+    from .earth_visibility import (
+        EARTH_VISIBILITY_CACHE_FILENAME,
+        EARTH_VISIBILITY_META_FILENAME,
+    )
+
+    layer_path = os.path.join(processed_dir, EARTH_VISIBILITY_CACHE_FILENAME)
+    if not os.path.exists(layer_path):
+        return None, None
+    layer = np.load(layer_path).astype(np.float64)
+    if layer.shape != tuple(expected_shape):
+        raise ValueError(
+            f"earth_visibility cache {layer.shape} does not match the grid "
+            f"{tuple(expected_shape)}; rebuild it with "
+            "scripts/build_earth_visibility_cache.py"
+        )
+    meta_path = os.path.join(processed_dir, EARTH_VISIBILITY_META_FILENAME)
+    meta: dict[str, Any] | None = None
+    if os.path.exists(meta_path):
+        with open(meta_path, encoding="utf-8") as handle:
+            meta = json.load(handle)
+    return layer, meta
 
 
 def load_and_preprocess_dem(

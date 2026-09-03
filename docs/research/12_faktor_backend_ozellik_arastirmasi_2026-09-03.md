@@ -1,0 +1,682 @@
+# 12 — Backend "Wow Faktörü" Özellik Araştırması: Sektörel Projelerden Ödünç Alınabilecek Teknikler
+
+**Tarih:** 3 Eylül 2026 · **Branch:** `berke-3d` (HEAD `374d8bc`) · **Kapsam:** yalnızca araştırma, kod değişikliği yok
+**Soru:** Bizim challenge'ımıza (Ay güney kutbunda termal güvenlik odaklı, çok kriterli, zaman-farkında rover rota planlama) benzeyen **gerçek misyonlar, akademik planlayıcılar, yarışmalar ve hackathon projeleri** hangi teknikleri kullanıyor; bunlardan hangileri **backend'e** eklenince jüride "wow" etkisi yaratır ve challenge'ın özüne (termal/enerji güvenliği, görev sürdürülebilirliği) gerçekten katkı sağlar?
+
+> Bu belge [10_sektorel_projeler_envanteri.md](10_sektorel_projeler_envanteri.md) (kim ne yapmış) ve [11_backend_olgunluk_analizi_2026-08-30.md](11_backend_olgunluk_analizi_2026-08-30.md) (biz neredeyiz) belgelerinin **devamıdır**; onlarda zaten anlatılan şeyleri tekrar etmez, yalnızca **yeni** teknik ve özellikleri ele alır. Her kayıtta: **ne olduğu → hangi proje/kim → link → detaylı açıklama → LunaPath'te bugün ne var → projeye somut katkısı → efor ve wow puanı.**
+>
+> **Doğruluk notu:** Sayılar açık kaynaklardan (NASA NTRS, arXiv, PGDA/PDS, GitHub) derlendi; erişilemeyen (403/paywall) kaynaklarda özet/abstract düzeyinde kalındı ve bu belirtildi. Kullanmadan önce bağlantıdan teyit edin.
+
+---
+
+## 0. Yönetici özeti
+
+Araştırmanın ana bulgusu: **LunaPath'in zaten yaptığı şey (SPICE efemeris + ray-cast ufuk + zaman-genişletilmiş A* + WAIT kenarı + 4 rover profili + provenance) NASA VIPER'ın strateji planlama zincirinin küçültülmüş bir kopyasıdır.** VIPER'ın yer yazılımı (SHERPA) ve CMU/Toronto akademik planlayıcıları bunun üstüne üç şey daha koyuyor ve LunaPath'te bu üçü yok:
+
+1. **Güvenli liman (safe haven) + Dünya görünürlüğü (DTE) ekseni** — VIPER'da rota planlamanın *asıl* kısıtı güneş değil, "Dünya batmadan güvenli limana var" kuralıdır. LunaPath'te Dünya görünürlüğü hiç hesaplanmıyor.
+2. **Belirsizlik ve risk sınırı** — "bu rotanın başarısızlık olasılığı ≤ %5" diyebilmek. LunaPath'te hiçbir çıktının hata bandı yok (11 no'lu belgede skorkartın en zayıf boyutu, 1/5).
+3. **Dış kıyas (benchmark) ve doğrulama** — ölçülmüş bir referansa karşı sayı. NASA'nın kendisi 5 m/px DEM'lerle birlikte **100 hata klonu** ve **Dünya-görünürlük haritaları** yayınlıyor; ikisi de indirilip doğrudan kullanılabilir.
+
+Bu üç eksende toplam **22 özellik/teknik** belgelendi. Aşağıdaki 10'u, efor/etki oranına göre en yüksek getirili olanlardır:
+
+| # | Özellik | Kaynak projesi | Efor | Wow | Challenge etkisi |
+|---|---|---|---|---|---|
+| A1 | Safe-haven haritası (Ay günü bazlı) + "50 saat karanlık" kuralı + *time-to-safe-haven* katmanı | NASA VIPER / SHERPA | 2–3 gün | ★★★★★ | ★★★★★ |
+| A4 | Dünya görünürlüğü (DTE) katmanı: SPICE ile Dünya az/el + ufuk → iletişim gölgesi; LOLA ürünüyle doğrulama | Mazarico 2011 / VIPER | 1–2 gün | ★★★★☆ | ★★★★☆ |
+| B3 | DEM hata yayılımı: NASA'nın 100 DEM klonuyla Monte Carlo → P(geçilebilir), P(aydınlık) | NASA GSFC PGDA (Barker) | 2–3 gün | ★★★★★ | ★★★★☆ |
+| B5 | Monte Carlo traverse stres testi (SHERPA "Traverse Evaluation" dağılımları ve metrikleri) | NASA VIPER / SHERPA | 2 gün | ★★★★☆ | ★★★★★ |
+| B1 | Stokastik reach-avoid "kurtarma politikası" → risk-sınırlı rota (P_fail ≤ β) | Toronto STARS (Lamarre & Kelly) | 5–8 gün | ★★★★★ | ★★★★★ |
+| A2 | Sürekli-aydınlık koridoru: 3B bağlı-bileşen budaması ile 4B planlayıcıyı hızlandırma ve "asla gölgeye girmez" kanıtı | CMU (Otten, Whittaker) | 2–3 gün | ★★★★☆ | ★★★★☆ |
+| D2 | MoonPlanBench standart benchmark'ında koşup sonuç yayınlamak | arXiv 2512.21438 (Aralık 2025) | 1 gün | ★★★★☆ | ★★★☆☆ |
+| D3 | Formal güvenlik kuralları: FRET ile yazılmış gereksinim + STL robustness monitörü (RTAMT) | NASA Ames FRET / AIT RTAMT | 2–3 gün | ★★★★☆ | ★★★★☆ |
+| B2 | CVaR tabanlı risk-farkında maliyet (slip/termal dağılımlarından) | JPL STEP / Ishigami Lab | 2 gün | ★★★★☆ | ★★★★☆ |
+| D1 | Herhangi-açı planlama (Theta* / Field D* enterpolasyonu) — MER'de uçmuş algoritma ailesi | JPL/CMU (Carsten 2007) | 1 gün | ★★★☆☆ | ★★☆☆☆ |
+
+**Tek cümlelik öneri:** A1 + A4 + B5 üçlüsü bir haftada yapılır ve sunumda "NASA VIPER'ın planlama kısıtlarını ve stres-test metriklerini birebir uyguluyoruz" denmesini sağlar; B3 + B1 ise projenin en büyük akademik açığını (belirsizlik = 1/5) kapatır.
+
+---
+
+## 1. Yöntem ve seçim ölçütleri
+
+Şu dört süzgeçten geçmeyen hiçbir şey bu listeye alınmadı:
+
+1. **Kabul görmüş olma:** Uçmuş bir misyonda (MER, Yutu-2, Pragyan, VIPER) kullanılmış, hakemli yayında sayısal sonuçla gösterilmiş veya resmi bir yarışmada (Lunar Autonomy Challenge, ISRO BAH, NASA SRC2) uygulanmış olmalı.
+2. **Backend'e ait olma:** Yalnızca `backend/app/` katmanında (planlayıcı, maliyet, fizik, API) uygulanabilir olmalı; algı/kamera/SLAM kapsam dışı (README zaten bunu reddediyor).
+3. **Challenge'a özgü olma:** Termal güvenlik, enerji, gölge/aydınlanma, görev sürdürülebilirliği eksenlerinden en az birine doğrudan dokunmalı.
+4. **Yeni olma:** 01–11 numaralı belgelerde zaten önerilmiş şeyler (Diviner indirme, heat1d, hiyerarşik planlama, D* Lite, radyasyon SEP senaryosu, ablasyon) burada yalnızca referans verilerek geçildi.
+
+"Wow" puanı, jürinin (TÜBİTAK UZAY / rover topluluğu çevresi; bkz. [rover_project/AYAP2_ANALIZ.md](../rover_project/AYAP2_ANALIZ.md)) *"bunu bir öğrenci ekibi yapmış olamaz"* diyeceği tahmini ile verildi. "Challenge etkisi" ise özelliğin proje belgesindeki ([ay_termal_navigasyon_proje_dokumani.md](../ay_termal_navigasyon_proje_dokumani.md)) Modül 4–6 çıktılarına (risk, health, replanning, safe haven, alternatif rota) ne kadar dokunduğudur.
+
+---
+
+## 2. LunaPath'te bugün ne var (dürüst temel çizgi)
+
+Aşağıdaki özellikler önerilirken hepsi mevcut kodun üzerine kurulur; tekrar yazılmaz.
+
+| Mevcut yetenek | Kod | Bu belgedeki hangi özellik üstüne kuruluyor |
+|---|---|---|
+| SPICE Güneş vektörü (`spkpos`, `MOON_ME`, `LT+S`), CRS yakınsama düzeltmesi | `ephemeris.py` | A4 (Dünya için aynı çağrı) |
+| Ray-cast topografik ufuk (Ay eğriliği dahil) | `horizon.py` | A2, A4, B3 |
+| Zaman dilimli gölge serisi | `illumination_series.py` | A1, A2, A5 |
+| Zaman-genişletilmiş A*, WAIT kenarı, `wait_cost` (güneş şarjı − idle − ısıtıcı) | `pathfinder_4d.py`, `cost_cube.py` | A1, A2, A3, B1, C1, C2 |
+| Rover başına `h_max_shadow_h` (LPR-1 için **50 saat** — VIPER'ın 50 saatlik min-power dayanımıyla aynı) | `constants.py` | A1 |
+| Statik safe-haven indeksleri (gölge oranına göre) | `corridor.py:_safe_haven_indices` | A1 |
+| `check_comm_window(minutes_remaining)` tetikleyicisi (girdi dışarıdan geliyor, hesaplanmıyor) | `replan_triggers.py` | A4 |
+| Simülasyon: `max_continuous_shadow_h` ihlal kontrolü | `simulation.py` | B5, C2 |
+| Referans misyon hızları (Yutu-2, Pragyan) | `mission_reference.py` | D8 |
+| `slip_model.py` — **UNCALIBRATED** etiketli | `slip_model.py` | C3 |
+| Provenance (`layer_validity`, `weakest_validity`) | `terrain.py` / metadata | C4, C5 |
+| `CostMap.explain()`, `/api/cell-telemetry`, nav2 baseline | `costmap.py`, `scripts/nav2_baseline.py` | D2, D4 |
+| Uzamsal en-büyük-bileşen ön kontrolü (`bfs_move_count`) | `pathfinder_4d.py` | A2 (zamansal versiyonu), A3 |
+
+---
+
+# BÖLÜM A — Zaman-uzay planlama ve görev güvenliği
+
+## A1. ⭐⭐⭐⭐⭐ Safe Haven haritası, "50 saat karanlık" kuralı ve *time-to-safe-haven* katmanı
+
+**Ne:** Rover'ın Dünya ufkun altındayken (her ayın ~2 haftası) park edip hayatta kalabileceği yerlerin haritası; rotanın her anında "buradan en yakın safe haven'a kaç saatte ve ne kadar enerjiyle varırım" bilgisi.
+
+**Kim:** NASA Ames, VIPER misyonu strateji planlama ekibi (Mark Shirley, Edward Balaban) — SHERPA yazılımı.
+
+**Linkler:**
+- [An Overview of Mission Planning for the VIPER Rover (Shirley & Balaban, NASA, 2022, PDF)](https://www.nasa.gov/wp-content/uploads/2022/05/overview_of_mission_planning_for_the_viper_rover.pdf)
+- [VIPER Mission Traverse Planning – Design, Strategies, and Dynamics (Ennico-Smith vd., NTRS 2023)](https://ntrs.nasa.gov/api/citations/20230004239/downloads/SSR2023-VIPER-Planning-Ennico.pdf?attachment=true)
+- [SHERPA — An AI System for Mission Planning and Decision Support (Balaban vd., SpaceOps 2025, PDF)](https://publications.spaceops.org/2025/download.php?doc=559__4nupk3n2.pdf)
+- [VIPER Lunar Operations (NASA Science)](https://science.nasa.gov/mission/viper/lunar-operations/)
+
+**Detaylı açıklama (VIPER'ın kuralları, birebir):**
+- Traverse **"leg"**lerden oluşur; bir leg = bir Ay günü. Her leg iniş noktasından veya bir **Safe Haven (SH)**'dan başlar.
+- SH tanımı: *"Dünya ufkun altındayken kesintisiz gölge süresi 50 saati geçmeyen ve rover'ın hareketsiz beklerken güç üretebildiği konum."* VIPER'ın min-power modunda dayanımı **50 saat**, matkapla çalışırken gölge dayanımı **~9,5 saat**.
+- Dünya ayın yaklaşık yarısında ufkun altında; "< 50 saat gölge" koşulunu sağlayan yerler **nadir**dir ve SH'lar misyonu uzatan asıl kaynaktır.
+- SHERPA'nın planlama veri seti şunları içerir: **2 saatlik adımla gölge zaman serisi, time-to-shadow serisi, eğim haritası, PSR sınırları, Ay günü bazlı safe-haven haritaları, buz kararlılık derinliği, Güneş ve Dünya azimut/yükseklik serileri, uçuş kuralları.** Rota çözünürlüğü 20 m/px.
+- VIPER için eğim sınırı 15°, hız 20 cm/s tepe, ancak **"Speed Made Good" ~1 cm/s** (zamanın %90'ı beklemede).
+- Stratejik plan her science station, PSR girişi, şarj molası ve SH için konum + zaman verir; **nominal ve kontenjan (contingency) dalları** içerir.
+
+**LunaPath'te bugün:** `corridor._safe_haven_indices` gölge oranına göre statik bir küme üretiyor; `h_max_shadow_h` rover başına var (LPR-1 için 50 saat, VIPER ile birebir). Ancak (a) SH'lar zamana bağlı değil, (b) Dünya görünürlüğüyle ilişkilendirilmiyor, (c) "buradan SH'a kaç saat" katmanı yok, (d) planlayıcı SH'a ulaşmayı **kısıt** olarak taşımıyor.
+
+**Somut katkı (backend):**
+1. `safe_haven.py`: `illumination_series` + (A4'teki) Dünya görünürlüğü serisi → her Ay günü için `safe_haven_mask[day]` = "Dünya ufkun altındayken maksimum kesintisiz gölge ≤ h_max_shadow_h(rover)". Rover profiline göre otomatik değişir (LUVMI-M için 4 saat → çok az SH; Yutu-2 için 96 saat → çok).
+2. `time_to_safe_haven` katmanı: her hücre ve zaman dilimi için, mevcut `cost_cube` üzerinde SH kümesinden geri Dijkstra → saat cinsinden mesafe. `/api/cell-telemetry` bu değeri döndürür.
+3. `pathfinder_4d`'e sert kısıt: `time_to_safe_haven(c,t) + Δ ≤ hours_until_earthset(t)` — VIPER'ın "Dünya batmadan SH'a var" kuralı.
+4. Yeni rota metrikleri: **time-to-sun-shadow (min, ort)**, **time-to-DSN-shadow**, **time-to-0-SOC** — SHERPA'nın metrik listesinden.
+
+**Neden wow:** Jüriye "VIPER'ın leg/safe-haven yapısını ve 50 saat kuralını aynı sayılarla uyguluyoruz; rover profilini değiştirince safe-haven haritası nasıl büzüşüyor görün" denir. Bu, challenge belgesindeki "6.7 Safe haven / recovery logic kapsamı" açık sorusunu tamamen kapatır.
+
+**Efor:** 2–3 gün (A4'e bağımlı). **Doğruluk kanıtı:** SH kuralı ve 50 saat NASA belgelerinden birebir.
+
+---
+
+## A2. ⭐⭐⭐⭐ Sürekli-aydınlık koridoru: 3B (x, y, t) bağlı-bileşen analizi
+
+**Ne:** Aydınlanma zaman serisi ve eğim maskesi birleştirilip **x-y-t hacminde** flood-fill ile "sürekli aydınlık ve güvenli eğimli" bağlı bileşenler bulunur; kökleri (başlangıç zamanına ulaşmayan) ve çıkmaz dalları (bitiş zamanına ulaşmayan) budanır; kalan hacim, "rover bu koridorun içinde kaldığı sürece **asla** gölgeye girmez" garantisi verir. Rota bu hacim içinde ileri-zamanlı A* ile bulunur.
+
+**Kim:** CMU Robotics Institute — Nathan Otten, Heather Jones, David Wettergreen, William "Red" Whittaker (NIAC destekli).
+
+**Linkler:**
+- [Planning Routes of Continuous Illumination and Traversable Slope using Connected Component Analysis (ICRA 2015, PDF)](https://www.ri.cmu.edu/app/uploads/2018/01/ICRA2015_Otten_3109.pdf) · [RI sayfası](https://publications.ri.cmu.edu/planning-routes-of-continuous-illumination-and-traversable-slope-using-connected-component-analysis)
+- [Strategic Autonomy for Reducing Risk of Sun-Synchronous Lunar Polar Exploration (FSR 2017, PDF)](https://publications.ri.cmu.edu/storage/publications/2018/01/FSR_2017_Otten_66.pdf)
+- [Otten doktora tezi: Planning for Sun-Synchronous Lunar Polar Roving (CMU KiltHub)](https://kilthub.cmu.edu/articles/thesis/Planning_for_Sun-Synchronous_Lunar_Polar_Roving/6721082/1)
+
+**Detaylı açıklama:**
+- Girdi: LOLA 5 m/px (kutup yakını) + NAC stereo 2 m/px + 240 m/px geniş alan; **SPICE** ile Güneş vektörü; ray-tracing (Blender) ile aydınlanma görüntüsü; eşik ile ikili "aydınlık/gölge" haritası. Simülasyon **LRO WAC gerçek görüntüleriyle** doğrulanmış.
+- 3×3×3 çekirdekle (26-komşuluk) flood-fill; en büyük bileşen seçilir; iki geçişli budama (zamanda ileri, sonra zamanı ters çevirip tekrar).
+- Graf: her voksel düğüm, kenarlar yalnızca **bir sonraki zaman dilimindeki** 9 komşuya (ileri zaman). A* Öklid mesafeyle.
+- Sonuçlar: Malapert Tepesi çevresinde 2 Ay döngüsünde (59 gün) **2,16 km, ort. 1,5 m/saat**; Shackleton çevresinde **34,7 km, 25 m/saat**; sırasıyla **45 ve 226 saat** kesintisiz bekleme (dwell) fırsatı — bilim için değerli.
+- FSR 2017: "singularity" (haftalarca kesintisiz güneş alan noktalar) belirsizliğine karşı **"strategic autonomy"** — iletişimsiz kısa otonom sürüşlerle gölgeden uzaklaşma.
+- Makalenin "future work"ü: sıcaklık ve iletişim (*"Dünya görünürlüğü güneşle neredeyse aynı biçimde modellenebilir"*) — bu tam olarak A4.
+
+**LunaPath'te bugün:** `pathfinder_4d` uzamsal en-büyük-bileşeni kontrol ediyor (`bfs_move_count`, %76,4 bileşen ölçümü), ama **zamansal** bileşen analizi yok; A* tüm küpte arıyor.
+
+**Somut katkı:**
+1. `cost_cube` üretilirken `lit_and_safe[t,y,x]` ikili hacmi çıkarılır; `scipy.ndimage.label(..., structure=np.ones((3,3,3)))` ile bileşenler; iki geçişli budama.
+2. Planlayıcıya `require_continuous_illumination=True` seçeneği: arama uzayı budanmış bileşenle sınırlanır → hem **hız** (11 no'lu belgede 22 s'lik koşumlar) hem **kanıt** ("rota tanım gereği gölgeye girmiyor").
+3. Yeni metrik: `max_dwell_hours` (rotada beklenebilecek en uzun aydınlık süre) — bilim istasyonu yerleşimi için.
+4. Rapor cümlesi: "Sun-synchronous yaklaşımını (CMU, NIAC) 4B planlayıcımızın ön-filtresi olarak uyguladık."
+
+**Efor:** 2–3 gün. **Wow:** yüksek (görselleştirilebilir 3B koridor; frontend zaten 3B).
+
+---
+
+## A3. ⭐⭐⭐ Zaman sıkıştırma ve hedef-erişilebilirlik budamasıyla 4B planlamayı hızlandırma
+
+**Ne:** Aydınlanmanın değişmediği zaman aralıklarını **sıkıştırma** (time compression), hedefe zaten ulaşamayacak durumları **erişilebilirlik** ile eleme, statik engellerden **ön-hesaplanmış sezgisel** kullanma.
+
+**Kim:** CMU — Christopher Cunningham, Joseph Amato, Heather Jones, William Whittaker.
+
+**Link:** [Accelerating energy-aware spatiotemporal path planning for the lunar poles (ICRA 2017, IEEE Xplore)](https://ieeexplore.ieee.org/document/7989508) — paywall; abstract düzeyinde. İlgili: [Cunningham vd., Locally-Adaptive Slip Prediction for Planetary Rovers Using Gaussian Processes (ICRA 2017)](https://arxiv.org/pdf/1805.05451) (özet: solar rover otonomisi).
+
+**LunaPath'te bugün:** `auto_slice_hours` ve invariant-katman probing zaten var (11 no'lu belge §3.1) — yani time compression'ın **kısmi** hali mevcut; erişilebilirlik ön-kontrolü de var. Eksik: dilim aralığının **yerel** (hücre bazında) değil global olması ve hedef-erişilebilirlik budamasının zaman eksenini kapsamaması.
+
+**Somut katkı:** (a) Dilim uzunluğunu gölge serisinin değişim oranına göre adaptif seç (değişim yoksa dilimi birleştir), (b) A2'deki bileşenden "hedefe ulaşan alt-hacim"i çıkarıp yalnızca onda ara, (c) `travel_hours` için tek seferlik statik Dijkstra tablosu → admissible sezgisel. Ölçülmüş hızlanma yayınlanır (`test_planner_benchmark.py`, 08 no'lu belge §6).
+
+**Efor:** 1–2 gün (A2 sonrası). **Wow:** orta (sunumda "22 s → X s" grafiği).
+
+---
+
+## A4. ✅ ⭐⭐⭐⭐ Dünya görünürlüğü (Direct-to-Earth, DTE) katmanı ve iletişim gölgesi
+
+> **Yapıldı (4 Eylül 2026, `berke-3d-backendEnhance`):** `earth_visibility` katmanı, `/api/earth-series`, `/api/comm-window`, `/api/plan-4d` `require_earth_visibility`, `/api/replan` ve `/api/pose` için hesaplanan `comm_minutes_remaining`. NASA LOLA "Average Earth Visibility" (PGDA 69, 60 m) ile karşılaştırma: **RMSE 0,087, Pearson r 0,96, 0,5 eşiğinde anlaşmazlık %9,4** (1 681 hücre) — ayrıntı [earth_visibility_validation.md](earth_visibility_validation.md). Doğrulama iki önceden var olan hatayı ortaya çıkardı ve kapattı: yerel gridlerin Site01 kalması ve 10 km ışın menzilinin uzak ufku kesmesi (ufuk küpü artık LOLA 40 m DEM ile 150 km'ye kadar iki ölçekli). Tasarım: [../superpowers/specs/2026-09-03-a4-dte-katmani-design.md](../superpowers/specs/2026-09-03-a4-dte-katmani-design.md).
+
+**Ne:** Her hücre ve zaman dilimi için Dünya'nın ufkun üstünde olup olmadığı; buradan "iletişim gölgesi" haritası, "time-to-DSN-shadow" metriği ve A1'deki safe-haven kuralı için gerekli girdi.
+
+**Kim / yöntem:** NASA GSFC LOLA ekibi — Mazarico vd. (2011) ufuk yöntemi; VIPER için zorunlu kısıt ("site dört ölçütü de sağlamalı: volatil, güneş, geçilebilir arazi, DTE").
+
+**Linkler:**
+- [Mazarico vd., Illumination conditions of the lunar polar regions using LOLA topography, Icarus 211 (2011)](https://www.researchgate.net/publication/251730356_Illumination_conditions_of_the_lunar_polar_regions_using_LOLA_topography)
+- [PGDA "Lunar Polar Illumination" ürünleri — ortalama aydınlanma, PSR, **ortalama Dünya görünürlüğü**, gökyüzü görünürlüğü; 240/120/60 m; 18,6 yıl, saatlik](https://pgda.gsfc.nasa.gov/products/69)
+- [NASA SVS 5027 — Güney kutbu aydınlanma animasyonu 2025–2028, 2 saat adım, DE421, 17.532 kare](https://svs.gsfc.nasa.gov/5027/)
+- [Heldmann vd., Site selection and traverse planning… Haworth Crater, Acta Astronautica 127 (2016)](https://ui.adsabs.harvard.edu/abs/2016AcAau.127..308H/abstract) — Resource Prospector için DTE + güneş + eğim üçlü kısıt; traverse, terminatör batıya kayarken doğuya ilerler.
+- [JPL IPN Progress Report 42-176: Lunar Pole Illumination and Communications Maps (Goldstone radar DEM)](https://ipnpr.jpl.nasa.gov/progress_report/42-176/176C.pdf) — en iyi sitede çok yıllık ortalama güneş %92, DTE %51.
+
+**Detaylı açıklama:** Mazarico yöntemi, her hücre için azimut başına ufuk yükseklik açısı hesaplar ve gök cisminin (Güneş **veya Dünya**) yükseklik açısıyla karşılaştırır. LunaPath'in `horizon_map` çıktısı zaten tam bu ufuk küpüdür. Tek eksik: `ephemeris.sun_vector_body` yerine `spkpos("EARTH", ...)` ile Dünya vektörü; aynı `true_north_grid_azimuth` düzeltmesi geçerlidir. Kutupta Dünya'nın yükseklik açısı ±~6,7° arasında (libration) salınır; bu yüzden Dünya "görünürlüğü" saatler değil **günler** ölçeğinde değişir.
+
+**LunaPath'te bugün:** `replan_triggers.check_comm_window` var ama girdisi (`comm_minutes_remaining`) hesaplanmıyor, dışarıdan bekleniyor. Dünya vektörü hiçbir yerde yok (grep ile doğrulandı).
+
+**Somut katkı:**
+1. `ephemeris.earth_track(...)` (5 satır: `SUN` → `EARTH`) + `illumination.illuminated_mask` aynı fonksiyonla → `earth_visible[t,y,x]`.
+2. Katman `earth_visibility_fraction` (`layer_validity: DERIVED`), `/api/layers/earth_visibility`, `/api/illumination-series`'e paralel `/api/earth-series`.
+3. Maliyet/kısıt: (a) "sürüş yalnızca DTE varken" seçeneği (VIPER teleoperasyon kuralı), (b) PSR girişleri hariç, (c) `comm_minutes_remaining` artık hesaplanıyor → mevcut tetikleyici gerçek veriyle çalışır.
+4. **Doğrulama:** PGDA'nın 240 m "Average Earth Visibility" ürünü indirilip LunaPath'in uzun-dönem ortalamasıyla RMSE/korelasyon → **projenin ilk gerçek validation sayısı** (skorkart 4. boyut 1/5 → 2/5).
+
+**Not (hackathon karşılaştırması):** ISRO Bharatiya Antariksh Hackathon 2026'daki iki proje bile Earth-LOS cezasını koymuş (bkz. Bölüm E). LunaPath'te bunun olmaması jüri gözünde eksik durur.
+
+**Efor:** 1–2 gün. **Wow:** yüksek; validation ile birleşince çok yüksek.
+
+---
+
+## A5. ⭐⭐⭐ Zaman pencereli bilim-istasyonu sıralaması (cost-constrained TSP) ve görev zaman çizelgesi
+
+**Ne:** Birden çok hedef noktayı (science station) hangi sırayla, hangi Ay gününde ziyaret edeceğini; "sürüşler güneşte, ziyaretler güneşte, toplam süre Dünya'nın ufkun üstünde olduğu süreyi aşmasın" kısıtlarıyla çözmek.
+
+**Kim:**
+- NASA VIPER "Traverse Planning Algorithm #1": **maliyet-kısıtlı, zaman pencereli, alt-küme seçen gezgin satıcı** (ziyaret edilen istasyon sayısını maksimize et; sürüş maliyeti = zaman; toplam ≤ Dünya-üstte süresi). Nobile/Haworth/Shoemaker site seçimi bununla yapıldı; sonra MCTS'e geçildi. [Shirley & Balaban 2022 (PDF)](https://www.nasa.gov/wp-content/uploads/2022/05/overview_of_mission_planning_for_the_viper_rover.pdf)
+- Polytechnique Montréal — Chen, Jackson, Allard, Beltrame: [Path planning algorithm for a South Pole lunar rover mission, Acta Astronautica 237 (Aralık 2025) 349–360](https://www.sciencedirect.com/science/article/pii/S0094576525004898) — önce zamana bağlı tentatif sıra, sonra rota ile doğrulama; manuel planlamadan daha kısa süre/mesafe (abstract düzeyi; tam metin erişilemedi).
+
+**LunaPath'te bugün:** `/api/plan-multi` ve `/api/compare` var ama sıralama (ordering) ve zaman penceresi yok.
+
+**Somut katkı:** `/api/plan-mission`: girdi = hedef listesi + görev başlangıç zamanı; çözücü = OR-Tools CP-SAT (Apache-2.0) ile zaman pencereli TSP; sürüş maliyetleri `pathfinder_4d`'den; çıktı = Ay günü bazlı leg listesi (VIPER formatı) + ziyaret edilen istasyon sayısı + kaçırılanlar. **Wow:** "tek rota" yerine "tam görev zaman çizelgesi".
+
+**Efor:** 3–4 gün. Challenge etkisi orta (Modül 6 "alternatif rota" ve Modül 7 "senaryo runner"a hizmet eder).
+
+---
+
+# BÖLÜM B — Belirsizlik, risk ve doğrulama (skorkartın en zayıf boyutu)
+
+## B1. ⭐⭐⭐⭐⭐ Stokastik reach-avoid "kurtarma politikası" ve şans-kısıtlı görev planlama
+
+**Ne:** Rover'ın durumu (hücre, zaman, batarya) üzerinden **her durumdan güvenli konuma ulaşma olasılığını** dinamik programlamayla hesaplamak; sonra rota planlayıcıyı "başarısızlık olasılığı ≤ β" kısıtıyla çalıştırmak.
+
+**Kim:** University of Toronto STARS Lab — Olivier Lamarre, Shantanu Malhotra, Jonathan Kelly. (10 no'lu belgede D1 olarak listelenmişti; burada **uygulanabilir formülasyon ve sayılar** veriliyor.)
+
+**Linkler:**
+- [Recovery Policies for Safe Exploration of Lunar PSRs by a Solar-Powered Rover (arXiv 2307.16786; Acta Astronautica 2023)](https://arxiv.org/abs/2307.16786)
+- [Safe Mission-Level Path Planning for Exploration of Lunar Shadowed Regions (arXiv 2401.08558, IEEE AERO 2024)](https://arxiv.org/html/2401.08558v2)
+- [utiasSTARS/gplanetary-nav (MIT lisans) — arazi + güneşlenme haritaları, planlama grafı, güneş gücü tahmini](https://github.com/utiasSTARS/gplanetary-nav)
+
+**Detaylı açıklama (uygulanabilir düzeyde):**
+- **Durum:** (c, t, b) — hücre, zaman, batarya enerjisi. **Eylemler:** 8 yön + "bekle" (5.000 s).
+- **Arıza modeli:** Poisson, uzamsal oran α (ör. **5 km'de 1 arıza, 10 saat toparlanma**); sürüş iki yarıya bölünür, üç sonuç (nominal / ilk yarıda arıza / ikinci yarıda arıza).
+- **Değer iterasyonu:** V(x)=1 güvensiz, 0 güvenli; V_k(x) = min_a E[V_{k+1}(f(x,a))]; ayrıklaştırma hatasına karşı **min-max konservatif** eşleme (komşu zaman kutularından riski büyük olanı al).
+- **Enerji modeli:** güneş = görünür disk yüzdesi × panel alanı × verim × 1.367 W/m²; sürüş 60–300 W, bekleme 40–80 W, hibernasyon 30–40 W; batarya 10–30 kWh.
+- **Veri:** 240 m/px, **saatlik** güneşlenme (JPL), Cabeus / LCROSS bölgesi, 2029 Ağustos–Ekim, 2.089 saatlik harita.
+- **Sonuçlar:** LCROSS senaryosu **41,5 milyon durum**; tahmin edilen risk %0,4–9,8, gerçekleşen %0,0–4,6 (100.000 deneme) — konservatiflik korunmuş. Şans-kısıtlı görev: hedef β=%2 → gerçekleşen %1,5; **21 km** traverse, β=%5, risk-sınırlı plan risk-bilmez plandan yalnızca **0,5 km ve 2 saat** daha uzun.
+- Safe haven kuralı: Ay gecesine girmeden **SOC ≥ %50 (15 kWh kapasitede)** ile SH'da olmak.
+
+**LunaPath'te bugün:** deterministik 4B A*; arıza modeli yok; olasılık yok.
+
+**Somut katkı:**
+1. `survival.py`: mevcut `cost_cube` dilimlerini (t) ve `wait_cost` enerji fiziğini kullanarak (c, t, SOC_bin) üzerinde geri değer iterasyonu → `P_safe[t, y, x, soc]`. Grid 500×500 yerine `coarsen=4`'te (125×125) × 48 dilim × 20 SOC kutusu ≈ 15 M durum — Lamarre'nin 41,5 M'sinin altında; NumPy ile dakikalar.
+2. Yeni katman `survival_probability` (MODEL etiketli) ve `/api/cell-telemetry`'de "bu hücreden bu saatte %X ihtimalle kurtulursun".
+3. `pathfinder_4d`'e `max_failure_probability` parametresi: kenar geçişinde P_safe(hedef durum) ≥ 1−β kısıtı.
+4. **Kurtarma politikası** çıktısı: her durum için en iyi eylem (argmin) → `/api/replan` bunu "acil durum önerisi" olarak döndürür (replan tetikleyicileri zaten var).
+
+**Neden wow ve neden challenge'ın kalbi:** Challenge belgesi "termal ihlal durumunda fail mantığı mı, risk artışı mı?" (6.3) diye soruyor; bu özellik ikisini birleştirir: risk **sayı** olur ve rota o sayıya göre sınırlanır. 11 no'lu belgede "Lamarre'nin tüm katkısı bu eksende" deniyordu; burada o katkı LunaPath'e taşınır.
+
+**Efor:** 5–8 gün (en pahalı ama en değerli kalem). **Bağımlılık:** A1/A4 (safe haven kümesi) önce yapılırsa daha anlamlı.
+
+---
+
+## B2. ⭐⭐⭐⭐ CVaR tabanlı risk-farkında maliyet (slip ve termal dağılımlarından)
+
+**Ne:** Bir hücrenin maliyetini tek bir sayı yerine **dağılım** olarak ele alıp, "en kötü α'lık kuyruğun ortalaması" (Conditional Value-at-Risk) ile deterministik maliyete çevirmek. α, operatörün risk iştahı olur.
+
+**Kim:**
+- NASA JPL / Caltech — David Fan, Kyohei Otsu, Ali Agha-mohammadi vd.: **STEP** (DARPA Subterranean Challenge'da sahada kullanıldı). [arXiv 2103.02828 (RSS 2021)](https://arxiv.org/abs/2103.02828) · [Genişletilmiş sürüm, arXiv 2303.01614](https://arxiv.org/pdf/2303.01614)
+- Keio Üniversitesi Ishigami Lab — Masafumi Endo vd.: **Mixture-of-Gaussian-Processes + CVaR**, [Risk-aware Path Planning via Probabilistic Fusion of Traversability Prediction (ICRA 2023, arXiv 2303.01169)](https://arxiv.org/abs/2303.01169): belirsiz görünümlü arazide başarı oranı **%11 → %95**, maksimum slip **%92,9 → %63,7** (sentetik veri, simülasyon).
+- Aynı grubun devamı: [Deep Probabilistic Traversability with Test-time Adaptation (Sci. Rep. 2026, arXiv 2409.00641)](https://arxiv.org/html/2409.00641) — 10 no'lu belgede zaten var.
+
+**Detaylı açıklama:** Slip s ~ p(s | eğim, arazi sınıfı); sınıf belirsizliği ile GP belirsizliği karıştırılır (∑_c P(c)·p(s|c)); risk = CVaR_α(slip) → seyahat süresi/enerji maliyetine dönüşür; A* aynen kalır. STEP aynı fikri çarpışma/basamak/slip risklerini birleştirerek MPC ile kullanır.
+
+**LunaPath'te bugün:** `slip_model.py` deterministik ve kalibre edilmemiş; termal maliyet `f_thermal` deterministik.
+
+**Somut katkı:** `cost_engine`'e `risk_alpha` parametresi; slip (C3'teki kalibrasyonla) ve iç sıcaklık için μ±σ; CVaR_α kapalı form (normal dağılım için μ + σ·φ(z_α)/(1−α)) → maliyet. `/api/plan`'a `risk_alpha` alanı; `/api/compare` ile α=0,5 / 0,9 / 0,99 rotaları yan yana. **Wow:** "risk iştahı sürgüsü" — jüriye canlı gösterilebilir. 
+
+**Efor:** 2 gün. Challenge etkisi: 6.3 sorusunun "soft penalty" tarafını matematiksel olarak temellendirir.
+
+---
+
+## B3. ⭐⭐⭐⭐⭐ DEM hata yayılımı: NASA'nın 100 DEM klonuyla Monte Carlo → olasılıksal geçilebilirlik ve aydınlanma
+
+**Ne:** Yükseklik modelinin hatasını eğim, ufuk ve gölgeye yaymak; her hücre için P(geçilebilir), P(aydınlık, t) ve rota metriklerine güven aralığı üretmek.
+
+**Kim:** NASA GSFC Planetary Geodesy — Michael Barker, Erwan Mazarico vd. **NASA'nın kendisi her 5 m/px güney kutbu DEM'i için Z-belirsizlik, eğim-belirsizlik haritaları ve 100 istatistiksel klon yayınlıyor.**
+
+**Linkler:**
+- [PGDA — High-Resolution LOLA Topography for Lunar South Pole Sites (28 site; LDEM, eğim, **Z uncertainty**, **slope uncertainty**, **100 clones**)](https://pgda.gsfc.nasa.gov/products/78)
+- [Barker vd., Improved LOLA elevation maps for south pole landing sites: Error estimates and their impact on illumination conditions, PSS (2021)](https://www.sciencedirect.com/science/article/abs/pii/S0032063320303329) — paywall; PGDA sayfasındaki sayılar: medyan RMS Z hatası **0,30–0,50 m**, medyan RMS eğim hatası **1,5–2,5°**, iz konumlandırma **10–20 cm yatay, 2–4 cm düşey**.
+- Genel yöntem: [Deep Probabilistic Traversability (arXiv 2409.00641)](https://arxiv.org/html/2409.00641); arkeolojide en-düşük-maliyet-yol için Monte Carlo DEM hatası: [Lewis 2021, JAMT](https://link.springer.com/article/10.1007/s10816-021-09522-w).
+
+**LunaPath'te bugün:** tek DEM, tek eğim, tek ufuk; belirsizlik yok (skorkart boyut 5 = 1/5).
+
+**Somut katkı:**
+1. Sevk edilen 5 m grid Site 11 ise (metadata'daki `NAC_SITE11`), PGDA'dan Site 11'in klonları indirilir; yoksa klonlar **eğim-belirsizlik haritasından** sentezlenir (`z + N(0, σ_z)` + uzamsal korelasyon).
+2. `uncertainty.py`: N klon → N eğim → N geçilebilirlik maskesi → `P_traversable`; N ufuk → N gölge serisi → `P_illuminated[t]`. (Ufuk hesabı pahalı: N=20 ile başlanır, `coarsen` kullanılır.)
+3. Rota metriklerinde **band**: N klonda aynı rota simüle edilir → enerji, süre, gölge saati için %5–%95 aralığı. `/api/plan` yanıtına `uncertainty` bloğu.
+4. Provenance: `P_*` katmanları `DERIVED`, girdi pedigree'si NASA-STD-7009 "Results Uncertainty" faktörünü karşılar.
+
+**Neden wow:** "NASA'nın yayınladığı 100 hata klonunu doğrudan Monte Carlo'ya soktuk; rotamızın enerji tüketimi 5,4 ± 0,6 kWh" — jüri için "belirsizlik nicelemesi" kutusu bir günde işaretlenir. Aynı zamanda 11 no'lu belgedeki "ufuk menzili sınırlaması" (§2.3) belirsizlik olarak dürüstçe raporlanır.
+
+**Efor:** 2–3 gün. **Doğruluk kanıtı:** hata sayıları NASA'nın kendi ürününden.
+
+---
+
+## B4. ⭐⭐⭐ Global duyarlılık analizi (Sobol / SALib) — "hangi kriter gerçekten önemli?"
+
+**Ne:** Maliyet ağırlıkları, rover parametreleri (kütle, F_net, batarya, ısıtıcı gücü) ve fizik sabitlerinin rota metriklerine katkısını **varyans ayrıştırmasıyla** (Sobol birinci-derece ve toplam indeksler, Saltelli örnekleme) ölçmek.
+
+**Kim / araç:** [SALib — Sensitivity Analysis Library in Python (MIT)](https://www.researchgate.net/publication/312204236_SALib_An_open-source_Python_library_for_Sensitivity_Analysis); rover tasarım uzayında kullanımına örnek: [RoverDevKit (arXiv 2606.21755, 2026)](https://arxiv.org/abs/2606.21755) NSGA-II Pareto cepheleriyle tasarım duyarlılığı.
+
+**LunaPath'te bugün:** yok; 11 no'lu belge ablasyon (A/B/C/D) istiyor, Sobol bunun nicel genellemesidir.
+
+**Somut katkı:** `scripts/sensitivity_sobol.py`: 4 ağırlık + 6 rover parametresi → Saltelli N=512 → `plan` koşumu (coarsen ile) → çıktı: toplam enerji, süre, gölge saati, min iç sıcaklık için S1/ST tabloları. Beklenen (ve sunulabilir) bulgu: 11 no'lu belgedeki termal-eğim ρ=0,98 sorunu Sobol'da "w_thermal'ın toplam indeksi ~0" olarak görünür — **hatanın kendisi bir sunum slaydı olur** ve düzeltme sonrası tekrar ölçülür.
+
+**Efor:** 1–2 gün. Wow: orta-yüksek (akademik jüri için yüksek).
+
+---
+
+## B5. ⭐⭐⭐⭐ Monte Carlo traverse stres testi — SHERPA "Traverse Evaluation" dağılımları ve metrik seti
+
+**Ne:** Planlanan rotayı, VIPER ekibinin kullandığı **aynı belirsizlik dağılımlarıyla** binlerce kez simüle edip başarı oranı ve gölge/iletişim/batarya marjlarının dağılımını üretmek.
+
+**Kim:** NASA Ames SHERPA — Balaban, Shirley, Booth vd.
+
+**Linkler:** [Shirley & Balaban 2022 (PDF, "Traverse Evaluation use case")](https://www.nasa.gov/wp-content/uploads/2022/05/overview_of_mission_planning_for_the_viper_rover.pdf) · [SHERPA SpaceOps 2025 (PDF)](https://publications.spaceops.org/2025/download.php?doc=559__4nupk3n2.pdf) · [NASA blog: AI and NASA's First Robotic Lunar Rover (Part 1)](https://www.nasa.gov/blogs/missions/2023/12/01/part-1-artificial-intelligence-and-nasas-first-robotic-lunar-rover/)
+
+**Detaylı açıklama — VIPER'ın enjekte ettiği belirsizlikler (kesik Gauss):**
+
+| Değişken | Dağılım | Ortalama | Std. sapma |
+|---|---|---|---|
+| Başlangıç zamanı | kesik Gauss (gecikme yönünde) | planlanan | **2 saat** |
+| Başlangıç batarya | kesik Gauss (aşağı) | tam şarj | **%20** |
+| Güç çekişi | kesik Gauss (yukarı) | CBE | **%20** |
+| Etkin hız (SMG) | kesik Gauss (aşağı) | CBE | **%20/30/40/50** |
+| Aktivite süresi | kesik Gauss (yukarı) | CBE | **%20** |
+| DSN kesintisi, SEP olayı | modellenmiş olasılıkla enjekte | — | — |
+
+Yürütme politikası (insan operatörü temsil eder): geride kalınca şarj molaları kısaltılır, opsiyonel aktiviteler atılır; **önde iken gölgeye rastlanırsa bekle, geride iken bataryayla gölgeden geç**.
+
+**Hesaplanan metrikler (SHERPA listesi):** tamamlanma oranı, tam başarı oranı, ziyaret edilen istasyon/PSR sayısı, süre (normalize), odometri, **time-to-sun-shadow (min, ort)**, **time-to-DSN-shadow**, **time-to-0-SOC**, DSN gölge olay sayısı ve süresi, ISR mesafe birikimi, SEP istatistikleri — hepsinin std. sapması.
+
+**LunaPath'te bugün:** `simulation.simulate_path` tek deterministik koşum; "sihirli yeniden şarj" sorunu var (11 no'lu belge §2.3).
+
+**Somut katkı:**
+1. Önce 11 no'lu belgenin 3. maddesi: `simulation.py` enerji fiziğini `cost_engine`/`wait_cost` ile birleştir (aksi halde MC anlamsız).
+2. `/api/stress-test`: rota + N (varsayılan 1.000) → yukarıdaki dağılımlarla vektörleştirilmiş simülasyon (NumPy, saniyeler) → metrik dağılımları (p5/p50/p95) + histogram verisi.
+3. Yürütme politikası: "önde/geride" kuralı `pathfinder_4d`'nin WAIT mantığıyla zaten uyumlu.
+4. Çıktı `/api/compare`'a beslenir: iki rota artık "hangisi daha kısa" değil "**hangisi %95 güvenle SH'a varıyor**" diye kıyaslanır.
+
+**Neden wow:** Jüriye "NASA'nın VIPER için kullandığı stres-test protokolünü aynı dağılım parametreleriyle uyguluyoruz" denir; sunumda tek slayt: "1.000 koşumda %97 SH'a vardı, en kötü %5'te 6 saat gölge marjı".
+
+**Efor:** 2 gün (+ enerji birleştirmesi yarım gün).
+
+---
+
+# BÖLÜM C — Fizik modelini derinleştiren, ölçülmüş veriye dayanan eklemeler
+
+## C1. ⭐⭐⭐ Güneş paneli geliş açısı ve panel geometrisi (cos i modeli)
+
+**Ne:** Şarj gücünü yalnızca "aydınlık oranı"yla değil, panel normali ile Güneş vektörü arasındaki açıyla (cos i) ve panel eğim/azimutuyla hesaplamak.
+
+**Kim / kaynak:**
+- [RoverDevKit (Autonomous Mission Systems Lab, arXiv 2606.21755, 2026; kod açık, Zenodo 10.5281/zenodo.20754999)](https://arxiv.org/html/2606.21755): P_solar = S₀·A·η·d·max(0, cos i); cos i = sin e cos β + cos e sin β cos(α_☉−ψ); kutup için panel eğimi min(80°, |φ|). Doğrulama: Pragyan tepe güç tahmini **52 W vs yayınlanan 50 W**; kütle modeli MAE %13,3.
+- VIPER, panelleri Güneş'e dönük tutmak için **yan/çapraz sürebilir** ([NASA VIPER rover and instruments](https://science.nasa.gov/mission/viper/rover-and-instruments)); Otten 2015, 2-serbestlik dereceli dizi varsayımıyla "sıfırdan büyük her aydınlanma yeterli" demiştir.
+
+**LunaPath'te bugün:** `wait_cost(illum_frac, …)` gücü `P_solar × illum_frac` alıyor; geliş açısı yok. `ephemeris.sun_azel_from_vector` Güneş yüksekliğini zaten veriyor.
+
+**Somut katkı:** Rover kataloğuna `panel_tilt_deg`, `panel_azimuth_mode` (sabit / güneşi izler); `wait_cost` ve MOVE enerjisine cos i çarpanı; kutupta Güneş yüksekliği 1–2° iken dikey panel ile yatay panel arasındaki fark **~30 kat** — sunumda çarpıcı bir sayı. Ayrıca A2'nin "dwell" kararlarını etkiler.
+
+**Efor:** 1 gün. Wow: orta; fiziksel doğruluk artışı yüksek.
+
+---
+
+## C2. ⭐⭐⭐ Batarya soğuk davranışı, hibernasyon ve "karanlık dayanımı" fiziği
+
+**Ne:** Bataryanın kullanılabilir kapasitesini sıcaklığa bağlamak, hibernasyon (donmuş batarya, sıfır yük) durumunu 4B planlayıcıya bir eylem olarak eklemek, ısıtıcı gücünü sıcaklık farkına göre modellemek.
+
+**Kim / kaynak:**
+- NASA Glenn — Oeftering, Bennett vd., [Battery Hibernation for Surviving the Lunar Night (2021 Space Power Workshop, NTRS)](https://ntrs.nasa.gov/api/citations/20210011101/downloads/Battery%20Hibernation%203-8-21.pdf): 18650 Li-ion hücrelerde elektrolit **<200 K (−70 °C)** donuyor, gerilim sıfıra düşüyor, **>200 K'de tamamen toparlıyor**; vakumda 4/4 başarılı; ISRO 3 üreticinin hücrelerini **−160 °C'de 14 gün** tutup kapasite kaybı görmedi; Surveyor 1 altı Ay gecesi hayatta kaldı. "Dawn mode" güç mimarisi tanımlı.
+- [Lunar Power Hibernation (NTRS 2021)](https://ntrs.nasa.gov/api/citations/20210019184/downloads/Lunar%20Power%20Hibernation%20Extreme%20Environments%20WG%20%207-28-21.pdf)
+- VIPER: gölgede matkapla **9,5 saat**, min-power modda **50 saat** dayanım ([Shirley & Balaban 2022](https://www.nasa.gov/wp-content/uploads/2022/05/overview_of_mission_planning_for_the_viper_rover.pdf)).
+- NASA JSC — Slusser vd., [Surviving Night at the Lunar South Pole (TFAWS 2023)](https://tfaws.nasa.gov/wp-content/uploads/TFAWS23-PT-52-Paper.pdf): sadece bataryalı araçta gece için **>400 kg batarya** gerekebiliyor; ısıtıcı gücü T⁴ ile ölçeklenen yüzey alanına bağlı.
+- [Energy storage selection and operation for night-time survival of small lunar surface systems (Acta Astronautica 2021)](https://www.sciencedirect.com/science/article/abs/pii/S0094576521002101)
+
+**LunaPath'te bugün:** batarya sabit kapasite; ısıtıcı sabit güç; hibernasyon yok; `h_max_shadow_h` tek eşik.
+
+**Somut katkı:** (a) `battery_usable_fraction(T_inner)` eğrisi (0 °C'de ~%85, −20 °C'de ~%60 tipik; katalogda parametre olarak, `MODEL` etiketli), (b) `heater_power = k·A·(T_survive − T_env)` — `thermal_model` iç sıcaklığını kullanır, (c) 4B planlayıcıda `HIBERNATE` kenarı: yük ≈ 0, ama çıkış için "dawn pre-heat" enerji/zaman bedeli, (d) `h_max_shadow_h` artık sabit değil, SOC ve sıcaklığın fonksiyonu. Challenge belgesi 6.5 ("bileşen bazlı sağlık skoru mu?") sorusuna somut bir "battery stress" bileşeni verir.
+
+**Efor:** 2 gün. Wow: orta; jüri "hibernasyon" kelimesini VIPER/Chandrayaan bağlamında bilir.
+
+---
+
+## C3. ⭐⭐⭐⭐ Slip modelinin uçmuş/yer-test verisiyle kalibrasyonu (Yutu-2, VIPER, termal atalet)
+
+**Ne:** `slip_model.py`'nin "UNCALIBRATED" etiketini kaldıracak referans eğriler ve regolit parametreleri.
+
+**Kaynaklar (sayılarla):**
+- **Yutu-2 (Chang'e-4), uçmuş veri:** Ding vd., [A 2-year locomotive exploration… by the Yutu-2 rover, Science Robotics (2022)](https://www.science.org/doi/10.1126/scirobotics.abj6660) — hafif slip/skid; ve dijital-ikiz çalışması [Lunar rock investigation and tri-aspect characterization of lunar farside regolith by a digital twin, Nature Communications (2024, açık erişim)](https://pmc.ncbi.nlm.nih.gov/articles/PMC11258293/): iç sürtünme açısı **21,5–42,0°**, kohezyon **520–3.154 Pa**, batma üssü N **0,87–1,0**, ortalama tekerlek batması **8 mm (5–15)**, taşıma ~**4 kPa**, slip oranı **0 ile −0,075** arası; dijital ikizle hedef nokta hatası **0,367 m**. Bekker/Wong denklemleri makalede açık.
+- **VIPER yer testi (güney kutbu için tasarım kısıtı):** [Investigating the Geotechnical Properties of the Lunar South Pole with NASA VIPER's Mobility System, PSJ (2025)](https://iopscience.iop.org/article/10.3847/PSJ/add13f): GRC-1 simülant, %15–20 bağıl yoğunluk (gevşek); **tasarım kısıtı: 15° eğimde %40 slip**; slip enkoder+VO'dan, batma HazCam desenlerinden.
+- **Termal atalet → slip:** Cunningham, Nesnas, Whittaker, [Improving Slip Prediction on Mars Using Thermal Inertia Measurements (RSS 2017; Autonomous Robots 43(2) 2019)](https://roboticsproceedings.org/rss13/p38.pdf): Curiosity verisiyle, termal atalet düşük kumun yüksek slip verdiği gösterildi; görünüm-tabanlı modelden daha iyi. **LunaPath için özgün fikir:** Diviner gece sıcaklığı/termal atalet vekili, slip önceliğini modüle eder — termal katman ile mobilite katmanı arasında fiziksel bir köprü.
+- Ek: [Modeling of slip rate-dependent traversability… sandy terrain (Frontiers 2024)](https://www.frontiersin.org/journals/robotics-and-ai/articles/10.3389/frobt.2024.1320261/full); Ishigami vd. terramekanik temelli eğim geçilebilirliği (10 no'lu belge kaynakları).
+
+**LunaPath'te bugün:** `slip_model.py` yön iddiası taşıyor, büyüklük iddiası taşımıyor.
+
+**Somut katkı:** (a) Katalogda rover başına `slip_curve` = {0°: 0,02, 10°: 0,15, 15°: 0,40 (VIPER kısıtı), 20°: 0,7}; kaynak alanı zorunlu, (b) enerji = mesafe/(1−slip) düzeltmesi `edge_energy_wh`'ye, (c) Yutu-2 aralıklarıyla Bekker parametreleri `SYNTHETIC`→`MODEL(literature)` etiketine geçer, (d) B2 ile birleşince slip dağılımı (μ, σ) doğrudan CVaR'a girer. Sunum cümlesi: "Slip eğrimiz VIPER'ın 15°/%40 tasarım kısıtına ve Yutu-2'nin ölçülmüş regolit parametrelerine bağlı."
+
+**Efor:** 1–2 gün. Wow: orta-yüksek (uçmuş veri adı geçince jüri dikkat kesilir).
+
+---
+
+## C4. ⭐⭐⭐⭐ Ölçülmüş pürüzlülük (roughness) katmanı — LOLA LDRM ürünleri
+
+**Ne:** DEM'in altında kalan (5–80 m arası) yüzey pürüzlülüğünü, LOLA'nın **ölçülmüş** çok-taban-uzunluklu pürüzlülük ürünlerinden yeni bir maliyet kriteri olarak eklemek. Diviner kaya bolluğu (rock abundance) **kullanılamaz**: kapsamı ±70–80° ile sınırlı ([Powell vd. 2023, JGR Planets](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2022JE007532), 128 ppd, ±70°) — bizim pencere 80–90°S.
+
+**Kim / kaynak:**
+- NASA GSFC — Barker vd., [A New View of the Lunar South Pole from LOLA, PSJ 4:183 (2023)](https://iopscience.iop.org/article/10.3847/PSJ/acf3e1) · [PGDA ürün sayfası](https://pgda.gsfc.nasa.gov/products/90): 60°S–90°S, 10–240 m/px; **LDRM pürüzlülük** (50–1.600 m taban, Hurst üssü, RMS yükseklik sapması, k-means yüzey sınıfları, RGB kompozit), hata tahminli eğim (LDSM), **PSR haritaları (506.349 özellik; 1.531'i > 1 km²)**, 20 m NAC mozaik. Veri DOI: 10.60903/gsfcpgda-lola-spole.
+- Kuzey kutbu eşdeğeri ve metodoloji: [Large-scale Roughness Properties of the Lunar North and South Polar Regions (PSJ 2025)](https://iopscience.iop.org/article/10.3847/PSJ/adbc9d): >10° eğimlerde 50–200 m tabanda pürüzlülük artıyor; pürüzlülük **regolit sıcaklığıyla korele** (soğuk bölgeler daha pürüzsüz).
+- Klasikler: Kreslavsky vd. 2013 (hektometre/kilometre pürüzlülük, IQR eğrilik), Rosenburg vd. 2011 (RMS eğim, Hurst).
+
+**LunaPath'te bugün:** eğim ve bakı var; pürüzlülük yok; 11 no'lu belge "80 m/px'te 30 cm'lik kaya görünmez" diyor — pürüzlülük bunun **istatistiksel** vekilidir.
+
+**Somut katkı:** 5. kriter `f_roughness` (`MEASURED` etiketli — projenin ilk ölçülmüş ikinci katmanı); `weakest_validity` mantığı gereği cost katmanı artık "SYNTHETIC" yerine "MODEL" seviyesine yükselebilir (termal düzeltildikten sonra). Ayrıca PGDA PSR shapefile'ı, `SYNTHETIC` PSR maskesinin yerine `MEASURED` maske olarak girer.
+
+**Efor:** 1–2 gün (indirme + ko-registrasyon; `rasterio` zaten var).
+
+---
+
+## C5. ⭐⭐⭐ Termal doğrulama için doğru ürün kimlikleri (Diviner PRP + Williams 2019)
+
+**Ne:** 07 ve 11 no'lu belgeler "Diviner'ı indirin" diyordu; burada **hangi ürün, hangi çözünürlük, hangi ID** netleştiriliyor ki doğrulama bir günde yapılabilsin.
+
+- [LRO Diviner **Polar Resource Products (PRP)**, PDS Geosciences / ODE](https://ode.rsl.wustl.edu/moon/pagehelp/Content/Missions_Instruments/LRO/DIVINER/PRP.htm): yıllık ortalama yüzey sıcaklığı, yıllık **maksimum** yüzey sıcaklığı, buz permafrost derinliği; kutuptan 80°'ye; üçgen ağ (2,88 M üçgen); `DLRE_PRP_SOUTH.TAB`; veri seti ID `LRO-L-DLRE-5-PRP-V2.0`. **Not:** heat1d LUT'umuz `nanmax` (yıllık tepe) alıyor — PRP'nin "annual maximum" ürünü tam bu istatistiğin ölçülmüş karşılığıdır; RMSE doğrudan hesaplanır.
+- [Williams vd., Seasonal Polar Temperatures on the Moon, JGR Planets (2019)](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2019JE006028): 240 m/px yaz/kış **max/avg/min/amplitude** haritaları, 80°'ye kadar; 80°S'nin kutup tarafında gerçek soğuk tuzaklar **1,3×10⁴ km²** (tepe T < 110 K).
+- [ICES 2023: LRO Diviner Polar Mapping Data Products (Williams vd.)](https://www.hou.usra.edu/meetings/ices2023/pdf/4046.pdf)
+
+**Somut katkı:** `scripts/validate_thermal.py`: PRP annual-max ↔ `thermal_grid.npy` (eğim/bakı LUT) RMSE + Spearman; Williams min ↔ heat1d gece minimumu. Bu, 11 no'lu belgede "#5 Diviner'a karşı RMSE" maddesinin uygulama reçetesidir. **Efor:** 1 gün (indirme dahil).
+
+---
+
+## C6. ⭐⭐⭐ VIPER termal "operasyon zarfı": (Güneş azimutu × yükseklik × eğim) sınır-durum matrisi ve "tolere edilebilir saplanma süresi"
+
+**Ne:** Rover'ın belirli bir Güneş geometrisi ve eğimde **ne kadar süre hareketsiz kalabileceğini** (izin verilen uçuş sıcaklığı AFT aşılmadan) veren zarf; NASA JSC bunu VIPER için hesaplama matrisini küçültmek amacıyla geliştirdi.
+
+**Kim:** NASA JSC / MSFC — Slusser, Turk, Stewart, Page, Barragan, Mittag: [Generalizing Lunar Vehicle Thermal Analysis: Lessons Learned from VIPER (ICES-2025-376)](https://ntrs.nasa.gov/api/citations/20250004028/downloads/ICES-2025-376_Final.pdf). Kutupta maksimum Güneş yüksekliği ~1,5°; "unlimited operations envelope" grafiği: Güneş azimutuna paralel eğim açısı vs. yükseklik; bazı kombinasyonlarda AFT **12 °C** aşılmış (77 °C); "tolerable entrenched time" (regolite saplanma durumunda dayanma süresi) çerçevesi.
+
+**LunaPath'te bugün:** `thermal_model.Heat1DModel` eğim/bakı LUT; iç sıcaklık log-barrier; ama "bu hücrede en fazla kaç saat durabilirim" katmanı yok.
+
+**Somut katkı:** `max_dwell_hours[y,x,t]` = iç sıcaklık modelinin AFT (rover kataloğundaki `t_inner_min/max`) sınırına ulaşma süresi; WAIT kenarı bu süreyi aşamaz; `replan_triggers`'a "entrenchment" senaryosu (hareket edemeyen rover, saplanma anından itibaren geri sayım). Challenge Modül 4 ("gölgede kalma süresini izlemek, warning/critical/fail") doğrudan bununla karşılanır.
+
+**Efor:** 2 gün (heat1d çağrıları önbelleklenirse). Wow: orta-yüksek ("NASA JSC'nin VIPER için kullandığı zarf yaklaşımı").
+
+---
+
+# BÖLÜM D — Algoritma, kıyaslama ve mühendislik "wow"ları
+
+## D1. ⭐⭐⭐ Herhangi-açı planlama: Theta* / Field D* — MER'de uçmuş algoritma ailesi
+
+**Ne:** 8-komşuluk grid'in 45° kırıklı yollarını, hücre kenarlarındaki herhangi bir noktadan geçebilen (enterpolasyonlu) yollarla değiştirmek; %5–8 daha kısa ve fiziksel olarak daha gerçekçi rotalar.
+
+**Kim:** CMU (Ferguson & Stentz) + JPL (Carsten, Rankin, Maimone): [Global Path Planning on Board the Mars Exploration Rovers (IEEE Aerospace 2007, PDF)](https://www-robotics.jpl.nasa.gov/media/documents/IEEEAC-Carsten-1125.pdf) — Field D* 2006 yazında Spirit ve Opportunity'ye yüklendi; **<1 MB bellek**, 50 m × 50 m maliyet haritası, 40 cm maliyet hücreleri; GESTALT'ın kapalı-koridor hatasını çözdü. [CMU haber](https://www.cs.cmu.edu/news/2007/carnegie-mellon-software-steers-nasas-mars-roverfirst-test-new-autonomous-capability-mars).
+- Benchmark kanıtı: MoonPlanBench'te Theta* Ay kutup haritalarında **%100 başarı** (D2).
+
+**LunaPath'te bugün:** 8-komşuluk A*; 05 ve 08 no'lu belgelerde Theta* adı geçiyor ama uygulanmamış.
+
+**Somut katkı:** En ucuz yol: A* sonrası **görüş-hattı (line-of-sight) yumuşatma** (Theta*'ın post-process versiyonu) — maliyet katmanı üzerinde LOS kontrolüyle; 4B planlayıcı için zaman dilimi içinde geçerli. Metriklerde `path_length_m` düşer, `heading_changes` yeni metrik. Sunum: "MER'de uçan Field D* ailesinin herhangi-açı ilkesini uyguluyoruz."
+
+**Efor:** 1 gün. Wow: orta (isim değeri yüksek, challenge etkisi düşük).
+
+---
+
+## D2. ⭐⭐⭐⭐ Dış benchmark: MoonPlanBench (Aralık 2025)
+
+**Ne:** Ay kutuplarının LOLA DEM'lerinden türetilmiş **36 standart planlama haritası** (10°/15°/20° eğim eşikli üç varyant), tanımlı metrikler (başarı oranı, yol uzunluğu, süre, hedefe uzaklık, bellek, düzgünlük, engel açıklığı) ve referans planlayıcılar (Dijkstra, A*, Theta*, RRT ailesi, öğrenme tabanlı 4 model).
+
+**Kim:** Marvin Chancán vd. — [Planetary Terrain Datasets and Benchmarks for Rover Path Planning (arXiv 2512.21438)](https://arxiv.org/abs/2512.21438) · [GitHub mchancan/PlanetaryPathBench](https://github.com/mchancan/PlanetaryPathBench) (veri CC BY-NC-SA 4.0; kod PythonRobotics/PathBench türevi). Sonuçlar: MoonPlanBench-10'da Dijkstra ve Theta* %100 başarı, ~651–654 hücre yol; RRT %8; öğrenme tabanlı modeller gezegen arazisine genellemiyor, en iyisi (WPN) 10× yavaş.
+
+**LunaPath'te bugün:** yalnızca kendi nav2 baseline kıyası.
+
+**Somut katkı:** `scripts/moonplanbench_runner.py`: LunaPath'in `pathfinder` (tek kriter: eğim) ve çok kriterli modunu 36 haritada koşturup aynı metrik tablosunu üretmek. Jüri için: "bağımsız bir benchmark'ta A*/Theta* ile aynı %100 başarı, artı çok kriterli maliyetin getirdiği X% gölge azalması." Ayrıca öğrenme tabanlı planlayıcı **kullanmama** kararımızın literatür kanıtı olur.
+
+**Efor:** 1 gün. **Not:** veri lisansı ticari kullanımı kısıtlar; hackathon/akademik kullanım uygundur.
+
+---
+
+## D3. ⭐⭐⭐⭐ Formal güvenlik gereksinimleri: FRET (NASA) + STL robustness monitörü (RTAMT)
+
+**Ne:** "Rover hiçbir zaman 50 saatten uzun kesintisiz gölgede kalmayacak", "iç sıcaklık her zaman −40 °C üstünde olacak", "SOC %20'nin altına düşerse 6 saat içinde şarj başlayacak" gibi kuralları **yapılandırılmış doğal dilde (FRETISH)** yazıp otomatik olarak zamansal mantığa çevirmek; planlanan rotanın telemetri izini bu formüllerle **nicel** (robustness = kural ihlaline kaç saat / kaç derece kaldı) denetlemek.
+
+**Kim / araçlar:**
+- NASA Ames — [FRET: Formal Requirements Elicitation Tool (GitHub NASA-SW-VnV/fret, açık kaynak)](https://github.com/NASA-SW-VnV/fret) · [Giannakopoulou vd., NTRS 2020](https://ntrs.nasa.gov/api/citations/20200001989/downloads/20200001989.pdf) · [Space ROS dokümantasyonunda FRET](https://space-ros.github.io/docs/rolling/Related-Projects/FRET.html) · [Robotics: A New Mission for FRET Requirements (2024)](https://link.springer.com/chapter/10.1007/978-3-031-60698-4_22) · [Towards a Catalogue of Requirement Patterns for Space Robotic Missions (arXiv 2511.14438)](https://arxiv.org/pdf/2511.14438)
+- AIT Avusturya — Dejan Ničković: [RTAMT — Runtime Robustness Monitors (GitHub, BSD-3)](https://github.com/nickovic/rtamt) · [STTT 2023 / arXiv 2501.18608](https://arxiv.org/abs/2501.18608): ayrık/yoğun zaman, online/offline STL, C++ arka uç, `rtamt4ros`.
+- FRET → Copilot/Ogma → ROS 2 monitör düğümleri: [Monitoring ROS2: from Requirements to Autonomous Robots (arXiv 2209.14030)](https://arxiv.org/pdf/2209.14030).
+
+**LunaPath'te bugün:** kısıtlar log-barrier ve `check_profile_constraints` ile; ROS 2 kabuğu var; ama gereksinimler formal değil, ihlal marjı ölçülmüyor.
+
+**Somut katkı:**
+1. `docs/requirements/lunapath.fret.json`: 8–10 FRETISH gereksinim (termal, gölge, SOC, eğim, DTE); FRET'in ürettiği LTL/STL formülleri belgeye.
+2. `safety_monitor.py`: `simulate_path` telemetri izini RTAMT offline monitörüne verir → her kural için robustness ρ (saat/°C/%); `/api/plan` yanıtına `safety_margins` bloğu; `/api/compare` "en küçük marj" ile sıralar.
+3. ROS 2 kabuğunda `rtamt4ros` düğümü → replan tetikleyicilerinin formal versiyonu.
+
+**Neden wow:** "Gereksinimlerimiz NASA'nın FRET aracıyla formal olarak yazıldı ve her rota bu gereksinimlere karşı nicel olarak denetleniyor" — akademik jüri için nadir görülen bir olgunluk sinyali; challenge Modül 9 ("validation checklist") doğrudan karşılanır.
+
+**Efor:** 2–3 gün. Bağımlılık: yok.
+
+---
+
+## D4. ⭐⭐⭐ Kontrastif açıklama: "neden bu rota, neden şu değil?"
+
+**Ne:** Kullanıcının çizdiği/önerdiği alternatif rotanın neden seçilmediğini, ihlal edilen kısıtlar ve maliyet farklarıyla açıklamak; ayrıca "rotanın değişmesi için hangi ağırlığın ne kadar değişmesi gerekir" (karşı-olgusal) sorusunu yanıtlamak.
+
+**Kim / literatür (XAIP):** [Krarup vd., Model-Based Contrastive Explanations for Explainable Planning (ICAPS 2019 XAIP)](https://strathprints.strath.ac.uk/69957/1/Krarup_etal_ICAPS2019_Model_based_contrastive_explanations_explainable_planning.pdf) · [Contrastive Explanations of Plans Through Model Restrictions (arXiv 2103.15575)](https://arxiv.org/pdf/2103.15575) · [Leveraging Counterfactual Paths for Contrastive Explanations of POMDP Policies (arXiv 2403.19760)](https://arxiv.org/pdf/2403.19760) · [Towards Transparent Robotic Planning via Contrastive Explanations (arXiv 2003.07425)](https://arxiv.org/pdf/2003.07425).
+
+**LunaPath'te bugün:** `CostMap.explain()` ve `cost_breakdown` — "neden bu" var, "neden o değil" yok; 11 no'lu belge açıklanabilirliği 5/5 vermiş, bu onu **farklılaştırıcı** yapar.
+
+**Somut katkı:** `/api/explain-contrast`: girdi = alternatif rota (nokta listesi) → çıktı = (a) ihlal edilen sert kısıtlar (hücre, hangi kural, ne kadar), (b) kriter bazında maliyet farkı, (c) **minimum ağırlık değişimi** (ikili arama ile: w_thermal'ı hangi değere çekince alternatif kazanır). Challenge Modül 6 "route rejection/explanation" çıktısı birebir.
+
+**Efor:** 1–2 gün.
+
+---
+
+## D5. ⭐⭐⭐ Pareto cephesi: ağırlık tartışması yerine baskın-olmayan rota ailesi
+
+**Ne:** Tek bir ağırlık vektörü yerine (süre, enerji, gölge saati, termal risk) uzayında **baskın-olmayan** rota kümesini üretmek; operatör cepheden seçer. 11 no'lu belge "AHP" etiketinin yanlış olduğunu söylüyordu — Pareto cephesi bu tartışmayı tamamen ortadan kaldırır.
+
+**Kim / kanıt:** ETH `lunar_planner` çok-amaçlı optimizasyon (10 no'lu belge A1); [A Pareto Front-Based Multiobjective Path Planning Algorithm (arXiv 1505.05947, Mars rover örneği)](https://arxiv.org/pdf/1505.05947); [RoverDevKit NSGA-II tradespace](https://arxiv.org/html/2606.21755); ISRO BAH 2026 hackathon projesi de NSGA-II kullanmış (Bölüm E).
+
+**Somut katkı:** Ucuz yol: ağırlık simpleksinde 20–40 örnek → `plan` → baskın-olmayan filtre (`/api/pareto`); pahalı yol: `pymoo` NSGA-II (Apache-2.0) ile rota geni. Çıktı frontend'de 2B/3B cephe grafiği. **Efor:** 1 gün (ucuz yol).
+
+---
+
+## D6. ⭐⭐⭐ Enerji-erişilebilirlik izokronları ("şu an nereye kadar gidebilirim?")
+
+**Ne:** Rover'ın mevcut konum, zaman ve SOC'siyle **ulaşabileceği bölge** (ve "N saat sonra"ki hali); `time-to-0-SOC` metriğinin uzamsal karşılığı.
+
+**Kim / literatür:** Tompkins (CMU 2005) [Mission-Directed Path Planning for Planetary Rover Exploration](https://www.ri.cmu.edu/pub_files/pub4/tompkins_paul_2005_1/tompkins_paul_2005_1.pdf) (TEMPEST; Lamarre'nin de temeli); [Energy-Constrained Navigation for Planetary Rovers under Hybrid RTG-Solar Power (arXiv 2509.15062)](https://arxiv.org/html/2509.15062): anlık güç kısıtı P_cons ≤ P_avail (softplus cezası), SCP + NMPC, tepe güç limitin %0,55 içinde (rakipler %17 aşıyor); Fast Marching ile enerji haritaları ([Energy-aware trajectory planning for planetary rovers, Advanced Robotics 2021](https://www.tandfonline.com/doi/full/10.1080/01691864.2021.1959396)).
+
+**Somut katkı:** `/api/reachable`: `cost_cube` üzerinde çok-kaynaklı Dijkstra (enerji bütçeli) → hücre kümesi + izokron poligonları (`skimage.measure.find_contours`). SHERPA'nın "time-to-0-SOC" metriği ile birlikte. **Efor:** 1 gün. Wow: görsel olarak yüksek (frontend'e hazır veri).
+
+---
+
+## D7. ⭐⭐⭐ Enerji modelinin gerçek rover ölçümüyle doğrulanması — UTIAS enav dataset
+
+**Ne:** `edge_energy_wh`'nin eğim bağımlılığını (μ = 1 + k·sin θ) ölçülmüş güç-vs-eğim verisiyle kıyaslamak; projenin ilk "validation" kanıtı.
+
+**Kim / veri:** University of Toronto STARS — Lamarre, Limoyo, Marić, Kelly, [The Canadian Planetary Emulation Terrain Energy-Aware Rover Navigation Dataset (IJRR 2020) — GitHub utiasSTARS/enav-planetary-dataset](https://github.com/utiasSTARS/enav-planetary-dataset): CSA Mars Emulation Terrain, **>1.200 m sürüş**, güç tüketimi, üst yüzey güneş ışınımı, IMU, tekerlek enkoderleri, GPS, 0,2 m çözünürlüklü yükseklik/eğim/bakı haritaları; IEEE DataPort'ta rosbag.
+
+**Somut katkı:** `scripts/validate_energy_enav.py`: veri setinden (eğim, güç) çiftleri → LunaPath modelinin **şekli** (sin θ bağımlılığı) ile ölçüm arasında R²; g_Dünya→g_Ay ve kütle ölçeklemesi açıkça belgelenir. Ayrıca `simulation.py` ↔ `cost_engine.py` iki farklı enerji modeli sorununu (11 no'lu belge §2.3) "hangisi ölçüme yakın?" sorusuyla çözer. **Efor:** 2 gün (veri indirme ağır olabilir).
+
+---
+
+## D8. ⭐⭐ "Speed Made Good" ve yer-döngülü komuta kadansı — referans misyon modelinin tamamlanması
+
+**Ne:** Rota süresi tahminlerine gerçek operasyon kadansını eklemek.
+
+**Sayılar:** VIPER 20 cm/s tepe, **SMG ~1 cm/s**, zamanın %90'ı bekleme ([Ennico-Smith 2023](https://ntrs.nasa.gov/api/citations/20230004239/downloads/SSR2023-VIPER-Planning-Ennico.pdf?attachment=true)); Pragyan hamle başına ≤5 m, hamleler arası ~5 saat, 15° eğim sınırı, 27 Ağustos 2023'te 3 m önde 4 m çaplı krater için rota değişikliği (haber kaynakları: [Swarajya](https://swarajyamag.com/science/chandrayaan-3-how-pragyan-rover-is-navigating-the-tough-lunar-obstacle-course), [Tribune](https://www.tribuneindia.com/news/india/chandrayaan-3-pragyan-rover-comes-across-big-crater-on-lunar-surface-retraces-path-isro-releases-fresh-pictures-539165)).
+
+**LunaPath'te bugün:** `mission_reference.py` Yutu-2 ve Pragyan günlük hızlarını veriyor.
+
+**Somut katkı:** `ops_cadence` modeli: hamle uzunluğu + yer-döngü gecikmesi + DTE penceresi → "takvim süresi" ile "sürüş süresi" ayrı raporlanır; VIPER SMG referansı eklenir. 4B planlayıcıda `travel_hours` fiziksel hız yerine SMG kullanabilir. **Efor:** yarım gün.
+
+---
+
+## D9. ⭐⭐ (Opsiyonel) Ay navigasyon servisi (LCNS/Moonlight) kullanılabilirlik katmanı
+
+**Ne:** 2028+ için ESA Moonlight LCNS'nin güney kutbunda günde ≥15 saat HHDOP < 3,5 hedefi ([ESA Moonlight](https://www.esa.int/Applications/Connectivity_and_Secure_Communications/ESA_s_Moonlight_programme_Pioneering_the_path_for_lunar_exploration), [UNOOSA ICG 2024 sunumu](https://www.unoosa.org/documents/pdf/icg/2024/WG-B_Lunar_PNT_Jun24/LunarPNT_Jun24_01_04.pdf)); de Gerlache çevresinde 320 km/11 gün rover konumlandırma simülasyonu ([Adv. Space Res. 2024](https://www.sciencedirect.com/science/article/abs/pii/S0273117724005829)). LunaPath'in `check_localization_uncertainty` tetikleyicisine "navigasyon servisi var/yok" girdisi olarak eklenebilir. Düşük öncelik; yalnızca "gelecek uyumluluğu" anlatısı için.
+
+---
+
+# BÖLÜM E — Hackathon ve yarışma projelerinden gözlemler
+
+Amaç: rakip/akran ekiplerin jüri karşısına neyle çıktığını görmek. Bunlar **doğrulanmış** projeler değildir; "jüri beklentisi" için okunmalıdır.
+
+| Proje | Kim / nerede | Ne yapmış | LunaPath için ders |
+|---|---|---|---|
+| [Lunaris — ISRO Bharatiya Antariksh Hackathon 2026, PS8](https://github.com/iamLakshikaTanwar/bah2026-ps8) (MIT) | Hindistan, 2026 | Faustini krateri buz tespiti + rover traverse: A*, **D* Lite, Theta*, RRT\*, NSGA-II**; eğim, aydınlanma, pürüzlülük, **Dünya görünürlüğü** katmanları; 70 saat gölge dayanımlı batarya modeli; AHP-MCDA iniş bölgesi | Hackathon seviyesinde bile DTE, herhangi-açı ve Pareto var (A4, D1, D5). Doğrulama iddiası yok — bizim avantajımız 263 test + provenance. |
+| [Subsurface Lunar Ice Detection — BAH 2026](https://github.com/Brukrish2006/Subsurface-Lunar-Ice-Detection/blob/main/README.md) | Hindistan, 2026 | A* ile **Bekker-Wong** toprak mekaniği maliyeti; LOLA 5 m; PSR karanlık cezası, iletişim kesintisi cezası, **40 K altı "cold-shock"** cezası; SOC profili | Termal "soğuk şoku" ve toprak mekaniği hackathon'da da kullanılıyor (C3). |
+| [Lunar Autonomy Challenge 2025 (NASA/JHU-APL/Caterpillar) — Stanford NavLab 1., MIT MAPLE 2.](https://arxiv.org/pdf/2603.17232) | ABD, 2025 | Stereo VO + pose-graph SLAM, U-Net++ segmentasyon, yay örnekleme yerel planlayıcı; cm düzeyi konumlandırma | 10 no'lu belge A2; yerel katman kapsam dışı — burada yeni bir şey yok. |
+| [NASA Space Robotics Challenge Phase 2 (2019–2021)](https://arxiv.org/abs/2109.09620) | ABD, 114 takım | Çok-rover ISRU otonomisi (Gazebo); Team Mountaineers (WVU) yaklaşımı | Çok-rover koordinasyonu (CADRE) ilerde `plan-multi` için fikir; şimdilik kapsam dışı. |
+| [NASA BIG Idea 2020 "Lunar PSR Challenge" — Michigan Tech T-REX (Artemis Award)](https://www.mtu.edu/news/2021/01/mtu-students-shoot-for-the-moon-and-win.html) | ABD, 2020 | PSR'a süperiletken tether ile güç/iletişim taşıyan rover; PSR'ın soğuğunu pasif soğutma olarak kullanma | Donanım odaklı; "PSR girişi = tether/enerji bütçesi" senaryosu B1'deki PSR-entry makro-aksiyonuna örnek. |
+| [ESA-ESRIC Space Resources Challenge (2021–22)](https://www.esa.int/ESA_Multimedia/Images/2022/03/Rovers_compete_in_Space_Resources_Challenge) | Avrupa/Kanada, 12 takım | Gölgeli kutup analoğunda prospeksiyon; LUVMI-XR (Space Applications + Uni Luxembourg), Mission Control (Husky + LiDAR) | LUVMI-M profilimizin sahibi bu ekosistemde; yarışma sonuçları yayınlı değil. |
+
+**Ders:** Hackathon projeleri "çok algoritma, sıfır doğrulama" profilinde. LunaPath'in farkı doğrulama ve dürüstlük; bu belgedeki A4/D1/D5 eklendiğinde algoritma çeşitliliğinde de geri kalınmaz.
+
+---
+
+## 3. Öncelik matrisi (efor × wow × challenge etkisi)
+
+| # | Özellik | Efor (gün) | Wow | Challenge | Bağımlılık | Doğrulama kanıtı türü |
+|---|---|---|---|---|---|---|
+| A4 | DTE katmanı + LOLA Earth-visibility doğrulaması | 1–2 | 4 | 4 | — | **Ölçülmüş ürünle RMSE** |
+| A1 | Safe haven (Ay günü) + time-to-SH + 50 h kuralı | 2–3 | 5 | 5 | A4 | NASA kuralı birebir |
+| B5 | MC stres testi (SHERPA dağılımları/metrikleri) | 2 (+0,5) | 4 | 5 | enerji birleştirme | NASA protokolü birebir |
+| B3 | DEM klonlarıyla Monte Carlo belirsizlik | 2–3 | 5 | 4 | — | NASA hata ürünleri |
+| D3 | FRET gereksinimleri + RTAMT STL monitörü | 2–3 | 4 | 4 | — | Formal yöntem |
+| A2 | 3B bağlı-bileşen aydınlık koridoru | 2–3 | 4 | 4 | — | CMU, WAC ile doğrulanmış yöntem |
+| B2 | CVaR risk maliyeti | 2 | 4 | 4 | C3 (tercihen) | JPL saha + ICRA sonuçları |
+| C3 | Slip kalibrasyonu (Yutu-2 / VIPER) | 1–2 | 4 | 3 | — | Uçmuş veri |
+| C4 | LOLA pürüzlülük + PSR (MEASURED) | 1–2 | 4 | 3 | — | Ölçülmüş katman |
+| D2 | MoonPlanBench koşumu | 1 | 4 | 3 | — | Dış benchmark |
+| B1 | Reach-avoid kurtarma politikası, P_fail ≤ β | 5–8 | 5 | 5 | A1, B5 | Toronto formülasyonu |
+| C6 | Termal operasyon zarfı / max dwell | 2 | 3 | 4 | — | NASA JSC yöntemi |
+| C1 | Panel cos i modeli | 1 | 3 | 3 | — | RoverDevKit doğrulaması |
+| C2 | Batarya soğuk/hibernasyon | 2 | 3 | 4 | C1 | NASA Glenn testleri |
+| C5 | Diviner PRP/Williams termal RMSE | 1 | 3 | 3 | — | **Ölçülmüş ürünle RMSE** |
+| D5 | Pareto cephesi | 1 | 3 | 3 | — | Literatür |
+| D4 | Kontrastif açıklama | 1–2 | 3 | 4 | — | XAIP literatürü |
+| D6 | Erişilebilirlik izokronları | 1 | 3 | 3 | — | Literatür |
+| B4 | Sobol duyarlılık | 1–2 | 3 | 3 | — | SALib |
+| A5 | Zaman pencereli TSP görev planı | 3–4 | 3 | 3 | A1 | VIPER Alg. #1 |
+| D7 | enav dataset ile enerji doğrulama | 2 | 3 | 3 | — | **Ölçülmüş veri** |
+| A3 | Zaman sıkıştırma hızlandırma | 1–2 | 2 | 2 | A2 | CMU |
+| D1 | Theta*/LOS yumuşatma | 1 | 3 | 2 | — | MER uçuş yazılımı |
+| D8 | SMG / komuta kadansı | 0,5 | 2 | 2 | — | VIPER/Pragyan sayıları |
+| D9 | LCNS katmanı | 1 | 2 | 1 | — | ESA hedefleri |
+
+---
+
+## 4. Önerilen üç paket
+
+**Paket 1 — "VIPER kuralları" (5 iş günü, demo-güvenli):** A4 → A1 → B5 (+ enerji birleştirme) → D8.
+Sunum cümlesi: *"Rota planlayıcımız VIPER'ın leg/safe-haven yapısını, 50 saatlik karanlık kuralını ve DTE kısıtını uyguluyor; her rotayı NASA'nın stres-test dağılımlarıyla 1.000 kez simüle edip 'time-to-DSN-shadow' ve 'time-to-0-SOC' marjlarını raporluyoruz. Dünya görünürlüğü katmanımız LOLA'nın 18,6 yıllık ürünüyle X RMSE ile örtüşüyor."*
+
+**Paket 2 — "Belirsizlik ve doğrulama" (5–6 iş günü):** B3 → C4 → C5 → D2 → B4.
+Sunum cümlesi: *"NASA'nın yayınladığı 100 DEM klonuyla Monte Carlo yaptık; rotamızın enerji tüketimi %90 güven aralığıyla veriliyor. İki katmanımız (pürüzlülük, PSR) artık MEASURED etiketli, termal modelimiz Diviner PRP'ye karşı ölçüldü, planlayıcımız bağımsız MoonPlanBench'te %100 başarı verdi."*
+
+**Paket 3 — "Risk sınırı ve formal güvenlik" (8–10 iş günü, akademik zirve):** C3 → B2 → D3 → B1 → D4.
+Sunum cümlesi: *"Her rota için başarısızlık olasılığı üst sınırı (β) veriyoruz ve rover'ın her durumdan güvenli limana dönüş politikasını önceden hesaplıyoruz; güvenlik gereksinimleri NASA FRET ile formal yazıldı ve STL robustness ile her rotada nicel marj olarak denetleniyor."*
+
+Üç paket birlikte 11 no'lu belgedeki skorkartı şu şekilde etkiler (tahmin): Veri gerçekliği 3→4, Validation 1→3, Belirsizlik 1→4, Otonomi kapsamı 3→4 ⇒ **33/50 → ~41/50**, TRL 4 iddiası savunulabilir.
+
+---
+
+## 5. Ne söylenebilir, ne söylenemez (bu belgedeki özellikler yapıldıktan sonra)
+
+| İddia | Koşul |
+|---|---|
+| "VIPER ile aynı safe-haven ve 50 saat kuralını uyguluyoruz" | A1 tamam; kaynak: Shirley & Balaban 2022, Ennico 2023 |
+| "Dünya görünürlüğü katmanımız LOLA ürünüyle doğrulandı" | A4 + PGDA 69 RMSE hesaplandı |
+| "Belirsizlik nicelenmiştir" | B3 (klonlar) veya en az sentetik σ_z ile MC; B5 metrik dağılımları |
+| "Rotanın başarısızlık olasılığı ≤ %β" | Yalnızca B1 yapılırsa; arıza oranı α'nın kaynağı (Lamarre: 1/5 km) açıkça yazılmalı |
+| "Slip modelimiz kalibre edildi" | C3; ama "uçmuş veriye **bağlandı**" demek, "ölçüldü" dememek — LunaPath hâlâ saha verisi üretmiyor |
+| "Gereksinimlerimiz formal olarak doğrulandı" | D3; "runtime monitoring ile denetlendi" doğru, "model checking ile ispatlandı" yanlış |
+| "Bağımsız benchmark'ta %100 başarı" | D2; benchmark'ın yalnızca eğim eşikli occupancy olduğunu söyleyin |
+| "Diviner kaya bolluğu kullanıyoruz" | **Söylenemez** — ürün 80–90°S'yi kapsamıyor (C4) |
+
+---
+
+## 6. Kaynaklar (bu belgede kullanılan tüm bağlantılar)
+
+**NASA VIPER / SHERPA**
+- [Overview of Mission Planning for the VIPER Rover — Shirley & Balaban, 2022 (PDF)](https://www.nasa.gov/wp-content/uploads/2022/05/overview_of_mission_planning_for_the_viper_rover.pdf)
+- [VIPER Mission Traverse Planning — Ennico-Smith vd., NTRS 2023 (PDF)](https://ntrs.nasa.gov/api/citations/20230004239/downloads/SSR2023-VIPER-Planning-Ennico.pdf?attachment=true)
+- [SHERPA — SpaceOps 2025 (PDF)](https://publications.spaceops.org/2025/download.php?doc=559__4nupk3n2.pdf) · [NASA blog Part 1](https://www.nasa.gov/blogs/missions/2023/12/01/part-1-artificial-intelligence-and-nasas-first-robotic-lunar-rover/) · [Aerospace America: VIPER's AI assistant](https://aerospaceamerica.aiaa.org/departments/vipers-ai-assistant/)
+- [VIPER Traverse Planning — Shirley vd., LPSC 2022 #2874](https://www.hou.usra.edu/meetings/lpsc2022/pdf/2874.pdf) (403; erişilemedi) · [VIPER Lunar Operations](https://science.nasa.gov/mission/viper/lunar-operations/) · [VIPER Site Analysis, PSJ](https://iopscience.iop.org/article/10.3847/PSJ/ae061a)
+- [Generalizing Lunar Vehicle Thermal Analysis: Lessons Learned from VIPER — ICES-2025-376](https://ntrs.nasa.gov/api/citations/20250004028/downloads/ICES-2025-376_Final.pdf)
+- [Investigating the Geotechnical Properties of the Lunar South Pole with VIPER's Mobility System — PSJ 2025](https://iopscience.iop.org/article/10.3847/PSJ/add13f)
+- [Resource Prospector traverse planning — Heldmann vd., NTRS 2015](https://ntrs.nasa.gov/api/citations/20150022104/downloads/20150022104.pdf) (404) · [Acta Astronautica 127 (2016)](https://ui.adsabs.harvard.edu/abs/2016AcAau.127..308H/abstract)
+
+**CMU / Toronto akademik planlayıcılar**
+- [Otten vd., ICRA 2015 (PDF)](https://www.ri.cmu.edu/app/uploads/2018/01/ICRA2015_Otten_3109.pdf) · [Otten vd., FSR 2017 (PDF)](https://publications.ri.cmu.edu/storage/publications/2018/01/FSR_2017_Otten_66.pdf) · [Otten tezi](https://kilthub.cmu.edu/articles/thesis/Planning_for_Sun-Synchronous_Lunar_Polar_Roving/6721082/1)
+- [Cunningham vd., ICRA 2017 (IEEE Xplore)](https://ieeexplore.ieee.org/document/7989508) · [Cunningham, Nesnas, Whittaker — RSS 2017 (PDF)](https://roboticsproceedings.org/rss13/p38.pdf) · [Autonomous Robots 2019](https://link.springer.com/article/10.1007/s10514-018-9796-4)
+- [Tompkins 2005 — Mission-Directed Path Planning (PDF)](https://www.ri.cmu.edu/pub_files/pub4/tompkins_paul_2005_1/tompkins_paul_2005_1.pdf)
+- [Lamarre vd., arXiv 2307.16786](https://arxiv.org/abs/2307.16786) · [arXiv 2401.08558](https://arxiv.org/html/2401.08558v2) · [gplanetary-nav](https://github.com/utiasSTARS/gplanetary-nav) · [enav-planetary-dataset](https://github.com/utiasSTARS/enav-planetary-dataset)
+
+**Risk / belirsizlik**
+- [STEP — arXiv 2103.02828](https://arxiv.org/abs/2103.02828) · [arXiv 2303.01614](https://arxiv.org/pdf/2303.01614) · [RSS 2021 p021](https://www.roboticsproceedings.org/rss17/p021.pdf)
+- [Endo vd., ICRA 2023 — arXiv 2303.01169](https://arxiv.org/abs/2303.01169) · [arXiv 2409.00641](https://arxiv.org/html/2409.00641)
+- [SALib](https://www.researchgate.net/publication/312204236_SALib_An_open-source_Python_library_for_Sensitivity_Analysis) · [Multi-Objective Risk Assessment Framework — arXiv 2410.03917](https://arxiv.org/abs/2410.03917)
+
+**NASA veri ürünleri (PGDA / PDS / SVS)**
+- [PGDA 78 — 5 m DEM + belirsizlik + 100 klon](https://pgda.gsfc.nasa.gov/products/78) · [PGDA 90 — Güney kutbu LOLA (pürüzlülük, PSR, eğim hatası)](https://pgda.gsfc.nasa.gov/products/90) · [PGDA 69 — Kutup aydınlanma & Dünya görünürlüğü](https://pgda.gsfc.nasa.gov/products/69) · [PGDA 81 — South Pole LOLA DEM Mosaic](https://pgda.gsfc.nasa.gov/products/81)
+- [Barker vd., PSJ 4:183 (2023)](https://iopscience.iop.org/article/10.3847/PSJ/acf3e1) · [Barker vd., PSS 2021 (hata tahminleri)](https://www.sciencedirect.com/science/article/abs/pii/S0032063320303329) · [PSJ 2025 kutup pürüzlülüğü](https://iopscience.iop.org/article/10.3847/PSJ/adbc9d)
+- [Mazarico vd., Icarus 2011](https://www.researchgate.net/publication/251730356_Illumination_conditions_of_the_lunar_polar_regions_using_LOLA_topography) · [NASA SVS 5027](https://svs.gsfc.nasa.gov/5027/) · [JPL IPN 42-176](https://ipnpr.jpl.nasa.gov/progress_report/42-176/176C.pdf)
+- [Diviner PRP (ODE)](https://ode.rsl.wustl.edu/moon/pagehelp/Content/Missions_Instruments/LRO/DIVINER/PRP.htm) · [Diviner GDR L3](https://ode.rsl.wustl.edu/moon/pagehelp/Content/Missions_Instruments/LRO/DIVINER/GDR_L3.htm) · [Williams vd., JGR Planets 2019](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2019JE006028) · [Powell vd., JGR Planets 2023](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2022JE007532) · [Diviner GHRM](https://ode.rsl.wustl.edu/MArs/pagehelp/Content/Missions_Instruments/Lunar%20Reconnaissance%20Orbiter%20(LRO)/DIVINER/GHRM.htm)
+- [Artemis Lunar Surface Data Book ACD-50044 Rev A (NTRS)](https://ntrs.nasa.gov/api/citations/20230007818/downloads/ACD-50044%20Lunar%20Surface%20Data%20Book%20Rev%20A.pdf)
+
+**Batarya / termal**
+- [Battery Hibernation — NASA Glenn 2021 (NTRS)](https://ntrs.nasa.gov/api/citations/20210011101/downloads/Battery%20Hibernation%203-8-21.pdf) · [Lunar Power Hibernation (NTRS)](https://ntrs.nasa.gov/api/citations/20210019184/downloads/Lunar%20Power%20Hibernation%20Extreme%20Environments%20WG%20%207-28-21.pdf) · [TFAWS 2023 — Surviving Night at the Lunar South Pole](https://tfaws.nasa.gov/wp-content/uploads/TFAWS23-PT-52-Paper.pdf) · [Acta Astronautica 2021 — night-time survival energy storage](https://www.sciencedirect.com/science/article/abs/pii/S0094576521002101)
+- [RoverDevKit — arXiv 2606.21755](https://arxiv.org/html/2606.21755) · [GitHub](https://github.com/Autonomous-Mission-Systems-Lab/roverdevkit)
+
+**Uçmuş rover verisi**
+- [Ding vd., Science Robotics 2022 (Yutu-2)](https://www.science.org/doi/10.1126/scirobotics.abj6660) · [Nature Communications 2024 — Yutu-2 dijital ikiz (açık erişim)](https://pmc.ncbi.nlm.nih.gov/articles/PMC11258293/)
+- [Carsten vd., Field D* on MER, IEEE Aerospace 2007 (PDF)](https://www-robotics.jpl.nasa.gov/media/documents/IEEEAC-Carsten-1125.pdf) · [CMU haber 2007](https://www.cs.cmu.edu/news/2007/carnegie-mellon-software-steers-nasas-mars-roverfirst-test-new-autonomous-capability-mars)
+- Pragyan: [Swarajya](https://swarajyamag.com/science/chandrayaan-3-how-pragyan-rover-is-navigating-the-tough-lunar-obstacle-course) · [Tribune](https://www.tribuneindia.com/news/india/chandrayaan-3-pragyan-rover-comes-across-big-crater-on-lunar-surface-retraces-path-isro-releases-fresh-pictures-539165)
+
+**Benchmark, formal yöntemler, açıklanabilirlik**
+- [MoonPlanBench — arXiv 2512.21438](https://arxiv.org/abs/2512.21438) · [GitHub PlanetaryPathBench](https://github.com/mchancan/PlanetaryPathBench)
+- [FRET (GitHub)](https://github.com/NASA-SW-VnV/fret) · [FRET NTRS 2020](https://ntrs.nasa.gov/api/citations/20200001989/downloads/20200001989.pdf) · [Space ROS FRET](https://space-ros.github.io/docs/rolling/Related-Projects/FRET.html) · [arXiv 2209.14030](https://arxiv.org/pdf/2209.14030) · [arXiv 2511.14438](https://arxiv.org/pdf/2511.14438) · [Adventures in FRET — arXiv 2503.24040](https://arxiv.org/pdf/2503.24040v1)
+- [RTAMT (GitHub)](https://github.com/nickovic/rtamt) · [arXiv 2501.18608](https://arxiv.org/abs/2501.18608) · [PyPI](https://pypi.org/project/rtamt/)
+- [Krarup vd., ICAPS 2019 XAIP](https://strathprints.strath.ac.uk/69957/1/Krarup_etal_ICAPS2019_Model_based_contrastive_explanations_explainable_planning.pdf) · [arXiv 2103.15575](https://arxiv.org/pdf/2103.15575) · [arXiv 2403.19760](https://arxiv.org/pdf/2403.19760) · [arXiv 2003.07425](https://arxiv.org/pdf/2003.07425)
+- [Pareto path planning — arXiv 1505.05947](https://arxiv.org/pdf/1505.05947)
+
+**Diğer akademik**
+- [Chen, Jackson, Allard, Beltrame — Acta Astronautica 237 (2025)](https://www.sciencedirect.com/science/article/pii/S0094576525004898) · [PolyPublie](https://publications.polymtl.ca/67847/)
+- [Spatiotemporal DL for Continuous Illumination Mapping… Chang'E-7 — Remote Sensing 18(17) 2950 (2026)](https://www.mdpi.com/2072-4292/18/17/2950) (Dice 0,983; 3ST-A*) · [Remote Sensing 17(9) 1589 (2025)](https://doi.org/10.3390/rs17091589)
+- [Energy-Constrained Navigation under Hybrid RTG-Solar — arXiv 2509.15062](https://arxiv.org/html/2509.15062) · [Energy-aware trajectory planning — Advanced Robotics 2021](https://www.tandfonline.com/doi/full/10.1080/01691864.2021.1959396)
+- [Slip rate-dependent traversability — Frontiers 2024](https://www.frontiersin.org/journals/robotics-and-ai/articles/10.3389/frobt.2024.1320261/full)
+- [ESA Moonlight](https://www.esa.int/Applications/Connectivity_and_Secure_Communications/ESA_s_Moonlight_programme_Pioneering_the_path_for_lunar_exploration) · [Adv. Space Res. 2024 — LCNS rover positioning](https://www.sciencedirect.com/science/article/abs/pii/S0273117724005829)
+
+**Hackathon / yarışma**
+- [ISRO BAH 2026 PS8 — Lunaris](https://github.com/iamLakshikaTanwar/bah2026-ps8) · [Subsurface Lunar Ice Detection](https://github.com/Brukrish2006/Subsurface-Lunar-Ice-Detection/blob/main/README.md) · [BAH 2026 (Hack2skill)](http://hack2skill.com/event/bah2026/)
+- [Lunar Autonomy Challenge — Stanford (arXiv 2603.17232)](https://arxiv.org/pdf/2603.17232) · [NASA: Top prize awarded](https://www.nasa.gov/directorates/stmd/top-prize-awarded-in-lunar-autonomy-challenge-to-virtually-map-moons-surface) · [MIT MAPLE 2. sıra](https://aeroastro.mit.edu/news-impact/mit-maple-team-takes-second-place-in-lunar-autonomy-challenge/)
+- [NASA SRC2 — arXiv 2109.09620](https://arxiv.org/abs/2109.09620) · [BIG Idea 2020 — MTU T-REX](https://www.mtu.edu/news/2021/01/mtu-students-shoot-for-the-moon-and-win.html) · [ESA-ESRIC Space Resources Challenge](https://www.esa.int/ESA_Multimedia/Images/2022/03/Rovers_compete_in_Space_Resources_Challenge)

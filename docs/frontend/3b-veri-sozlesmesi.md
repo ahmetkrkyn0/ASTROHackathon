@@ -319,6 +319,120 @@ ufuk yalnızca rotanın kendi süresi kadardır, bu yüzden böyle tarihlerde
 
 Süre: gerçek gridde varsayılan ayarlarla gece ve gündüz planı ~10 s.
 
+## Dünya görünürlüğü — DTE katmanı (4 Eylül 2026 eki, A4)
+
+VIPER kuralı: rover **Dünya ile doğrudan radyo görüş hattı (Direct-to-Earth)**
+varken sürer. Backend artık Güneş için yaptığı ufuk hesabını Dünya için de
+yapıyor; çıktı bir katman, bir zaman serisi, bir planlayıcı kısıtı ve bir
+replan girdisi olarak yayınlanıyor. Kutupta Dünya'nın yüksekliği ±7°
+arasında ~27 günlük periyotla salınır, yani bu alan **günler** ölçeğinde
+değişir; Güneş gibi saatler ölçeğinde değil.
+
+**Kurulum — bir kez** (ufuk küpünden sonra):
+
+```bash
+python scripts/build_earth_visibility_cache.py        # ~2 dk, 18,6 yıllık ortalama
+```
+
+`earth_visibility_grid.npy` + `earth_visibility_meta.json` yazar; yüklemede
+`earth_visibility` katmanı olarak görünür. Ufuk küpünü uzak alanla yeniden
+kurmak için (bkz. aşağıdaki not) LOLA 40 m kutup DEM'i gerekir:
+`scripts/build_horizon_cache.py --force` (`lunapath/data/raw/ldem_85s_40m.img`
+varsa otomatik kullanır).
+
+### `GET /api/terrain` ve `GET /api/layers/earth_visibility`
+
+Katman yüklüyse manifestte `layers.earth_visibility` (`units: "fraction"`,
+`validity: "DERIVED"`) görünür; değeri örneklenen sürenin Dünya'yı gören kesri
+(0–1). Yüklü değilse manifestte **yoktur** ve `/api/layers/earth_visibility`
+404 ile hangi scripti koşturacağını söyler.
+
+### `GET /api/earth-series` — zaman serisi
+
+`/api/illumination-series` ile aynı parametreler ve aynı bütçe. Tek alan:
+`earth_visible` (dilim başına 1.0 görüyor / 0.0 görmüyor).
+
+```
+/api/earth-series?start_utc=2026-09-07T00:00:00&n_slices=28&slice_hours=24&downsample=2
+```
+
+```jsonc
+{
+  "slices": 28, "slice_hours": 24.0, "start_utc": "2026-09-07T00:00:00",
+  "grid": { "rows": 250, "cols": 250, "resolution_m": 10.0, "downsample": 2 },
+  "earth_model": { "model": "spice_horizon", "time_varying": true, "horizon_cache": "..." },
+  "earth": [ { "index": 0, "utc": "2026-09-07T00:00:00Z",
+               "azimuth_true_deg": 74.2, "azimuth_grid_deg": 1.5,
+               "elevation_deg": 5.9, "visible_fraction": 0.81 } ],
+  "fields": { "earth_visible": { "units": "fraction", "min": 0.0, "max": 1.0, "binary_url": "..." } },
+  "binary_format": { "order": "slice-major, then row-major", "shape": [28, 250, 250] }
+}
+```
+
+**`earth_model`'i kontrol et.** Üç dürüst durum var: `spice_horizon`
+(epoch + ufuk küpü + çekirdek), `static` (epoch yok; uzun dönem katmanı her
+dilimde tekrarlanır, `reason` söyler) ve `unavailable` (hiçbir alan
+hesaplanamadı: `fields` boştur, ikili istek **404** döner, sıfırlarla dolu
+küp asla gelmez). `earth[i].visible_fraction` o dilimde gridin bağlantılı
+kesri — zaman çizelgesinde "site ne zaman bağlantıyı kaybediyor" bundan okunur.
+
+### `POST /api/plan-4d` — kısıt ve rapor
+
+İstek, yeni opsiyonel alan: `"require_earth_visibility": true` (varsayılan
+`false`). Açıkken her MOVE yalnızca varış diliminde Dünya'yı gören bir hücreye
+yapılabilir; **bekleme hiçbir yerde kısıtlanmaz** (kural sürüş içindir).
+`start_utc` ve ufuk küpü olmadan istenirse 422.
+
+Yanıt — eklenen alanlar:
+
+| Alan | Tip | Anlamı |
+|---|---|---|
+| `earth_model` | nesne | `shadow_model` ile aynı üçlü: `spice_horizon` / `static` / `unavailable` + `reason` |
+| `path_earth_visible` | `boolean[] \| null` | `path_states` ile aynı uzunlukta; hücre o dilimde Dünya'yı görüyor mu. Alan yoksa `null` (asla hepsi-`true` liste değil) |
+| `metrics.moves_out_of_earth_view` | `number \| null` | Dünya'yı görmeyen hücreye varan MOVE sayısı |
+| `metrics.earth_visibility_enforced` | `boolean` | Kısıt uygulandı mı |
+| `metrics.edges_rejected.earth_visibility` | `number` | Kısıt yüzünden reddedilen geçişler |
+
+404 mesajı kısıt rotayı kapattıysa bunu söyler ("… edges would have driven the
+rover into a cell with no Earth visibility …") ve bağlantının ufuk boyunca
+hiç açılmadığını ya da kaç saat sonra açıldığını ekler.
+
+### `GET /api/comm-window`, `POST /api/replan`, `POST /api/pose`
+
+`comm_minutes_remaining` artık hesaplanıyor. `GET /api/comm-window?row=&col=&utc=`:
+
+```jsonc
+{ "utc": "2026-09-07T00:00:00Z", "row": 250, "col": 250,
+  "visible_now": true, "minutes_remaining": 4380.0, "minutes_until_visible": null,
+  "next_change_utc": "2026-09-10T01:00:00Z", "search_limited": false,
+  "trigger_minutes_remaining": 4380.0,
+  "earth_elevation_deg": 5.9, "earth_azimuth_true_deg": 74.2,
+  "earth_azimuth_grid_deg": 1.5, "horizon_deg": -0.8 }
+```
+
+`trigger_minutes_remaining` her zaman sayıdır: bağlantı varken kapanmaya kalan
+dakika (arama 14 günü aşarsa arama uzunluğu, `search_limited: true` ile "en
+az"); bağlantı yokken **0** — VIPER bağlantısız sürmez, tetikleyici ateşlenir.
+Ufuk küpü yoksa 409.
+
+`POST /api/replan` gövdesine `"utc": "..."` ekleyince, `state` içinde
+`comm_minutes_remaining` yoksa backend bunu `current` hücresinden hesaplar;
+verilmişse **ezmez**. `POST /api/pose` aynısını `pose.timestamp_utc` ve
+`pose.x_m/y_m` ile kendiliğinden yapar. İki yanıt da hesaplanan pencereyi
+`comm_window` alanında döner (hesaplanamadıysa `null`, tetikleyici `skipped`).
+
+### Not — ufuk küpü artık iki ölçekli
+
+Bu katmanı NASA'nın LOLA "average Earth visibility" ürünüyle karşılaştırmak
+(`scripts/earth_visibility_validation.py`, rapor
+`docs/research/earth_visibility_validation.md`) 10 km ışın menzilinin uzak
+ufku kestiğini gösterdi: krater kenarından ufuk 10 km içinde −20°'ye düşüyor
+ve karşı duvar hiç görülmüyordu. `build_horizon_cache.py` artık LOLA 40 m
+kutup DEM'i üzerinde 10–150 km arasını da tarıyor ve iki geçişin en büyüğünü
+alıyor. Bu **`shadow_ratio` serisini de etkiler** (Güneş ±2° yükseklikte aynı
+uzak ufka bağlıdır); yeniden kurulmuş küple aydınlanma döngüsü ölçümleri
+değişebilir.
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,
