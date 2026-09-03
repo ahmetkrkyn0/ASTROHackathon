@@ -18,6 +18,7 @@ import { LayerProvenance } from './features/layer-provenance'
 import { CostExplain } from './features/cost-explain'
 import { CorridorFeature } from './features/corridor'
 import { Replan } from './features/replan'
+import { TimeAxis } from './features/time-axis'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -857,7 +858,9 @@ export default function App() {
               <CanvasOverlaySlot />
             </div>
 
-            <BottomDock />
+            <BottomDock>
+              <TimeAxis />
+            </BottomDock>
 
             {dimension === '3d' && (
               <div className="map-overlay map-overlay-bottom-right terrain3d-time">
