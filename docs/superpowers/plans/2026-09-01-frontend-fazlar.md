@@ -114,7 +114,8 @@ cd frontend && npm run dev
 | `src/net/types.ts` | Backend yanıt tipleri (`TerrainManifest`, `Corridor`, `Plan4DResponse`, `PoseResponse`, …) | 2 |
 | `src/grid/geo.ts` | CRS metre ⇄ fine piksel dönüşümünün **tek** kaynağı | 3 |
 | `src/overlay/types.ts` | `OverlayLayer`, `OverlayStyle`, `PixelPoint` | 4 |
-| `src/overlay/useOverlays.ts` | Overlay kayıt defteri (context) | 4 |
+| `src/overlay/useOverlays.ts` | Overlay kayıt defteri: context + `useOverlays` kancası | 4 |
+| `src/overlay/OverlayProvider.tsx` | Yalnızca `OverlayProvider` bileşeni — Fast Refresh için ayrı dosya | 4 |
 | `src/overlay/draw2d.ts` | `OverlayLayer[]` → 2B canvas çizimi | 4 |
 | `src/mission/MissionContext.tsx` | Read-only durum + `setStart`/`setGoal` | 5 |
 | `src/shell/slots.tsx` | `LeftRailSlot` · `RightRailSlot` · `BottomDock` · `CanvasOverlaySlot` | 5 |
@@ -899,6 +900,7 @@ olacak, faz modülleri değişmeyecek.
 **Files:**
 - Create: `frontend/src/overlay/types.ts`
 - Create: `frontend/src/overlay/useOverlays.ts`
+- Create: `frontend/src/overlay/OverlayProvider.tsx`
 - Create: `frontend/src/overlay/draw2d.ts`
 - Modify: `frontend/src/MapCanvas.tsx` (Props, `redraw` çağrısı, `redraw` gövdesi)
 
@@ -910,7 +912,7 @@ olacak, faz modülleri değişmeyecek.
   - `useOverlays(): { register(id, layers): void; unregister(id): void; layers: OverlayLayer[] }`
   - `drawOverlays(ctx, layers, gridRows, canvasSize): void`
 
-- [ ] **Adım 1: `overlay/types.ts` oluştur**
+- [x] **Adım 1: `overlay/types.ts` oluştur**
 
 ```ts
 import type { PixelPoint } from '../grid/geo'
@@ -962,20 +964,65 @@ export type OverlayLayer =
     }
 ```
 
-- [ ] **Adım 2: `overlay/useOverlays.ts` oluştur**
+- [x] **Adım 2: `overlay/useOverlays.ts` + `overlay/OverlayProvider.tsx` oluştur**
 
-```tsx
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react'
+> **Plan düzeltmesi (uygulama sırasında, `b999d5a`):** bu adım ilk yazıldığında
+> sağlayıcı ile kanca tek dosyadaydı ve o dosya `.ts` uzantılıydı. İki sorun:
+> içerik JSX taşıyor, yani `.ts` derlenmez, `.tsx` olmak zorunda. Ve bir modül
+> bir bileşenin yanında başka bir şey daha dışa açtığında Fast Refresh
+> çalışmaz (`react-refresh/only-export-components`) — o dosyadaki her düzenleme
+> kokpiti bastan yükler ve yüklü grid'i düşürür; bu sağlayıcının üzerine dokuz
+> modül kurulacağı için bedel dokuz kez ödenirdi. Bu yüzden ikiye ayrıldı:
+> context + kanca `useOverlays.ts`'te (JSX yok, `.ts` kalıyor), bileşen
+> `OverlayProvider.tsx`'te. Görev 5'in importu buna göre güncellendi.
+
+`frontend/src/overlay/useOverlays.ts` — context, tip ve kanca:
+
+```ts
+import { createContext, useContext } from 'react'
 import type { OverlayLayer } from './types'
 
-interface OverlayRegistry {
+export interface OverlayRegistry {
   layers: OverlayLayer[]
   register: (id: string, layers: OverlayLayer[]) => void
   unregister: (id: string) => void
 }
 
-const OverlayContext = createContext<OverlayRegistry | null>(null)
+export const OverlayContext = createContext<OverlayRegistry | null>(null)
 
+const EMPTY: OverlayRegistry = {
+  layers: [],
+  register: () => undefined,
+  unregister: () => undefined,
+}
+
+/**
+ * Outside an OverlayProvider this returns a no-op registry rather than
+ * throwing: a feature module must stay renderable in isolation.
+ */
+export function useOverlays(): OverlayRegistry {
+  const ctx = useContext(OverlayContext)
+  return ctx ?? EMPTY
+}
+```
+
+`frontend/src/overlay/OverlayProvider.tsx` — yalnızca bileşen:
+
+```tsx
+import React, { useCallback, useMemo, useState } from 'react'
+import { OverlayContext } from './useOverlays'
+import type { OverlayLayer } from './types'
+
+/**
+ * A file of its own, holding nothing but the component.
+ *
+ * The provider and the useOverlays hook used to share one file, which costs
+ * Fast Refresh: a module that exports both a component and something else
+ * cannot be hot-swapped, so every edit here would full-reload the cockpit
+ * and drop the loaded grid. Nine feature modules are about to be built
+ * against this provider, so the reload would be paid on every one of them.
+ * (react-refresh/only-export-components.)
+ */
 export function OverlayProvider({ children }: { children: React.ReactNode }) {
   const [groups, setGroups] = useState<Record<string, OverlayLayer[]>>({})
 
@@ -1010,24 +1057,9 @@ export function OverlayProvider({ children }: { children: React.ReactNode }) {
 
   return <OverlayContext.Provider value={value}>{children}</OverlayContext.Provider>
 }
-
-/**
- * Outside an OverlayProvider this returns a no-op registry rather than
- * throwing: a feature module must stay renderable in isolation.
- */
-export function useOverlays(): OverlayRegistry {
-  const ctx = useContext(OverlayContext)
-  return ctx ?? EMPTY
-}
-
-const EMPTY: OverlayRegistry = {
-  layers: [],
-  register: () => undefined,
-  unregister: () => undefined,
-}
 ```
 
-- [ ] **Adım 3: `colormap.ts`'in gerçek imzasını doğrula**
+- [x] **Adım 3: `colormap.ts`'in gerçek imzasını doğrula**
 
 Bir sonraki adımın rampa tablosu bu imzaya göre yazılıyor, o yüzden **önce**
 bakılır.
@@ -1053,7 +1085,7 @@ Dördünden biri çıkmazsa `RampName`'den ve `RAMPS` tablosundan o adı çıkar
 uydurma isim eklenmez. İmza yukarıdakinden farklıysa Adım 4'teki `RAMPS` tipini
 **ve `drawField`'daki çağrı yerini birlikte** gerçek imzaya uydur.
 
-- [ ] **Adım 4: `overlay/draw2d.ts` oluştur**
+- [x] **Adım 4: `overlay/draw2d.ts` oluştur**
 
 ```ts
 import { magmaToRgb, thermalToRgb, viridisToRgb, grayReverseToRgb } from '../colormap'
@@ -1307,7 +1339,7 @@ function drawField(
 }
 ```
 
-- [ ] **Adım 5: `overlay/draw2d.test.ts` oluştur**
+- [x] **Adım 5: `overlay/draw2d.test.ts` oluştur**
 
 Görev 1'de kurulan Vitest'in ikinci gerekçesi bu. `drawRibbon` ve `drawField`
 bir `CanvasRenderingContext2D` istiyor ve jsdom kurulmuyor — o yüzden test
@@ -1410,9 +1442,9 @@ describe('normaliseToDomain', () => {
 ```
 
 Run: `cd frontend && npm test`
-Expected: `16 passed` — Görev 1'in 1'i, Görev 3'ün 7'si, buradaki 8'i.
+Expected: `18 passed` — Görev 1'in 1'i, Görev 3'ün 9'u, buradaki 8'i.
 
-- [ ] **Adım 6: `MapCanvas.tsx`'e overlay prop'unu ekle**
+- [x] **Adım 6: `MapCanvas.tsx`'e overlay prop'unu ekle**
 
 `interface Props` içine, `onHoverCellChange` satırının altına ekle:
 
@@ -1430,7 +1462,7 @@ import { drawOverlays } from './overlay/draw2d'
 
 Bileşenin destructure listesine `onHoverCellChange`'den sonra `overlays,` ekle.
 
-- [ ] **Adım 7: Grid satır sayısını ve overlay'leri `redraw`'a geçir**
+- [x] **Adım 7: Grid satır sayısını ve overlay'leri `redraw`'a geçir**
 
 Overlay koordinatları **fine grid pikselidir**, tuval pikseli değil. Taban
 görüntü `cellPx = CANVAS_SIZE / rows` ile basılıyor (`MapCanvas.tsx:454`), yani
@@ -1460,8 +1492,26 @@ Bileşen gövdesine, `redraw` çağrılarından **önce** ekle:
 
 ```ts
     redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell, gridRows, overlays)
-  }, [aspectGrid, costGrid, elevationGrid, gridRows, overlays, resolutionM, shadowGrid, slopeGrid, thermalGrid, traversableGrid, viewMode])
+    // Overlay degerleri (waypoints/start/goal/animStep/hoverCell/overlays)
+    // bilerek bagimlilikta degil: onlari bir sonraki efekt yeniden ciziyor.
+    // Buraya eklemek, her hover'da -- ve her overlay degisikliginde, yani
+    // zaman kaydiricisinin her adiminda -- taban goruntuyu bastan uretmek
+    // demek olurdu. Bu efekt kostugunda closure zaten o render'in guncel
+    // degerlerini tasir; gridRows da elevationGrid'den turedigi icin
+    // asagidaki listede zaten temsil ediliyor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aspectGrid, costGrid, elevationGrid, resolutionM, shadowGrid, slopeGrid, thermalGrid, traversableGrid, viewMode])
 ```
+
+> **Plan düzeltmesi (uygulama sırasında, `b999d5a`):** bu adım önce `overlays`
+> ve `gridRows`'u **ilk** efektin bağımlılık listesine de ekliyordu. O efekt
+> `buildBaseImage` çağırıyor: 500x500'lük bir `ImageData`'yı hücre hücre bastan
+> üretiyor. İkinci efekt zaten overlay değiştiğinde önbellekli taban görüntüyle
+> yeniden çiziyor, yani ilk efektin overlay için koşmasına gerek yok — ama
+> listede olsaydı koşardı: zaman kaydırıcısı sürüklenirken kare basina bir
+> taban görüntü yeniden üretimi. `overlays` yine de **argüman olarak**
+> geçiliyor, çünkü görünüm/katman değiştiğinde ikinci efekt koşmaz ve o çizimi
+> bu efekt yapar.
 
 `MapCanvas.tsx:132` civarındaki **ikinci** çağrıyı bul:
 
@@ -1481,7 +1531,7 @@ Bileşen gövdesine, `redraw` çağrılarından **önce** ekle:
 > hover değiştiğinde çiziyor. Yalnızca birine overlay geçirmek, overlay'lerin
 > diğer yol her koştuğunda silinmesi demektir.
 
-- [ ] **Adım 8: `redraw` gövdesini genişlet**
+- [x] **Adım 8: `redraw` gövdesini genişlet**
 
 `MapCanvas.tsx:282` civarındaki imzaya son parametreyi ekle:
 
@@ -1520,7 +1570,7 @@ Taban görüntü basıldıktan **hemen sonra**, rota çizilmeden **önce** — y
 > `rows`/`cols`'unu taşıyor ve `drawImage` ile tuvalin tamamına geriliyor, bu
 > yüzden downsample edilmiş bir zaman dilimi de doğru oturur.
 
-- [ ] **Adım 9: Regresyon olmadığını doğrula**
+- [x] **Adım 9: Regresyon olmadığını doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: dördü de temiz.
@@ -1530,7 +1580,7 @@ Expected: harita, rota, işaretler ve hover **Görev 4 öncesiyle birebir aynı*
 görünüyor — hiçbir modül henüz overlay kaydetmediği için `overlays` `undefined`
 ve çizim yolu hiç çalışmıyor.
 
-- [ ] **Adım 10: Commit**
+- [x] **Adım 10: Commit**
 
 ```bash
 git add frontend/src/overlay/ frontend/src/MapCanvas.tsx
@@ -1714,7 +1764,8 @@ Sonra kalan importları ekle:
 ```ts
 import { MissionProvider } from './mission/MissionContext'
 import type { MissionValue } from './mission/MissionContext'
-import { OverlayProvider, useOverlays } from './overlay/useOverlays'
+import { OverlayProvider } from './overlay/OverlayProvider'
+import { useOverlays } from './overlay/useOverlays'
 import { LeftRailSlot, RightRailSlot, BottomDock, CanvasOverlaySlot } from './shell/slots'
 ```
 
