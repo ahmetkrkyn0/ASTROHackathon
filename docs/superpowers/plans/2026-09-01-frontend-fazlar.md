@@ -1964,7 +1964,7 @@ Mevcut katman fetch'lerine hiç dokunulmuyor.
   - `useLayerProvenance(): { manifest, loading, error }`
   - `LAYER_FOR_VIEW: Record<MapViewMode, string>` — görünüm adı → katman adı eşlemesi
 
-- [ ] **Adım 1: `net/terrain.ts` oluştur**
+- [x] **Adım 1: `net/terrain.ts` oluştur**
 
 ```ts
 import { getJson } from './client'
@@ -1995,7 +1995,7 @@ export async function fetchTerrain(
 }
 ```
 
-- [ ] **Adım 2: `mission/useTerrainManifest.ts` oluştur**
+- [x] **Adım 2: `mission/useTerrainManifest.ts` oluştur**
 
 Üç modül aynı manifesti istiyor: F1 katman künyelerini, F2a ve F7 ise
 georeference'ı. Üç ayrı `useEffect` üç özdeş `/api/terrain` isteği atar ve
@@ -2074,9 +2074,12 @@ export function useTerrainManifest(roverId: string, weights: PlanWeights) {
     return () => {
       alive = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` is the
-    // value identity of roverId+weights; adding the objects themselves would
-    // refetch on every parent render without changing what is fetched.
+    // `key` is the value identity of roverId + weights. Listing the objects
+    // themselves would refetch on every parent render -- with the same key,
+    // so the same response -- because App rebuilds `weights` by identity on
+    // each slider commit. The disable has to sit on the line directly above
+    // the dependency array, which is where the rule reports.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
   /**
@@ -2092,12 +2095,21 @@ export function useTerrainManifest(roverId: string, weights: PlanWeights) {
 }
 ```
 
-> `eslint-disable-next-line` bu planda kullanılan **tek** lint istisnası ve
-> gerekçesi satırın kendisinde. `weights`'i bağımlılığa koymak, `App.tsx` her
-> render ettiğinde effect'i yeniden koşturur — aynı anahtarla, yani aynı
-> yanıtla. `lint --max-warnings 0` bu satırla temiz kalır.
+> `weights`'i bağımlılığa koymak, `App.tsx` her render ettiğinde effect'i
+> yeniden koşturur — aynı anahtarla, yani aynı yanıtla. Bu yüzden disable
+> gerekli.
+>
+> **Plan düzeltmesi (uygulama sırasında, `283a2ee`):** bu adım önce
+> `eslint-disable-next-line ... -- açıklama` biçiminde yazılmıştı ve açıklama iki
+> satır daha sürüyordu. `disable-next-line` **bir sonraki satıra** uygulanır — o
+> da bir yorum satırıydı, bağımlılık dizisi değil. Kural diziyi bildirdiği için
+> direktif hiçbir şeyi örtmüyordu. Geri koyup koşturulduğunda `npm run lint`
+> **iki hata** verdi: `Unused eslint-disable directive` ve kuralın kendisi.
+> Açıklama artık direktifin **üstünde**, direktif de dizinin hemen üstünde.
+> (Ayrıca bu, plandaki tek disable değil: Görev 4 `MapCanvas`'a gerekçeli bir
+> tane daha ekledi.)
 
-- [ ] **Adım 3: `useLayerProvenance.ts` oluştur**
+- [x] **Adım 3: `useLayerProvenance.ts` oluştur**
 
 ```ts
 import { useTerrainManifest } from '../../mission/useTerrainManifest'
@@ -2132,7 +2144,7 @@ export function useLayerProvenance() {
 }
 ```
 
-- [ ] **Adım 4: `LayerProvenancePanel.tsx` oluştur**
+- [x] **Adım 4: `LayerProvenancePanel.tsx` oluştur**
 
 ```tsx
 import type { LayerManifestEntry, Validity } from '../../net/types'
@@ -2222,7 +2234,7 @@ export function LayerProvenancePanel({
 }
 ```
 
-- [ ] **Adım 5: `layer-provenance.css` oluştur**
+- [x] **Adım 5: `layer-provenance.css` oluştur**
 
 Tüm sınıflar `.lp-provenance-` ön ekli. `App.css`'e dokunulmuyor.
 
@@ -2300,7 +2312,7 @@ Tüm sınıflar `.lp-provenance-` ön ekli. `App.css`'e dokunulmuyor.
 .lp-provenance-warn { color: #fbbf24; }
 ```
 
-- [ ] **Adım 6: `index.tsx` oluştur**
+- [x] **Adım 6: `index.tsx` oluştur**
 
 ```tsx
 import { useMission } from '../../mission/MissionContext'
@@ -2328,7 +2340,7 @@ export function LayerProvenance() {
 }
 ```
 
-- [ ] **Adım 7: `App.tsx`'e tek satırla bağla**
+- [x] **Adım 7: `App.tsx`'e tek satırla bağla**
 
 `LeftRailSlot`'u doldur:
 
@@ -2343,12 +2355,12 @@ Import: `import { LayerProvenance } from './features/layer-provenance'`
 > `features/layer-provenance/index.tsx` dışında bu modülden hiçbir şey import
 > edilmez.
 
-- [ ] **Adım 8: Derlemeyi doğrula**
+- [x] **Adım 8: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: dördü de temiz
 
-- [ ] **Adım 9: Elle kabul**
+- [x] **Adım 9: Elle kabul**
 
 Backend'i `/api/load-preprocessed` ile yükledikten sonra, sol rayda paneli aç ve
 katmanları sırayla değiştir. Beklenen etiketler (`metadata.json`'ın
@@ -2373,7 +2385,7 @@ Ayrıca doğrula:
 Backend kapalıyken sayfayı yenile → panel **sarı bir uyarı** gösteriyor,
 "Measured" varsaymıyor ve çökmüyor.
 
-- [ ] **Adım 10: Commit**
+- [x] **Adım 10: Commit**
 
 ```bash
 git add frontend/src/net/terrain.ts frontend/src/mission/useTerrainManifest.ts \
