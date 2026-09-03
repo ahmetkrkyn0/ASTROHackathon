@@ -2424,10 +2424,10 @@ Starlette `allow_nan=False` ile serileştiriyor. "Veri yok" **değil**.
 **Interfaces:**
 - Consumes: `useMission()` (`cellTelemetry`, `hoverCell`, `weights`), `useOverlays()`
 - Produces:
-  - `useCostExplain(): { rows: CostRow[]; total: number | null; impassableBy: string[]; cell: [number, number] | null }`
+  - `useCostExplain(): { rows: CostRow[]; total: number | null; impassable: boolean; impassableBy: string[]; cell: [number, number] | null }`
   - `type CostRow = { key: 'slope' | 'energy' | 'shadow' | 'thermal'; label: string; value: number | null; share: number; weight: number }`
 
-- [ ] **Adım 1: `useCostExplain.ts` oluştur**
+- [x] **Adım 1: `useCostExplain.ts` oluştur**
 
 ```ts
 import { useMemo } from 'react'
@@ -2469,17 +2469,34 @@ export function useCostExplain() {
   return useMemo(() => {
     const breakdown = cellTelemetry?.cost_breakdown ?? null
     if (!breakdown) {
-      return { rows: [], total: null, impassableBy: [], cell: hoverCell }
+      return {
+        rows: [],
+        total: null,
+        impassable: false,
+        impassableBy: [],
+        cell: hoverCell,
+      }
     }
 
     const impassableBy = KEYS.filter((key) => breakdown[key] === null).map(
       (key) => LABELS[key],
     )
 
+    // A null TOTAL is the authoritative verdict, and it has two causes.
+    // costmap.explain() returns null when any component is infinite, and
+    // ALSO when _invalid_mask closes the cell -- not traversable, or NaN in
+    // slope / thermal / shadow_ratio / thermal_min (costmap.py:66-75,
+    // 155-158). The second path leaves all four components finite, so
+    // keying "impassable" off impassableBy alone would call such a cell
+    // passable and print its total as "unknown". Live example on the
+    // shipped grid: row 0, col 74 -- four finite contributions, null total.
+    const total = breakdown.total
+    const impassable = total === null
+
     // Shares are taken against the finite total only. When the cell is
     // impassable there is no meaningful denominator, so every bar reads 0
-    // rather than inventing a proportion out of a partial sum.
-    const total = breakdown.total
+    // rather than inventing a proportion out of a partial sum. The value
+    // column still shows each real number.
     const denominator = total !== null && total > 0 ? total : 0
 
     const rows: CostRow[] = KEYS.map((key) => ({
@@ -2493,12 +2510,12 @@ export function useCostExplain() {
       weight: weights[WEIGHT_KEY[key]],
     }))
 
-    return { rows, total, impassableBy, cell: hoverCell }
+    return { rows, total, impassable, impassableBy, cell: hoverCell }
   }, [cellTelemetry, hoverCell, weights])
 }
 ```
 
-- [ ] **Adım 2: `overlays.ts` oluştur**
+- [x] **Adım 2: `overlays.ts` oluştur**
 
 ```ts
 import type { OverlayLayer } from '../../overlay/types'
@@ -2517,7 +2534,7 @@ export function hoverCellOverlay(cell: [number, number] | null): OverlayLayer[] 
 }
 ```
 
-- [ ] **Adım 3: `CostExplainPanel.tsx` oluştur**
+- [x] **Adım 3: `CostExplainPanel.tsx` oluştur**
 
 ```tsx
 import type { CostRow } from './useCostExplain'
@@ -2526,11 +2543,13 @@ import './cost-explain.css'
 export function CostExplainPanel({
   rows,
   total,
+  impassable,
   impassableBy,
   cell,
 }: {
   rows: CostRow[]
   total: number | null
+  impassable: boolean
   impassableBy: string[]
   cell: [number, number] | null
 }) {
@@ -2541,8 +2560,6 @@ export function CostExplainPanel({
       </p>
     )
   }
-
-  const impassable = impassableBy.length > 0
 
   return (
     <div className="lp-cost-card">
@@ -2560,10 +2577,22 @@ export function CostExplainPanel({
       </div>
 
       {impassable ? (
-        <p className="lp-cost-reason">
-          Closed by <strong>{impassableBy.join(', ')}</strong>. This cell costs
-          infinity — no route can cross it.
-        </p>
+        impassableBy.length > 0 ? (
+          <p className="lp-cost-reason">
+            Closed by <strong>{impassableBy.join(', ')}</strong>. This cell costs
+            infinity — no route can cross it.
+          </p>
+        ) : (
+          // Every component came back finite and the cell is still closed:
+          // the traversability gate rejected it, or one of its source layers
+          // has no value here (costmap.py:66-75). Naming a cost component
+          // would be wrong -- none of them is the reason.
+          <p className="lp-cost-reason">
+            Closed by the traversability gate, not by a cost component — the
+            cell is off-limits or a source layer has no value here. No route
+            can cross it.
+          </p>
+        )
       ) : null}
 
       <ul className="lp-cost-bars">
@@ -2598,7 +2627,7 @@ export function CostExplainPanel({
 }
 ```
 
-- [ ] **Adım 4: `cost-explain.css` oluştur**
+- [x] **Adım 4: `cost-explain.css` oluştur**
 
 ```css
 .lp-cost-card {
@@ -2681,7 +2710,7 @@ export function CostExplainPanel({
 .lp-cost-note { margin: 0; font-size: 11px; color: #94a3b8; }
 ```
 
-- [ ] **Adım 5: `index.tsx` oluştur**
+- [x] **Adım 5: `index.tsx` oluştur**
 
 ```tsx
 import { useEffect } from 'react'
@@ -2710,7 +2739,7 @@ export function CostExplain() {
 }
 ```
 
-- [ ] **Adım 6: `App.tsx`'e tek satırla bağla**
+- [x] **Adım 6: `App.tsx`'e tek satırla bağla**
 
 ```tsx
 <RightRailSlot>
@@ -2720,12 +2749,12 @@ export function CostExplain() {
 
 Import: `import { CostExplain } from './features/cost-explain'`
 
-- [ ] **Adım 7: Derlemeyi doğrula**
+- [x] **Adım 7: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
-- [ ] **Adım 8: Elle kabul**
+- [x] **Adım 8: Elle kabul**
 
 1. Haritada geçilebilir bir hücrenin üstüne gel → dört çubuk doluyor
 2. **Toplamı doğrula:** dört değeri topla, panelin gösterdiği toplama eşit
@@ -2734,12 +2763,17 @@ Expected: temiz
    küçük bir alt sınır farkı beklenir ve panel bunu belirtmelidir
 3. Traversability katmanına geç, **geçilemez** (koyu) bir hücrenin üstüne gel →
    panel **Impassable** yazıyor, hangi bileşenin kapattığını söylüyor, o
-   bileşenin çubuğu **çizgili ve tam dolu** — boş değil
+   bileşenin çubuğu **çizgili ve tam dolu** — boş değil.
+   Sevk edilen ızgarada örnek: `row 0, col 259` (slope + energy kapatıyor)
+3b. **Kapı tarafından** kapatılan bir hücre: `row 0, col 74` — dört bileşen de
+   sonlu ama `total` null. Panel yine **Impassable** yazıyor ama hiçbir
+   bileşeni suçlamıyor, "traversability gate" diyor. `unknown` yazarsa
+   düzeltme geri gitmiş demektir
 4. Ağırlık kaydıraçlarını oynat → `w` değerleri panelde güncelleniyor
 5. Ağ sekmesi → hücre üstünde gezinirken **ek bir `/api/cell-telemetry`
    isteği yok** (App.tsx'in zaten yaptığı istek kullanılıyor)
 
-- [ ] **Adım 9: Commit**
+- [x] **Adım 9: Commit**
 
 ```bash
 git add frontend/src/features/cost-explain/ frontend/src/App.tsx
