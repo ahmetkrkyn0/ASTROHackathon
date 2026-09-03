@@ -301,12 +301,12 @@ Expected: `1 passed`. Sıfır test bulunursa Vitest dosya desenini görmüyor
 demektir — `vite.config.ts` içinde `test: { include: ['src/**/*.test.ts'] }`
 ayarla.
 
-- [ ] **Adım 4: Derlemeyi doğrula**
+- [x] **Adım 4: Derlemeyi doğrula**
 
 Run: `cd frontend && npm run typecheck && npm run lint && npm test`
 Expected: dördü de hatasız çıkar (çıkış kodu 0)
 
-- [ ] **Adım 5: Commit**
+- [x] **Adım 5: Commit**
 
 ```bash
 git add frontend/src/net/client.ts frontend/src/net/client.test.ts frontend/package.json frontend/package-lock.json
