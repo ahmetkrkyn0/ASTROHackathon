@@ -105,9 +105,18 @@ export interface Corridor {
   corridor_id: string
 }
 
+export interface SlopeBin {
+  /** Field names are bin_low_deg / bin_high_deg, not from_deg / to_deg. */
+  bin_low_deg: number
+  bin_high_deg: number
+  count: number
+  /** Share of waypoints in this bin, already computed by the backend. */
+  pct: number
+}
+
 export interface RouteStatistics {
   waypoint_count: number
-  slope_histogram: Array<{ from_deg: number; to_deg: number; count: number }>
+  slope_histogram: SlopeBin[]
   risk_breakdown_pct: Record<string, number>
   min_surface_temp_c: number | null
   max_surface_temp_c: number | null
