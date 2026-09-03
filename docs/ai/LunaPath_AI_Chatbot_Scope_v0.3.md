@@ -618,3 +618,67 @@ Bu kesitte uygulanmaz: rota geneli maliyet ayrışması · `POST /api/score-path
 değiştirilmesi · `replan` · `plan-4d` · `pose` araçları · `illumination-series`
 araçları · otonom ajan döngüsü · SSE · WebSocket · iş kuyruğu · arka plan işçisi ·
 compare ön-ısıtma · compare önbelleği · veritabanı · konuşma kalıcılığı.
+
+---
+
+## 18. Doğrulama durumu
+
+Bu bölüm, sözleşmenin hangi bölümlerinin gerçek model karşısında sınandığını
+kaydeder. Uzun kabul raporu buraya kopyalanmaz; burada yalnızca sonuçlar durur.
+
+**CANLI OPENAI KABULÜ: GEÇTİ.**
+
+| | |
+|---|---|
+| Sağlayıcı | OpenAI Responses API, sunucu tarafı |
+| Model | `gpt-5.6-terra` |
+| A-6 — kapsam yönlendirme duman testi | **10/10 GEÇTİ** (5 kapsam içi, 5 kapsam dışı; skor model dışında hesaplandı) |
+| Odaklı AI test paketi | 283 geçti, 0 başarısız, 0 hata |
+| Kabul çağrı bütçesi | 20 çağrılık tavan tüketildi |
+
+Gerçek model üzerinde doğrulanan senaryolar: mevcut rota özeti · mevcut görevin
+sayısal dayanağı · `E-SCOPE` · desteklenmeyen serbest ağırlık duyarlılığı ·
+hücre telemetrisi ve T-3 ağırlık uyuşmazlığı · **bir** ayrık öntanımlı-profil
+duyarlılık karşılaştırması. T-13 doğrulandı: `comparison.recommendation` ne K4'e
+ne arayüze ulaştı.
+
+**K5** üretimde etkin ve gerçek model karşısında kapalı-devre davrandığı
+gösterildi: reddedilen taslak hiçbir noktada kullanıcıya ulaşmadı, yerine
+kayıtlı değerlerden üretilen deterministik özet gösterildi, zorunlu uyarılar
+korundu. Reddin nedeni artık sunucu tarafında yapılandırılmış olarak
+kaydediliyor (§15); taslak metni kaydedilmez.
+
+**Görev değişmezliği: GEÇTİ.** Aynı süreç içinde, gerçek bir rota planlandıktan
+sonra bir özet turu ve dört profili gerçekten çözen bir karşılaştırma turu
+koşuldu; koridor kaydı, ızgara kimliği ve katmanların kendisi alan alan
+değişmedi ve karşılaştırma ekrandaki rotanın yerini almadı.
+
+**Gizli anahtar ve tarayıcı sızıntısı: GEÇTİ.** Pakette anahtar, OpenAI istemcisi,
+doğrudan OpenAI çağrısı ya da yetkilendirme başlığı yok; tarayıcı yalnızca
+LunaPath backend'i ile konuşuyor.
+
+### Canlı kabul sırasında bulunan iki kusur
+
+İkisi de düzeltildi ve deterministik testle kapatıldı: yönlendirici şeması
+Responses API'nin kabul etmediği bir kökle gidiyordu, ve reddedilen şema
+"parametre desteklenmiyor" sanılıp sessizce düşürüldüğü için hata `E-SCHEMA`
+olarak görünüyordu.
+
+### Kasıtlı olarak canlı tekrarlanmayanlar
+
+`L2` gerçek sözelleştirici ile doğrulandı. `L1` ve `L3` gerçek model ile yeniden
+koşulmadı — gerekçe maliyet denetimi; seviyenin sayısal sonuçları, uyarıları ve
+provenance beyanlarını değiştirmediği deterministik olarak doğrulanmıştır
+(seviye yalnızca K4 brifingine girer, K1 kaydını etkilemez).
+
+### Yüzen sohbet penceresi
+
+**GÖRSEL KABUL BEKLİYOR — KULLANICI EKRAN GÖRÜNTÜSÜ GEREKİYOR.** Tarayıcı
+otomasyonu bu ortamda bağlanamadı; kod incelemesine dayanarak kabul edilmiş
+sayılmaz.
+
+### Yapılandırma sınırı
+
+`.env` dosyasının kendiliğinden yüklenmesi **ürün sözleşmesinin parçası
+değildir**. Desteklenen geliştirme akışı, backend'in `--env-file .env` ile
+başlatılmasıdır (README, Çalıştırma). Anahtar yalnızca sunucu sürecinde okunur.
