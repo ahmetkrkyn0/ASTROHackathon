@@ -20,6 +20,7 @@ import { CorridorFeature } from './features/corridor'
 import { Replan } from './features/replan'
 import { TimeAxis } from './features/time-axis'
 import { PoseLoop } from './features/pose-loop'
+import { ProfileCompare } from './features/profile-compare'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -1066,6 +1067,7 @@ export default function App() {
               <CostExplain />
               <CorridorFeature />
               <PoseLoop />
+              <ProfileCompare />
             </RightRailSlot>
           </div>
             </>

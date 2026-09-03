@@ -1,0 +1,50 @@
+.lp-compare-card {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px; padding: 12px 14px; background: rgba(15, 23, 42, 0.45);
+}
+
+.lp-compare-run {
+  width: 100%; border-radius: 7px;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.12);
+  color: #bae6fd; font-size: 11px; padding: 6px 8px; cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.lp-compare-run:disabled { opacity: 0.45; cursor: default; }
+
+.lp-compare-recommendation {
+  margin: 0 0 8px; font-size: 11px; line-height: 1.5; color: #cbd5f5;
+}
+
+.lp-compare-row {
+  padding: 8px 0; border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.lp-compare-head { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+
+.lp-compare-swatch {
+  width: 11px; height: 3px; border-radius: 2px; display: inline-block;
+}
+
+.lp-compare-name { font-size: 12px; color: #e2e8f0; }
+
+.lp-compare-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; margin: 0; }
+.lp-compare-metrics div { display: flex; justify-content: space-between; gap: 8px; }
+
+.lp-compare-metrics dt {
+  font-size: 9px; letter-spacing: 0.07em; text-transform: uppercase; color: #64748b;
+}
+
+.lp-compare-metrics dd {
+  margin: 0; font-size: 11px; color: #cbd5f5; font-variant-numeric: tabular-nums;
+}
+
+.lp-compare-violated { margin: 6px 0 0; font-size: 10px; color: #f87171; }
+/* Amber, not silence: a constraint that could not be tested is an open
+   question, and the backend says so with checked:false. */
+.lp-compare-unchecked { margin: 4px 0 0; font-size: 10px; color: #fbbf24; }
+.lp-compare-error { margin: 4px 0 0; font-size: 10px; color: #f87171; line-height: 1.45; }
+
+.lp-compare-note { margin: 8px 0 0; font-size: 11px; color: #94a3b8; }
+.lp-compare-warn { color: #fbbf24; }
