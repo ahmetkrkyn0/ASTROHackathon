@@ -16,6 +16,7 @@ import type { CellTelemetryResponse } from './net/types'
 import { LeftRailSlot, RightRailSlot, BottomDock, CanvasOverlaySlot } from './shell/slots'
 import { LayerProvenance } from './features/layer-provenance'
 import { CostExplain } from './features/cost-explain'
+import { CorridorFeature } from './features/corridor'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -1057,6 +1058,7 @@ export default function App() {
 
             <RightRailSlot>
               <CostExplain />
+              <CorridorFeature />
             </RightRailSlot>
           </div>
             </>
