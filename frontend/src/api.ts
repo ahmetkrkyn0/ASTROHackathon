@@ -1,3 +1,7 @@
+// Type-only, so it is erased at build time and creates no runtime cycle
+// with net/types.ts importing PlanWeights back from here.
+import type { CellTelemetryResponse } from './net/types'
+
 const BASE = '/api'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -86,6 +90,15 @@ export interface ProfileEntry {
   color: string
 }
 
+/**
+ * The eight fields the telemetry wells read.
+ *
+ * /api/cell-telemetry sends three more -- thermal_min_c, cost_breakdown and
+ * layer_validity (main.py:554-573) -- so this is a view of the response, not
+ * the response. fetchCellTelemetry therefore returns the full
+ * CellTelemetryResponse and callers that only need these eight keep using
+ * this type; a narrower parameter accepts the wider object.
+ */
 export interface FocusTelemetryResponse {
   row: number
   col: number
@@ -222,7 +235,7 @@ export async function fetchCellTelemetry(
   row: number,
   col: number,
   signal?: AbortSignal,
-): Promise<FocusTelemetryResponse> {
+): Promise<CellTelemetryResponse> {
   const query = new URLSearchParams({
     row: String(row),
     col: String(col),
@@ -232,7 +245,7 @@ export async function fetchCellTelemetry(
     const err = await r.json().catch(() => ({ detail: r.statusText }))
     throw new Error((err as { detail?: string }).detail ?? 'Cell telemetry request failed')
   }
-  return r.json() as Promise<FocusTelemetryResponse>
+  return r.json() as Promise<CellTelemetryResponse>
 }
 
 export async function checkHealth(): Promise<{ dem_loaded: boolean }> {
