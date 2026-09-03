@@ -22,6 +22,7 @@ import { TimeAxis } from './features/time-axis'
 import { PoseLoop } from './features/pose-loop'
 import { ProfileCompare } from './features/profile-compare'
 import { MissionValidation } from './features/mission-validation'
+import { RosShowcase } from './features/ros-showcase'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -725,6 +726,7 @@ export default function App() {
                 <LeftRailSlot>
                   <LayerProvenance />
                   <Replan />
+                  <RosShowcase />
                 </LeftRailSlot>
               </div>
             </>
