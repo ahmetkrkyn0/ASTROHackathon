@@ -336,7 +336,7 @@ Spec T1: `astar_metrics.total_energy_wh` ve `total_shadow_hours` backend'de
   `PoseResponse`, `CompareResponse`, `ReferenceMissions`, `RouteStatistics`,
   `Validity`
 
-- [ ] **Adım 1: `api.ts`'teki hatalı tipi düzelt**
+- [x] **Adım 1: `api.ts`'teki hatalı tipi düzelt**
 
 `frontend/src/api.ts` içinde `AstarMetrics` arayüzünde şu iki satırı bul:
 
@@ -356,7 +356,7 @@ Spec T1: `astar_metrics.total_energy_wh` ve `total_shadow_hours` backend'de
   total_shadow_hours: number | null
 ```
 
-- [ ] **Adım 2: `net/types.ts` dosyasını oluştur**
+- [x] **Adım 2: `net/types.ts` dosyasını oluştur**
 
 ```ts
 import type { PlanWeights } from '../api'
@@ -626,13 +626,13 @@ export interface ReferenceMissions {
 }
 ```
 
-- [ ] **Adım 3: Derlemeyi doğrula**
+- [x] **Adım 3: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: dördü de hatasız. `AstarMetrics` değişikliği mevcut kodda hata
 vermemeli — `App.tsx` bu iki alanı okumuyor.
 
-- [ ] **Adım 4: Commit**
+- [x] **Adım 4: Commit**
 
 ```bash
 git add frontend/src/net/types.ts frontend/src/api.ts
