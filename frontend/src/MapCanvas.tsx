@@ -116,6 +116,11 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
 
     baseImageRef.current = imageData
     redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell)
+    // Overlay degerleri (waypoints/start/goal/animStep/hoverCell) bilerek
+    // bagimlilikta degil: onlari bir sonraki efekt yeniden ciziyor. Buraya
+    // eklemek, her hover'da taban goruntuyu bastan uretmek demek olurdu.
+    // Bu efekt kostugunda closure zaten o render'in guncel degerlerini tasir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aspectGrid, costGrid, elevationGrid, resolutionM, shadowGrid, slopeGrid, thermalGrid, traversableGrid, viewMode])
 
   useEffect(() => {

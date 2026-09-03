@@ -498,7 +498,7 @@ export default function TerrainCanvas3D({
     const flat = viewMode === 'surface'
 
     if (flat) {
-      const useDetail = (texture: THREE.Texture) => {
+      const applyDetail = (texture: THREE.Texture) => {
         if (cancelled || !sceneRef.current) return
         texture.colorSpace = THREE.SRGBColorSpace
         state.detailTexture = texture
@@ -506,9 +506,9 @@ export default function TerrainCanvas3D({
         state.material.color.set(0xffffff)
         state.material.needsUpdate = true
       }
-      if (state.detailTexture) useDetail(state.detailTexture)
+      if (state.detailTexture) applyDetail(state.detailTexture)
       else
-        new THREE.TextureLoader().load(DETAIL_TEXTURE_URL, useDetail, undefined, () => {
+        new THREE.TextureLoader().load(DETAIL_TEXTURE_URL, applyDetail, undefined, () => {
           // No texture: put the albedo back on the material so the ground is
           // still the right tone, just without the crater detail.
           if (cancelled || !sceneRef.current) return

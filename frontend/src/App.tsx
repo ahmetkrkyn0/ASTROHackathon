@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import LandingPage from './LandingPage'
 import MapCanvas, {
@@ -171,8 +171,11 @@ export default function App() {
   )
 
   useEffect(() => {
+    // Dizinin kendisi hic yeniden atanmiyor, sadece push ediliyor -- bu yuzden
+    // referansi burada yakalamak, cleanup'ta okumakla ayni listeyi verir.
+    const timers = toastTimersRef.current
     return () => {
-      toastTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+      timers.forEach((timer) => window.clearTimeout(timer))
     }
   }, [])
 
@@ -412,7 +415,7 @@ export default function App() {
   )
   const focusPoint = goal ?? start ?? DEFAULT_POINT
   const telemetryPoint = hoverPoint ?? focusPoint
-  const waypoints = planResult?.waypoints ?? []
+  const waypoints = useMemo(() => planResult?.waypoints ?? [], [planResult])
   const activeMapView = MAP_VIEW_OPTIONS.find((option) => option.id === viewMode) ?? MAP_VIEW_OPTIONS[0]
   const selectedRover = rovers.find((entry) => entry.id === selectedRoverId) ?? null
 
