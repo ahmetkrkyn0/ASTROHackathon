@@ -797,3 +797,35 @@
     max-width: 92%;
   }
 }
+
+/* ── mode divider ──────────────────────────────────────────────────────────
+   A local marker in the transcript, not a message. It appears when a route is
+   generated (or cleared) mid-conversation, so the operator can see where the
+   evidence behind the answers changed. It is never sent to the server, and the
+   turns before it are not sent either -- see conversationForWire.
+
+   Prefixed per the ownership contract: new selectors in a feature stylesheet
+   use `.lp-<feature>-`. The `chat-` names above are older and are published
+   contracts (shell.css keys the toast stack off `.chat-window.is-open`), so
+   they stay as they are. */
+.lp-assistant-divider {
+  margin: 4px 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--chat-muted, #7c8798);
+}
+
+.lp-assistant-divider::before,
+.lp-assistant-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.28;
+}

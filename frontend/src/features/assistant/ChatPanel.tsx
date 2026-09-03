@@ -8,11 +8,19 @@ import {
   type ExplanationLevel,
 } from '../../api/assistant'
 import { windowMessages, type AiMissionSnapshot } from './aiContext'
+import type { AssistantMode } from './useAssistant'
 
 interface ChatTurn {
   id: number
-  role: 'user' | 'assistant'
+  /**
+   * `divider` is a local marker, never a message. It is not sent, and the
+   * server would reject it if it were: ChatMessage accepts user and assistant
+   * only.
+   */
+  role: 'user' | 'assistant' | 'divider'
   content: string
+  /** Stamped when the turn is created, so an old answer keeps its own name. */
+  roleLabel?: string
   evidence?: AiChatResponse['evidence']
   limitations?: AiChatResponse['limitations']
   warnings?: AiChatResponse['warnings']
@@ -24,7 +32,7 @@ interface ChatTurn {
 }
 
 /** Which analysis the operator asked for, when that is actually knowable. */
-type PendingIntent = 'generic' | 'cell' | 'compare'
+type PendingIntent = 'generic' | 'cell' | 'compare' | 'guide'
 
 interface Suggestion {
   id: string
@@ -42,6 +50,7 @@ const PEDIGREE_LABEL: Record<string, string> = {
 
 /** Derived from the evidence source, never asked of the model. */
 const CONTEXT_LABEL: Record<string, string> = {
+  'planning-guide': 'Planlama rehberi',
   'current-plan': 'Mevcut rota',
   'cell-telemetry': 'Hücre telemetrisi',
   'profile-comparison': 'Profil karşılaştırması',
@@ -74,6 +83,122 @@ const PENDING_STAGE: Record<PendingIntent, string> = {
   generic: 'Görev verileri inceleniyor…',
   cell: 'Seçili nokta analiz ediliyor…',
   compare: 'Görev profilleri karşılaştırılıyor…',
+  guide: 'Ürün bilgisi hazırlanıyor…',
+}
+
+/**
+ * The assistant's two identities.
+ *
+ * One component, one conversation, one pipeline. Only the framing changes,
+ * because the evidence available changes: before a route there is a product to
+ * explain, after one there is a result to explain.
+ */
+const IDENTITY: Record<
+  AssistantMode,
+  { kicker: string; title: string; introTitle: string; introCopy: string }
+> = {
+  planning: {
+    kicker: 'Planlama desteği',
+    title: 'Görev Rehberi',
+    introTitle: 'Göreve nereden başlamak istersin?',
+    introCopy:
+      'Rover seçimi, rota öncelikleri, arazi katmanları, Start ve Goal seçimi, ' +
+      '2D/3D görünüm ve rota üretme akışı hakkında yardımcı olabilirim.',
+  },
+  analysis: {
+    kicker: 'Görev karar desteği',
+    title: 'Analiz Asistanı',
+    introTitle: 'Bu görev hakkında ne öğrenmek istiyorsun?',
+    introCopy:
+      'Mevcut rotayı, seçili arazi noktasını ve görev profillerini ' +
+      'deterministik LunaPath analizleri üzerinden açıklayabilirim.',
+  },
+}
+
+const ROLE_LABEL: Record<AssistantMode, string> = {
+  planning: 'LunaPath Görev Rehberi',
+  analysis: 'LunaPath Analiz Asistanı',
+}
+
+/** Marks the boundary in the transcript. Local only; never sent. */
+const MODE_DIVIDER: Record<AssistantMode, string> = {
+  planning: 'Rota temizlendi · Planlama modu',
+  analysis: 'Rota oluşturuldu · Analiz modu',
+}
+
+/**
+ * Product help, answerable before anything has been selected.
+ *
+ * Deliberately no route-analysis chip here. Offering "summarise the route"
+ * with no route is an offer that comes back refused, and the cell chip is
+ * gated on a placed endpoint rather than on a plan -- so it could otherwise
+ * appear beside these.
+ */
+const PLANNING_SUGGESTIONS: readonly Suggestion[] = [
+  {
+    id: 'guide-workflow',
+    label: 'Bu ekranı nasıl kullanırım?',
+    query: 'Bu ekranı nasıl kullanacağım?',
+    intent: 'guide',
+  },
+  {
+    id: 'guide-rover',
+    label: 'Rover seçimlerini açıkla',
+    query: 'Rover seçimi neyi değiştiriyor?',
+    intent: 'guide',
+  },
+  {
+    id: 'guide-priority',
+    label: 'Route priorities ne işe yarıyor?',
+    query: 'Rota öncelikleri ne işe yarıyor?',
+    intent: 'guide',
+  },
+  {
+    id: 'guide-layer',
+    label: 'Katmanları açıkla',
+    query: 'Harita katmanları ne gösteriyor?',
+    intent: 'guide',
+  },
+  {
+    id: 'guide-endpoints',
+    label: 'Start ve Goal nasıl seçilir?',
+    query: 'Start ve Goal nasıl seçiliyor?',
+    intent: 'guide',
+  },
+  {
+    id: 'guide-view',
+    label: '2D ve 3D farkı nedir?',
+    query: '2D ve 3D görünüm arasındaki fark ne?',
+    intent: 'guide',
+  },
+]
+
+/**
+ * The turns that travel for the NEXT question.
+ *
+ * Two things are dropped, for two different reasons.
+ *
+ * Everything before the last mode divider goes, because planning turns are not
+ * history for an analysis question: the transcript stays whole on screen, but
+ * a route summary should not be routed against a conversation about which
+ * rover to pick.
+ *
+ * An empty turn goes because it cannot legally be sent. A transport failure
+ * appends an assistant turn with no content, and ChatMessage.content is
+ * min_length=1 -- so replaying it made the server reject every LATER question
+ * in the same conversation with a 422, and the only escape was "Yeni sohbet".
+ */
+function conversationForWire(turns: ChatTurn[]): ChatTurn[] {
+  let from = 0
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (turns[index].role === 'divider') {
+      from = index + 1
+      break
+    }
+  }
+  return turns
+    .slice(from)
+    .filter((turn) => turn.role !== 'divider' && turn.content.trim().length > 0)
 }
 
 /**
@@ -111,6 +236,8 @@ const NEAR_BOTTOM_PX = 48
 interface ChatPanelProps {
   /** A value snapshot. The panel gets no setters, by design. */
   mission: AiMissionSnapshot
+  /** Derived from the mission upstream. Never a control the operator sets. */
+  mode: AssistantMode
   /**
    * Whether the panel is on screen.
    *
@@ -128,10 +255,12 @@ interface ChatPanelProps {
 
 export default function ChatPanel({
   mission,
+  mode,
   isVisible = true,
   onMinimize,
   onAnswerWhileHidden,
 }: ChatPanelProps) {
+  const identity = IDENTITY[mode]
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
@@ -154,6 +283,7 @@ export default function ChatPanel({
   // Read inside send(), which is created before the reply arrives: visibility
   // can change while the request is in flight, so the flag is read late.
   const visibleRef = useRef(isVisible)
+  const modeRef = useRef(mode)
 
   useEffect(() => {
     visibleRef.current = isVisible
@@ -162,6 +292,29 @@ export default function ChatPanel({
   useEffect(() => {
     return () => abortRef.current?.abort()
   }, [])
+
+  /**
+   * Mark the mode change in the transcript, and nothing else.
+   *
+   * The conversation is preserved: a route appearing is not a reason to throw
+   * away what the operator was told while planning. The divider says where the
+   * evidence changed, and `conversationForWire` uses the same marker to stop
+   * the older turns being sent as history.
+   *
+   * Nothing is sent here. A mode change is not a question.
+   */
+  useEffect(() => {
+    if (modeRef.current === mode) return
+    modeRef.current = mode
+    setTurns((current) => {
+      // An empty transcript needs no divider -- it would replace the intro
+      // with a lone status line and say nothing useful.
+      if (current.length === 0) return current
+      if (current[current.length - 1].role === 'divider') return current
+      const id = (turnIdRef.current += 1)
+      return [...current, { id, role: 'divider', content: MODE_DIVIDER[mode] }]
+    })
+  }, [mode])
 
   // Coming back into view: put the caret where the operator will type, unless
   // the level is still unchosen and the composer is therefore disabled.
@@ -229,7 +382,10 @@ export default function ChatPanel({
       // Only user and assistant turns travel; the server rejects any other
       // role, and refuses more messages than it will accept.
       const wire: AiChatMessage[] = windowMessages(
-        history.map((turn) => ({ role: turn.role, content: turn.content })),
+        conversationForWire(history).map((turn) => ({
+          role: turn.role as 'user' | 'assistant',
+          content: turn.content,
+        })),
       )
 
       try {
@@ -242,6 +398,7 @@ export default function ChatPanel({
           {
             id: replyId,
             role: 'assistant',
+            roleLabel: ROLE_LABEL[modeRef.current],
             content: reply.answer,
             evidence: reply.evidence,
             limitations: reply.limitations,
@@ -266,7 +423,13 @@ export default function ChatPanel({
         turnIdRef.current = replyId
         setTurns((current) => [
           ...current,
-          { id: replyId, role: 'assistant', content: '', transportFailure: true },
+          {
+            id: replyId,
+            role: 'assistant',
+            roleLabel: ROLE_LABEL[modeRef.current],
+            content: '',
+            transportFailure: true,
+          },
         ])
         setStatusCue('İstek tamamlanamadı.')
       } finally {
@@ -327,6 +490,10 @@ export default function ChatPanel({
    * never an offer to run something that will come back refused.
    */
   const suggestions = useMemo<Suggestion[]>(() => {
+    // Before a route exists there is nothing to analyse, so the analysis chips
+    // are not merely empty -- they are absent.
+    if (mode === 'planning') return [...PLANNING_SUGGESTIONS]
+
     const items: Suggestion[] = []
     if (mission.currentPlan !== null) {
       items.push({
@@ -339,6 +506,12 @@ export default function ChatPanel({
         id: 'energy',
         label: 'Enerji ve bataryayı açıkla',
         query: 'Bu rotanın enerji tüketimini ve batarya durumunu açıkla.',
+        intent: 'generic',
+      })
+      items.push({
+        id: 'risk',
+        label: 'Riskleri açıkla',
+        query: 'Bu rotadaki riskleri açıkla.',
         intent: 'generic',
       })
     }
@@ -368,17 +541,17 @@ export default function ChatPanel({
       })
     }
     return items
-  }, [mission])
+  }, [mission, mode])
 
   const remaining = MAX_AI_MESSAGE_CHARS - draft.length
   const canSend = levelChosen && !pending && draft.trim().length > 0
 
   return (
-    <section className="rail-section chat-panel" aria-label="Analiz Asistanı">
+    <section className="rail-section chat-panel" aria-label={identity.title}>
       <header className="chat-header">
         <div className="chat-identity">
-          <p className="panel-kicker">Görev karar desteği</p>
-          <h2 className="panel-title">Analiz Asistanı</h2>
+          <p className="panel-kicker">{identity.kicker}</p>
+          <h2 className="panel-title">{identity.title}</h2>
         </div>
         <div className="chat-header-actions">
           <span className="chat-readonly" title="Asistan görevi okur; rotayı değiştirmez">
@@ -401,8 +574,8 @@ export default function ChatPanel({
             type="button"
             className="chat-minimize"
             onClick={onMinimize}
-            aria-label="Analiz Asistanını Küçült"
-            title="Analiz Asistanını Küçült"
+            aria-label={`${identity.title}ni Küçült`}
+            title={`${identity.title}ni Küçült`}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
               <path
@@ -479,6 +652,7 @@ export default function ChatPanel({
               <p className="chat-intro-blocked">
                 Önce bir rota oluştur veya haritada bir başlangıç/hedef noktası seç.
               </p>
+
             )}
             {!levelChosen && (
               <p className="chat-intro-blocked">
@@ -494,7 +668,13 @@ export default function ChatPanel({
             ref={index === turns.length - 1 ? lastTurnRef : undefined}
             className={`chat-turn chat-turn--${turn.role}`}
           >
-            {turn.role === 'user' ? (
+            {turn.role === 'divider' ? (
+              /* A local status marker, not a message. It is never sent, and
+                 the turns before it are not sent either. */
+              <p className="lp-assistant-divider" role="separator">
+                {turn.content}
+              </p>
+            ) : turn.role === 'user' ? (
               <>
                 <span className="chat-role">Sen</span>
                 <p className="chat-text">{turn.content}</p>
@@ -507,7 +687,7 @@ export default function ChatPanel({
 
         {pending && (
           <div className="chat-turn chat-turn--assistant chat-turn--pending">
-            <span className="chat-role">LunaPath Analiz Asistanı</span>
+            <span className="chat-role">{ROLE_LABEL[mode]}</span>
             <p className="chat-stage">
               {PENDING_STAGE[pendingIntent]}
               <span className="chat-dots" aria-hidden="true">
@@ -563,10 +743,12 @@ export default function ChatPanel({
 }
 
 function AssistantTurn({ turn }: { turn: ChatTurn }) {
+  const roleLabel = turn.roleLabel ?? ROLE_LABEL.analysis
+
   if (turn.transportFailure) {
     return (
       <>
-        <span className="chat-role">LunaPath Analiz Asistanı</span>
+        <span className="chat-role">{roleLabel}</span>
         <div className="chat-notice is-caution">
           <p className="chat-notice-title">{TRANSPORT_TITLE}</p>
           <p className="chat-notice-copy">{TRANSPORT_HINT}</p>
@@ -592,7 +774,7 @@ function AssistantTurn({ turn }: { turn: ChatTurn }) {
   return (
     <>
       <div className="chat-assistant-head">
-        <span className="chat-role">LunaPath Analiz Asistanı</span>
+        <span className="chat-role">{roleLabel}</span>
         {contextLabel && <span className="chat-context">{contextLabel}</span>}
       </div>
 

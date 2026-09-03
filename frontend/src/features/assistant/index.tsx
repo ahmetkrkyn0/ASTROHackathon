@@ -19,8 +19,22 @@ const CHAT_WINDOW_ID = 'analysis-assistant-window'
  */
 export function Assistant() {
   const mission = useMission()
-  const { isOpen, unread, launcherRef, toggle, close, markUnread, missionSnapshot } =
-    useAssistant(mission)
+  const {
+    isOpen,
+    unread,
+    mode,
+    launcherRef,
+    toggle,
+    close,
+    markUnread,
+    missionSnapshot,
+  } = useAssistant(mission)
+
+  // The window id and its class names are published contracts and do NOT vary
+  // with mode: shell.css keys the toast stack off `.chat-window.is-open`, and
+  // the launcher's aria-controls points at the id. Only the accessible name
+  // follows the mode.
+  const label = mode === 'planning' ? 'Görev Rehberi' : 'Analiz Asistanı'
 
   return (
     <>
@@ -28,8 +42,8 @@ export function Assistant() {
         type="button"
         ref={launcherRef}
         className={`chat-launcher ${isOpen ? 'is-open' : ''} ${unread ? 'has-unread' : ''}`}
-        aria-label="Analiz Asistanını Aç"
-        title="Analiz Asistanını Aç"
+        aria-label={`${label} Aç`}
+        title={`${label} Aç`}
         aria-expanded={isOpen}
         aria-controls={CHAT_WINDOW_ID}
         onClick={toggle}
@@ -57,10 +71,11 @@ export function Assistant() {
         id={CHAT_WINDOW_ID}
         className={`chat-window ${isOpen ? 'is-open' : ''}`}
         role="dialog"
-        aria-label="Analiz Asistanı"
+        aria-label={label}
       >
         <ChatPanel
           mission={missionSnapshot}
+          mode={mode}
           isVisible={isOpen}
           onMinimize={close}
           onAnswerWhileHidden={markUnread}

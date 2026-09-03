@@ -3,9 +3,19 @@ import { selectStableAnalysisCell } from '../../mission/selectors'
 import type { MissionValue } from '../../mission/types'
 import { buildMissionSnapshot, type AiMissionSnapshot } from './aiContext'
 
+/**
+ * Which of the two jobs the assistant is doing right now.
+ *
+ * Derived from the mission, never chosen by the operator: a toggle would let
+ * the panel offer route analysis with no route, which is the state this whole
+ * distinction exists to handle.
+ */
+export type AssistantMode = 'planning' | 'analysis'
+
 export interface AssistantShell {
   isOpen: boolean
   unread: boolean
+  mode: AssistantMode
   launcherRef: React.RefObject<HTMLButtonElement>
   toggle: () => void
   close: () => void
@@ -97,5 +107,39 @@ export function useAssistant(mission: MissionValue): AssistantShell {
     [mission.goal, mission.planResult, mission.roverId, mission.start, mission.weights],
   )
 
-  return { isOpen, unread, launcherRef, toggle, close, markUnread, missionSnapshot }
+  const mode: AssistantMode =
+    missionSnapshot.currentPlan === null ? 'planning' : 'analysis'
+
+  /**
+   * A finished route opens the assistant.
+   *
+   * The operator has just produced the thing the analysis mode exists to
+   * explain, and having to find the launcher first is friction with no
+   * purpose. It OPENS and nothing else: no question is sent, no request is
+   * made, and the model is not called. Whether to ask anything stays the
+   * operator's decision.
+   *
+   * Fires on the transition only. planResult is cleared by five different
+   * actions -- a map click, a rover change, a weight change, Clear, and the
+   * start of the next plan -- so a level-triggered effect would reopen the
+   * window every time the operator adjusted anything.
+   */
+  const hadPlanRef = useRef(missionSnapshot.currentPlan !== null)
+  useEffect(() => {
+    const hasPlan = missionSnapshot.currentPlan !== null
+    const had = hadPlanRef.current
+    hadPlanRef.current = hasPlan
+    if (hasPlan && !had) open()
+  }, [missionSnapshot.currentPlan, open])
+
+  return {
+    isOpen,
+    unread,
+    mode,
+    launcherRef,
+    toggle,
+    close,
+    markUnread,
+    missionSnapshot,
+  }
 }
