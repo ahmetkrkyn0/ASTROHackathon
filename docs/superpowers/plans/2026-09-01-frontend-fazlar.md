@@ -6,7 +6,7 @@
 
 **Architecture:** `App.tsx` yerinde kalır ve faz başına birkaç satır uzar. Paylaşılan durum ince bir read-only context (`MissionContext`) üzerinden yayınlanır; her modül kendi state'ini kendi hook'unda tutar. Tuvale çizim `OverlayLayer` sözleşmesi üzerinden yapılır — modüller `MapCanvas`'a doğrudan dokunmaz, böylece aynı overlay listesi ileride 3B'ye beslenebilir.
 
-**Tech Stack:** React 18 · TypeScript 5.3 · Vite 5 · three.js 0.183 (mevcut) · yeni bağımlılık **yok**
+**Tech Stack:** React 18 · TypeScript 5.3 · Vite 5 · three.js 0.183 (mevcut) · çalışma zamanına yeni bağımlılık **yok** (eklenen her şey devDependency: vitest, eslint)
 
 **Spec:** [`docs/superpowers/specs/2026-09-01-frontend-fazlar-design.md`](../specs/2026-09-01-frontend-fazlar-design.md)
 
@@ -16,27 +16,82 @@
 
 Bu kısıtlar **her görev** için geçerlidir. Görevler bunları tekrar etmez.
 
-- **Yeni npm bağımlılığı eklenmez.** React, TypeScript ve mevcut `three` dışında hiçbir paket kurulmaz.
-- **`App.css`'e dokunulmaz.** Her modül kendi CSS dosyasını `features/<modül>/<x>.css` içinde getirir ve tüm sınıf adları `.lp-<modül>-` ön ekiyle başlar.
-- **`api.ts`'e dokunulmaz.** Mevcut yedi çağrı yerinde kalır; yeni uçlar `src/api/` altında ayrı dosyalara yazılır. Tek istisna: Görev 2'deki `AstarMetrics` tip düzeltmesi.
+- **Çalışma zamanına yeni bağımlılık eklenmez.** Kullanıcıya giden pakete giren tek şey mevcut `react` / `react-dom` / `three`. Eklenen iki devDependency grubu var, ikisi de doğrulama içindir:
+  - **`vitest`** — saf fonksiyonları (`grid/geo.ts`, `overlay/draw2d.ts`, `net/series.ts` indeksleme) test etmek için; bunlar planın en riskli ve en kolay test edilir parçaları ve elle doğrulamayla güvence altına alınamıyorlar.
+  - **`eslint` + `typescript-eslint` + `eslint-plugin-react-hooks` + `eslint-plugin-react-refresh` + `@eslint/js` + `globals`** — plan yazılırken `npm run lint`'in çalıştığı varsayılmıştı; varsayım yanlıştı. Görev 1'den sonra kuruldu (`3c76198`) — gerekçesi aşağıda.
+
+  Bu ikisinin dışında paket kurulmaz.
+- **`src/api.ts` ile `src/net/` bir arada yaşar.** Yeni uç istemcileri `net/` altındadır, `api/` altında **değil**: `src/api.ts` dosyası dururken bir `src/api/` klasörü açmak `'../api'` importunu iki hedefe birden çözülebilir hale getirir. `net/` bu belirsizliği tamamen kaldırır.
+- **`App.css`'e dokunulmaz.** Her modül kendi CSS dosyasını `features/<modül>/<x>.css` içinde getirir ve **kendi yazdığı** her sınıf adı `.lp-<modül>-` ön ekiyle başlar.
+- **`App.css`'ten ödünç alınan tam olarak iki sınıf var:** modülün en dış sarmalayıcısındaki `rail-section` (`App.css:458`) ve `panel-kicker` (`App.css:495`). Bunlar raydaki bölümlerin ortak çerçevesi ve tipografisi; `.lp-` altında yeniden yazmak dokuz paneli komşularından görsel olarak ayrıştırırdı. Bu ikisi **okunur, değiştirilmez** ve modüllerin `App.css`'e olan tek bağıdır — üçüncü bir mevcut sınıf eklenmez.
+- **`api.ts`'e dokunulmaz.** Mevcut yedi çağrı yerinde kalır; yeni uçlar `src/net/` altında ayrı dosyalara yazılır. Tek istisna: Görev 2'deki `AstarMetrics` tip düzeltmesi.
 - **`App.tsx`'e yapılan her değişiklik kendi commit'idir**, içine başka iş karışmaz.
 - **Modül dışa yalnızca `index.tsx`'ini açar.** Başka bir modülün iç dosyası import edilmez.
-- **Koordinat birimi:** `OverlayLayer` içindeki her koordinat **fine grid pikselidir** (`{row, col}`). CRS metresi veya coarse piksel `mission/geo.ts` ile çevrilir.
+- **Koordinat birimi:** `OverlayLayer` içindeki her koordinat **fine grid pikselidir** (`{row, col}`). CRS metresi veya coarse piksel `grid/geo.ts` ile çevrilir.
 - **Validity sabit yazılmaz.** `SYNTHETIC < DERIVED < MODEL < MEASURED`; değer her zaman `/api/terrain`'den okunur, `null` gelirse "unknown" gösterilir.
 - **`null` bir sayı 0 olarak çizilmez.** `cost_breakdown`'da `null` = GEÇİLEMEZ demektir.
 - **Değerlendirilemeyen bir kontrol "temiz" gösterilmez.** `skipped` dizisi her zaman görünür kalır.
 - **UI dili İngilizce**, kod yorumları ve commit mesajları İngilizce, belgeler Türkçe.
-- **Her görev sonunda üçü de temiz olmalı:** `npm run typecheck`, `npm run lint`, `npm run build`.
+- **Her görev sonunda dördü de temiz olmalı:** `npm run typecheck`, `npm run lint`, `npm run build`, `npm test` (sonuncusu Görev 1'den itibaren).
 - **Commit mesajları Conventional Commits** (`feat:`, `fix:`, `refactor:`, `docs:`).
 
 ### Doğrulama hakkında
 
-`frontend/package.json` içinde test script'i yok ve bu plan kapsamında test altyapısı **kurulmuyor** (spec, "Kapsam dışı"). Bu yüzden her görevin doğrulama adımları:
+`frontend/package.json` içinde plan yazılırken test script'i yoktu. Spec'in
+"Kapsam dışı" bıraktığı şey **geniş** test altyapısı: jsdom, bileşen testleri,
+e2e. Bu plan da onları kurmuyor. Test tarafında kurduğu tek şey, saf
+fonksiyonlar için Vitest (Görev 1, Adım 2) — çünkü bu plandaki üç parça ekrana
+bakarak doğrulanamaz: yanlış olduklarında makul görünen bir şey çizerler.
+
+#### `npm run lint` neden şimdi var
+
+Plan yazılırken `package.json` bir lint script'i taşıyordu ama `eslint` kurulu
+değildi ve repoda hiçbir config dosyası yoktu (`.eslintrc*` da `eslint.config.*`
+da) — script bu repoda hiç koşmamıştı. Aşağıdaki 2. doğrulama adımı bu yüzden
+uygulanamıyordu. Görev 1'den sonra kuruldu (`3c76198`); script'ten `--ext
+ts,tsx` de çıkarıldı (ESLint 9'da kaldırıldı, olduğu gibi hata veriyordu).
+
+Açık olan iki kural var ve bu kurulumun tek sebebi onlar:
+
+- `react-hooks/rules-of-hooks`
+- `react-hooks/exhaustive-deps`
+
+Önümüzdeki dokuz modülün her biri `useEffect`/`useMemo` bağımlılık listesi
+yazacak. Bu listeler yanlış olduğunda TypeScript derlenir, `npm run build`
+geçer, uygulama açılır — ama panel ya eski veriyi gösterir ya da sonsuz
+döngüye girip istekleri arka arkaya atar. Sonsuz döngü gözle görünür; "eski
+veri gösteriyor" çoğu zaman görünmez. Diğer üç kontrolün hiçbiri bu hata
+sınıfını yakalamıyor.
+
+`eslint-plugin-react-hooks` 7'nin kendi `recommended` seti bunların yanında
+React Compiler kurallarını da açar (`purity`, `immutability`,
+`set-state-in-effect`, `refs`…). Onlar **bilerek kapalı**: mevcut
+`TerrainCanvas3D` three.js'i doğrudan imperatif sürüyor ve `App.tsx`'in
+efektleri o kurallara göre baştan yazılmak zorunda kalırdı — bu planın işi
+değil. Gerekçe ve nasıl açılacağı `frontend/eslint.config.js` içinde yazılı.
+
+Bir modül `exhaustive-deps`'i susturmak zorunda kalırsa, `eslint-disable-next-line`
+satırının **üstüne neden** yazılır. Gerekçesiz disable kabul edilmez;
+`--report-unused-disable-directives` zaten gereksiz kalanı hata yapar.
+
+Her görevin doğrulama adımları:
 
 1. `npm run typecheck` — tip hatası yok
 2. `npm run lint` — `--max-warnings 0` ile temiz
 3. `npm run build` — derleniyor
-4. **Elle kabul:** çalışan backend'e karşı, görevde yazılı tam adımlar; ne görüldüğü commit mesajına yazılır
+4. `npm test` — **Görev 1'den itibaren her görevde.** Kendi testi olmayan bir
+   görev de bunu koşar; amaç önceki görevlerin testlerini yeşil tutmak
+5. **Elle kabul:** çalışan backend'e karşı, görevde yazılı tam adımlar; ne görüldüğü commit mesajına yazılır
+
+Vitest'in doğruladığı üç şey ve hangi görevde yazıldıkları:
+
+| Saf fonksiyon | Test dosyası | Görev |
+|---|---|---|
+| `metresToPixel` · `pixelToMetres` · `coarseToFine` | `src/grid/geo.test.ts` | 3, Adım 2 |
+| `ribbonEdges` (köşe genişliği) · `normaliseToDomain` (alan indeksleme) | `src/overlay/draw2d.test.ts` | 4, Adım 5 |
+| `sliceAt` (küp indekslemesi) | `src/net/series.test.ts` | 10, Adım 2 |
+
+Üçü de Görev 1'in vitest bağımlılığının gerekçesi; üçü de gerçekten yazılıyor.
 
 Backend'i ayağa kaldırma (her elle kabul adımı bunu varsayar):
 
@@ -55,23 +110,29 @@ cd frontend && npm run dev
 
 | Dosya | Sorumluluk | Görev |
 |---|---|---|
-| `src/api/client.ts` | Tek fetch sarmalayıcı: JSON/f32 çözme, hata → `Error`, `AbortSignal` | 1 |
-| `src/mission/types.ts` | Backend yanıt tipleri (`TerrainManifest`, `Corridor`, `Plan4DResponse`, `PoseResponse`, …) | 2 |
-| `src/mission/geo.ts` | CRS metre ⇄ fine piksel dönüşümünün **tek** kaynağı | 3 |
+| `src/net/client.ts` | Tek fetch sarmalayıcı: JSON/f32 çözme, hata → `Error`, `AbortSignal` | 1 |
+| `src/net/types.ts` | Backend yanıt tipleri (`TerrainManifest`, `Corridor`, `Plan4DResponse`, `PoseResponse`, …) | 2 |
+| `src/grid/geo.ts` | CRS metre ⇄ fine piksel dönüşümünün **tek** kaynağı | 3 |
 | `src/overlay/types.ts` | `OverlayLayer`, `OverlayStyle`, `PixelPoint` | 4 |
 | `src/overlay/useOverlays.ts` | Overlay kayıt defteri (context) | 4 |
 | `src/overlay/draw2d.ts` | `OverlayLayer[]` → 2B canvas çizimi | 4 |
 | `src/mission/MissionContext.tsx` | Read-only durum + `setStart`/`setGoal` | 5 |
-| `src/mission/slots.tsx` | `LeftRailSlot` · `RightRailSlot` · `BottomDock` · `CanvasOverlaySlot` | 5 |
-| `src/api/terrain.ts` | `GET /api/terrain` | 6 |
+| `src/shell/slots.tsx` | `LeftRailSlot` · `RightRailSlot` · `BottomDock` · `CanvasOverlaySlot` | 5 |
+| `src/net/terrain.ts` | `GET /api/terrain` | 6 |
+| `src/mission/useTerrainManifest.ts` | Manifesti **bir kez** çekip paylaşan hook — F1, F2a ve F7 aynı geoyu istiyor | 6 |
+| `src/mission/triggers.ts` | Yedi tetikleyicinin telemetri künyesi — F2b ve F7 paylaşıyor | 9 |
+| `src/net/client.test.ts` | `ApiError` birim testi — Vitest'in koştuğunun kanıtı | 1 |
+| `src/grid/geo.test.ts` | `metresToPixel` / `pixelToMetres` / `coarseToFine` birim testleri | 3 |
+| `src/overlay/draw2d.test.ts` | `ribbonEdges` köşe genişliği ve `normaliseToDomain` birim testleri | 4 |
+| `src/net/series.test.ts` | `sliceAt` küp indekslemesi birim testi | 10 |
 | `src/features/layer-provenance/*` | F1 — katman kökeni | 6 |
 | `src/features/cost-explain/*` | F1–2 — maliyet kırılımı | 7 |
 | `src/features/corridor/*` | F2a — koridor | 8 |
-| `src/api/replan.ts` · `src/features/replan/*` | F2b — tetikleyiciler | 9 |
-| `src/api/series.ts` · `src/api/plan4d.ts` · `src/features/time-axis/*` | F3 — zaman ekseni | 10, 11 |
-| `src/api/pose.ts` · `src/features/pose-loop/*` | F7 — poz döngüsü | 12 |
-| `src/api/compare.ts` · `src/features/profile-compare/*` | F5 — profil kıyası | 13 |
-| `src/api/missions.ts` · `src/features/mission-validation/*` | F6 — misyon doğrulaması | 14 |
+| `src/net/replan.ts` · `src/features/replan/*` | F2b — tetikleyiciler | 9 |
+| `src/net/series.ts` · `src/net/plan4d.ts` · `src/features/time-axis/*` | F3 — zaman ekseni | 10, 11 |
+| `src/net/pose.ts` · `src/features/pose-loop/*` | F7 — poz döngüsü | 12 |
+| `src/net/compare.ts` · `src/features/profile-compare/*` | F5 — profil kıyası | 13 |
+| `src/net/missions.ts` · `src/features/mission-validation/*` | F6 — misyon doğrulaması | 14 |
 | `src/features/ros-showcase/*` | F4 — ROS 2 vitrini | 15 |
 
 ### Değiştirilecek mevcut dosyalar
@@ -104,14 +165,14 @@ Görev 1–5 iskelettir ve seri yürütülür. Görev 6'dan sonra 7, 8, 10, 13, 
 
 ---
 
-### Görev 1: `api/client.ts` — tek fetch sarmalayıcı
+### Görev 1: `net/client.ts` — tek fetch sarmalayıcı
 
 Her yeni uç çağrısı bunu kullanır. Hata gövdesindeki `detail` alanını okuyup
 `Error` mesajına koyar — backend her hatayı `{"detail": "..."}` biçiminde
 döndürür (`HTTPException`).
 
 **Files:**
-- Create: `frontend/src/api/client.ts`
+- Create: `frontend/src/net/client.ts`
 
 **Interfaces:**
 - Consumes: hiçbir şey (ilk görev)
@@ -121,7 +182,7 @@ döndürür (`HTTPException`).
   - `getFloat32(path: string, signal?: AbortSignal): Promise<{ data: Float32Array; headers: Headers }>`
   - `ApiError` sınıfı, `status: number` alanıyla
 
-- [ ] **Adım 1: Dosyayı oluştur**
+- [x] **Adım 1: Dosyayı oluştur**
 
 ```ts
 const BASE = '/api'
@@ -195,28 +256,77 @@ export async function getFloat32(
 }
 ```
 
-- [ ] **Adım 2: Derlemeyi doğrula**
+- [x] **Adım 2: Vitest'i kur**
 
-Run: `cd frontend && npm run typecheck && npm run lint`
-Expected: ikisi de hatasız çıkar (çıkış kodu 0)
-
-- [ ] **Adım 3: Commit**
+Planın en riskli üç parçası saf fonksiyon: koordinat dönüşümü, ribbon köşe
+matematiği, küp indeksleme. Bunların doğruluğu tarayıcıya bakarak
+anlaşılmaz — yanlış olduklarında da makul görünen bir şey çizerler.
 
 ```bash
-git add frontend/src/api/client.ts
-git commit -m "feat(frontend): add a single fetch wrapper that reads FastAPI detail"
+cd frontend && npm install --save-dev vitest@2.1.9
+```
+
+`package.json`'ın `scripts` bölümüne ekle:
+
+```json
+    "test": "vitest run",
+    "test:watch": "vitest"
+```
+
+> `vitest@2.1.9` sabitleniyor — sürüm aralığı değil. Tek yeni bağımlılık bu;
+> jsdom kurulmuyor, çünkü test edilen her şey DOM'suz saf fonksiyon.
+
+- [x] **Adım 3: Vitest'in çalıştığını doğrula**
+
+`frontend/src/net/client.test.ts` oluştur:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { ApiError } from './client'
+
+describe('ApiError', () => {
+  it('carries the status alongside the message', () => {
+    const error = new ApiError(422, 'start (9, 9) is outside the 5x5 grid.')
+    expect(error.status).toBe(422)
+    expect(error.message).toBe('start (9, 9) is outside the 5x5 grid.')
+    expect(error).toBeInstanceOf(Error)
+  })
+})
+```
+
+Run: `cd frontend && npm test`
+Expected: `1 passed`. Sıfır test bulunursa Vitest dosya desenini görmüyor
+demektir — `vite.config.ts` içinde `test: { include: ['src/**/*.test.ts'] }`
+ayarla.
+
+- [ ] **Adım 4: Derlemeyi doğrula**
+
+Run: `cd frontend && npm run typecheck && npm run lint && npm test`
+Expected: dördü de hatasız çıkar (çıkış kodu 0)
+
+- [ ] **Adım 5: Commit**
+
+```bash
+git add frontend/src/net/client.ts frontend/src/net/client.test.ts frontend/package.json frontend/package-lock.json
+git commit -m "feat(frontend): add a single fetch wrapper that reads FastAPI detail
+
+Also adds vitest, the plan's only new dependency. The three pieces most
+likely to be silently wrong -- the metre/pixel transform, the ribbon
+corner width, the time-cube index -- are pure functions that draw
+something plausible when they are wrong, so looking at the screen cannot
+verify them."
 ```
 
 ---
 
-### Görev 2: `mission/types.ts` — backend yanıt tipleri + `AstarMetrics` düzeltmesi
+### Görev 2: `net/types.ts` — backend yanıt tipleri + `AstarMetrics` düzeltmesi
 
 Spec T1: `astar_metrics.total_energy_wh` ve `total_shadow_hours` backend'de
 **her zaman `null`** (`pathfinder.py:734-735, 790-791`) ama `api.ts` bunları
 `number` diye tipliyor. Bu görev hem yeni tipleri getirir hem o hatayı düzeltir.
 
 **Files:**
-- Create: `frontend/src/mission/types.ts`
+- Create: `frontend/src/net/types.ts`
 - Modify: `frontend/src/api.ts:39-51` (`AstarMetrics` arayüzü)
 
 **Interfaces:**
@@ -246,7 +356,7 @@ Spec T1: `astar_metrics.total_energy_wh` ve `total_shadow_hours` backend'de
   total_shadow_hours: number | null
 ```
 
-- [ ] **Adım 2: `mission/types.ts` dosyasını oluştur**
+- [ ] **Adım 2: `net/types.ts` dosyasını oluştur**
 
 ```ts
 import type { PlanWeights } from '../api'
@@ -518,14 +628,14 @@ export interface ReferenceMissions {
 
 - [ ] **Adım 3: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
-Expected: üçü de hatasız. `AstarMetrics` değişikliği mevcut kodda hata
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
+Expected: dördü de hatasız. `AstarMetrics` değişikliği mevcut kodda hata
 vermemeli — `App.tsx` bu iki alanı okumuyor.
 
 - [ ] **Adım 4: Commit**
 
 ```bash
-git add frontend/src/mission/types.ts frontend/src/api.ts
+git add frontend/src/net/types.ts frontend/src/api.ts
 git commit -m "fix(frontend): type the always-null A* energy and shadow metrics honestly
 
 pathfinder.py emits total_energy_wh and total_shadow_hours as None and
@@ -537,7 +647,7 @@ cockpit does not read yet."
 
 ---
 
-### Görev 3: `mission/geo.ts` — koordinat dönüşümü
+### Görev 3: `grid/geo.ts` — koordinat dönüşümü
 
 Koridor CRS metresiyle konuşur, tuval pikselle. Bu dönüşüm **tek bir yerde**
 yaşar; spec'in en yüksek riskli maddesi (yanlışsa F2a ve F7 birlikte yanlış olur).
@@ -550,10 +660,10 @@ y_m = origin.y - row * resolution_m     # satırlar güneye artar
 ```
 
 **Files:**
-- Create: `frontend/src/mission/geo.ts`
+- Create: `frontend/src/grid/geo.ts`
 
 **Interfaces:**
-- Consumes: `mission/types.ts`'ten `TerrainManifest`
+- Consumes: `net/types.ts`'ten `TerrainManifest`
 - Produces:
   - `type GridFrame = { originX: number; originY: number; resolutionM: number; rows: number; cols: number }`
   - `frameFromManifest(manifest: TerrainManifest): GridFrame | null`
@@ -564,7 +674,7 @@ y_m = origin.y - row * resolution_m     # satırlar güneye artar
 - [ ] **Adım 1: Dosyayı oluştur**
 
 ```ts
-import type { TerrainManifest } from './types'
+import type { TerrainManifest } from '../net/types'
 
 export interface PixelPoint {
   row: number
@@ -639,47 +749,100 @@ export function coarseToFine(row: number, col: number, coarsen: number): PixelPo
 }
 ```
 
-- [ ] **Adım 2: Formülü elle doğrula**
+- [ ] **Adım 2: Önce başarısız testi yaz**
 
-`lunapath/data/processed/metadata.json` şu değerleri taşıyor:
+`frontend/src/grid/geo.test.ts` oluştur. Sayılar
+`lunapath/data/processed/metadata.json`'ın gerçek değerleri:
 `origin = { x: -32500.0, y: 11000.0 }`, `resolution_m = 5.0`, `shape = [500, 500]`.
 
-Bu değerlerle `metresToPixel` şunları vermeli:
+```ts
+import { describe, expect, it } from 'vitest'
+import { coarseToFine, metresToPixel, pixelToMetres, type GridFrame } from './geo'
 
-| Girdi (metre) | Beklenen piksel |
-|---|---|
-| `x = -32500, y = 11000` | `{ row: 0, col: 0 }` (kuzey-batı köşesi) |
-| `x = -32495, y = 10995` | `{ row: 1, col: 1 }` |
-| `x = -30005, y = 8505` | `{ row: 499, col: 499 }` (güney-doğu köşesi) |
+// The shipped Site01 window. Not a fixture invented for the test: these are
+// the values the backend reads at runtime.
+const FRAME: GridFrame = {
+  originX: -32500,
+  originY: 11000,
+  resolutionM: 5,
+  rows: 500,
+  cols: 500,
+}
 
-Bunu tarayıcı konsolunda doğrula — `npm run dev` çalışırken konsola:
+describe('metresToPixel', () => {
+  it('puts the origin at the north-west corner', () => {
+    expect(metresToPixel(-32500, 11000, FRAME)).toEqual({ row: 0, col: 0 })
+  })
 
-```js
-// beklenen: {row: 0, col: 0}
-console.log({ row: (11000 - 11000) / 5, col: (-32500 - -32500) / 5 })
-// beklenen: {row: 499, col: 499}
-console.log({ row: (11000 - 8505) / 5, col: (-30005 - -32500) / 5 })
+  it('advances a row SOUTHWARD as y decreases', () => {
+    // The whole point. origin.y is the window's north edge and rows increase
+    // southward, so a smaller y is a LARGER row. Flipping this sign mirrors
+    // the corridor about the middle row -- which looks plausible on screen.
+    expect(metresToPixel(-32495, 10995, FRAME)).toEqual({ row: 1, col: 1 })
+  })
+
+  it('puts the last cell at the south-east corner', () => {
+    expect(metresToPixel(-30005, 8505, FRAME)).toEqual({ row: 499, col: 499 })
+  })
+
+  it('never returns a negative row for a point inside the window', () => {
+    for (const y of [11000, 10000, 9000, 8505]) {
+      expect(metresToPixel(-32500, y, FRAME).row).toBeGreaterThanOrEqual(0)
+    }
+  })
+})
+
+describe('pixelToMetres', () => {
+  it('round-trips with metresToPixel', () => {
+    for (const [row, col] of [[0, 0], [1, 1], [250, 137], [499, 499]]) {
+      const { x, y } = pixelToMetres(row, col, FRAME)
+      expect(metresToPixel(x, y, FRAME)).toEqual({ row, col })
+    }
+  })
+})
+
+describe('coarseToFine', () => {
+  it('returns the CENTRE of the coarse block', () => {
+    // coarsen=4 collapses fine rows 0..3 onto coarse row 0; its centre is 1.5.
+    expect(coarseToFine(0, 0, 4)).toEqual({ row: 1.5, col: 1.5 })
+    expect(coarseToFine(2, 3, 4)).toEqual({ row: 9.5, col: 13.5 })
+  })
+
+  it('is the identity at coarsen=1', () => {
+    expect(coarseToFine(7, 9, 1)).toEqual({ row: 7, col: 9 })
+  })
+})
 ```
 
-Expected: ikisi de tabloyla birebir. **`row` çıkışı negatifse y terimi ters
-çevrilmiştir** — durup düzelt.
+- [ ] **Adım 3: Testi çalıştır — başarısız olmalı**
 
-- [ ] **Adım 3: Derlemeyi doğrula**
+Run: `cd frontend && npm test`
+Expected: FAIL, "Cannot find module './geo'" (Adım 1'i henüz yazmadıysan) veya
+assertion hatası. **Geçerse dur** — test yanlış yazılmıştır.
 
-Run: `cd frontend && npm run typecheck && npm run lint`
-Expected: temiz
+> Adım 1'i Adım 2'den önce yazdıysan, bu adımı `metresToPixel`'in `y` terimini
+> geçici olarak `+`'ya çevirip koşarak yap: "advances a row SOUTHWARD" testi
+> **başarısız olmalı**. Sonra `-`'ye geri al. Bu, testin gerçekten o hatayı
+> yakaladığını kanıtlar.
 
-- [ ] **Adım 4: Commit**
+- [ ] **Adım 4: Testleri geçir ve derlemeyi doğrula**
+
+Run: `cd frontend && npm test && npm run typecheck && npm run lint`
+Expected: `8 passed` — Görev 1'in `ApiError` testi ve buradaki yedi test.
+Typecheck ve lint temiz.
+
+- [ ] **Adım 5: Commit**
 
 ```bash
-git add frontend/src/mission/geo.ts
+git add frontend/src/grid/geo.ts frontend/src/grid/geo.test.ts
 git commit -m "feat(frontend): one canonical grid metre/pixel conversion
 
 The corridor speaks projected CRS metres and the canvas speaks pixels.
 Mirrors serializer.pixel_to_lonlat, subtracted y term included: origin.y
 is the window's north edge and rows increase southward, so getting the
 sign wrong mirrors the corridor about the middle row -- plausible-looking
-and wrong. Verified against metadata.json's corners."
+and wrong, which is why the sign has its own test against the shipped
+window's real corners rather than a glance at the screen."
 ```
 
 ---
@@ -697,7 +860,7 @@ olacak, faz modülleri değişmeyecek.
 - Modify: `frontend/src/MapCanvas.tsx` (Props, `redraw` çağrısı, `redraw` gövdesi)
 
 **Interfaces:**
-- Consumes: `mission/geo.ts`'ten `PixelPoint`
+- Consumes: `grid/geo.ts`'ten `PixelPoint`
 - Produces:
   - `OverlayLayer`, `OverlayStyle`, `RampName`
   - `OverlayProvider` bileşeni
@@ -707,7 +870,7 @@ olacak, faz modülleri değişmeyecek.
 - [ ] **Adım 1: `overlay/types.ts` oluştur**
 
 ```ts
-import type { PixelPoint } from '../mission/geo'
+import type { PixelPoint } from '../grid/geo'
 
 export type { PixelPoint }
 
@@ -729,7 +892,7 @@ export interface OverlayStyle {
  * One thing a feature module wants drawn on the map.
  *
  * Every coordinate is a FINE grid pixel ({row, col}). A module holding CRS
- * metres or coarse pixels converts with mission/geo.ts before registering.
+ * metres or coarse pixels converts with grid/geo.ts before registering.
  * The canvas knows no other unit, and 3-D will consume this same list.
  */
 export type OverlayLayer =
@@ -821,13 +984,50 @@ const EMPTY: OverlayRegistry = {
 }
 ```
 
-- [ ] **Adım 3: `overlay/draw2d.ts` oluştur**
+- [ ] **Adım 3: `colormap.ts`'in gerçek imzasını doğrula**
+
+Bir sonraki adımın rampa tablosu bu imzaya göre yazılıyor, o yüzden **önce**
+bakılır.
+
+Run: `cd frontend && grep -n "^export type RGB\|^export function \(viridisToRgb\|magmaToRgb\|thermalToRgb\|grayReverseToRgb\)" src/colormap.ts`
+
+Expected (bugünkü kaynak):
+
+```
+1:export type RGB = [number, number, number]
+96:export function thermalToRgb(value: number | null, min: number, max: number, lut?: number[]): RGB
+140:export function magmaToRgb(value: number | null, min: number, max: number): RGB
+147:export function viridisToRgb(value: number | null, min: number, max: number): RGB
+161:export function grayReverseToRgb(value: number | null, min: number, max: number): RGB
+```
+
+Dikkat: bunlar **`(t) => rgb` değil**. Üç parametre alıyorlar ve normalizasyonu
+kendi içlerinde yapıyorlar; `thermalToRgb`'nin dördüncü bir `lut?` parametresi
+var. Adım 4 bunu böyle kullanıyor — tek argümanla çağıran bir tablo `tsc`'den
+geçmez.
+
+Dördünden biri çıkmazsa `RampName`'den ve `RAMPS` tablosundan o adı çıkar —
+uydurma isim eklenmez. İmza yukarıdakinden farklıysa Adım 4'teki `RAMPS` tipini
+**ve `drawField`'daki çağrı yerini birlikte** gerçek imzaya uydur.
+
+- [ ] **Adım 4: `overlay/draw2d.ts` oluştur**
 
 ```ts
 import { magmaToRgb, thermalToRgb, viridisToRgb, grayReverseToRgb } from '../colormap'
+import type { RGB } from '../colormap'
 import type { OverlayLayer, PixelPoint, RampName } from './types'
 
-const RAMPS: Record<RampName, (t: number) => [number, number, number]> = {
+/**
+ * The four ramps a module may ask for, at their REAL signature.
+ *
+ * colormap.ts's ramps are (value, min, max) => RGB and normalise inside;
+ * they are not (t) => rgb. An overlay has already normalised against its
+ * own domain, so every ramp here is called on the unit interval:
+ * toRgb(t, 0, 1). thermalToRgb's fourth `lut?` parameter is deliberately
+ * not passed -- an equalisation LUT belongs to the base map, not to an
+ * overlay whose domain the module chose itself.
+ */
+const RAMPS: Record<RampName, (value: number | null, min: number, max: number) => RGB> = {
   viridis: viridisToRgb,
   magma: magmaToRgb,
   thermal: thermalToRgb,
@@ -837,10 +1037,12 @@ const RAMPS: Record<RampName, (t: number) => [number, number, number]> = {
 /**
  * Draw every registered overlay onto the map canvas.
  *
- * `scale` converts a grid pixel into a canvas pixel. The canvas is a fixed
- * square (CANVAS_SIZE) whatever the grid's size, so a 250-row preview and a
- * 500-row full grid both fill it -- taking the scale from the grid rather
- * than assuming 1:1 keeps a downsampled field aligned with the route.
+ * `gridRows` is the LOADED GRID's row count -- never the canvas size. The
+ * canvas is a fixed square (CANVAS_SIZE) whatever the grid's size and the
+ * base map is painted at cellPx = CANVAS_SIZE / rows (MapCanvas.tsx:454),
+ * so passing anything but the real row count puts every overlay out of
+ * register with the map underneath it. That the shipped 500x500 grid makes
+ * the two numbers equal today is a coincidence, not a contract.
  */
 export function drawOverlays(
   ctx: CanvasRenderingContext2D,
@@ -916,6 +1118,50 @@ function drawPoints(
 }
 
 /**
+ * The two edges of a corridor ribbon, one point per centre point.
+ *
+ * Exported and pure because this is the maths that draws a plausible band
+ * when it is wrong: a flipped perpendicular swaps the edges, a dropped
+ * clamp pinches the ribbon shut at the goal, and both still look like a
+ * corridor on screen. See draw2d.test.ts.
+ */
+export function ribbonEdges(
+  center: PixelPoint[],
+  halfWidthPx: number[],
+): { left: PixelPoint[]; right: PixelPoint[] } {
+  const left: PixelPoint[] = []
+  const right: PixelPoint[] = []
+
+  for (let i = 0; i < center.length; i++) {
+    const prev = center[Math.max(0, i - 1)]
+    const next = center[Math.min(center.length - 1, i + 1)]
+    const dRow = next.row - prev.row
+    const dCol = next.col - prev.col
+    const length = Math.hypot(dRow, dCol)
+    if (length === 0) {
+      // A repeated waypoint has no direction to be perpendicular to.
+      // Collapsing to the centre keeps the polygon closed; dividing by
+      // zero would put NaN into the path and blank the entire fill.
+      left.push(center[i])
+      right.push(center[i])
+      continue
+    }
+    // Perpendicular in grid space: (dRow, dCol) -> (-dCol, dRow).
+    const nRow = -dCol / length
+    const nCol = dRow / length
+    // half_width_m is per SEGMENT and so N-1 long against N centre points
+    // (corridor.py:126). The last vertex reuses the last segment's width;
+    // falling off the end to 0 would taper the corridor to a point exactly
+    // at the goal, where the width matters most.
+    const w = halfWidthPx[Math.min(i, halfWidthPx.length - 1)] ?? 0
+    left.push({ row: center[i].row + nRow * w, col: center[i].col + nCol * w })
+    right.push({ row: center[i].row - nRow * w, col: center[i].col - nCol * w })
+  }
+
+  return { left, right }
+}
+
+/**
  * A corridor is one filled band, not a stack of per-segment quads: drawn
  * segment by segment the shared edges overlap and a translucent fill goes
  * visibly darker at every joint. Walking the left side forward and the
@@ -929,27 +1175,7 @@ function drawRibbon(
   const { center, halfWidthPx } = layer
   if (center.length < 2) return
 
-  const left: PixelPoint[] = []
-  const right: PixelPoint[] = []
-
-  for (let i = 0; i < center.length; i++) {
-    const prev = center[Math.max(0, i - 1)]
-    const next = center[Math.min(center.length - 1, i + 1)]
-    const dRow = next.row - prev.row
-    const dCol = next.col - prev.col
-    const length = Math.hypot(dRow, dCol)
-    if (length === 0) {
-      left.push(center[i])
-      right.push(center[i])
-      continue
-    }
-    // Perpendicular in grid space: (dRow, dCol) -> (-dCol, dRow).
-    const nRow = -dCol / length
-    const nCol = dRow / length
-    const w = halfWidthPx[Math.min(i, halfWidthPx.length - 1)] ?? 0
-    left.push({ row: center[i].row + nRow * w, col: center[i].col + nCol * w })
-    right.push({ row: center[i].row - nRow * w, col: center[i].col - nCol * w })
-  }
+  const { left, right } = ribbonEdges(center, halfWidthPx)
 
   ctx.globalAlpha = layer.style.opacity ?? 0.25
   ctx.fillStyle = layer.style.color
@@ -975,6 +1201,28 @@ function drawRibbon(
  * without the caller resampling anything. NaN is the backend's only
  * no-data value and stays fully transparent.
  */
+/**
+ * A field value's position on its ramp, or null for "draw nothing".
+ *
+ * NaN is the backend's only no-data value (binary_format.nodata) and has to
+ * stay transparent: clamping it into the domain would paint missing data as
+ * the coldest real value in the field, which reads as a measurement. Any
+ * non-finite value is treated the same way, for the same reason.
+ * Exported and pure -- see draw2d.test.ts.
+ */
+export function normaliseToDomain(
+  value: number,
+  domain: [number, number],
+): number | null {
+  if (!Number.isFinite(value)) return null
+  const [min, max] = domain
+  const span = max - min
+  // A flat field is not an error: every cell sits at the bottom of the ramp
+  // rather than dividing by zero into NaN.
+  if (span === 0) return 0
+  return Math.min(1, Math.max(0, (value - min) / span))
+}
+
 function drawField(
   ctx: CanvasRenderingContext2D,
   layer: Extract<OverlayLayer, { kind: 'field' }>,
@@ -983,20 +1231,20 @@ function drawField(
   const { data, rows, cols, domain, ramp, opacity } = layer
   if (data.length !== rows * cols) return
 
-  const [min, max] = domain
-  const span = max - min
   const toRgb = RAMPS[ramp]
   const image = new ImageData(cols, rows)
 
   for (let i = 0; i < data.length; i++) {
-    const value = data[i]
     const offset = i * 4
-    if (Number.isNaN(value)) {
+    const t = normaliseToDomain(data[i], domain)
+    if (t === null) {
       image.data[offset + 3] = 0
       continue
     }
-    const t = span === 0 ? 0 : Math.min(1, Math.max(0, (value - min) / span))
-    const [r, g, b] = toRgb(t)
+    // The ramp's own (value, min, max) signature, on the unit interval the
+    // line above just produced. One argument does not compile; the raw
+    // value would normalise twice, against a domain the module never chose.
+    const [r, g, b] = toRgb(t, 0, 1)
     image.data[offset] = r
     image.data[offset + 1] = g
     image.data[offset + 2] = b
@@ -1016,19 +1264,112 @@ function drawField(
 }
 ```
 
-- [ ] **Adım 4: `colormap.ts`'in gerçekten bu dört fonksiyonu dışa açtığını doğrula**
+- [ ] **Adım 5: `overlay/draw2d.test.ts` oluştur**
 
-Run: `cd frontend && grep -n "^export function \(viridisToRgb\|magmaToRgb\|thermalToRgb\|grayReverseToRgb\)" src/colormap.ts`
-Expected: dört satır da çıkar. Bir tanesi çıkmazsa `draw2d.ts`'teki `RAMPS`
-tablosundan o girdiyi ve `RampName`'den o adı çıkar — uydurma isim eklenmez.
+Görev 1'de kurulan Vitest'in ikinci gerekçesi bu. `drawRibbon` ve `drawField`
+bir `CanvasRenderingContext2D` istiyor ve jsdom kurulmuyor — o yüzden test
+edilen şey, ikisinin içinden çıkarılmış iki **saf** fonksiyon: `ribbonEdges`
+ve `normaliseToDomain`. Yanlış olduklarında ekranda hâlâ bir koridor ve bir
+alan görünür; yanlışlığı ancak sayılar gösterir.
 
-Ayrıca dönüş tipini doğrula:
+```ts
+import { describe, expect, it } from 'vitest'
+import { normaliseToDomain, ribbonEdges } from './draw2d'
+import type { PixelPoint } from './types'
 
-Run: `cd frontend && sed -n "/^export function viridisToRgb/,/^}/p" src/colormap.ts`
-Expected: `[number, number, number]` döndüğü görülür. Farklıysa `RAMPS`
-tablosunun tipini gerçek imzaya uydur.
+// A straight run east: col increases, row does not. The perpendicular is
+// therefore purely in row, which makes every offset readable by eye.
+const EAST: PixelPoint[] = [
+  { row: 10, col: 0 },
+  { row: 10, col: 1 },
+  { row: 10, col: 2 },
+]
 
-- [ ] **Adım 5: `MapCanvas.tsx`'e overlay prop'unu ekle**
+describe('ribbonEdges', () => {
+  it('offsets both edges perpendicular to the run', () => {
+    const { left, right } = ribbonEdges(EAST, [2, 2])
+    expect(left).toEqual([
+      { row: 8, col: 0 },
+      { row: 8, col: 1 },
+      { row: 8, col: 2 },
+    ])
+    expect(right).toEqual([
+      { row: 12, col: 0 },
+      { row: 12, col: 1 },
+      { row: 12, col: 2 },
+    ])
+  })
+
+  it('widens and narrows with the per-segment half-width', () => {
+    // The band is not a constant-width tube: clearance is what the corridor
+    // publishes per segment, and a ribbon drawn at one width hides exactly
+    // the place a driver needs to see -- the pinch.
+    const { left, right } = ribbonEdges(EAST, [1, 4])
+    expect(left[0]).toEqual({ row: 9, col: 0 })
+    expect(right[0]).toEqual({ row: 11, col: 0 })
+    expect(left[1]).toEqual({ row: 6, col: 1 })
+    expect(right[1]).toEqual({ row: 14, col: 1 })
+  })
+
+  it('gives N centre points N edge points from N-1 widths', () => {
+    // corridor.py:126: the budget arrays are per segment. The last vertex
+    // reuses the last segment's width instead of falling off the end to 0,
+    // which would taper the corridor to a point exactly at the goal.
+    const { left, right } = ribbonEdges(EAST, [4, 4])
+    expect(left).toHaveLength(3)
+    expect(right).toHaveLength(3)
+    expect(left[2]).toEqual({ row: 6, col: 2 })
+  })
+
+  it('survives a repeated waypoint without emitting NaN', () => {
+    // Zero-length segment: Math.hypot is 0 and the perpendicular would be
+    // 0/0. One NaN in the path blanks the whole fill, so the ribbon would
+    // vanish rather than look wrong.
+    const { left, right } = ribbonEdges(
+      [
+        { row: 3, col: 3 },
+        { row: 3, col: 3 },
+      ],
+      [5],
+    )
+    for (const point of [...left, ...right]) {
+      expect(Number.isFinite(point.row)).toBe(true)
+      expect(Number.isFinite(point.col)).toBe(true)
+    }
+  })
+})
+
+describe('normaliseToDomain', () => {
+  it('places a value on the unit interval', () => {
+    expect(normaliseToDomain(5, [0, 10])).toBe(0.5)
+    expect(normaliseToDomain(-20, [-40, 0])).toBe(0.5)
+  })
+
+  it('returns null for NaN instead of clamping it', () => {
+    // The whole point. NaN is the backend's nodata; clamped to 0 it would
+    // paint missing data as the coldest real value in the field, which
+    // reads as a measurement rather than as an absence.
+    expect(normaliseToDomain(Number.NaN, [0, 10])).toBeNull()
+    expect(normaliseToDomain(Number.POSITIVE_INFINITY, [0, 10])).toBeNull()
+  })
+
+  it('clamps a value outside the domain', () => {
+    expect(normaliseToDomain(-5, [0, 10])).toBe(0)
+    expect(normaliseToDomain(99, [0, 10])).toBe(1)
+  })
+
+  it('returns 0 for a flat field rather than NaN', () => {
+    // min === max happens for real: a fully shadowed slice has shadow = 1
+    // everywhere. Dividing by the zero span would blank the layer.
+    expect(normaliseToDomain(7, [7, 7])).toBe(0)
+  })
+})
+```
+
+Run: `cd frontend && npm test`
+Expected: `16 passed` — Görev 1'in 1'i, Görev 3'ün 7'si, buradaki 8'i.
+
+- [ ] **Adım 6: `MapCanvas.tsx`'e overlay prop'unu ekle**
 
 `interface Props` içine, `onHoverCellChange` satırının altına ekle:
 
@@ -1046,9 +1387,40 @@ import { drawOverlays } from './overlay/draw2d'
 
 Bileşenin destructure listesine `onHoverCellChange`'den sonra `overlays,` ekle.
 
-- [ ] **Adım 6: `redraw`'a overlay'leri geçir**
+- [ ] **Adım 7: Grid satır sayısını ve overlay'leri `redraw`'a geçir**
 
-`MapCanvas.tsx:132` civarındaki çağrıyı bul:
+Overlay koordinatları **fine grid pikselidir**, tuval pikseli değil. Taban
+görüntü `cellPx = CANVAS_SIZE / rows` ile basılıyor (`MapCanvas.tsx:454`), yani
+ölçek grid'in **gerçek** satır sayısından gelmeli. Bugün sevk edilen grid
+500x500 ve `CANVAS_SIZE = 500` (`MapCanvas.tsx:23`), `DOWNSAMPLE = 1`
+(`MapCanvas.tsx:24`) — iki sayı tesadüfen eşit. Bu eşitliğe yaslanan kod,
+başka bir sahada ya da `DOWNSAMPLE` değiştiğinde her overlay'i haritadan kaydırır.
+
+Bileşen gövdesine, `redraw` çağrılarından **önce** ekle:
+
+```ts
+  // The loaded grid's own row count, not CANVAS_SIZE. Every layer is
+  // fetched at the same downsample, so elevation's shape is the grid's
+  // shape. Zero before the first fetch lands, and drawOverlays draws
+  // nothing at zero -- there is no base map to be out of register with yet.
+  const gridRows = elevationGrid?.length ?? 0
+```
+
+`MapCanvas.tsx:118` civarındaki **ilk** çağrıyı bul:
+
+```ts
+    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell)
+  }, [aspectGrid, costGrid, elevationGrid, resolutionM, shadowGrid, slopeGrid, thermalGrid, traversableGrid, viewMode])
+```
+
+Şununla değiştir:
+
+```ts
+    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell, gridRows, overlays)
+  }, [aspectGrid, costGrid, elevationGrid, gridRows, overlays, resolutionM, shadowGrid, slopeGrid, thermalGrid, traversableGrid, viewMode])
+```
+
+`MapCanvas.tsx:132` civarındaki **ikinci** çağrıyı bul:
 
 ```ts
     redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell)
@@ -1058,11 +1430,15 @@ Bileşenin destructure listesine `onHoverCellChange`'den sonra `overlays,` ekle.
 Şununla değiştir:
 
 ```ts
-    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell, overlays)
-  }, [animStep, goal, hoverCell, overlays, start, waypoints])
+    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell, gridRows, overlays)
+  }, [animStep, goal, gridRows, hoverCell, overlays, start, waypoints])
 ```
 
-- [ ] **Adım 7: `redraw` gövdesini genişlet**
+> İkisi de değişiyor: ilki katman/görünüm değiştiğinde, ikincisi rota veya
+> hover değiştiğinde çiziyor. Yalnızca birine overlay geçirmek, overlay'lerin
+> diğer yol her koştuğunda silinmesi demektir.
+
+- [ ] **Adım 8: `redraw` gövdesini genişlet**
 
 `MapCanvas.tsx:282` civarındaki imzaya son parametreyi ekle:
 
@@ -1075,9 +1451,13 @@ function redraw(
   goal: [number, number] | null,
   currentStep: number | null,
   hoverCell: [number, number] | null,
+  gridRows: number,
   overlays?: OverlayLayer[],
 ) {
 ```
+
+> Mevcut yedi parametrenin sırası **değişmiyor**; `gridRows` ve `overlays`
+> yalnızca sona ekleniyor.
 
 Taban görüntü basıldıktan **hemen sonra**, rota çizilmeden **önce** — yani
 `ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE)`'ı kapatan `}` ile
@@ -1087,28 +1467,27 @@ Taban görüntü basıldıktan **hemen sonra**, rota çizilmeden **önce** — y
   // Before the route and the markers: a field overlay is a backdrop, and the
   // planned route must stay readable on top of it.
   if (overlays && overlays.length) {
-    drawOverlays(ctx, overlays, CANVAS_SIZE, CANVAS_SIZE)
+    drawOverlays(ctx, overlays, gridRows, CANVAS_SIZE)
   }
 ```
 
-> `gridRows` olarak `CANVAS_SIZE` geçiliyor çünkü `MapCanvas` taban görüntüyü
-> zaten tuval çözünürlüğüne ölçekliyor (`cellPx = CANVAS_SIZE / rows`,
-> `MapCanvas.tsx:454`) — yani tuval uzayında bir grid pikseli tam olarak bir
-> tuval pikselidir. `field` overlay'i kendi `rows`/`cols`'unu taşır ve
-> `drawImage` ile ölçeklenir, bu yüzden farklı çözünürlükte bir dilim de doğru
-> oturur.
+> `gridRows` grid'in gerçek satır sayısı, `CANVAS_SIZE` değil — Adım 7'deki
+> gerekçe. `drawOverlays` `gridRows <= 0` olduğunda hiç çizmez, yani ilk
+> katman gelmeden önce çağrılması zararsız. `field` overlay'i kendi
+> `rows`/`cols`'unu taşıyor ve `drawImage` ile tuvalin tamamına geriliyor, bu
+> yüzden downsample edilmiş bir zaman dilimi de doğru oturur.
 
-- [ ] **Adım 8: Regresyon olmadığını doğrula**
+- [ ] **Adım 9: Regresyon olmadığını doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
-Expected: üçü de temiz.
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
+Expected: dördü de temiz.
 
 Elle: uygulamayı aç, bir başlangıç ve hedef seç, rota üret.
 Expected: harita, rota, işaretler ve hover **Görev 4 öncesiyle birebir aynı**
 görünüyor — hiçbir modül henüz overlay kaydetmediği için `overlays` `undefined`
 ve çizim yolu hiç çalışmıyor.
 
-- [ ] **Adım 9: Commit**
+- [ ] **Adım 10: Commit**
 
 ```bash
 git add frontend/src/overlay/ frontend/src/MapCanvas.tsx
@@ -1132,11 +1511,11 @@ faz başına yalnızca bir satır eklenecek.
 
 **Files:**
 - Create: `frontend/src/mission/MissionContext.tsx`
-- Create: `frontend/src/mission/slots.tsx`
+- Create: `frontend/src/shell/slots.tsx`
 - Modify: `frontend/src/App.tsx`
 
 **Interfaces:**
-- Consumes: `mission/types.ts`, `overlay/useOverlays.ts`
+- Consumes: `net/types.ts`, `overlay/useOverlays.ts`
 - Produces:
   - `MissionProvider` bileşeni (`value: MissionState & MissionActions`)
   - `useMission(): MissionState & MissionActions`
@@ -1147,7 +1526,7 @@ faz başına yalnızca bir satır eklenecek.
 ```tsx
 import React, { createContext, useContext } from 'react'
 import type { PlanResponse, PlanWeights } from '../api'
-import type { CellTelemetryResponse } from './types'
+import type { CellTelemetryResponse } from '../net/types'
 
 export type MapViewMode =
   | 'surface'
@@ -1173,7 +1552,12 @@ export interface MissionState {
   goal: [number, number] | null
   /** The FULL /api/plan response -- corridor, route_statistics and execution included. */
   planResult: PlanResponse | null
-  selectedCell: [number, number] | null
+  /**
+   * The cell under the pointer, NOT a click selection. App publishes its
+   * hover state here because that is what drives /api/cell-telemetry today;
+   * a module that wants a sticky selection has to hold it itself.
+   */
+  hoverCell: [number, number] | null
   /** The RAW /api/cell-telemetry response, cost_breakdown and layer_validity included. */
   cellTelemetry: CellTelemetryResponse | null
   activeLayer: MapViewMode
@@ -1208,7 +1592,7 @@ export function useMission(): MissionValue {
 }
 ```
 
-- [ ] **Adım 2: `mission/slots.tsx` oluştur**
+- [ ] **Adım 2: `shell/slots.tsx` oluştur**
 
 ```tsx
 import React from 'react'
@@ -1261,7 +1645,7 @@ export function CanvasOverlaySlot({ children }: { children?: React.ReactNode }) 
 Importlara ekle:
 
 ```ts
-import type { CellTelemetryResponse } from './mission/types'
+import type { CellTelemetryResponse } from './net/types'
 ```
 
 `fetchCellTelemetry` yanıtının işlendiği yerde (`mapFocusTelemetryResponse`
@@ -1276,40 +1660,72 @@ import type { CellTelemetryResponse } from './mission/types'
 
 - [ ] **Adım 4: `App.tsx` — sağlayıcıları ve yuvaları yerleştir**
 
-Importlara ekle:
+`App.tsx:1` şu anda `useMemo`'yu import etmiyor — React import'una ekle:
+
+```ts
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+```
+
+Sonra kalan importları ekle:
 
 ```ts
 import { MissionProvider } from './mission/MissionContext'
 import type { MissionValue } from './mission/MissionContext'
 import { OverlayProvider, useOverlays } from './overlay/useOverlays'
-import { LeftRailSlot, RightRailSlot, BottomDock, CanvasOverlaySlot } from './mission/slots'
+import { LeftRailSlot, RightRailSlot, BottomDock, CanvasOverlaySlot } from './shell/slots'
 ```
 
-`return (` satırından hemen önce context değerini kur:
+`return (` satırından hemen önce context değerini kur. **`useMemo` şart:**
+`hoverPoint` her fare hareketinde değişiyor ve her render'da taze bir nesne
+literali, o nesneyi okuyan dokuz modülün hepsini yeniden render ettirir —
+hiçbiri hover'ı umursamasa bile. Bağımlılık listesi bilerek alan alan yazılıyor,
+`missionValue`'nun kendisi değil.
 
 ```ts
-  const missionValue: MissionValue = {
-    gridMeta: elevationLayer
-      ? {
-          rows: elevationLayer.shape[0],
-          cols: elevationLayer.shape[1],
-          resolutionM: focusTelemetry.resolutionM,
-        }
-      : null,
-    roverId: selectedRoverId,
-    weights,
-    start,
-    goal,
-    planResult,
-    selectedCell: hoverPoint,
-    cellTelemetry: rawCellTelemetry,
-    activeLayer: viewMode,
-    dimension,
-    setStart,
-    setGoal,
-  }
+  const missionValue: MissionValue = useMemo(
+    () => ({
+      gridMeta: elevationLayer
+        ? {
+            rows: elevationLayer.shape[0],
+            cols: elevationLayer.shape[1],
+            resolutionM: focusTelemetry.resolutionM,
+          }
+        : null,
+      roverId: selectedRoverId,
+      weights,
+      start,
+      goal,
+      planResult,
+      hoverCell: hoverPoint,
+      cellTelemetry: rawCellTelemetry,
+      activeLayer: viewMode,
+      dimension,
+      setStart,
+      setGoal,
+    }),
+    [
+      dimension,
+      elevationLayer,
+      focusTelemetry.resolutionM,
+      goal,
+      hoverPoint,
+      planResult,
+      rawCellTelemetry,
+      selectedRoverId,
+      start,
+      viewMode,
+      weights,
+    ],
+  )
 ```
 
+> Gövdenin girintisi iki boşluk artıyor (artık bir ok fonksiyonunun içinde);
+> alanların kendisi değişmiyor.
+>
+> `setStart` ve `setGoal` `useState`'in setter'ları, React onların kimliğini
+> garanti ediyor — bağımlılık listesinde yer almalarına gerek yok ve
+> `exhaustive-deps` de istemiyor.
+>
 > `selectedRoverId` ve `focusTelemetry.resolutionM` adları `App.tsx`'te zaten
 > var; farklı adlandırılmışlarsa gerçek adı kullan, yeni state ekleme.
 
@@ -1366,8 +1782,8 @@ canvasRef={mapRef} ... />` ile değiştir; diğer prop'lar aynen kalır.
 
 - [ ] **Adım 7: Regresyon olmadığını doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
-Expected: üçü de temiz.
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
+Expected: dördü de temiz.
 
 Elle kabul — sırayla:
 1. Uygulamayı aç, giriş ekranından Mission Workspace'e geç → **açılıyor**
@@ -1408,7 +1824,8 @@ türetilmiş (ham DEM yolunda tamamen sentetik) — kullanıcı ikisini ayırt e
 Mevcut katman fetch'lerine hiç dokunulmuyor.
 
 **Files:**
-- Create: `frontend/src/api/terrain.ts`
+- Create: `frontend/src/net/terrain.ts`
+- Create: `frontend/src/mission/useTerrainManifest.ts`
 - Create: `frontend/src/features/layer-provenance/index.tsx`
 - Create: `frontend/src/features/layer-provenance/useLayerProvenance.ts`
 - Create: `frontend/src/features/layer-provenance/LayerProvenancePanel.tsx`
@@ -1416,18 +1833,19 @@ Mevcut katman fetch'lerine hiç dokunulmuyor.
 - Modify: `frontend/src/App.tsx` (bir satır: `<LeftRailSlot>` içine modül)
 
 **Interfaces:**
-- Consumes: `api/client.ts`'ten `getJson`; `mission/types.ts`'ten `TerrainManifest`, `Validity`, `VALIDITY_RANK`; `mission/MissionContext`'ten `useMission`
+- Consumes: `net/client.ts`'ten `getJson`; `net/types.ts`'ten `TerrainManifest`, `Validity`, `VALIDITY_RANK`; `mission/MissionContext`'ten `useMission`
 - Produces:
   - `fetchTerrain(params, signal): Promise<TerrainManifest>`
+  - `useTerrainManifest(roverId, weights): { manifest, frame, loading, error }` — **F1, F2a ve F7'nin ortak girişi**
   - `useLayerProvenance(): { manifest, loading, error }`
   - `LAYER_FOR_VIEW: Record<MapViewMode, string>` — görünüm adı → katman adı eşlemesi
 
-- [ ] **Adım 1: `api/terrain.ts` oluştur**
+- [ ] **Adım 1: `net/terrain.ts` oluştur**
 
 ```ts
 import { getJson } from './client'
 import type { PlanWeights } from '../api'
-import type { TerrainManifest } from '../mission/types'
+import type { TerrainManifest } from './types'
 
 /**
  * The scene manifest: units, provenance and value range for every layer,
@@ -1453,14 +1871,114 @@ export async function fetchTerrain(
 }
 ```
 
-- [ ] **Adım 2: `useLayerProvenance.ts` oluştur**
+- [ ] **Adım 2: `mission/useTerrainManifest.ts` oluştur**
+
+Üç modül aynı manifesti istiyor: F1 katman künyelerini, F2a ve F7 ise
+georeference'ı. Üç ayrı `useEffect` üç özdeş `/api/terrain` isteği atar ve
+rover değişimi uçarken birbiriyle çelişebilen üç `frame` tutar. Bu dosya
+`features/` altında değil `mission/` altında, çünkü bir modülün başka bir
+modülün iç dosyasını import etmesi global kısıtı çiğnerdi — `mission/triggers.ts`
+ile aynı gerekçe.
 
 ```ts
-import { useEffect, useState } from 'react'
-import { fetchTerrain } from '../../api/terrain'
+import { useEffect, useMemo, useState } from 'react'
+import type { PlanWeights } from '../api'
+import { frameFromManifest, type GridFrame } from '../grid/geo'
+import { fetchTerrain } from '../net/terrain'
+import type { TerrainManifest } from '../net/types'
+
+/**
+ * One in-flight request per (rover, weights), shared by every consumer.
+ *
+ * Keyed on exactly what the manifest depends on -- cost and traversable are
+ * rover- and weight-dependent, so changing either must fetch again. This is
+ * a dedupe, not a freeze.
+ */
+const inFlight = new Map<string, Promise<TerrainManifest>>()
+
+function cacheKey(roverId: string, weights: PlanWeights): string {
+  return [
+    roverId,
+    weights.w_slope,
+    weights.w_energy,
+    weights.w_shadow,
+    weights.w_thermal,
+  ].join('|')
+}
+
+/**
+ * The terrain manifest and the grid frame derived from it.
+ *
+ * No AbortSignal: the promise is shared, so one unmounting consumer must not
+ * cancel the request the other two are still waiting on. The `alive` flag
+ * drops the result instead, which costs one response nobody reads and never
+ * fails the modules that are still mounted.
+ */
+export function useTerrainManifest(roverId: string, weights: PlanWeights) {
+  const [manifest, setManifest] = useState<TerrainManifest | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const key = cacheKey(roverId, weights)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    setError(null)
+
+    let pending = inFlight.get(key)
+    if (!pending) {
+      pending = fetchTerrain({ roverId, weights })
+      inFlight.set(key, pending)
+      // A failure must not be cached as the answer forever -- the next
+      // mount, or the next weight change back, should try again.
+      pending.catch(() => inFlight.delete(key))
+    }
+
+    pending
+      .then((next) => {
+        if (!alive) return
+        setManifest(next)
+        setLoading(false)
+      })
+      .catch((cause: unknown) => {
+        if (!alive) return
+        setError(cause instanceof Error ? cause.message : 'Terrain manifest unavailable')
+        setLoading(false)
+      })
+
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` is the
+    // value identity of roverId+weights; adding the objects themselves would
+    // refetch on every parent render without changing what is fetched.
+  }, [key])
+
+  /**
+   * null when the manifest carries no georeference. A module that draws CRS
+   * metres must say so rather than place the corridor at the origin.
+   */
+  const frame = useMemo<GridFrame | null>(
+    () => (manifest ? frameFromManifest(manifest) : null),
+    [manifest],
+  )
+
+  return { manifest, frame, loading, error }
+}
+```
+
+> `eslint-disable-next-line` bu planda kullanılan **tek** lint istisnası ve
+> gerekçesi satırın kendisinde. `weights`'i bağımlılığa koymak, `App.tsx` her
+> render ettiğinde effect'i yeniden koşturur — aynı anahtarla, yani aynı
+> yanıtla. `lint --max-warnings 0` bu satırla temiz kalır.
+
+- [ ] **Adım 3: `useLayerProvenance.ts` oluştur**
+
+```ts
+import { useTerrainManifest } from '../../mission/useTerrainManifest'
 import { useMission } from '../../mission/MissionContext'
 import type { MapViewMode } from '../../mission/MissionContext'
-import type { TerrainManifest } from '../../mission/types'
 
 /**
  * The map's view modes and the grid layers behind them.
@@ -1479,41 +1997,21 @@ export const LAYER_FOR_VIEW: Record<MapViewMode, string> = {
   aspect: 'aspect',
 }
 
+/**
+ * F1 needs nothing this module owns: the manifest is shared with F2a and F7,
+ * and cost/traversable provenance already changes with the weights because
+ * the shared hook keys on them.
+ */
 export function useLayerProvenance() {
   const { roverId, weights } = useMission()
-  const [manifest, setManifest] = useState<TerrainManifest | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    setLoading(true)
-    setError(null)
-
-    fetchTerrain({ roverId, weights }, controller.signal)
-      .then((next) => {
-        setManifest(next)
-        setLoading(false)
-      })
-      .catch((cause: unknown) => {
-        if (controller.signal.aborted) return
-        setError(cause instanceof Error ? cause.message : 'Terrain manifest unavailable')
-        setLoading(false)
-      })
-
-    return () => controller.abort()
-    // cost and traversable are weight-dependent, so their range and
-    // provenance change when the weights do.
-  }, [roverId, weights])
-
-  return { manifest, loading, error }
+  return useTerrainManifest(roverId, weights)
 }
 ```
 
-- [ ] **Adım 3: `LayerProvenancePanel.tsx` oluştur**
+- [ ] **Adım 4: `LayerProvenancePanel.tsx` oluştur**
 
 ```tsx
-import type { LayerManifestEntry, Validity } from '../../mission/types'
+import type { LayerManifestEntry, Validity } from '../../net/types'
 import './layer-provenance.css'
 
 const LABEL: Record<Validity, string> = {
@@ -1600,7 +2098,7 @@ export function LayerProvenancePanel({
 }
 ```
 
-- [ ] **Adım 4: `layer-provenance.css` oluştur**
+- [ ] **Adım 5: `layer-provenance.css` oluştur**
 
 Tüm sınıflar `.lp-provenance-` ön ekli. `App.css`'e dokunulmuyor.
 
@@ -1678,7 +2176,7 @@ Tüm sınıflar `.lp-provenance-` ön ekli. `App.css`'e dokunulmuyor.
 .lp-provenance-warn { color: #fbbf24; }
 ```
 
-- [ ] **Adım 5: `index.tsx` oluştur**
+- [ ] **Adım 6: `index.tsx` oluştur**
 
 ```tsx
 import { useMission } from '../../mission/MissionContext'
@@ -1706,7 +2204,7 @@ export function LayerProvenance() {
 }
 ```
 
-- [ ] **Adım 6: `App.tsx`'e tek satırla bağla**
+- [ ] **Adım 7: `App.tsx`'e tek satırla bağla**
 
 `LeftRailSlot`'u doldur:
 
@@ -1721,12 +2219,12 @@ Import: `import { LayerProvenance } from './features/layer-provenance'`
 > `features/layer-provenance/index.tsx` dışında bu modülden hiçbir şey import
 > edilmez.
 
-- [ ] **Adım 7: Derlemeyi doğrula**
+- [ ] **Adım 8: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
-Expected: üçü de temiz
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
+Expected: dördü de temiz
 
-- [ ] **Adım 8: Elle kabul**
+- [ ] **Adım 9: Elle kabul**
 
 Backend'i `/api/load-preprocessed` ile yükledikten sonra, sol rayda paneli aç ve
 katmanları sırayla değiştir. Beklenen etiketler (`metadata.json`'ın
@@ -1751,10 +2249,11 @@ Ayrıca doğrula:
 Backend kapalıyken sayfayı yenile → panel **sarı bir uyarı** gösteriyor,
 "Measured" varsaymıyor ve çökmüyor.
 
-- [ ] **Adım 9: Commit**
+- [ ] **Adım 10: Commit**
 
 ```bash
-git add frontend/src/api/terrain.ts frontend/src/features/layer-provenance/ frontend/src/App.tsx
+git add frontend/src/net/terrain.ts frontend/src/mission/useTerrainManifest.ts \
+  frontend/src/features/layer-provenance/ frontend/src/App.tsx
 git commit -m "feat(frontend): say where each layer's numbers come from
 
 Seven layers were painted in the same palette with nothing to separate a
@@ -1787,7 +2286,7 @@ Starlette `allow_nan=False` ile serileştiriyor. "Veri yok" **değil**.
 - Modify: `frontend/src/App.tsx` (bir satır: `<RightRailSlot>`)
 
 **Interfaces:**
-- Consumes: `useMission()` (`cellTelemetry`, `selectedCell`, `weights`), `useOverlays()`
+- Consumes: `useMission()` (`cellTelemetry`, `hoverCell`, `weights`), `useOverlays()`
 - Produces:
   - `useCostExplain(): { rows: CostRow[]; total: number | null; impassableBy: string[]; cell: [number, number] | null }`
   - `type CostRow = { key: 'slope' | 'energy' | 'shadow' | 'thermal'; label: string; value: number | null; share: number; weight: number }`
@@ -1829,12 +2328,12 @@ const WEIGHT_KEY: Record<CostKey, 'w_slope' | 'w_energy' | 'w_shadow' | 'w_therm
 const KEYS: CostKey[] = ['slope', 'energy', 'shadow', 'thermal']
 
 export function useCostExplain() {
-  const { cellTelemetry, selectedCell, weights } = useMission()
+  const { cellTelemetry, hoverCell, weights } = useMission()
 
   return useMemo(() => {
     const breakdown = cellTelemetry?.cost_breakdown ?? null
     if (!breakdown) {
-      return { rows: [], total: null, impassableBy: [], cell: selectedCell }
+      return { rows: [], total: null, impassableBy: [], cell: hoverCell }
     }
 
     const impassableBy = KEYS.filter((key) => breakdown[key] === null).map(
@@ -1858,8 +2357,8 @@ export function useCostExplain() {
       weight: weights[WEIGHT_KEY[key]],
     }))
 
-    return { rows, total, impassableBy, cell: selectedCell }
-  }, [cellTelemetry, selectedCell, weights])
+    return { rows, total, impassableBy, cell: hoverCell }
+  }, [cellTelemetry, hoverCell, weights])
 }
 ```
 
@@ -1869,12 +2368,12 @@ export function useCostExplain() {
 import type { OverlayLayer } from '../../overlay/types'
 
 /** A ring on the cell whose cost is being explained. */
-export function selectedCellOverlay(cell: [number, number] | null): OverlayLayer[] {
+export function hoverCellOverlay(cell: [number, number] | null): OverlayLayer[] {
   if (!cell) return []
   return [
     {
       kind: 'points',
-      id: 'cost-explain-selected',
+      id: 'cost-explain-hover',
       points: [{ row: cell[0], col: cell[1] }],
       style: { color: '#f8fafc', radius: 5, opacity: 0.95 },
     },
@@ -2052,7 +2551,7 @@ export function CostExplainPanel({
 import { useEffect } from 'react'
 import { useOverlays } from '../../overlay/useOverlays'
 import { CostExplainPanel } from './CostExplainPanel'
-import { selectedCellOverlay } from './overlays'
+import { hoverCellOverlay } from './overlays'
 import { useCostExplain } from './useCostExplain'
 
 const OVERLAY_ID = 'cost-explain'
@@ -2062,7 +2561,7 @@ export function CostExplain() {
   const { register, unregister } = useOverlays()
 
   useEffect(() => {
-    register(OVERLAY_ID, selectedCellOverlay(state.cell))
+    register(OVERLAY_ID, hoverCellOverlay(state.cell))
     return () => unregister(OVERLAY_ID)
   }, [register, state.cell, unregister])
 
@@ -2087,7 +2586,7 @@ Import: `import { CostExplain } from './features/cost-explain'`
 
 - [ ] **Adım 7: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
 - [ ] **Adım 8: Elle kabul**
@@ -2154,7 +2653,7 @@ koridoru asla olduğundan geniş göstermemek için.
 - Modify: `frontend/src/App.tsx` (bir satır)
 
 **Interfaces:**
-- Consumes: `useMission()` (`planResult`), `useOverlays()`, `api/terrain.ts`'ten `fetchTerrain`, `mission/geo.ts`'ten `frameFromManifest` + `metresToPixel`
+- Consumes: `useMission()` (`planResult`), `useOverlays()`, `mission/useTerrainManifest.ts`'ten `useTerrainManifest` (Görev 6), `grid/geo.ts`'ten `metresToPixel`
 - Produces:
   - `useCorridor(): { corridor: Corridor | null; frame: GridFrame | null; segments: SegmentRow[]; error: string | null }`
   - `type SegmentRow = { index: number; halfWidthM: number; maxSlopeDeg: number; energyWh: number; thermalKs: number }`
@@ -2163,11 +2662,10 @@ koridoru asla olduğundan geniş göstermemek için.
 - [ ] **Adım 1: `useCorridor.ts` oluştur**
 
 ```ts
-import { useEffect, useMemo, useState } from 'react'
-import { fetchTerrain } from '../../api/terrain'
-import { frameFromManifest, type GridFrame } from '../../mission/geo'
+import { useMemo } from 'react'
 import { useMission } from '../../mission/MissionContext'
-import type { Corridor } from '../../mission/types'
+import { useTerrainManifest } from '../../mission/useTerrainManifest'
+import type { Corridor } from '../../net/types'
 
 export interface SegmentRow {
   index: number
@@ -2179,25 +2677,17 @@ export interface SegmentRow {
 
 export function useCorridor() {
   const { planResult, roverId, weights } = useMission()
-  const [frame, setFrame] = useState<GridFrame | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   // The georeference, not the layers: the corridor speaks CRS metres and the
   // canvas speaks pixels, and the manifest is where origin/resolution live.
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchTerrain({ roverId, weights }, controller.signal)
-      .then((manifest) => {
-        const next = frameFromManifest(manifest)
-        setFrame(next)
-        setError(next ? null : 'Grid has no georeference; corridor cannot be placed.')
-      })
-      .catch((cause: unknown) => {
-        if (controller.signal.aborted) return
-        setError(cause instanceof Error ? cause.message : 'Terrain manifest unavailable')
-      })
-    return () => controller.abort()
-  }, [roverId, weights])
+  // Shared with F1 and F7 -- one request, one frame, no chance of three
+  // modules disagreeing about where the grid is while a rover change is in
+  // flight.
+  const { frame, error: manifestError } = useTerrainManifest(roverId, weights)
+
+  const error =
+    manifestError ??
+    (frame === null ? 'Grid has no georeference; corridor cannot be placed.' : null)
 
   const corridor = (planResult as { corridor?: Corridor | null } | null)?.corridor ?? null
 
@@ -2222,9 +2712,9 @@ export function useCorridor() {
 - [ ] **Adım 2: `overlays.ts` oluştur**
 
 ```ts
-import { metresToPixel, type GridFrame, type PixelPoint } from '../../mission/geo'
+import { metresToPixel, type GridFrame, type PixelPoint } from '../../grid/geo'
 import type { OverlayLayer } from '../../overlay/types'
-import type { Corridor } from '../../mission/types'
+import type { Corridor } from '../../net/types'
 
 /**
  * Per-vertex half-width from the per-segment array.
@@ -2282,7 +2772,7 @@ export function corridorOverlays(
 - [ ] **Adım 3: `CorridorPanel.tsx` oluştur**
 
 ```tsx
-import type { Corridor } from '../../mission/types'
+import type { Corridor } from '../../net/types'
 import type { SegmentRow } from './useCorridor'
 import './corridor.css'
 
@@ -2474,7 +2964,7 @@ Import: `import { CorridorFeature } from './features/corridor'`
 
 - [ ] **Adım 7: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
 - [ ] **Adım 8: Elle kabul — koordinat dönüşümünü ispatla**
@@ -2538,7 +3028,7 @@ alanı eksik). Panel üçünü de ayrı gösterir. `skipped`'ı yutmak, %1 batar
 (`main.py:748-763`), frontend aynı hatayı tekrarlamamalı.
 
 **Files:**
-- Create: `frontend/src/api/replan.ts`
+- Create: `frontend/src/net/replan.ts`
 - Create: `frontend/src/features/replan/index.tsx`
 - Create: `frontend/src/features/replan/useReplan.ts`
 - Create: `frontend/src/features/replan/ReplanPanel.tsx`
@@ -2553,12 +3043,12 @@ alanı eksik). Panel üçünü de ayrı gösterir. `skipped`'ı yutmak, %1 batar
   - `TRIGGER_FIELDS: Record<TriggerId, { label: string; fields: TelemetryField[] }>`
   - `useReplan(): { form, setField, submit, result, busy, error, rows }`
 
-- [ ] **Adım 1: `api/replan.ts` oluştur**
+- [ ] **Adım 1: `net/replan.ts` oluştur**
 
 ```ts
 import { postJson } from './client'
 import type { PlanWeights } from '../api'
-import type { ReplanResponse } from '../mission/types'
+import type { ReplanResponse } from './types'
 
 export interface ReplanBody {
   current: { row: number; col: number }
@@ -2589,7 +3079,7 @@ birebir aynıdır. Bir alan adı uydurulursa tetikleyici sessizce `skipped`'a
 düşer.
 
 ```ts
-import type { TriggerId } from './types'
+import type { TriggerId } from '../net/types'
 
 export interface TelemetryField {
   key: string
@@ -2670,9 +3160,9 @@ export function initialTelemetry(): Record<string, number> {
 
 ```ts
 import { useCallback, useMemo, useState } from 'react'
-import { requestReplan } from '../../api/replan'
+import { requestReplan } from '../../net/replan'
 import { useMission } from '../../mission/MissionContext'
-import type { ReplanResponse, TriggerId } from '../../mission/types'
+import type { ReplanResponse, TriggerId } from '../../net/types'
 import { TRIGGER_IDS, initialTelemetry } from '../../mission/triggers'
 
 export type TriggerStatus = 'fired' | 'clear' | 'unchecked'
@@ -2748,7 +3238,7 @@ export function useReplan() {
 - [ ] **Adım 4: `ReplanPanel.tsx` oluştur**
 
 ```tsx
-import type { ReplanResponse } from '../../mission/types'
+import type { ReplanResponse } from '../../net/types'
 import { TRIGGER_FIELDS, TRIGGER_IDS } from '../../mission/triggers'
 import type { TriggerRow } from './useReplan'
 import './replan.css'
@@ -2944,7 +3434,7 @@ Import: `import { Replan } from './features/replan'`
 
 - [ ] **Adım 8: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
 - [ ] **Adım 9: Elle kabul — üç durumu da ispatla**
@@ -2964,7 +3454,7 @@ Expected: temiz
 - [ ] **Adım 10: Commit**
 
 ```bash
-git add frontend/src/api/replan.ts frontend/src/features/replan/ frontend/src/App.tsx
+git add frontend/src/net/replan.ts frontend/src/features/replan/ frontend/src/App.tsx
 git commit -m "feat(frontend): evaluate the seven replan triggers, skips included
 
 /api/replan has evaluated seven triggers against a telemetry snapshot
@@ -2980,7 +3470,7 @@ all-clear would rebuild the same bug on this side of the wire."
 
 ---
 
-### Görev 10: `api/series.ts` + `api/plan4d.ts` — zaman küpü istemcisi
+### Görev 10: `net/series.ts` + `net/plan4d.ts` — zaman küpü istemcisi
 
 Görev 11'in (F3) ihtiyacı olan iki uç. Ayrı bir görev çünkü ikili küp çözümünün
 kendi doğrulaması var: `(T, rows, cols)` dizisi **slice-major, sonra row-major**
@@ -2988,22 +3478,23 @@ sıralı ve `NaN` veri yok demek — sıra yanlış varsayılırsa animasyon anl
 ama makul görünen bir şey oynatır.
 
 **Files:**
-- Create: `frontend/src/api/series.ts`
-- Create: `frontend/src/api/plan4d.ts`
+- Create: `frontend/src/net/series.ts`
+- Create: `frontend/src/net/plan4d.ts`
 
 **Interfaces:**
 - Consumes: `getJson`, `getFloat32`, `postJson`
 - Produces:
   - `fetchSeriesManifest(params, signal): Promise<SeriesManifest>`
+  - `cubeFrom(data, expected): SeriesCube` — saf; küp indekslemesinin tamamı burada
   - `fetchSeriesCube(binaryUrl, expected, signal): Promise<SeriesCube>`
   - `type SeriesCube = { data: Float32Array; slices: number; rows: number; cols: number; sliceAt(index): Float32Array }`
   - `planRoute4D(body, signal): Promise<Plan4DResponse>`
 
-- [ ] **Adım 1: `api/series.ts` oluştur**
+- [ ] **Adım 1: `net/series.ts` oluştur**
 
 ```ts
 import { getFloat32, getJson } from './client'
-import type { SeriesManifest } from '../mission/types'
+import type { SeriesManifest } from './types'
 
 export interface SeriesParams {
   startUtc?: string
@@ -3035,27 +3526,19 @@ export interface SeriesCube {
 }
 
 /**
- * Fetch a time cube from a binary_url the manifest published.
- *
- * The URL is used VERBATIM -- the manifest already encoded start_utc,
- * downsample and field into it, and rebuilding the query by hand is how a
- * "+" in an ISO-8601 offset turns into a space.
+ * Wrap a decoded cube, without touching the network.
  *
  * Layout is slice-major then row-major (binary_format.order), so slice t
- * occupies [t*rows*cols, (t+1)*rows*cols). Asserting the length here means
- * a layout change surfaces as an error rather than as a plausible-looking
- * animation of the wrong thing.
+ * occupies [t*rows*cols, (t+1)*rows*cols). Split out from the fetch and
+ * exported so the index arithmetic is testable: a wrong stride animates a
+ * perfectly plausible sequence of the wrong data, and no amount of watching
+ * it play reveals that. Asserting the length means a layout change surfaces
+ * as an error instead.
  */
-export async function fetchSeriesCube(
-  binaryUrl: string,
+export function cubeFrom(
+  data: Float32Array,
   expected: { slices: number; rows: number; cols: number },
-  signal?: AbortSignal,
-): Promise<SeriesCube> {
-  // binary_url arrives as "/api/illumination-series?..."; getFloat32 prefixes
-  // "/api", so the duplicated prefix is stripped.
-  const path = binaryUrl.startsWith('/api') ? binaryUrl.slice(4) : binaryUrl
-  const { data } = await getFloat32(path, signal)
-
+): SeriesCube {
   const { slices, rows, cols } = expected
   if (data.length !== slices * rows * cols) {
     throw new Error(
@@ -3069,18 +3552,93 @@ export async function fetchSeriesCube(
     slices,
     rows,
     cols,
-    sliceAt: (index: number) =>
-      data.subarray(index * perSlice, (index + 1) * perSlice),
+    sliceAt: (index: number) => {
+      if (index < 0 || index >= slices) {
+        throw new RangeError(`Slice ${index} is outside 0..${slices - 1}`)
+      }
+      return data.subarray(index * perSlice, (index + 1) * perSlice)
+    },
   }
+}
+
+/**
+ * Fetch a time cube from a binary_url the manifest published.
+ *
+ * The URL is used VERBATIM -- the manifest already encoded start_utc,
+ * downsample and field into it, and rebuilding the query by hand is how a
+ * "+" in an ISO-8601 offset turns into a space.
+ */
+export async function fetchSeriesCube(
+  binaryUrl: string,
+  expected: { slices: number; rows: number; cols: number },
+  signal?: AbortSignal,
+): Promise<SeriesCube> {
+  // binary_url arrives as "/api/illumination-series?..."; getFloat32 prefixes
+  // "/api", so the duplicated prefix is stripped.
+  const path = binaryUrl.startsWith('/api') ? binaryUrl.slice(4) : binaryUrl
+  const { data } = await getFloat32(path, signal)
+  return cubeFrom(data, expected)
 }
 ```
 
-- [ ] **Adım 2: `api/plan4d.ts` oluştur**
+- [ ] **Adım 2: `net/series.test.ts` oluştur**
+
+Vitest'in üçüncü ve son gerekçesi. Küp `(T, rows, cols)` sıralı ve yanlış
+stride ile okunduğunda **hata vermez** — sadece yanlış anı oynatır.
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { cubeFrom } from './series'
+
+// 2 slices of a 2x3 grid, each cell numbered so its slice, row and column
+// are readable from the value itself: slice*100 + row*10 + col.
+const DATA = new Float32Array([
+  0, 1, 2, 10, 11, 12,
+  100, 101, 102, 110, 111, 112,
+])
+
+describe('cubeFrom', () => {
+  it('reads slices slice-major, then row-major', () => {
+    const cube = cubeFrom(DATA, { slices: 2, rows: 2, cols: 3 })
+    expect(Array.from(cube.sliceAt(0))).toEqual([0, 1, 2, 10, 11, 12])
+    expect(Array.from(cube.sliceAt(1))).toEqual([100, 101, 102, 110, 111, 112])
+  })
+
+  it('indexes a cell inside a slice as row * cols + col', () => {
+    // The layout drawField and the time axis both assume. Transposing rows
+    // and cols here would still fill the canvas -- with the map's mirror.
+    const cube = cubeFrom(DATA, { slices: 2, rows: 2, cols: 3 })
+    const slice = cube.sliceAt(1)
+    expect(slice[1 * 3 + 2]).toBe(112)
+  })
+
+  it('rejects a payload that does not fill the declared shape', () => {
+    // A downsample the caller forgot to pass through would land here rather
+    // than animate a cube read at the wrong stride.
+    expect(() => cubeFrom(DATA, { slices: 3, rows: 2, cols: 3 })).toThrow(
+      /do not fill 3x2x3/,
+    )
+  })
+
+  it('rejects a slice index outside the cube', () => {
+    const cube = cubeFrom(DATA, { slices: 2, rows: 2, cols: 3 })
+    // subarray silently returns an empty view past the end, which renders as
+    // a blank frame that looks like night rather than like a bug.
+    expect(() => cube.sliceAt(2)).toThrow(RangeError)
+    expect(() => cube.sliceAt(-1)).toThrow(RangeError)
+  })
+})
+```
+
+Run: `cd frontend && npm test`
+Expected: `20 passed` — önceki 16'ya buradaki 4 ekleniyor.
+
+- [ ] **Adım 3: `net/plan4d.ts` oluştur**
 
 ```ts
 import { postJson } from './client'
 import type { PlanWeights } from '../api'
-import type { Plan4DResponse } from '../mission/types'
+import type { Plan4DResponse } from './types'
 
 export interface Plan4DBody {
   start: { row: number; col: number }
@@ -3103,7 +3661,7 @@ export async function planRoute4D(
 }
 ```
 
-- [ ] **Adım 3: Küpü elle doğrula**
+- [ ] **Adım 4: Küpü elle doğrula**
 
 Backend çalışırken:
 
@@ -3126,15 +3684,15 @@ kontrolü doğru çalışıyor demektir — ama şekli manifest'ten okuduğundan
 - `"static"` → ufuk önbelleği yok; **önce `python scripts/build_horizon_cache.py`
   çalıştır**, yoksa Görev 11'in kabulü yapılamaz
 
-- [ ] **Adım 4: Derlemeyi doğrula**
+- [ ] **Adım 5: Derlemeyi doğrula**
 
 Run: `cd frontend && npm run typecheck && npm run lint`
 Expected: temiz
 
-- [ ] **Adım 5: Commit**
+- [ ] **Adım 6: Commit**
 
 ```bash
-git add frontend/src/api/series.ts frontend/src/api/plan4d.ts
+git add frontend/src/net/series.ts frontend/src/net/series.test.ts frontend/src/net/plan4d.ts
 git commit -m "feat(frontend): read the illumination cube and the 4-D planner
 
 The cube is slice-major then row-major with NaN for no-data, so the length
@@ -3176,10 +3734,10 @@ kuralının ihlalidir.
 
 ```ts
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { planRoute4D } from '../../api/plan4d'
-import { fetchSeriesCube, fetchSeriesManifest, type SeriesCube } from '../../api/series'
+import { planRoute4D } from '../../net/plan4d'
+import { fetchSeriesCube, fetchSeriesManifest, type SeriesCube } from '../../net/series'
 import { useMission } from '../../mission/MissionContext'
-import type { Plan4DResponse, SeriesManifest } from '../../mission/types'
+import type { Plan4DResponse, SeriesManifest } from '../../net/types'
 
 export type SeriesField = 'shadow' | 'surface_temp_c'
 
@@ -3302,8 +3860,8 @@ export function useTimeAxis() {
 - [ ] **Adım 2: `overlays.ts` oluştur**
 
 ```ts
-import type { SeriesCube } from '../../api/series'
-import type { Plan4DResponse, SeriesManifest } from '../../mission/types'
+import type { SeriesCube } from '../../net/series'
+import type { Plan4DResponse, SeriesManifest } from '../../net/types'
 import type { OverlayLayer } from '../../overlay/types'
 import type { SeriesField } from './useTimeAxis'
 
@@ -3355,7 +3913,7 @@ export function timeAxisOverlays(
 - [ ] **Adım 3: `TimeAxisPanel.tsx` oluştur**
 
 ```tsx
-import type { Plan4DResponse, SeriesManifest } from '../../mission/types'
+import type { Plan4DResponse, SeriesManifest } from '../../net/types'
 import type { SeriesField } from './useTimeAxis'
 import './time-axis.css'
 
@@ -3566,7 +4124,7 @@ Import: `import { TimeAxis } from './features/time-axis'`
 
 - [ ] **Adım 7: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
 - [ ] **Adım 8: Elle kabul**
@@ -3626,7 +4184,7 @@ yapmak, yalan bir pozdan plan yapmaktır. Panel bu iki öneriyi **görsel olarak
 ayırır**.
 
 **Files:**
-- Create: `frontend/src/api/pose.ts`
+- Create: `frontend/src/net/pose.ts`
 - Create: `frontend/src/features/pose-loop/index.tsx`
 - Create: `frontend/src/features/pose-loop/usePoseLoop.ts`
 - Create: `frontend/src/features/pose-loop/PoseLoopPanel.tsx`
@@ -3635,19 +4193,19 @@ ayırır**.
 - Modify: `frontend/src/App.tsx` (bir satır)
 
 **Interfaces:**
-- Consumes: `postJson`, `useMission()` (`planResult`), `useOverlays()`, `mission/geo.ts`
+- Consumes: `postJson`, `useMission()` (`planResult`), `useOverlays()`, `grid/geo.ts`
 - Produces:
   - `submitPose(body, signal): Promise<PoseResponse>`
   - `usePoseLoop(): { form, setField, submit, result, busy, error, rows }`
 
-- [ ] **Adım 1: `api/pose.ts` oluştur**
+- [ ] **Adım 1: `net/pose.ts` oluştur**
 
 Alan adları `PoseEstimate` ile birebir (`pose.py:80-113`). **Sekizinin hepsi
 zorunludur** — hiçbirinin varsayılanı yok, eksik gönderilen istek 422 döner.
 
 ```ts
 import { postJson } from './client'
-import type { PoseResponse } from '../mission/types'
+import type { PoseResponse } from './types'
 
 /**
  * Which estimator produced the pose. Required, and not decorative: a
@@ -3708,9 +4266,9 @@ export async function submitPose(
 
 ```ts
 import { useCallback, useMemo, useState } from 'react'
-import { submitPose, type PoseEstimateBody } from '../../api/pose'
+import { submitPose, type PoseEstimateBody } from '../../net/pose'
 import { useMission } from '../../mission/MissionContext'
-import type { Corridor, PoseResponse, TriggerId } from '../../mission/types'
+import type { Corridor, PoseResponse, TriggerId } from '../../net/types'
 import { TRIGGER_IDS } from '../../mission/triggers'
 
 export type PoseStatus = 'fired' | 'clear' | 'unchecked'
@@ -3802,9 +4360,9 @@ export function usePoseLoop() {
 - [ ] **Adım 3: `overlays.ts` oluştur**
 
 ```ts
-import { metresToPixel, type GridFrame } from '../../mission/geo'
+import { metresToPixel, type GridFrame } from '../../grid/geo'
 import type { OverlayLayer } from '../../overlay/types'
-import type { Corridor, PoseResponse } from '../../mission/types'
+import type { Corridor, PoseResponse } from '../../net/types'
 
 /**
  * The pose, and the line from it to the corridor centreline.
@@ -3866,9 +4424,9 @@ export function poseOverlays(
 - [ ] **Adım 4: `PoseLoopPanel.tsx` oluştur**
 
 ```tsx
-import type { PoseSource } from '../../api/pose'
+import type { PoseSource } from '../../net/pose'
 import { TRIGGER_FIELDS } from '../../mission/triggers'
-import type { Corridor, PoseResponse } from '../../mission/types'
+import type { Corridor, PoseResponse } from '../../net/types'
 import type { PoseForm, PoseTriggerRow } from './usePoseLoop'
 import './pose-loop.css'
 
@@ -4091,10 +4649,9 @@ export function PoseLoopPanel({
 - [ ] **Adım 6: `index.tsx` oluştur**
 
 ```tsx
-import { useEffect, useState } from 'react'
-import { fetchTerrain } from '../../api/terrain'
-import { frameFromManifest, type GridFrame } from '../../mission/geo'
+import { useEffect } from 'react'
 import { useMission } from '../../mission/MissionContext'
+import { useTerrainManifest } from '../../mission/useTerrainManifest'
 import { useOverlays } from '../../overlay/useOverlays'
 import { PoseLoopPanel } from './PoseLoopPanel'
 import { poseOverlays } from './overlays'
@@ -4106,15 +4663,10 @@ export function PoseLoop() {
   const { roverId, weights } = useMission()
   const state = usePoseLoop()
   const { register, unregister } = useOverlays()
-  const [frame, setFrame] = useState<GridFrame | null>(null)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchTerrain({ roverId, weights }, controller.signal)
-      .then((manifest) => setFrame(frameFromManifest(manifest)))
-      .catch(() => setFrame(null))
-    return () => controller.abort()
-  }, [roverId, weights])
+  // The same shared manifest F1 and F2a read (Görev 6). A pose in CRS metres
+  // and the corridor it is judged against must be placed by the SAME frame;
+  // two independent fetches could briefly hold two.
+  const { frame } = useTerrainManifest(roverId, weights)
 
   useEffect(() => {
     register(
@@ -4145,7 +4697,7 @@ Import: `import { PoseLoop } from './features/pose-loop'`
 
 - [ ] **Adım 8: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
 - [ ] **Adım 9: Elle kabul — kapalı döngüyü ispatla**
@@ -4174,7 +4726,7 @@ Expected: temiz
 - [ ] **Adım 10: Commit**
 
 ```bash
-git add frontend/src/api/pose.ts frontend/src/features/pose-loop/ frontend/src/App.tsx
+git add frontend/src/net/pose.ts frontend/src/features/pose-loop/ frontend/src/App.tsx
 git commit -m "feat(frontend): close the pose loop in the cockpit
 
 Phase 7's chain -- pose, corridor projection, triggers, replan -- was
@@ -4209,7 +4761,7 @@ kokpitte yok.
 Panel `checked: false` olanı **"not checked"** gösterir, "passed" değil.
 
 **Files:**
-- Create: `frontend/src/api/compare.ts`
+- Create: `frontend/src/net/compare.ts`
 - Create: `frontend/src/features/profile-compare/index.tsx`
 - Create: `frontend/src/features/profile-compare/useProfileCompare.ts`
 - Create: `frontend/src/features/profile-compare/ProfileComparePanel.tsx`
@@ -4224,11 +4776,11 @@ Panel `checked: false` olanı **"not checked"** gösterir, "passed" değil.
   - `useProfileCompare(): { results, comparison, run, busy, error }`
   - `profileOverlays(results): OverlayLayer[]`
 
-- [ ] **Adım 1: `api/compare.ts` oluştur**
+- [ ] **Adım 1: `net/compare.ts` oluştur**
 
 ```ts
 import { postJson } from './client'
-import type { CompareResponse, PlanMultiResponse } from '../mission/types'
+import type { CompareResponse, PlanMultiResponse } from './types'
 
 /** start and goal are PIXEL PAIRS here -- [row, col], not {row, col}
  *  (CompareRequest uses PixelPair, main.py:430-433). */
@@ -4261,9 +4813,9 @@ export async function planMulti(
 
 ```ts
 import { useCallback, useState } from 'react'
-import { compareProfiles } from '../../api/compare'
+import { compareProfiles } from '../../net/compare'
 import { useMission } from '../../mission/MissionContext'
-import type { ProfileResult } from '../../mission/types'
+import type { ProfileResult } from '../../net/types'
 
 export interface ConstraintVerdict {
   name: string
@@ -4321,7 +4873,7 @@ export function useProfileCompare() {
 - [ ] **Adım 3: `overlays.ts` oluştur**
 
 ```ts
-import type { ProfileResult } from '../../mission/types'
+import type { ProfileResult } from '../../net/types'
 import type { OverlayLayer } from '../../overlay/types'
 
 /** One polyline per profile, in the colour the backend assigned it. */
@@ -4340,7 +4892,7 @@ export function profileOverlays(results: ProfileResult[]): OverlayLayer[] {
 - [ ] **Adım 4: `ProfileComparePanel.tsx` oluştur**
 
 ```tsx
-import type { ProfileResult } from '../../mission/types'
+import type { ProfileResult } from '../../net/types'
 import { readConstraints } from './useProfileCompare'
 import './profile-compare.css'
 
@@ -4503,7 +5055,7 @@ Import: `import { ProfileCompare } from './features/profile-compare'`
 
 - [ ] **Adım 8: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
 - [ ] **Adım 9: Elle kabul**
@@ -4523,7 +5075,7 @@ Expected: temiz
 - [ ] **Adım 10: Commit**
 
 ```bash
-git add frontend/src/api/compare.ts frontend/src/features/profile-compare/ frontend/src/App.tsx
+git add frontend/src/net/compare.ts frontend/src/features/profile-compare/ frontend/src/App.tsx
 git commit -m "feat(frontend): put four mission profiles side by side
 
 /api/compare planned all four profiles against one start and goal and
@@ -4551,7 +5103,7 @@ içerdiğini ve **alt sınır** olduğunu söylüyor. Bu not ekranda görünmezs
 karşılaştırma olduğundan daha iddialı okunur.
 
 **Files:**
-- Create: `frontend/src/api/missions.ts`
+- Create: `frontend/src/net/missions.ts`
 - Create: `frontend/src/features/mission-validation/index.tsx`
 - Create: `frontend/src/features/mission-validation/useMissionValidation.ts`
 - Create: `frontend/src/features/mission-validation/MissionValidationPanel.tsx`
@@ -4564,11 +5116,11 @@ karşılaştırma olduğundan daha iddialı okunur.
   - `fetchReferenceMissions(signal): Promise<ReferenceMissions>`
   - `useMissionValidation(): { reference, stats, ourRateMPerDay, loading, error }`
 
-- [ ] **Adım 1: `api/missions.ts` oluştur**
+- [ ] **Adım 1: `net/missions.ts` oluştur**
 
 ```ts
 import { getJson } from './client'
-import type { ReferenceMissions } from '../mission/types'
+import type { ReferenceMissions } from './types'
 
 export async function fetchReferenceMissions(
   signal?: AbortSignal,
@@ -4581,9 +5133,9 @@ export async function fetchReferenceMissions(
 
 ```ts
 import { useEffect, useState } from 'react'
-import { fetchReferenceMissions } from '../../api/missions'
+import { fetchReferenceMissions } from '../../net/missions'
 import { useMission } from '../../mission/MissionContext'
-import type { ReferenceMissions, RouteStatistics } from '../../mission/types'
+import type { ReferenceMissions, RouteStatistics } from '../../net/types'
 
 export function useMissionValidation() {
   const { planResult } = useMission()
@@ -4627,7 +5179,7 @@ export function useMissionValidation() {
 - [ ] **Adım 3: `MissionValidationPanel.tsx` oluştur**
 
 ```tsx
-import type { ReferenceMissions, RouteStatistics } from '../../mission/types'
+import type { ReferenceMissions, RouteStatistics } from '../../net/types'
 import './mission-validation.css'
 
 export function MissionValidationPanel({
@@ -4816,7 +5368,7 @@ Import: `import { MissionValidation } from './features/mission-validation'`
 
 - [ ] **Adım 7: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
 - [ ] **Adım 8: Elle kabul**
@@ -4833,7 +5385,7 @@ Expected: temiz
 - [ ] **Adım 9: Commit**
 
 ```bash
-git add frontend/src/api/missions.ts frontend/src/features/mission-validation/ frontend/src/App.tsx
+git add frontend/src/net/missions.ts frontend/src/features/mission-validation/ frontend/src/App.tsx
 git commit -m "feat(frontend): compare this route against flown missions
 
 app.mission_reference exists to be compared against and had no consumer
@@ -5036,7 +5588,7 @@ Import: `import { RosShowcase } from './features/ros-showcase'`
 
 - [ ] **Adım 6: Derlemeyi doğrula**
 
-Run: `cd frontend && npm run typecheck && npm run lint && npm run build`
+Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
 - [ ] **Adım 7: Elle kabul**
@@ -5081,7 +5633,7 @@ Spec'in her gereksinimi bir göreve düşüyor mu?
 | `MissionContext` | 5 |
 | Yuva mekanizması | 5 |
 | `OverlayLayer` sözleşmesi | 4 |
-| `mission/geo.ts` | 3 |
+| `grid/geo.ts` | 3 |
 | Modül dosya sözleşmesi | 6–15 (her biri aynı beş dosya deseni) |
 
 Tuzaklar:
@@ -5101,7 +5653,7 @@ Tuzaklar:
 | T11 — validity dört değerli | Görev 6, Adım 3 |
 | T12 — koşullu başlıklar/`null` alanlar | Görev 6, `formatRange` ve `validity` dalları |
 
-**Bulunan ve düzeltilen iki hata:**
+**Birinci turda bulunan ve düzeltilen iki hata:**
 
 1. Görev 12'nin `PoseEstimate` alan adları yanlıştı (`x`/`y`/serbest `source`).
    Gerçek şema (`pose.py:80-113`) sekiz **zorunlu** alan taşıyor: `x_m`, `y_m`,
@@ -5110,6 +5662,38 @@ Tuzaklar:
 2. Görev 12, `features/replan/triggers.ts`'i import ediyordu — bir modülün başka
    bir modülün iç dosyasına uzanması global kısıtı çiğniyor. Paylaşılan
    tetikleyici künyesi `mission/triggers.ts`'e taşındı.
+
+**İkinci turda (plan gözden geçirmesi) bulunan ve düzeltilen altı sorun:**
+
+3. **Vitest kendi içinde çelişiyordu.** Global Constraints bağımlılığı üç saf
+   fonksiyon için gerekçelendiriyor, "Doğrulama hakkında" ise test altyapısının
+   kurulmadığını söylüyor ve görev doğrulamalarında `npm test` yoktu. Üçten
+   ikisi — ribbon köşe matematiği ve küp indekslemesi — hiç yazılmıyordu:
+   `draw2d.test.ts` yalnızca dosya tablosunda vardı, `series.test.ts` hiçbir
+   yerde. Bölüm yeniden yazıldı, `npm test` her görevin doğrulamasına girdi,
+   iki test dosyası da gerçek adım oldu (Görev 4 Adım 5, Görev 10 Adım 2) ve
+   test edilebilmeleri için `ribbonEdges`, `normaliseToDomain` ve `cubeFrom`
+   saf fonksiyon olarak dışa açıldı.
+4. **`mission/useTerrainManifest.ts` tabloda vardı, hiçbir görev üretmiyordu.**
+   F1, F2a ve F7'nin üçü de kendi `useEffect`'inde `fetchTerrain` çağırıyordu:
+   üç özdeş `/api/terrain` isteği ve rover değişimi uçarken çelişebilen üç
+   `frame`. Hook Görev 6 Adım 2 olarak gerçekten yazılıyor, üçü de onu okuyor.
+5. **`draw2d.ts` derlenmezdi.** `colormap.ts`'in rampaları `(value, min, max)`
+   alıyor, `(t)` değil (`colormap.ts:140,147,161`; `thermalToRgb`'de dördüncü
+   bir `lut?` var). Rampa tablosu ve `drawField`'daki çağrı gerçek imzaya
+   uyduruldu, imza doğrulaması `draw2d.ts`'ten **önceye** alındı.
+6. **`drawOverlays`'e `gridRows` olarak `CANVAS_SIZE` geçiliyordu.** Ölçek
+   yalnızca sevk edilen grid 500x500 ve `CANVAS_SIZE = 500` olduğu için doğru
+   çıkıyordu; taban görüntü ise gerçek satır sayısını kullanıyor
+   (`MapCanvas.tsx:454`). Artık grid'in kendi satır sayısı geçiyor ve iki
+   `redraw` çağrısının **ikisi** de overlay alıyor.
+7. **`missionValue` her render'da taze bir nesne literaliydi** — `hoverPoint`
+   her fare hareketinde değiştiği için dokuz modülün hepsi her harekette
+   yeniden render olurdu. `useMemo`'ya alındı. Ayrıca `selectedCell` alanı
+   aslında hover konumu taşıyordu; adı `hoverCell` oldu.
+8. **`rail-section` ve `panel-kicker` sessizce `App.css`'ten geliyordu** ama
+   global kısıt her sınıf adının `.lp-` ile başladığını söylüyordu. İstisna
+   artık açıkça yazılı ve iki sınıfla sınırlı.
 
 ---
 
