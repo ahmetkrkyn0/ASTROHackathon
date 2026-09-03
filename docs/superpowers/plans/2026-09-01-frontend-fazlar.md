@@ -1617,7 +1617,7 @@ faz başına yalnızca bir satır eklenecek.
   - `useMission(): MissionState & MissionActions`
   - `LeftRailSlot`, `RightRailSlot`, `BottomDock`, `CanvasOverlaySlot` bileşenleri
 
-- [ ] **Adım 1: `mission/MissionContext.ts` + `mission/MissionProvider.tsx` oluştur**
+- [x] **Adım 1: `mission/MissionContext.ts` + `mission/MissionProvider.tsx` oluştur**
 
 > **Plan düzeltmesi (uygulama sırasında, `a24c053`):** Görev 4'tekiyle aynı
 > bölünme. Aşağıdaki kod tek dosyada `MissionProvider` bileşeniyle `useMission`
@@ -1715,7 +1715,7 @@ export function MissionProvider({
 }
 ```
 
-- [ ] **Adım 2: `shell/slots.tsx` oluştur**
+- [x] **Adım 2: `shell/slots.tsx` oluştur**
 
 ```tsx
 import React from 'react'
@@ -1756,7 +1756,7 @@ export function CanvasOverlaySlot({ children }: { children?: React.ReactNode }) 
 }
 ```
 
-- [ ] **Adım 3: `App.tsx` — ham telemetriyi sakla**
+- [x] **Adım 3: `App.tsx` — ham telemetriyi sakla**
 
 `App.tsx:145` civarındaki `focusTelemetry` state'inin **yanına** ekle
 (mevcut satır silinmez):
@@ -1781,7 +1781,7 @@ import type { CellTelemetryResponse } from './net/types'
 > `mapFocusTelemetryResponse` çağrısı **silinmez** — mevcut telemetri kuyusu
 > aynen çalışmaya devam eder. Bu satır sadece yanıtın atılan kısmını da tutar.
 
-- [ ] **Adım 4: `App.tsx` — sağlayıcıları ve yuvaları yerleştir**
+- [x] **Adım 4: `App.tsx` — sağlayıcıları ve yuvaları yerleştir**
 
 `useMemo` `App.tsx`'in React import'unda **zaten var** (`3c76198` ekledi). Kalan importları ekle:
 
@@ -1860,18 +1860,24 @@ al — yani mevcut ağacın tamamı bunların içinde kalacak:
   )
 ```
 
-- [ ] **Adım 5: `App.tsx` — dört yuvayı yerleştir**
+- [x] **Adım 5: `App.tsx` — dört yuvayı yerleştir**
 
 - `<LeftRailSlot />` — `rail-scroll` içindeki son `</section>`'dan sonra
 - `<RightRailSlot />` — sağ raydaki Route Analytics bölümünden sonra
 - `<BottomDock />` — `<MapCanvas ... />`'ı saran kabın hemen altında
-- `<CanvasOverlaySlot />` — `<MapCanvas ... />` ile aynı `position: relative`
-  kabın içinde, canvas'tan sonra
+- `<CanvasOverlaySlot />` — `<MapCanvas ... />` ile aynı kabın
+  (`map-canvas-shell`) içinde, canvas'tan sonra. **O kap bugün
+  `position: relative` değil** (`App.css:942-950`), yani
+  `<div className="map-canvas-shell">`'e satır içi
+  `style={{ position: 'relative' }}` eklenir — App.css'e dokunulmuyor ve o div'in
+  içinde bugün mutlak konumlu hiçbir şey yok, dolayısıyla görünüm değişmez.
+  Eklenmezse yuva `.map-stage`'e göre boyutlanır ve haritanın değil
+  overlay'lerin üzerine oturur.
 
 Dördü de şimdilik boş (`children` yok) — `slots.tsx` `children` yoksa `null`
 döndüğü için DOM'a hiçbir şey eklenmez.
 
-- [ ] **Adım 6: `App.tsx` — overlay'leri tuvale bağla**
+- [x] **Adım 6: `App.tsx` — overlay'leri tuvale bağla**
 
 `MapCanvas`'ı render eden JSX'in bulunduğu bileşen `OverlayProvider`'ın
 **içinde** olmalı ki `useOverlays()` çalışsın. `App` bileşeni sağlayıcıyı kendi
@@ -1898,7 +1904,7 @@ function MapCanvasWithOverlays(
 Mevcut `<MapCanvas ref={mapRef} ... />` kullanımını `<MapCanvasWithOverlays
 canvasRef={mapRef} ... />` ile değiştir; diğer prop'lar aynen kalır.
 
-- [ ] **Adım 7: Regresyon olmadığını doğrula**
+- [x] **Adım 7: Regresyon olmadığını doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: dördü de temiz.
@@ -1914,7 +1920,7 @@ Elle kabul — sırayla:
 Expected: altısı da Görev 5 öncesiyle **birebir aynı**. Tek fark: DOM'da dört
 boş yuva sarmalayıcısı var ama hiçbiri render etmiyor.
 
-- [ ] **Adım 8: Commit**
+- [x] **Adım 8: Commit**
 
 ```bash
 git add frontend/src/mission/ frontend/src/shell/ frontend/src/App.tsx frontend/src/api.ts
