@@ -659,6 +659,17 @@ x_m = origin.x + col * resolution_m
 y_m = origin.y - row * resolution_m     # satırlar güneye artar
 ```
 
+> **Plan düzeltmesi (uygulama sırasında, `d2cbe13`):** bu görev ilk yazıldığında
+> `coarseToFine` bloğun **geometrik** merkezini döndürüyordu — `(coarsen - 1) / 2`.
+> Backend "merkez" derken bunu kastetmiyor ve iki yerde de aynı şeyi söylüyor:
+> `cost_cube.coarsen_grid` how="center" ile yükseklik indirgerken
+> `arr[coarsen // 2 :: coarsen]` örnekliyor (`cost_cube.py:57-59`) ve
+> `/api/plan-4d` `path_pixels`'i `r * coarsen + coarsen // 2` olarak yayınlıyor
+> (`main.py:1143-1147`). İki formül çift `coarsen`'de yarım hücre ayrışıyor;
+> 5 m'lik ızgarada 2.5 m sessiz yanal hata. Aşağıdaki kod bu yüzden
+> `Math.floor(coarsen / 2)` kullanıyor. Aynı sınıftan bir hata: göründüğünde
+> makul, yanlış olduğunda görünmez.
+
 **Files:**
 - Create: `frontend/src/grid/geo.ts`
 
@@ -671,7 +682,7 @@ y_m = origin.y - row * resolution_m     # satırlar güneye artar
   - `pixelToMetres(row: number, col: number, frame: GridFrame): { x: number; y: number }`
   - `coarseToFine(row: number, col: number, coarsen: number): PixelPoint`
 
-- [ ] **Adım 1: Dosyayı oluştur**
+- [x] **Adım 1: Dosyayı oluştur**
 
 ```ts
 import type { TerrainManifest } from '../net/types'
@@ -737,19 +748,27 @@ export function pixelToMetres(
 }
 
 /**
- * Coarse planning pixel -> fine pixel, at the block CENTRE.
+ * Coarse planning pixel -> fine pixel, at the block's CENTRE CELL.
  *
- * /api/plan-4d coarsens the grid by an integer factor and publishes block
- * centres as waypoints (main.py uses how="center" for the same reason), so
- * the centre is where the geometry a rover meets actually lives.
+ * The offset is `floor(coarsen / 2)`, not `(coarsen - 1) / 2`. Those differ
+ * by half a cell on every even factor, and the integer one is what the
+ * backend means by "centre" in both places it matters: cost_cube.coarsen_grid
+ * samples `arr[coarsen // 2 :: coarsen]` when reducing elevation with
+ * how="center" (cost_cube.py:57-59), and /api/plan-4d publishes
+ * `path_pixels` as `r * coarsen + coarsen // 2` (main.py:1143-1147).
+ *
+ * So a coarse waypoint converted here lands on the SAME fine pixel the
+ * backend already published for it, and on the fine cell whose elevation the
+ * planner actually solved against. The geometric block centre would sit half
+ * a block away from both -- close enough to look right on screen.
  */
 export function coarseToFine(row: number, col: number, coarsen: number): PixelPoint {
-  const half = (coarsen - 1) / 2
-  return { row: row * coarsen + half, col: col * coarsen + half }
+  const offset = Math.floor(coarsen / 2)
+  return { row: row * coarsen + offset, col: col * coarsen + offset }
 }
 ```
 
-- [ ] **Adım 2: Önce başarısız testi yaz**
+- [x] **Adım 2: Önce başarısız testi yaz**
 
 `frontend/src/grid/geo.test.ts` oluştur. Sayılar
 `lunapath/data/processed/metadata.json`'ın gerçek değerleri:
@@ -802,10 +821,34 @@ describe('pixelToMetres', () => {
 })
 
 describe('coarseToFine', () => {
-  it('returns the CENTRE of the coarse block', () => {
-    // coarsen=4 collapses fine rows 0..3 onto coarse row 0; its centre is 1.5.
-    expect(coarseToFine(0, 0, 4)).toEqual({ row: 1.5, col: 1.5 })
-    expect(coarseToFine(2, 3, 4)).toEqual({ row: 9.5, col: 13.5 })
+  it('returns the CENTRE CELL of the coarse block', () => {
+    // coarsen=4 collapses fine rows 0..3 onto coarse row 0; the cell the
+    // backend samples and publishes for it is 0 * 4 + 4 // 2 = 2.
+    expect(coarseToFine(0, 0, 4)).toEqual({ row: 2, col: 2 })
+    expect(coarseToFine(2, 3, 4)).toEqual({ row: 10, col: 14 })
+  })
+
+  it('agrees with the fine pixels /api/plan-4d publishes', () => {
+    // main.py:1143-1147 builds path_pixels as r * coarsen + coarsen // 2.
+    // Drawing a coarse state at any other offset puts it off the very route
+    // the same response drew, so this reproduces that expression exactly.
+    for (const coarsen of [1, 2, 3, 4, 5, 8]) {
+      const offset = Math.floor(coarsen / 2)
+      for (const [row, col] of [[0, 0], [1, 2], [7, 9]]) {
+        expect(coarseToFine(row, col, coarsen)).toEqual({
+          row: row * coarsen + offset,
+          col: col * coarsen + offset,
+        })
+      }
+    }
+  })
+
+  it('lands on a whole fine pixel, never a half one', () => {
+    // (coarsen - 1) / 2 -- the geometric block centre -- returns 1.5 here.
+    // That is half a cell off the elevation the planner solved against, and
+    // on a 5 m grid half a cell is 2.5 m of silent lateral error.
+    expect(Number.isInteger(coarseToFine(0, 0, 4).row)).toBe(true)
+    expect(Number.isInteger(coarseToFine(3, 5, 2).col)).toBe(true)
   })
 
   it('is the identity at coarsen=1', () => {
@@ -814,7 +857,7 @@ describe('coarseToFine', () => {
 })
 ```
 
-- [ ] **Adım 3: Testi çalıştır — başarısız olmalı**
+- [x] **Adım 3: Testi çalıştır — başarısız olmalı**
 
 Run: `cd frontend && npm test`
 Expected: FAIL, "Cannot find module './geo'" (Adım 1'i henüz yazmadıysan) veya
@@ -825,13 +868,13 @@ assertion hatası. **Geçerse dur** — test yanlış yazılmıştır.
 > **başarısız olmalı**. Sonra `-`'ye geri al. Bu, testin gerçekten o hatayı
 > yakaladığını kanıtlar.
 
-- [ ] **Adım 4: Testleri geçir ve derlemeyi doğrula**
+- [x] **Adım 4: Testleri geçir ve derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint`
-Expected: `8 passed` — Görev 1'in `ApiError` testi ve buradaki yedi test.
+Expected: `10 passed` — Görev 1'in `ApiError` testi ve buradaki dokuz test.
 Typecheck ve lint temiz.
 
-- [ ] **Adım 5: Commit**
+- [x] **Adım 5: Commit**
 
 ```bash
 git add frontend/src/grid/geo.ts frontend/src/grid/geo.test.ts
