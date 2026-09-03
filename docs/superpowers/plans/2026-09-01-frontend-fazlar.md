@@ -2825,11 +2825,11 @@ koridoru asla olduğundan geniş göstermemek için.
 **Interfaces:**
 - Consumes: `useMission()` (`planResult`), `useOverlays()`, `mission/useTerrainManifest.ts`'ten `useTerrainManifest` (Görev 6), `grid/geo.ts`'ten `metresToPixel`
 - Produces:
-  - `useCorridor(): { corridor: Corridor | null; frame: GridFrame | null; segments: SegmentRow[]; error: string | null }`
+  - `useCorridor(): { corridor: Corridor | null; frame: GridFrame | null; segments: SegmentRow[]; loading: boolean; error: string | null }`
   - `type SegmentRow = { index: number; halfWidthM: number; maxSlopeDeg: number; energyWh: number; thermalKs: number }`
   - `corridorOverlays(corridor, frame): OverlayLayer[]`
 
-- [ ] **Adım 1: `useCorridor.ts` oluştur**
+- [x] **Adım 1: `useCorridor.ts` oluştur**
 
 ```ts
 import { useMemo } from 'react'
@@ -2853,12 +2853,21 @@ export function useCorridor() {
   // Shared with F1 and F7 -- one request, one frame, no chance of three
   // modules disagreeing about where the grid is while a rover change is in
   // flight.
-  const { frame, error: manifestError } = useTerrainManifest(roverId, weights)
+  const { frame, loading, error: manifestError } = useTerrainManifest(roverId, weights)
 
+  // `loading` guards the frame check. Before the first manifest lands the
+  // frame is null for the ordinary reason that nobody has asked yet, and
+  // reporting that as "the grid has no georeference" would put a warning on
+  // screen for a fetch that is simply in flight.
   const error =
     manifestError ??
-    (frame === null ? 'Grid has no georeference; corridor cannot be placed.' : null)
+    (!loading && frame === null
+      ? 'Grid has no georeference; corridor cannot be placed.'
+      : null)
 
+  // /api/plan carries corridor, execution and route_statistics beside the
+  // fields api.ts declares. Narrowed here rather than widening PlanResponse,
+  // which would be a third edit to a file this plan keeps closed.
   const corridor = (planResult as { corridor?: Corridor | null } | null)?.corridor ?? null
 
   const segments = useMemo<SegmentRow[]>(() => {
@@ -2875,11 +2884,11 @@ export function useCorridor() {
     }))
   }, [corridor])
 
-  return { corridor, frame, segments, error }
+  return { corridor, frame, segments, loading, error }
 }
 ```
 
-- [ ] **Adım 2: `overlays.ts` oluştur**
+- [x] **Adım 2: `overlays.ts` oluştur**
 
 ```ts
 import { metresToPixel, type GridFrame, type PixelPoint } from '../../grid/geo'
@@ -2939,7 +2948,7 @@ export function corridorOverlays(
 }
 ```
 
-- [ ] **Adım 3: `CorridorPanel.tsx` oluştur**
+- [x] **Adım 3: `CorridorPanel.tsx` oluştur**
 
 ```tsx
 import type { Corridor } from '../../net/types'
@@ -3022,7 +3031,7 @@ export function CorridorPanel({
 }
 ```
 
-- [ ] **Adım 4: `corridor.css` oluştur**
+- [x] **Adım 4: `corridor.css` oluştur**
 
 ```css
 .lp-corridor-card {
@@ -3093,7 +3102,7 @@ export function CorridorPanel({
 .lp-corridor-warn { color: #fbbf24; }
 ```
 
-- [ ] **Adım 5: `index.tsx` oluştur**
+- [x] **Adım 5: `index.tsx` oluştur**
 
 ```tsx
 import { useEffect } from 'react'
@@ -3122,7 +3131,7 @@ export function CorridorFeature() {
 }
 ```
 
-- [ ] **Adım 6: `App.tsx`'e tek satırla bağla**
+- [x] **Adım 6: `App.tsx`'e tek satırla bağla**
 
 `<RightRailSlot>` içine, `<CostExplain />`'in altına:
 
@@ -3132,12 +3141,12 @@ export function CorridorFeature() {
 
 Import: `import { CorridorFeature } from './features/corridor'`
 
-- [ ] **Adım 7: Derlemeyi doğrula**
+- [x] **Adım 7: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
-- [ ] **Adım 8: Elle kabul — koordinat dönüşümünü ispatla**
+- [x] **Adım 8: Elle kabul — koordinat dönüşümünü ispatla**
 
 Bu görevin en riskli kısmı `metresToPixel` (spec riski: yanlışsa F2a ve F7
 birlikte yanlış). İspat adımları:
@@ -3148,8 +3157,16 @@ birlikte yanlış). İspat adımları:
    `y` terimi ters — durup Görev 3'e dön
 3. Şerit rota boyunca **daralıp genişliyor** (sabit genişlikte değil)
 4. Yeşil sığınak noktaları rotanın yakınında, dağınık değil
-5. **Sayısal ispat:** konsolda ilk waypoint'i piksele çevir ve rotanın ilk
-   pikseliyle karşılaştır:
+5. **Sayısal ispat — uygulama sırasında backend'e karşı koşuldu (`aca438a`),
+   geçti.** `row 60, col 60` → `row 300, col 340` planlandı;
+   `corridor.waypoints[0]` = `(-32200.0, 10700.0)` CRS metre, `metresToPixel`
+   bunu **tam olarak** `(60, 60)`'a, son waypoint'i `(300, 340)`'a eşliyor.
+   `y` terimi toplanmış olsaydı ilk satır 500 satırlık ızgarada 4340 çıkardı.
+   Aynı koşu dizi uzunluklarını da doğruladı: 351 waypoint / 351
+   fallback_point'e karşı dört bütçe dizisinde 350'şer eleman, ve
+   `half_width_m` 5.00–93.01 m aralığında değişiyor.
+
+   Tekrar etmek istersen tarayicı konsolunda:
 
 ```js
 // planResult.corridor.waypoints[0] ve planResult.waypoints[0] üzerinden
@@ -3166,7 +3183,7 @@ Expected: iki değer eşleşiyor. Eşleşmiyorsa **devam etme** — dönüşüm 
 7. Başlangıç ve hedefi aynı hücreye yakın seç, planlama başarısız olsun →
    panel "No corridor" diyor, boş tablo göstermiyor
 
-- [ ] **Adım 9: Commit**
+- [x] **Adım 9: Commit**
 
 ```bash
 git add frontend/src/features/corridor/ frontend/src/App.tsx
