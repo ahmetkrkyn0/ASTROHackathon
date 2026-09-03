@@ -492,13 +492,29 @@ export interface TriggerRef {
   detail: string
 }
 
+/**
+ * A check that could NOT run, and the telemetry keys it wanted.
+ *
+ * An object, not a bare id: replan_triggers.evaluate_triggers_detailed
+ * appends `{trigger_id, missing}` (replan_triggers.py:219-223), and
+ * /api/pose adds `reason` when it can explain why the keys are absent
+ * (localization.py:317-327). Typing this as string[] makes every
+ * membership test silently false, which renders an unevaluated trigger as
+ * clear -- the exact failure `skipped` exists to prevent.
+ */
+export interface SkippedTrigger {
+  trigger_id: TriggerId
+  missing: string[]
+  reason?: string
+}
+
 export interface ReplanResponse {
   replanned: boolean
   triggers: TriggerRef[]
   /** Trigger ids that WERE evaluated. */
   evaluated: string[]
-  /** Trigger ids that could NOT be evaluated -- telemetry fields missing. */
-  skipped: string[]
+  /** Checks that could NOT be evaluated -- telemetry fields missing. */
+  skipped: SkippedTrigger[]
   reason?: string
   plan?: unknown
 }
@@ -584,7 +600,7 @@ export interface PoseResponse {
   pose_source: string
   fired_triggers: TriggerRef[]
   evaluated: string[]
-  skipped: string[]
+  skipped: SkippedTrigger[]
   trigger_state: Record<string, number>
   recommended_action: string
 }
@@ -3214,6 +3230,24 @@ alanı eksik). Panel üçünü de ayrı gösterir. `skipped`'ı yutmak, %1 batar
 "her şey yolunda" demektir — backend bu hatayı bir review'da düzeltmişti
 (`main.py:748-763`), frontend aynı hatayı tekrarlamamalı.
 
+> **Plan düzeltmesi (uygulama sırasında, `9590ad8`):** bu görevin
+> "dürüstlük çekirdeği" planın kendi kodunda iki kez kırıktı.
+>
+> 1. `skipped` **string dizisi değil**: backend `{trigger_id, missing}`
+>    nesneleri ekliyor (`replan_triggers.py:219-223`), `/api/pose` bir de
+>    `reason` koyuyor (`localization.py:317-327`). Planın
+>    `new Set(result.skipped).has(id)` testi nesnelere karşı **her zaman
+>    false** — yani değerlendirilemeyen her tetikleyici `clear`'a düşüyordu.
+>    Boş telemetriyle panel yedi yeşil satır gösterirdi, yanıt "7 trigger(s)
+>    could not be evaluated" derken. `SkippedTrigger` tipi eklendi; Görev 2'nin
+>    `ReplanResponse`/`PoseResponse` tipleri ve Görev 12'nin aynı hatası da
+>    düzeltildi.
+> 2. Sarı "Not checked" durumu **arayüzden üretilemiyordu**: her alan bir
+>    değerle başlıyor ve boşaltılan kutu `Number('')` = 0 oluyordu, yani anahtar
+>    hep gönderiliyor ve kontrol hep koşuyordu. Telemetri değeri artık
+>    `number | ''`, boşlar istekten düşürülüyor. 0 gayet makul bir batarya
+>    seviyesi — "ölçüm yok" demenin yolu değil.
+
 **Files:**
 - Create: `frontend/src/net/replan.ts`
 - Create: `frontend/src/features/replan/index.tsx`
@@ -3230,7 +3264,7 @@ alanı eksik). Panel üçünü de ayrı gösterir. `skipped`'ı yutmak, %1 batar
   - `TRIGGER_FIELDS: Record<TriggerId, { label: string; fields: TelemetryField[] }>`
   - `useReplan(): { form, setField, submit, result, busy, error, rows }`
 
-- [ ] **Adım 1: `net/replan.ts` oluştur**
+- [x] **Adım 1: `net/replan.ts` oluştur**
 
 ```ts
 import { postJson } from './client'
@@ -3255,7 +3289,7 @@ export async function requestReplan(
 }
 ```
 
-- [ ] **Adım 2: `mission/triggers.ts` oluştur — yedi tetikleyicinin girdileri**
+- [x] **Adım 2: `mission/triggers.ts` oluştur — yedi tetikleyicinin girdileri**
 
 > Bu dosya `features/` altında değil `mission/` altında: hem Görev 9 hem Görev 12
 > kullanıyor ve bir modülün başka bir modülün iç dosyasını import etmesi global
@@ -3331,9 +3365,19 @@ export const TRIGGER_FIELDS: Record<TriggerId, { label: string; fields: Telemetr
 
 export const TRIGGER_IDS = Object.keys(TRIGGER_FIELDS) as TriggerId[]
 
+/**
+ * A telemetry reading, or the absence of one.
+ *
+ * '' is not zero. A blank field means the rover did not report that value,
+ * and it is dropped from the request so the backend lists the trigger as
+ * skipped. Sending 0 instead would have the check run against a number
+ * nobody measured -- and 0 is a perfectly plausible SoC.
+ */
+export type TelemetryValue = number | ''
+
 /** Every distinct telemetry key, deduplicated -- half_width_m feeds two triggers. */
-export function initialTelemetry(): Record<string, number> {
-  const out: Record<string, number> = {}
+export function initialTelemetry(): Record<string, TelemetryValue> {
+  const out: Record<string, TelemetryValue> = {}
   for (const id of TRIGGER_IDS) {
     for (const field of TRIGGER_FIELDS[id].fields) {
       out[field.key] = field.initial
@@ -3341,9 +3385,20 @@ export function initialTelemetry(): Record<string, number> {
   }
   return out
 }
+
+/** Drops the blanks, so an unreported value is absent rather than zero. */
+export function telemetryPayload(
+  form: Record<string, TelemetryValue>,
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [key, value] of Object.entries(form)) {
+    if (value !== '' && Number.isFinite(value)) out[key] = value as number
+  }
+  return out
+}
 ```
 
-- [ ] **Adım 3: `useReplan.ts` oluştur**
+- [x] **Adım 3: `useReplan.ts` oluştur**
 
 ```ts
 import { useCallback, useMemo, useState } from 'react'
@@ -3385,7 +3440,7 @@ export function useReplan() {
           goal: { row: goal[0], col: goal[1] },
           rover_id: roverId,
           weights,
-          state: form,
+          state: telemetryPayload(form),
           force,
         })
         setResult(response)
@@ -3401,7 +3456,13 @@ export function useReplan() {
   const rows = useMemo<TriggerRow[]>(() => {
     if (!result) return []
     const fired = new Map(result.triggers.map((t) => [t.trigger_id, t.detail]))
-    const skipped = new Set(result.skipped)
+    // skipped carries objects, not ids (replan_triggers.py:219-223). Keyed by
+    // trigger_id so the lookup below actually matches -- a Set of the raw
+    // entries would never contain a plain id, and every unevaluated trigger
+    // would fall through to "clear".
+    const skipped = new Map<string, SkippedTrigger>(
+      result.skipped.map((entry) => [entry.trigger_id, entry]),
+    )
 
     return TRIGGER_IDS.map((id) => {
       if (fired.has(id)) {
@@ -3411,8 +3472,16 @@ export function useReplan() {
       // telemetry once answered "no replan needed" at 1% battery; the
       // backend reports it in `skipped` precisely so a client cannot repeat
       // that (main.py:748-763).
-      if (skipped.has(id)) {
-        return { id, status: 'unchecked' as const, detail: 'Telemetry field missing' }
+      const skip = skipped.get(id)
+      if (skip) {
+        const missing = skip.missing.length
+          ? `Missing telemetry: ${skip.missing.join(', ')}`
+          : 'Telemetry field missing'
+        return {
+          id,
+          status: 'unchecked' as const,
+          detail: skip.reason ? `${missing} — ${skip.reason}` : missing,
+        }
       }
       return { id, status: 'clear' as const, detail: null }
     })
@@ -3422,7 +3491,7 @@ export function useReplan() {
 }
 ```
 
-- [ ] **Adım 4: `ReplanPanel.tsx` oluştur**
+- [x] **Adım 4: `ReplanPanel.tsx` oluştur**
 
 ```tsx
 import type { ReplanResponse } from '../../net/types'
@@ -3516,7 +3585,7 @@ export function ReplanPanel({
 }
 ```
 
-- [ ] **Adım 5: `replan.css` oluştur**
+- [x] **Adım 5: `replan.css` oluştur**
 
 ```css
 .lp-replan-card {
@@ -3597,7 +3666,7 @@ export function ReplanPanel({
 .lp-replan-warn { color: #fbbf24; }
 ```
 
-- [ ] **Adım 6: `index.tsx` oluştur**
+- [x] **Adım 6: `index.tsx` oluştur**
 
 ```tsx
 import { ReplanPanel } from './ReplanPanel'
@@ -3614,31 +3683,33 @@ export function Replan() {
 }
 ```
 
-- [ ] **Adım 7: `App.tsx`'e tek satırla bağla**
+- [x] **Adım 7: `App.tsx`'e tek satırla bağla**
 
 `<LeftRailSlot>` içine, `<LayerProvenance />`'ın altına `<Replan />`.
 Import: `import { Replan } from './features/replan'`
 
-- [ ] **Adım 8: Derlemeyi doğrula**
+- [x] **Adım 8: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
-- [ ] **Adım 9: Elle kabul — üç durumu da ispatla**
+- [x] **Adım 9: Elle kabul — üç durumu da ispatla**
 
 1. Rota üret, sonra **Evaluate triggers** → yedi satır listeleniyor
 2. **Ateşleme:** `lateral_offset_m` = 40, `half_width_m` = 20 → 
    `corridor_violation` **Fired** (kırmızı) ve `detail` metni gerçek sayıları
    yazıyor ("lateral offset 40.0 m exceeds corridor half-width 20.0 m")
 3. **Temiz:** `lateral_offset_m` = 5 → aynı satır **Clear** (yeşil)
-4. **Bakılamadı:** `actual_soc` alanını sil (boş bırak veya kaldır) →
-   `soc_deviation` satırı **Not checked** (sarı) ve "Telemetry field missing"
-   yazıyor. **Yeşil olmamalı** — bu görevin asıl kabul kriteri budur
+4. **Bakılamadı:** `Actual SoC` kutusunu **boşalt** (placeholder "not
+   reported" görünür) → `soc_deviation` satırı **Not checked** (sarı) ve
+   "Missing telemetry: actual_soc" yazıyor, kalan altısı Clear.
+   **Yeşil olmamalı** — bu görevin asıl kabul kriteri budur.
+   Backend'e karşı koşuldu (`9590ad8`), geçti
 5. **Force replan** → `replanned: true` ve yeni bir plan dönüyor
 6. Başlangıç/hedef seçmeden butona bas → "Pick a start and a goal first"
    uyarısı, çökme yok
 
-- [ ] **Adım 10: Commit**
+- [x] **Adım 10: Commit**
 
 ```bash
 git add frontend/src/net/replan.ts frontend/src/features/replan/ frontend/src/App.tsx
@@ -4529,12 +4600,24 @@ export function usePoseLoop() {
   const rows = useMemo<PoseTriggerRow[]>(() => {
     if (!result) return []
     const fired = new Map(result.fired_triggers.map((t) => [t.trigger_id, t.detail]))
-    const skipped = new Set(result.skipped)
+    // Same object shape as /api/replan, plus a `reason` this endpoint fills
+    // in when it can explain the absence (localization.py:317-327).
+    const skipped = new Map<string, SkippedTrigger>(
+      result.skipped.map((entry) => [entry.trigger_id, entry]),
+    )
 
     return TRIGGER_IDS.map((id) => {
       if (fired.has(id)) return { id, status: 'fired' as const, detail: fired.get(id) ?? null }
-      if (skipped.has(id)) {
-        return { id, status: 'unchecked' as const, detail: 'Telemetry field missing' }
+      const skip = skipped.get(id)
+      if (skip) {
+        const missing = skip.missing.length
+          ? `Missing telemetry: ${skip.missing.join(', ')}`
+          : 'Telemetry field missing'
+        return {
+          id,
+          status: 'unchecked' as const,
+          detail: skip.reason ? `${missing} — ${skip.reason}` : missing,
+        }
       }
       return { id, status: 'clear' as const, detail: null }
     })
