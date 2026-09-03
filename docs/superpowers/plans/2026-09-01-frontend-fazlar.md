@@ -4000,11 +4000,34 @@ query string."
 Faz 3'ün tek cümlelik iddiası: **"planlayıcı beklemeyi seçti"** bir slogan değil
 bir karar. Bunu göstermek, bu plandaki en çarpıcı demo.
 
-**Ön koşul:** `python scripts/build_horizon_cache.py` bir kez çalıştırılmış
-olmalı (`lunapath/data/processed/horizon_map.npy`). Çalıştırılmamışsa
-`shadow_model.model === "static"` döner ve panel bunu **açıkça söyler** —
-statik bir küpü animasyonluymuş gibi oynatmak, spec'in dördüncü dürüstlük
-kuralının ihlalidir.
+**Ön koşul:** ufuk önbelleği (`lunapath/data/processed/horizon_map.npy`)
+mevcut olmalı. Bu repoda **zaten var**. Statik bir küpü animasyonluymuş gibi
+oynatmak spec'in dördüncü dürüstlük kuralının ihlali olduğu için, panel
+`shadow_model.model === "static"` geldiğinde bunu **açıkça söyler**.
+
+> **Plan düzeltmesi (uygulama sırasında, `28d8621`):** bu görevin üç parametresi
+> çalıştırıldığında demoyu imkânsız kılıyordu.
+>
+> 1. **Ne seri ne de plan isteği `start_utc` taşıyordu.** Aydınlanma zamanın
+>    fonksiyonu; epoch yoksa backend gölge alanını sabitliyor ve
+>    `shadow_model: "static"` diyor — yani seri **her seferinde** animasyonsuz
+>    olurdu. `/api/plan-4d` aynı şeyi kendi alan açıklamasında yazıyor
+>    (`main.py:403-406`). İkisi artık **aynı** epoch'u paylaşıyor — rotayı
+>    çizilenden başka bir göğe karşı çözmek ikisinden de kötü olurdu.
+> 2. **Bir saatlik dilim hiçbir şey göstermiyor.** Ay günü ~29.5 Dünya günü; bu
+>    kutup sahasında 24 saatlik pencerede backend `shadow` için min ve max'ı
+>    **ikisi de tam 1.0** döndürüyor — 24 özdeş kare. Dilim 6 saate çıkınca aynı
+>    24 dilim altı günü kapsıyor: `shadow` 0.0-1.0, yüzey sıcaklığı -183...+43 C,
+>    ve ortalama gölge ilk dilimde 1.0'dan son dilimde 0.265'e düşüyor. Küp tam
+>    6.000.000 bayt.
+> 3. **Plan için `n_slices: 24` bir pencere değil, bir hamle bütçesi.**
+>    Planlayıcı dilim uzunluğunu ızgaradan türetiyor (~0.03 sa), çünkü sabit bir
+>    saat her hamleyi tam bir dilime yuvarlıyordu (Faz 3 review, C1). Yani bir
+>    dilim = bir hamle: 24'te backend "the shortest gated coarse route needs at
+>    least 96 moves" diyor ve hiçbir rota sığmaz. 256'ya çıkarıldı.
+>
+> Statik uyarı metni de düzeltildi: önbellek kurmayı söylemek yerine
+> `shadow_model.reason`'ı basıyor (bkz. Görev 10 düzeltmesi).
 
 **Files:**
 - Create: `frontend/src/features/time-axis/index.tsx`
@@ -4020,7 +4043,7 @@ kuralının ihlalidir.
   - `useTimeAxis(): { manifest, cube, sliceIndex, setSliceIndex, playing, togglePlay, field, setField, plan4d, planning, runPlan4D, error, timeVarying }`
   - `timeAxisOverlays(cube, sliceIndex, field, manifest, plan4d): OverlayLayer[]`
 
-- [ ] **Adım 1: `useTimeAxis.ts` oluştur**
+- [x] **Adım 1: `useTimeAxis.ts` oluştur**
 
 ```ts
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -4032,10 +4055,32 @@ import type { Plan4DResponse, SeriesManifest } from '../../net/types'
 export type SeriesField = 'shadow' | 'surface_temp_c'
 
 const N_SLICES = 24
-const SLICE_HOURS = 1
+/**
+ * Six hours a slice, so 24 slices span six days.
+ *
+ * Not one hour. A lunar day is ~29.5 Earth days, so at this polar site a
+ * 24-hour window does not change at all: the backend reports shadow min and
+ * max both exactly 1.0 across every slice, and the animation plays 24
+ * identical frames.
+ */
+const SLICE_HOURS = 6
 // 24 x 500 x 500 x 4 B is 24 MB per field. Halving each axis makes it 6 MB,
 // which is what a slider scrubbing at 10 fps can afford to keep resident.
 const DOWNSAMPLE = 2
+
+/**
+ * The epoch the whole panel is anchored to, taken once when the module loads.
+ * Both the series and the 4-D plan need it, and they need the SAME one, or
+ * the route would be solved against a different sky than the one drawn.
+ */
+const START_UTC = new Date().toISOString()
+
+/**
+ * Slice budget for the 4-D plan -- deliberately large. The planner derives
+ * its own slice length from the grid, so a move costs one slice and the
+ * slice count is a move budget.
+ */
+const PLAN_SLICES = 256
 
 export function useTimeAxis() {
   const { start, goal, roverId, weights } = useMission()
@@ -4058,7 +4103,12 @@ export function useTimeAxis() {
     setError(null)
 
     fetchSeriesManifest(
-      { nSlices: N_SLICES, sliceHours: SLICE_HOURS, downsample: DOWNSAMPLE },
+      {
+        startUtc: START_UTC,
+        nSlices: N_SLICES,
+        sliceHours: SLICE_HOURS,
+        downsample: DOWNSAMPLE,
+      },
       controller.signal,
     )
       .then(async (next) => {
@@ -4114,8 +4164,12 @@ export function useTimeAxis() {
         goal: { row: goal[0], col: goal[1] },
         rover_id: roverId,
         weights,
-        n_slices: N_SLICES,
+        n_slices: PLAN_SLICES,
         coarsen: 4,
+        // slice_hours is deliberately omitted: the backend derives it from
+        // the grid, and a hand-picked value made the time axis count steps
+        // instead of hours (Faz 3 review, C1).
+        start_utc: START_UTC,
       })
       setPlan4d(response)
     } catch (cause: unknown) {
@@ -4127,7 +4181,7 @@ export function useTimeAxis() {
 
   // "static" means the cube did NOT vary with time. Playing it would be a
   // lie told at 8 fps (spec T7).
-  const timeVarying = manifest?.shadow_model.model !== 'static'
+  const timeVarying = manifest !== null && manifest.shadow_model.model !== 'static'
 
   return {
     manifest,
@@ -4147,7 +4201,7 @@ export function useTimeAxis() {
 }
 ```
 
-- [ ] **Adım 2: `overlays.ts` oluştur**
+- [x] **Adım 2: `overlays.ts` oluştur**
 
 ```ts
 import type { SeriesCube } from '../../net/series'
@@ -4200,7 +4254,7 @@ export function timeAxisOverlays(
 }
 ```
 
-- [ ] **Adım 3: `TimeAxisPanel.tsx` oluştur**
+- [x] **Adım 3: `TimeAxisPanel.tsx` oluştur**
 
 ```tsx
 import type { Plan4DResponse, SeriesManifest } from '../../net/types'
@@ -4274,10 +4328,9 @@ export function TimeAxisPanel({
       {/* The honesty gate. A static cube gets said out loud, not animated. */}
       {manifest && !timeVarying ? (
         <p className="lp-time-note lp-time-warn">
-          No time series — the horizon cache has not been built, so this cube does
-          not vary with time.
+          No time series — this cube does not vary with time, so it is not
+          animated.
           {manifest.shadow_model.reason ? ` ${manifest.shadow_model.reason}` : ''}
-          {' '}Run <code>python scripts/build_horizon_cache.py</code> once.
         </p>
       ) : null}
 
@@ -4314,7 +4367,7 @@ export function TimeAxisPanel({
 }
 ```
 
-- [ ] **Adım 4: `time-axis.css` oluştur**
+- [x] **Adım 4: `time-axis.css` oluştur**
 
 ```css
 .lp-time-card {
@@ -4367,7 +4420,7 @@ export function TimeAxisPanel({
 .lp-time-verdict strong { color: #facc15; }
 ```
 
-- [ ] **Adım 5: `index.tsx` oluştur**
+- [x] **Adım 5: `index.tsx` oluştur**
 
 ```tsx
 import { useEffect } from 'react'
@@ -4402,7 +4455,7 @@ export function TimeAxis() {
 }
 ```
 
-- [ ] **Adım 6: `App.tsx`'e tek satırla bağla**
+- [x] **Adım 6: `App.tsx`'e tek satırla bağla**
 
 ```tsx
 <BottomDock>
@@ -4412,12 +4465,12 @@ export function TimeAxis() {
 
 Import: `import { TimeAxis } from './features/time-axis'`
 
-- [ ] **Adım 7: Derlemeyi doğrula**
+- [x] **Adım 7: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
-- [ ] **Adım 8: Elle kabul**
+- [x] **Adım 8: Elle kabul**
 
 Önce ufuk önbelleğini üret:
 
@@ -4441,7 +4494,7 @@ Sonra:
 adlandır): panel **sarı uyarı** gösteriyor, ▶ butonu **devre dışı**, animasyon
 oynamıyor. Bu görevin dürüstlük kabul kriteri budur.
 
-- [ ] **Adım 9: Commit**
+- [x] **Adım 9: Commit**
 
 ```bash
 git add frontend/src/features/time-axis/ frontend/src/App.tsx
