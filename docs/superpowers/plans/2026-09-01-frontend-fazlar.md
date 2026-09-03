@@ -468,9 +468,18 @@ export interface Corridor {
   corridor_id: string
 }
 
+export interface SlopeBin {
+  /** Field names are bin_low_deg / bin_high_deg, not from_deg / to_deg. */
+  bin_low_deg: number
+  bin_high_deg: number
+  count: number
+  /** Share of waypoints in this bin, already computed by the backend. */
+  pct: number
+}
+
 export interface RouteStatistics {
   waypoint_count: number
-  slope_histogram: Array<{ from_deg: number; to_deg: number; count: number }>
+  slope_histogram: SlopeBin[]
   risk_breakdown_pct: Record<string, number>
   min_surface_temp_c: number | null
   max_surface_temp_c: number | null
@@ -5531,6 +5540,23 @@ koyar — künyeleriyle.
 içerdiğini ve **alt sınır** olduğunu söylüyor. Bu not ekranda görünmezse
 karşılaştırma olduğundan daha iddialı okunur.
 
+> **Plan düzeltmesi (uygulama sırasında, `b721b0e`):** iki şey.
+>
+> 1. `slope_histogram` kutularının alan adları **`bin_low_deg` / `bin_high_deg`**,
+>    `from_deg` / `to_deg` değil. Plandaki panel her kutuda
+>    "undefined–undefined" basar ve hepsine aynı React `key`'ini verirdi.
+>    Kutular ayrıca `pct` taşıyor — çubuk genişliği artık onu kullanıyor,
+>    `count/waypoint_count`'u yeniden hesaplayıp backend'in yuvarlamasıyla
+>    çelişmiyor.
+> 2. **Not tek başına uyarıyı taşımıyor.** Bu rotanın oranı **16.667 m/gün**
+>    çıkıyor, Yutu-2'nin **0.10**'una karşı — beş büyüklük mertebesi, çünkü
+>    yayınlanmış rakamlar Ay gecesi uykusu dahil takvim gününe bölünüyor,
+>    simülasyon saati ise yalnızca sürüş süresi. Bu kadar açık iki sayı aynı
+>    sütun başlığı altında, altında ne yazarsa yazsın bir iddia gibi okunur.
+>    Satır artık "driving only" diyor ve ikinci bir cümle büyük sayının daha
+>    hızlı bir rover anlamına gelmediğini açıkça yazıyor. Görevin amacı zaten
+>    buydu.
+
 **Files:**
 - Create: `frontend/src/net/missions.ts`
 - Create: `frontend/src/features/mission-validation/index.tsx`
@@ -5543,9 +5569,9 @@ karşılaştırma olduğundan daha iddialı okunur.
 - Consumes: `getJson`, `useMission()` (`planResult`)
 - Produces:
   - `fetchReferenceMissions(signal): Promise<ReferenceMissions>`
-  - `useMissionValidation(): { reference, stats, ourRateMPerDay, loading, error }`
+  - `useMissionValidation(): { reference, stats, ourDrivingRateMPerDay, loading, error }`
 
-- [ ] **Adım 1: `net/missions.ts` oluştur**
+- [x] **Adım 1: `net/missions.ts` oluştur**
 
 ```ts
 import { getJson } from './client'
@@ -5558,7 +5584,7 @@ export async function fetchReferenceMissions(
 }
 ```
 
-- [ ] **Adım 2: `useMissionValidation.ts` oluştur**
+- [x] **Adım 2: `useMissionValidation.ts` oluştur**
 
 ```ts
 import { useEffect, useState } from 'react'
@@ -5592,20 +5618,28 @@ export function useMissionValidation() {
     (planResult as { route_statistics?: RouteStatistics | null } | null)
       ?.route_statistics ?? null
 
-  // Our own rate on the same footing as the published ones: metres per
-  // calendar day, dormancy included. summary.total_elapsed_hours is the
-  // simulated traverse clock, which already spans the waits.
+  /**
+   * This route's DRIVING rate: metres per 24 h of simulated traverse clock.
+   *
+   * Deliberately not called comparable to the published column. The flown
+   * figures are distance over CALENDAR days including lunar-night dormancy,
+   * which is why the backend calls them lower bounds; this one excludes
+   * every night the rover would have slept through. On the shipped grid the
+   * two differ by five orders of magnitude -- 16,667 m/day against Yutu-2's
+   * 0.10 -- so the panel labels this number rather than letting the column
+   * header imply they measure the same thing.
+   */
   const summary = planResult?.summary ?? null
-  const ourRateMPerDay =
+  const ourDrivingRateMPerDay =
     summary && summary.total_elapsed_hours > 0
       ? (summary.total_distance_km * 1000) / (summary.total_elapsed_hours / 24)
       : null
 
-  return { reference, stats, ourRateMPerDay, loading, error }
+  return { reference, stats, ourDrivingRateMPerDay, loading, error }
 }
 ```
 
-- [ ] **Adım 3: `MissionValidationPanel.tsx` oluştur**
+- [x] **Adım 3: `MissionValidationPanel.tsx` oluştur**
 
 ```tsx
 import type { ReferenceMissions, RouteStatistics } from '../../net/types'
@@ -5614,13 +5648,13 @@ import './mission-validation.css'
 export function MissionValidationPanel({
   reference,
   stats,
-  ourRateMPerDay,
+  ourDrivingRateMPerDay,
   loading,
   error,
 }: {
   reference: ReferenceMissions | null
   stats: RouteStatistics | null
-  ourRateMPerDay: number | null
+  ourDrivingRateMPerDay: number | null
   loading: boolean
   error: string | null
 }) {
@@ -5652,8 +5686,12 @@ export function MissionValidationPanel({
             <tr className="lp-val-ours">
               <td>This route</td>
               <td>{stats.waypoint_count} waypoints</td>
-              <td>{ourRateMPerDay === null ? '—' : `${ourRateMPerDay.toFixed(1)} m/day`}</td>
-              <td>simulated</td>
+              <td>
+                {ourDrivingRateMPerDay === null
+                  ? '—'
+                  : `${ourDrivingRateMPerDay.toFixed(0)} m/day`}
+              </td>
+              <td>driving only</td>
             </tr>
           ) : null}
         </tbody>
@@ -5663,24 +5701,35 @@ export function MissionValidationPanel({
           reads as a driving speed, which it is not. */}
       <p className="lp-val-caveat">{reference.note}</p>
 
+      {/* And the note alone is not enough here: the two rates differ by five
+          orders of magnitude because they measure different things, so the
+          row above says "driving only" and this says why. */}
+      {stats && ourDrivingRateMPerDay !== null ? (
+        <p className="lp-val-caveat">
+          This route&rsquo;s rate is its simulated traverse clock only — it excludes
+          the lunar nights the published rates are averaged over, so the two
+          columns are not the same measurement and the larger number is not a
+          faster rover.
+        </p>
+      ) : null}
+
       {stats ? (
         <>
           <h4 className="lp-val-subhead">Slope distribution</h4>
           <ul className="lp-val-hist">
-            {stats.slope_histogram.map((bin) => {
-              const share = stats.waypoint_count > 0 ? bin.count / stats.waypoint_count : 0
-              return (
-                <li key={`${bin.from_deg}-${bin.to_deg}`}>
-                  <span className="lp-val-bin">
-                    {bin.from_deg}–{bin.to_deg}°
-                  </span>
-                  <span className="lp-val-track">
-                    <span className="lp-val-fill" style={{ width: `${share * 100}%` }} />
-                  </span>
-                  <span className="lp-val-count">{bin.count}</span>
-                </li>
-              )
-            })}
+            {stats.slope_histogram.map((bin) => (
+              <li key={`${bin.bin_low_deg}-${bin.bin_high_deg}`}>
+                <span className="lp-val-bin">
+                  {bin.bin_low_deg}–{bin.bin_high_deg}°
+                </span>
+                <span className="lp-val-track">
+                  {/* pct comes from the backend; recomputing count/total here
+                      would disagree with it wherever it rounds. */}
+                  <span className="lp-val-fill" style={{ width: `${bin.pct}%` }} />
+                </span>
+                <span className="lp-val-count">{bin.count}</span>
+              </li>
+            ))}
           </ul>
 
           <h4 className="lp-val-subhead">Risk mix</h4>
@@ -5708,7 +5757,7 @@ export function MissionValidationPanel({
 }
 ```
 
-- [ ] **Adım 4: `mission-validation.css` oluştur**
+- [x] **Adım 4: `mission-validation.css` oluştur**
 
 ```css
 .lp-val-card {
@@ -5773,7 +5822,7 @@ export function MissionValidationPanel({
 .lp-val-warn { color: #fbbf24; }
 ```
 
-- [ ] **Adım 5: `index.tsx` oluştur**
+- [x] **Adım 5: `index.tsx` oluştur**
 
 ```tsx
 import { MissionValidationPanel } from './MissionValidationPanel'
@@ -5790,17 +5839,17 @@ export function MissionValidation() {
 }
 ```
 
-- [ ] **Adım 6: `App.tsx`'e tek satırla bağla**
+- [x] **Adım 6: `App.tsx`'e tek satırla bağla**
 
 `<RightRailSlot>` içine `<MissionValidation />`.
 Import: `import { MissionValidation } from './features/mission-validation'`
 
-- [ ] **Adım 7: Derlemeyi doğrula**
+- [x] **Adım 7: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
-- [ ] **Adım 8: Elle kabul**
+- [x] **Adım 8: Elle kabul**
 
 1. Panel açıldığında Yutu-2 ve Pragyan satırları görünüyor — mesafe, oran, tarih
 2. **`note` metni ekranda** ve sarı: "Published mission figures, not model
@@ -5811,7 +5860,7 @@ Expected: temiz
 5. Risk karışımı yüzdeleri görünüyor
 6. Yüzey sıcaklık aralığı görünüyor; `null` ise "unknown" yazıyor, `0.0 °C` değil
 
-- [ ] **Adım 9: Commit**
+- [x] **Adım 9: Commit**
 
 ```bash
 git add frontend/src/net/missions.ts frontend/src/features/mission-validation/ frontend/src/App.tsx
