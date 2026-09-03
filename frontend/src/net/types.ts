@@ -229,10 +229,22 @@ export interface SeriesManifest {
 
 // ── POST /api/pose ─────────────────────────────────────────────────────────
 
+/**
+ * Where a pose sits relative to the corridor it is judged against.
+ *
+ * The clearance field is `half_width_at_pose_m`, not `half_width_m`: the
+ * corridor publishes a half-width per SEGMENT, and this is the one at the
+ * segment the pose projected onto. `inside` is the backend's own verdict --
+ * comparing the offset against the width here would re-derive a decision it
+ * has already made, and disagree with it at the boundary.
+ */
 export interface CorridorFix {
+  segment_index: number
   lateral_offset_m: number
   along_track_m: number
-  half_width_m: number
+  progress_fraction: number
+  half_width_at_pose_m: number
+  inside: boolean
   [key: string]: unknown
 }
 

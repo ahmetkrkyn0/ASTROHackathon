@@ -19,6 +19,7 @@ import { CostExplain } from './features/cost-explain'
 import { CorridorFeature } from './features/corridor'
 import { Replan } from './features/replan'
 import { TimeAxis } from './features/time-axis'
+import { PoseLoop } from './features/pose-loop'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -1064,6 +1065,7 @@ export default function App() {
             <RightRailSlot>
               <CostExplain />
               <CorridorFeature />
+              <PoseLoop />
             </RightRailSlot>
           </div>
             </>
