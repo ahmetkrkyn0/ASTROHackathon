@@ -7,6 +7,8 @@ import React, {
   useImperativeHandle,
 } from 'react'
 import type { Waypoint } from './api'
+import { drawOverlays } from './overlay/draw2d'
+import type { OverlayLayer } from './overlay/types'
 import {
   aspectToRgb,
   computeHillshade,
@@ -50,6 +52,8 @@ interface Props {
   onCellClick: (row: number, col: number) => void
   onAnimationStepChange?: (step: number | null) => void
   onHoverCellChange?: (cell: [number, number] | null) => void
+  /** Feature-module marks, drawn above the base map. See overlay/types.ts. */
+  overlays?: OverlayLayer[]
 }
 
 export interface MapCanvasHandle {
@@ -74,6 +78,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     onCellClick,
     onAnimationStepChange,
     onHoverCellChange,
+    overlays,
   },
   ref,
 ) {
@@ -82,6 +87,12 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   const animationTimerRef = useRef<number | null>(null)
   const [animStep, setAnimStep] = useState<number | null>(null)
   const [hoverCell, setHoverCell] = useState<[number, number] | null>(null)
+
+  // The loaded grid's own row count, not CANVAS_SIZE. Every layer is
+  // fetched at the same downsample, so elevation's shape is the grid's
+  // shape. Zero before the first fetch lands, and drawOverlays draws
+  // nothing at zero -- there is no base map to be out of register with yet.
+  const gridRows = elevationGrid?.length ?? 0
 
   const stopAnimation = useCallback(() => {
     if (animationTimerRef.current !== null) {
@@ -115,11 +126,14 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     })
 
     baseImageRef.current = imageData
-    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell)
-    // Overlay degerleri (waypoints/start/goal/animStep/hoverCell) bilerek
-    // bagimlilikta degil: onlari bir sonraki efekt yeniden ciziyor. Buraya
-    // eklemek, her hover'da taban goruntuyu bastan uretmek demek olurdu.
-    // Bu efekt kostugunda closure zaten o render'in guncel degerlerini tasir.
+    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell, gridRows, overlays)
+    // Overlay degerleri (waypoints/start/goal/animStep/hoverCell/overlays)
+    // bilerek bagimlilikta degil: onlari bir sonraki efekt yeniden ciziyor.
+    // Buraya eklemek, her hover'da -- ve her overlay degisikliginde, yani
+    // zaman kaydiricisinin her adiminda -- taban goruntuyu bastan uretmek
+    // demek olurdu. Bu efekt kostugunda closure zaten o render'in guncel
+    // degerlerini tasir; gridRows da elevationGrid'den turedigi icin
+    // asagidaki listede zaten temsil ediliyor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aspectGrid, costGrid, elevationGrid, resolutionM, shadowGrid, slopeGrid, thermalGrid, traversableGrid, viewMode])
 
@@ -134,8 +148,8 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       return
     }
 
-    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell)
-  }, [animStep, goal, hoverCell, start, waypoints])
+    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell, gridRows, overlays)
+  }, [animStep, goal, gridRows, hoverCell, overlays, start, waypoints])
 
   useEffect(() => {
     if (!waypoints || waypoints.length === 0) {
@@ -293,12 +307,20 @@ function redraw(
   goal: [number, number] | null,
   currentStep: number | null,
   hoverCell: [number, number] | null,
+  gridRows: number,
+  overlays?: OverlayLayer[],
 ) {
   if (baseImage) {
     ctx.putImageData(baseImage, 0, 0)
   } else {
     ctx.fillStyle = '#030408'
     ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE)
+  }
+
+  // Before the route and the markers: a field overlay is a backdrop, and the
+  // planned route must stay readable on top of it.
+  if (overlays && overlays.length) {
+    drawOverlays(ctx, overlays, gridRows, CANVAS_SIZE)
   }
 
   if (waypoints && waypoints.length > 1) {
