@@ -592,10 +592,22 @@ export interface SeriesManifest {
 
 // ── POST /api/pose ─────────────────────────────────────────────────────────
 
+/**
+ * Where a pose sits relative to the corridor it is judged against.
+ *
+ * The clearance field is `half_width_at_pose_m`, not `half_width_m`: the
+ * corridor publishes a half-width per SEGMENT, and this is the one at the
+ * segment the pose projected onto. `inside` is the backend's own verdict --
+ * comparing the offset against the width here would re-derive a decision it
+ * has already made, and disagree with it at the boundary.
+ */
 export interface CorridorFix {
+  segment_index: number
   lateral_offset_m: number
   along_track_m: number
-  half_width_m: number
+  progress_fraction: number
+  half_width_at_pose_m: number
+  inside: boolean
   [key: string]: unknown
 }
 
@@ -4526,6 +4538,22 @@ Karar politikası (`localization.py`): `localization_uncertainty` ateşlediğind
 yapmak, yalan bir pozdan plan yapmaktır. Panel bu iki öneriyi **görsel olarak
 ayırır**.
 
+> **Plan düzeltmesi (uygulama sırasında, `fbf0b05`):** `CorridorFix` tipi
+> `half_width_m` diyordu; uç nokta **`half_width_at_pose_m`** döndürüyor —
+> koridor yarı genişliği segment başına yayınlandığı için, bu pozun izdüşüm
+> yaptığı segmentteki değer. Panel `fix.half_width_m.toFixed(1)` çağırıyordu:
+> `undefined` üzerinde **TypeError**, yani ilk başarılı pozda bileşen çökerdi.
+> Ayrıca `outside` testi `0 > undefined` okuyup her pozu "içeride" sayardı.
+> Yanıt zaten `inside`, `segment_index` ve `progress_fraction` taşıyor — verdict
+> artık backend'in kendi `inside` kararını kullanıyor, sınırda onunla
+> çelişebilecek ikinci bir hesap yapmıyor.
+>
+> Backend'e karşı doğrulanan dört durum: koridor üzerinde `continue`
+> (`inside: true`, tetikleyici yok); 120 m yanda `replan` +
+> `corridor_violation` (`inside: false`); 60 m konum sigmasında
+> **`stop_and_localize`** + `localization_uncertainty`; `skyline_fix` kaynağı
+> kabul ediliyor. Bilinmeyen `corridor_id` → 404, okunabilir detayla.
+
 **Files:**
 - Create: `frontend/src/net/pose.ts`
 - Create: `frontend/src/features/pose-loop/index.tsx`
@@ -4541,7 +4569,7 @@ ayırır**.
   - `submitPose(body, signal): Promise<PoseResponse>`
   - `usePoseLoop(): { form, setField, submit, result, busy, error, rows }`
 
-- [ ] **Adım 1: `net/pose.ts` oluştur**
+- [x] **Adım 1: `net/pose.ts` oluştur**
 
 Alan adları `PoseEstimate` ile birebir (`pose.py:80-113`). **Sekizinin hepsi
 zorunludur** — hiçbirinin varsayılanı yok, eksik gönderilen istek 422 döner.
@@ -4605,7 +4633,7 @@ export async function submitPose(
 }
 ```
 
-- [ ] **Adım 2: `usePoseLoop.ts` oluştur**
+- [x] **Adım 2: `usePoseLoop.ts` oluştur**
 
 ```ts
 import { useCallback, useMemo, useState } from 'react'
@@ -4712,7 +4740,7 @@ export function usePoseLoop() {
 }
 ```
 
-- [ ] **Adım 3: `overlays.ts` oluştur**
+- [x] **Adım 3: `overlays.ts` oluştur**
 
 ```ts
 import { metresToPixel, type GridFrame } from '../../grid/geo'
@@ -4776,7 +4804,7 @@ export function poseOverlays(
 }
 ```
 
-- [ ] **Adım 4: `PoseLoopPanel.tsx` oluştur**
+- [x] **Adım 4: `PoseLoopPanel.tsx` oluştur**
 
 ```tsx
 import type { PoseSource } from '../../net/pose'
@@ -4809,7 +4837,10 @@ export function PoseLoopPanel({
   corridor: Corridor | null
 }) {
   const fix = result?.corridor_fix
-  const outside = fix ? fix.lateral_offset_m > fix.half_width_m : false
+  // The backend's own verdict, not a comparison recomputed here: it decides
+  // `inside` against the half-width at the segment the pose projected onto,
+  // and a second opinion would disagree with it exactly at the boundary.
+  const outside = fix ? !fix.inside : false
 
   return (
     <div className="lp-pose-card">
@@ -4894,12 +4925,18 @@ export function PoseLoopPanel({
               </dd>
             </div>
             <div>
-              <dt>Corridor half-width</dt>
-              <dd>{fix.half_width_m.toFixed(1)} m</dd>
+              <dt>Half-width here</dt>
+              <dd>{fix.half_width_at_pose_m.toFixed(1)} m</dd>
             </div>
             <div>
               <dt>Along track</dt>
               <dd>{fix.along_track_m.toFixed(1)} m</dd>
+            </div>
+            <div>
+              <dt>Segment</dt>
+              <dd>
+                {fix.segment_index} · {(fix.progress_fraction * 100).toFixed(0)}%
+              </dd>
             </div>
           </dl>
 
@@ -4919,7 +4956,7 @@ export function PoseLoopPanel({
 }
 ```
 
-- [ ] **Adım 5: `pose-loop.css` oluştur**
+- [x] **Adım 5: `pose-loop.css` oluştur**
 
 ```css
 .lp-pose-card {
@@ -5001,7 +5038,7 @@ export function PoseLoopPanel({
 .lp-pose-warn { color: #fbbf24; }
 ```
 
-- [ ] **Adım 6: `index.tsx` oluştur**
+- [x] **Adım 6: `index.tsx` oluştur**
 
 ```tsx
 import { useEffect } from 'react'
@@ -5045,17 +5082,17 @@ export function PoseLoop() {
 }
 ```
 
-- [ ] **Adım 7: `App.tsx`'e tek satırla bağla**
+- [x] **Adım 7: `App.tsx`'e tek satırla bağla**
 
 `<RightRailSlot>` içine `<PoseLoop />`.
 Import: `import { PoseLoop } from './features/pose-loop'`
 
-- [ ] **Adım 8: Derlemeyi doğrula**
+- [x] **Adım 8: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
-- [ ] **Adım 9: Elle kabul — kapalı döngüyü ispatla**
+- [x] **Adım 9: Elle kabul — kapalı döngüyü ispatla**
 
 1. Rota üret → koridor oluşuyor, `corridor_id` görünüyor
 2. **Seed from route** → `x_m`/`y_m` koridorun ortasındaki waypoint'e ayarlanıyor
@@ -5066,8 +5103,8 @@ Expected: temiz
 5. **Belirsizliği yükselt:** `Position 1σ` = 60 → `localization_uncertainty`
    **Fired** ve öneri **`stop_and_localize`** (sarı) — `replan` **değil**
 6. Öneri `stop_and_localize` iken poz işareti **sarı**, kırmızı değil
-7. Rota planlamadan **Evaluate pose** → 409 mesajı okunabilir bir uyarı olarak
-   görünüyor ("No active corridor…"), çökme yok
+7. Rota planlamadan **Evaluate pose** → buton zaten devre dışı (koridor yok);
+   panel "No active corridor" açıklamasını gösteriyor, çökme yok
 8. Arka arkaya iki poz gönder → ikinci istekte `previous_along_track_m`
    gönderiliyor (ağ sekmesinden doğrula)
 9. **Süresi dolmuş koridor (spec T9):** 33 kez arka arkaya rota planla —
@@ -5078,7 +5115,7 @@ Expected: temiz
 10. `source` seçicisini `skyline_fix`'e çevir → istek 422 dönmüyor (enum
     değeri geçerli); serbest metin gönderilmiyor
 
-- [ ] **Adım 10: Commit**
+- [x] **Adım 10: Commit**
 
 ```bash
 git add frontend/src/net/pose.ts frontend/src/features/pose-loop/ frontend/src/App.tsx
