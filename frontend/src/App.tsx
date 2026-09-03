@@ -26,6 +26,7 @@ import {
 } from './api'
 import { batteryToHex, riskToHex } from './colormap'
 import { MissionProvider } from './mission/MissionContext'
+import { OverlayProvider } from './overlay/OverlayContext'
 import type { FocusTelemetry, MissionValue } from './mission/types'
 import {
   BottomDock,
@@ -636,6 +637,7 @@ export default function App() {
 
   return (
     <MissionProvider value={missionValue} focusTelemetry={focusTelemetry}>
+      <OverlayProvider>
       {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
 
       <div className={`loading-screen ${phase === 'loading' ? 'is-active' : ''}`}>
@@ -1133,6 +1135,7 @@ export default function App() {
         ))}
       </div>
       </div>
+      </OverlayProvider>
     </MissionProvider>
   )
 }

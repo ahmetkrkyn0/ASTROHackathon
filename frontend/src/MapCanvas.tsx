@@ -2,11 +2,16 @@ import React, {
   useRef,
   useEffect,
   useCallback,
+  useMemo,
   useState,
   forwardRef,
   useImperativeHandle,
 } from 'react'
 import type { Waypoint } from './api'
+import type { CanvasGeometry } from './mission/geo'
+import { drawOverlayCommands } from './overlay/draw2d'
+import type { OverlayCommand } from './overlay/types'
+import { useOverlayCommands } from './overlay/useOverlays'
 import {
   aspectToRgb,
   computeHillshade,
@@ -89,6 +94,21 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   const [animStep, setAnimStep] = useState<number | null>(null)
   const [hoverCell, setHoverCell] = useState<[number, number] | null>(null)
 
+  // The generic feature overlay layer. This is the ONLY seam features get on
+  // this canvas: they publish commands, overlay/draw2d.ts translates them, and
+  // no feature-specific drawing is ever written here again. Empty by default,
+  // and the empty list is returned by identity, so a cockpit with no overlay
+  // features redraws exactly as often and paints exactly what it did before.
+  const overlayCommands = useOverlayCommands()
+  const overlayGeometry = useMemo<CanvasGeometry>(
+    () => ({
+      rows: elevationGrid?.length ?? CANVAS_SIZE,
+      cols: elevationGrid?.[0]?.length ?? CANVAS_SIZE,
+      canvasSize: CANVAS_SIZE,
+    }),
+    [elevationGrid],
+  )
+
   const stopAnimation = useCallback(() => {
     if (animationTimerRef.current !== null) {
       window.clearTimeout(animationTimerRef.current)
@@ -121,7 +141,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     })
 
     baseImageRef.current = imageData
-    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell)
+    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell, overlayCommands, overlayGeometry)
   }, [aspectGrid, costGrid, elevationGrid, resolutionM, shadowGrid, slopeGrid, thermalGrid, traversableGrid, viewMode])
 
   useEffect(() => {
@@ -135,8 +155,8 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       return
     }
 
-    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell)
-  }, [animStep, goal, hoverCell, start, waypoints])
+    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell, overlayCommands, overlayGeometry)
+  }, [animStep, goal, hoverCell, overlayCommands, overlayGeometry, start, waypoints])
 
   useEffect(() => {
     if (!waypoints || waypoints.length === 0) {
@@ -294,6 +314,8 @@ function redraw(
   goal: [number, number] | null,
   currentStep: number | null,
   hoverCell: [number, number] | null,
+  overlayCommands: readonly OverlayCommand[],
+  overlayGeometry: CanvasGeometry,
 ) {
   if (baseImage) {
     ctx.putImageData(baseImage, 0, 0)
@@ -343,6 +365,13 @@ function redraw(
 
   drawMarker(ctx, start, '#00e676', 'S')
   drawMarker(ctx, goal, '#ff1744', 'G')
+
+  // Feature overlays sit above the route and the mission markers -- a corridor
+  // that a route disappeared under would be pointless -- and below the hover
+  // crosshair, which is a pointer affordance and has to stay readable over
+  // whatever is drawn.
+  drawOverlayCommands(ctx, overlayCommands, overlayGeometry)
+
   drawHoverCrosshair(ctx, hoverCell)
 }
 
