@@ -276,8 +276,51 @@ alıp `vx` ile ölçekle, mesh ile aynı referansta olur.
 
 ---
 
+## `/api/plan-4d` — batarya ve gölge dayanımı (3 Eylül 2026 eki)
+
+Ay gecesine denk gelen bir `start_utc` ile plan artık **reddedilmiyor**.
+Eskiden küp, yüzey sıcaklığı −150 °C'nin altına düşen her hücreyi o dilimde
+geçilmez sayıyordu; gecede bu haritanın tamamıydı ("1.257.052 edges led
+into cells with no finite cost"). Geçilebilirliği artık rover'ın kendi
+zarfı belirliyor: planlayıcı her durumda bataryayı ve kesintisiz gölge
+saatini taşıyor.
+
+**İstek** — yeni, opsiyonel alan:
+
+```json
+{ "start": {...}, "goal": {...}, "start_utc": "2026-09-07T00:00:00",
+  "initial_soc_pct": 1.0 }
+```
+
+`initial_soc_pct` ∈ (0, 1], varsayılan 1.0. Rota, bataryayı rover'ın
+`soc_min_pct` rezervinin (LPR-1 için %20) altına düşüremez; rezervin altında
+başlamak yalnızca güneşte bekleyerek şarj olunabiliyorsa geçerlidir.
+
+**Yanıt** — eklenen alanlar (mevcut alanlar aynen duruyor):
+
+| Alan | Tip | Anlamı |
+|---|---|---|
+| `path_battery_pct` | `number[]` | `path_states` ile aynı uzunlukta; her durumda batarya yüzdesi |
+| `path_dark_hours` | `number[]` | Her duruma varışta birikmiş kesintisiz gölge saati (aydınlık hücrede sıfırlanır) |
+| `metrics.min_battery_pct` | `number` | Rota boyunca en düşük batarya |
+| `metrics.final_battery_pct` | `number` | Hedefte batarya |
+| `metrics.max_continuous_shadow_h` | `number` | Rotadaki en uzun kesintisiz gölge; her zaman ≤ `h_max_shadow_h` |
+| `metrics.energy_drawn_wh`, `metrics.energy_charged_wh` | `number` | Bataryadan çekilen / güneşten giren enerji |
+| `metrics.edges_rejected.soc_floor` | `number` | Rezervi ihlal edeceği için reddedilen geçişler |
+| `metrics.edges_rejected.shadow_endurance` | `number` | Gölge dayanımını aşacağı için reddedilen geçişler |
+| `metrics.envelope_tracked` | `boolean` | Her zaman `true` (endpoint gölge küpünü daima geçirir) |
+
+**404 mesajı** artık önce zarfı söyler ("… edges would have drained the
+battery below the 20 percent reserve …") ve site tüm ufuk boyunca karanlıksa
+bunu ekler ("The site is in darkness for the entire 6.8 h horizon …"). Gün
+doğumu civarında (bu grid için 18–22 Eylül) planın beklemesi gerekir; varsayılan
+ufuk yalnızca rotanın kendi süresi kadardır, bu yüzden böyle tarihlerde
+`horizon_hours` (ör. 120) ve `slice_hours` (ör. 0.5) gönderin.
+
+Süre: gerçek gridde varsayılan ayarlarla gece ve gündüz planı ~10 s.
+
 ## Değişmeyenler
 
-`fetchLayer`, `/api/plan`, `/api/plan-4d`, `/api/cell-telemetry`,
+`fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,
 `/api/profiles`, `/api/rovers` — hepsi aynen. `format` opsiyonel ve
 varsayılanı `json`.

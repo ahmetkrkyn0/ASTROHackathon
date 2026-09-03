@@ -167,6 +167,52 @@ def net_energy_per_metre_wh(
     return net_w * seconds / 3600.0
 
 
+def move_battery_drain_wh(
+    theta_deg: float,
+    distance_m: float,
+    shadow_ratio: float = 0.0,
+    rover: Mapping[str, Any] | None = None,
+) -> float:
+    """Signed change the BATTERY sees for one drive: draw minus solar income.
+
+    Positive drains, negative charges. Unlike :func:`net_energy_per_metre_wh`
+    this is NOT floored at zero, because it feeds a state of charge rather
+    than a penalty: a flat, lit cell where the array outproduces the drive
+    genuinely refills the battery, and the 4-D planner has to know that to
+    decide whether a later dark stretch is affordable. Same traction,
+    housekeeping and solar conventions as the simulator and ``wait_cost``.
+    """
+    rover_cfg = _resolve_rover(rover)
+    seconds = edge_travel_time_s(max(0.0, float(theta_deg)), float(distance_m), rover_cfg)
+    if not math.isfinite(seconds):
+        return float("inf")
+    hours = seconds / 3600.0
+    drawn = gross_energy_per_metre_wh(theta_deg, shadow_ratio, rover_cfg) * float(distance_m)
+    ratio = min(1.0, max(0.0, float(shadow_ratio)))
+    solar_wh = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * hours
+    return drawn - solar_wh
+
+
+def wait_battery_drain_wh(
+    shadow_ratio: float,
+    hours: float,
+    rover: Mapping[str, Any] | None = None,
+) -> float:
+    """Signed battery change for holding position: housekeeping minus solar.
+
+    Positive drains (waiting in shadow runs the heater on the battery),
+    negative charges (waiting in sunlight refills it). ``wait_cost`` prices
+    the drain side of exactly this quantity; the 4-D planner integrates it
+    into the state so a wait in the dark is affordable only while the
+    reserve holds.
+    """
+    rover_cfg = _resolve_rover(rover)
+    ratio = min(1.0, max(0.0, float(shadow_ratio)))
+    solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio)
+    net_w = housekeeping_power_w(ratio, rover_cfg) - solar_w
+    return net_w * max(0.0, float(hours))
+
+
 def f_energy_cell(
     theta_deg: float,
     rover: Mapping[str, Any] | None = None,

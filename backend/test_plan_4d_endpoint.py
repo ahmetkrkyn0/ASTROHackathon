@@ -214,3 +214,54 @@ def test_horizon_within_the_cap_is_accepted(client):
     payload = client.post("/api/plan-4d", json=body).json()
     assert payload["n_slices"] == 400
     assert payload["horizon_hours"] == pytest.approx(20.0)
+
+
+# ── Battery and shadow endurance in the response ─────────────────────────────
+
+
+def test_plan_4d_reports_a_battery_profile_and_honours_initial_soc(client):
+    payload = client.post("/api/plan-4d", json=_body(initial_soc_pct=0.5)).json()
+    assert payload["path_battery_pct"][0] == pytest.approx(50.0)
+    assert len(payload["path_battery_pct"]) == len(payload["path_states"])
+    assert len(payload["path_dark_hours"]) == len(payload["path_states"])
+    metrics = payload["metrics"]
+    assert "min_battery_pct" in metrics
+    assert "final_battery_pct" in metrics
+    assert "max_continuous_shadow_h" in metrics
+    assert "energy_drawn_wh" in metrics and "energy_charged_wh" in metrics
+
+
+def test_plan_4d_defaults_to_a_full_battery(client):
+    payload = client.post("/api/plan-4d", json=_body()).json()
+    assert payload["path_battery_pct"][0] == pytest.approx(100.0)
+
+
+def test_plan_4d_rejects_initial_soc_outside_the_unit_interval(client):
+    for bad in (0.0, 1.5, -0.2):
+        response = client.post("/api/plan-4d", json=_body(initial_soc_pct=bad))
+        assert response.status_code == 422, bad
+
+
+def test_plan_4d_starting_under_the_reserve_waits_to_charge(client):
+    """The fixture is 70 percent lit, so a rover parked at 10 percent charges
+    at ~240 W -- while driving a 12 degree slope draws more than the array
+    gives back. The right plan is to wait until the reserve is covered, not
+    to refuse."""
+    app.state.grids["slope"] = np.full(SHAPE, 12.0)
+    response = client.post("/api/plan-4d", json=_body(initial_soc_pct=0.1))
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["path_battery_pct"][0] == pytest.approx(10.0)
+    assert payload["metrics"]["final_battery_pct"] > 10.0
+    assert payload["metrics"]["wait_steps"] > 0
+    # Waiting under the reserve is allowed (it charges); every MOVE must
+    # end at or above it.
+    reserve_pct = get_rover()["soc_min_pct"] * 100.0
+    states, battery = payload["path_states"], payload["path_battery_pct"]
+    moves_end_at = [
+        battery[i + 1]
+        for i in range(len(states) - 1)
+        if states[i][:2] != states[i + 1][:2]
+    ]
+    assert moves_end_at, "the route must contain at least one move"
+    assert min(moves_end_at) >= reserve_pct - 1e-6
