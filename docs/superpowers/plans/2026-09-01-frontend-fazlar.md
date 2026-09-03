@@ -5885,6 +5885,18 @@ yayıncısı ve bir `pose_monitor` içeriyor. Ama **frontend'e açılan bir HTTP
 yüzeyi yok** — rosbridge/websocket kurulu değil. Bu yüzden bu modül canlı
 bağlantı iddia etmez; ne inşa edildiğini künyeleriyle gösterir.
 
+> **Plan düzeltmesi (uygulama sırasında, `7b38d0b`):** panelin kapanış cümlesi
+> "`backend/app/` ne rclpy ne fastapi import eder" diyordu ve bu **yanlış** —
+> `main.py` o paketin içinde ve 16-18. satırlarda fastapi import ediyor.
+> `grid_frame.py` ile `rover_grids.py` kelimeleri yalnızca bu özelliği anlatan
+> docstring'lerinde geçiriyor. Sayıldı: `backend/app`'teki **35 modülden
+> yalnızca `main.py`** fastapi import ediyor, hiçbiri rclpy import etmiyor.
+> Hem doğru hem daha güçlü bir iddia — ki tam olarak var olma sebebi
+> "olmayanı iddia etmemek" olan panelde bu önemli.
+>
+> Adım 1'in doğrulaması geçti: dört düğüm dosyası, `PlanTraverse.action`, dört
+> `.msg`, launch + rviz ve iki script — hepsi repoda mevcut.
+
 **Files:**
 - Create: `frontend/src/features/ros-showcase/index.tsx`
 - Create: `frontend/src/features/ros-showcase/RosShowcasePanel.tsx`
@@ -5895,7 +5907,7 @@ bağlantı iddia etmez; ne inşa edildiğini künyeleriyle gösterir.
 - Consumes: hiçbir uç (statik içerik)
 - Produces: `RosShowcase` bileşeni
 
-- [ ] **Adım 1: İçeriği kaynaktan doğrula**
+- [x] **Adım 1: İçeriği kaynaktan doğrula**
 
 Panelde yazacak her şeyin repoda karşılığı olmalı. Şunları çalıştır ve çıktıyı
 not al:
@@ -5914,7 +5926,7 @@ Expected: `conversions.py`, `grid_publisher.py`, `planner_node.py`,
 
 **Listede olmayan hiçbir şey panele yazılmaz.** Bir dosya yoksa o satırı çıkar.
 
-- [ ] **Adım 2: `RosShowcasePanel.tsx` oluştur**
+- [x] **Adım 2: `RosShowcasePanel.tsx` oluştur**
 
 ```tsx
 import './ros-showcase.css'
@@ -5996,9 +6008,13 @@ export function RosShowcasePanel() {
       <Group title="Interfaces" items={INTERFACES} />
       <Group title="Tooling" items={TOOLING} />
 
+      {/* Counted, not asserted. Saying backend/app imports no fastapi would
+          be false -- main.py is in that package and is the HTTP shell. The
+          true and stronger claim is that it is the ONLY module that does. */}
       <p className="lp-ros-note">
-        The core is shell-independent: <code>backend/app/</code> imports neither
-        rclpy nor fastapi, so the HTTP API and the ROS 2 nodes call the same
+        The core is shell-independent: of the 35 modules in{' '}
+        <code>backend/app/</code>, only <code>main.py</code> imports fastapi and
+        none imports rclpy, so the HTTP API and the ROS 2 nodes call the same
         functions and cannot drift apart.
       </p>
     </div>
@@ -6006,7 +6022,7 @@ export function RosShowcasePanel() {
 }
 ```
 
-- [ ] **Adım 3: `ros-showcase.css` oluştur**
+- [x] **Adım 3: `ros-showcase.css` oluştur**
 
 ```css
 .lp-ros-card {
@@ -6044,7 +6060,7 @@ export function RosShowcasePanel() {
 .lp-ros-note code { color: #cbd5f5; }
 ```
 
-- [ ] **Adım 4: `index.tsx` oluştur**
+- [x] **Adım 4: `index.tsx` oluştur**
 
 ```tsx
 import { RosShowcasePanel } from './RosShowcasePanel'
@@ -6059,17 +6075,17 @@ export function RosShowcase() {
 }
 ```
 
-- [ ] **Adım 5: `App.tsx`'e tek satırla bağla**
+- [x] **Adım 5: `App.tsx`'e tek satırla bağla**
 
 `<LeftRailSlot>` içine `<RosShowcase />`.
 Import: `import { RosShowcase } from './features/ros-showcase'`
 
-- [ ] **Adım 6: Derlemeyi doğrula**
+- [x] **Adım 6: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
-- [ ] **Adım 7: Elle kabul**
+- [x] **Adım 7: Elle kabul**
 
 1. Panel açılıyor; **sarı uyarı en üstte** ve "Not a live connection" diyor
 2. Listelenen her dosya yolu repoda **gerçekten var** (Adım 1'in çıktısıyla
@@ -6077,7 +6093,7 @@ Expected: temiz
 3. Panelde hiçbir yerde canlı topic, canlı sayı veya bağlantı durumu
    göstergesi **yok**
 
-- [ ] **Adım 8: Commit**
+- [x] **Adım 8: Commit**
 
 ```bash
 git add frontend/src/features/ros-showcase/ frontend/src/App.tsx
