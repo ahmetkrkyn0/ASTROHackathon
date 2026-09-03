@@ -5152,6 +5152,20 @@ kokpitte yok.
 
 Panel `checked: false` olanı **"not checked"** gösterir, "passed" değil.
 
+> **Uygulama notu (`e7eb572`):** çalışan backend'e karşı koşuldu ve tam da bu
+> tasarımın varlık sebebi olan karışık durum çıktı: `balanced`, `fast_recon` ve
+> `shadow_traverse` başarılı planlarken **`energy_saver` başarısız** (20159 kenar
+> 18 derece devrilme sınırını aşıyor) ve üç yol-bağımlı kısıtı da
+> `checked: false, satisfied: null` dönüyor. `satisfied === true`
+> karşılaştırması bu yüzden şart: `null` bir "geçti" değil. Tablonun okuduğu dört
+> metrik anahtarının dördü de yanıtta mevcut.
+>
+> Bir ekleme: kanca zaten `comparison` döndürüyordu ama panel kullanmıyordu.
+> Backend'in `recommendation` cümlesi artık olduğu gibi gösteriliyor — kendi
+> uyarısını taşıdığı için ("energy and shadow totals are not tracked in fast
+> mode, so neither ranking is an energy claim") ve özetlemek tam da onu
+> düşürürdü.
+
 **Files:**
 - Create: `frontend/src/net/compare.ts`
 - Create: `frontend/src/features/profile-compare/index.tsx`
@@ -5168,7 +5182,7 @@ Panel `checked: false` olanı **"not checked"** gösterir, "passed" değil.
   - `useProfileCompare(): { results, comparison, run, busy, error }`
   - `profileOverlays(results): OverlayLayer[]`
 
-- [ ] **Adım 1: `net/compare.ts` oluştur**
+- [x] **Adım 1: `net/compare.ts` oluştur**
 
 ```ts
 import { postJson } from './client'
@@ -5201,7 +5215,7 @@ export async function planMulti(
 }
 ```
 
-- [ ] **Adım 2: `useProfileCompare.ts` oluştur**
+- [x] **Adım 2: `useProfileCompare.ts` oluştur**
 
 ```ts
 import { useCallback, useState } from 'react'
@@ -5227,7 +5241,8 @@ export function readConstraints(result: ProfileResult): ConstraintVerdict[] {
     enforcedInSearch: entry.enforced_in_search === true,
     // A constraint the backend could not test is not a pass. It reports
     // checked:false precisely so a client does not read silence as success
-    // (scenarios.py:104-108).
+    // (scenarios.py:104-108). satisfied arrives as null in that case, which
+    // is why both are compared against true rather than coerced.
     checked: entry.checked === true,
     satisfied: entry.satisfied === true,
   }))
@@ -5262,7 +5277,7 @@ export function useProfileCompare() {
 }
 ```
 
-- [ ] **Adım 3: `overlays.ts` oluştur**
+- [x] **Adım 3: `overlays.ts` oluştur**
 
 ```ts
 import type { ProfileResult } from '../../net/types'
@@ -5281,7 +5296,7 @@ export function profileOverlays(results: ProfileResult[]): OverlayLayer[] {
 }
 ```
 
-- [ ] **Adım 4: `ProfileComparePanel.tsx` oluştur**
+- [x] **Adım 4: `ProfileComparePanel.tsx` oluştur**
 
 ```tsx
 import type { ProfileResult } from '../../net/types'
@@ -5295,15 +5310,20 @@ function metric(result: ProfileResult, key: string): string {
 
 export function ProfileComparePanel({
   results,
+  comparison,
   run,
   busy,
   error,
 }: {
   results: ProfileResult[]
+  comparison: Record<string, unknown> | null
   run: () => void
   busy: boolean
   error: string | null
 }) {
+  const recommendation =
+    typeof comparison?.recommendation === 'string' ? comparison.recommendation : null
+
   return (
     <div className="lp-compare-card">
       <button type="button" className="lp-compare-run" disabled={busy} onClick={run}>
@@ -5311,6 +5331,13 @@ export function ProfileComparePanel({
       </button>
 
       {error ? <p className="lp-compare-note lp-compare-warn">{error}</p> : null}
+
+      {/* The backend's own summary, verbatim. It states its own limits --
+          "energy and shadow totals are not tracked in fast mode, so neither
+          ranking is an energy claim" -- and paraphrasing would drop that. */}
+      {recommendation ? (
+        <p className="lp-compare-recommendation">{recommendation}</p>
+      ) : null}
 
       {results.map((result) => {
         const constraints = readConstraints(result)
@@ -5360,7 +5387,7 @@ export function ProfileComparePanel({
 }
 ```
 
-- [ ] **Adım 5: `profile-compare.css` oluştur**
+- [x] **Adım 5: `profile-compare.css` oluştur**
 
 ```css
 .lp-compare-card {
@@ -5377,6 +5404,10 @@ export function ProfileComparePanel({
 }
 
 .lp-compare-run:disabled { opacity: 0.45; cursor: default; }
+
+.lp-compare-recommendation {
+  margin: 0 0 8px; font-size: 11px; line-height: 1.5; color: #cbd5f5;
+}
 
 .lp-compare-row {
   padding: 8px 0; border-top: 1px solid rgba(148, 163, 184, 0.12);
@@ -5411,7 +5442,7 @@ export function ProfileComparePanel({
 .lp-compare-warn { color: #fbbf24; }
 ```
 
-- [ ] **Adım 6: `index.tsx` oluştur**
+- [x] **Adım 6: `index.tsx` oluştur**
 
 ```tsx
 import { useEffect } from 'react'
@@ -5423,7 +5454,7 @@ import { useProfileCompare } from './useProfileCompare'
 const OVERLAY_ID = 'profile-compare'
 
 export function ProfileCompare() {
-  const { results, run, busy, error } = useProfileCompare()
+  const { results, comparison, run, busy, error } = useProfileCompare()
   const { register, unregister } = useOverlays()
 
   useEffect(() => {
@@ -5434,23 +5465,29 @@ export function ProfileCompare() {
   return (
     <section className="rail-section">
       <p className="panel-kicker">Profile Comparison</p>
-      <ProfileComparePanel results={results} run={run} busy={busy} error={error} />
+      <ProfileComparePanel
+        results={results}
+        comparison={comparison}
+        run={run}
+        busy={busy}
+        error={error}
+      />
     </section>
   )
 }
 ```
 
-- [ ] **Adım 7: `App.tsx`'e tek satırla bağla**
+- [x] **Adım 7: `App.tsx`'e tek satırla bağla**
 
 `<RightRailSlot>` içine `<ProfileCompare />`.
 Import: `import { ProfileCompare } from './features/profile-compare'`
 
-- [ ] **Adım 8: Derlemeyi doğrula**
+- [x] **Adım 8: Derlemeyi doğrula**
 
 Run: `cd frontend && npm test && npm run typecheck && npm run lint && npm run build`
 Expected: temiz
 
-- [ ] **Adım 9: Elle kabul**
+- [x] **Adım 9: Elle kabul**
 
 1. Başlangıç ve hedef seç → **Compare all profiles**
 2. **Dört** profil listeleniyor: Balanced, Energy Saver, Fast Recon,
@@ -5464,7 +5501,7 @@ Expected: temiz
 7. Grid dışında bir hedef seçmeye çalış → 422 okunabilir bir hata olarak
    görünüyor
 
-- [ ] **Adım 10: Commit**
+- [x] **Adım 10: Commit**
 
 ```bash
 git add frontend/src/net/compare.ts frontend/src/features/profile-compare/ frontend/src/App.tsx
