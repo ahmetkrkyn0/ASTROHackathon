@@ -14,6 +14,7 @@ import { OverlayProvider } from './overlay/OverlayProvider'
 import { useOverlays } from './overlay/useOverlays'
 import type { CellTelemetryResponse } from './net/types'
 import { LeftRailSlot, RightRailSlot, BottomDock, CanvasOverlaySlot } from './shell/slots'
+import { LayerProvenance } from './features/layer-provenance'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -714,7 +715,9 @@ export default function App() {
                   </div>
                 </section>
 
-                <LeftRailSlot />
+                <LeftRailSlot>
+                  <LayerProvenance />
+                </LeftRailSlot>
               </div>
             </>
           )}
