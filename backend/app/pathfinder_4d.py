@@ -37,6 +37,11 @@ REJECTION_KEYS: tuple[str, ...] = (
     "corner_cut",
     "cost_infinite",
     "horizon",
+    # The rover's envelope, carried in the search state: a transition that
+    # would drain the battery below the reserve, or keep the rover in
+    # continuous shadow longer than it survives.
+    "soc_floor",
+    "shadow_endurance",
 )
 
 
@@ -66,8 +71,23 @@ def no_path_reason_4d(
     horizon = rejections.get("horizon", 0)
     blocked = rejections.get("cost_infinite", 0)
     unknown = rejections.get("nan_elevation", 0)
+    soc = rejections.get("soc_floor", 0)
+    endurance = rejections.get("shadow_endurance", 0)
 
     parts: list[str] = []
+    # The envelope first: when the battery or the darkness closed the route,
+    # that is the answer, and slope counts beside it are noise.
+    if soc:
+        reserve_pct = 100.0 * float(rover.get("soc_min_pct") or 0.0)
+        parts.append(
+            f"{soc} edges would have drained the battery below the "
+            f"{reserve_pct:.0f} percent reserve"
+        )
+    if endurance:
+        parts.append(
+            f"{endurance} edges would have kept the rover in continuous shadow "
+            f"beyond its {float(rover['h_max_shadow_h']):g} h endurance"
+        )
     if lateral:
         parts.append(
             f"{lateral} edges exceeded the {rover['slope_lateral_max_deg']} deg "
@@ -94,7 +114,7 @@ def no_path_reason_4d(
             "passable cells at this coarsen factor."
         )
     lead = "No path found"
-    if horizon and not (lateral or along or blocked or unknown):
+    if horizon and not (lateral or along or blocked or unknown or soc or endurance):
         lead = "No path found within the time horizon"
     return (
         f"{lead} for {rover.get('name', rover.get('id', 'this rover'))}: "
@@ -284,6 +304,88 @@ def _empty(
     }
 
 
+# The envelope's resolution for DOMINANCE. At one (row, col, slice), a
+# label whose battery is within one percent of capacity of a cheaper
+# label's, and whose continuous shadow is within five percent of the
+# endurance of it, is pruned: the difference is below anything the model
+# can claim to resolve. Without a tolerance the search kept one label per
+# floating-point drain value -- at a lunar-night epoch, where every edge
+# drains by a slope-dependent amount, that is one label per path, and the
+# production grid did not finish in ten minutes. A tolerance rather than
+# fixed bins, because a bin boundary at exactly full charge split every
+# lit-terrain label in two. Measured on the production grid (216 slices,
+# coarsen 4): at these tolerances the tracked search expands exactly as
+# many nodes as the untracked one (122 753 vs 122 604, static series) and
+# finds the same cost; at half these tolerances the static series took
+# 2.5x the nodes (the fractional long-run shadow resets the shadow clock
+# differently on every path). The CONSTRAINTS are still checked on the
+# exact values.
+_BATTERY_DOMINANCE_TOL_FRAC: float = 0.01
+_DARK_DOMINANCE_TOL_FRAC: float = 0.05
+# Label keys (for the closed set and the cost table) are binned finely.
+_BATTERY_BINS_PER_CAPACITY: int = 400
+_DARK_BINS_PER_ENDURANCE: int = 100
+# A slice counts toward continuous shadow when at least this much of it is
+# dark. The SPICE series is binary, so this only matters for the static
+# (long-run fraction) fallback, where it reads "mostly dark".
+_DARK_RATIO_THRESHOLD: float = 0.5
+
+
+def _dominated(
+    front: list[tuple[float, float, float]],
+    g: float,
+    battery: float,
+    dark: float,
+    battery_tol: float,
+    dark_tol: float,
+    strict: bool = False,
+) -> bool:
+    """True if some label in *front* is at least as good on every axis.
+
+    A label is (cost so far, battery Wh, continuous shadow hours). Lower
+    cost, more battery and less shadow all dominate, each within its
+    tolerance. With *strict* the label must be beaten on at least one axis
+    beyond the tolerance, which is how a label already in the front is told
+    apart from a genuine dominator at pop time.
+    """
+    for other_g, other_battery, other_dark in front:
+        if (
+            other_g <= g + 1e-12
+            and other_battery >= battery - battery_tol
+            and other_dark <= dark + dark_tol
+        ):
+            if not strict:
+                return True
+            if (
+                other_g < g - 1e-12
+                or other_battery > battery + battery_tol
+                or other_dark < dark - dark_tol
+            ):
+                return True
+    return False
+
+
+def _insert_label(
+    front: list[tuple[float, float, float]],
+    g: float,
+    battery: float,
+    dark: float,
+    battery_tol: float,
+    dark_tol: float,
+) -> None:
+    """Add a non-dominated label and drop the ones it dominates."""
+    front[:] = [
+        (other_g, other_battery, other_dark)
+        for other_g, other_battery, other_dark in front
+        if not (
+            g <= other_g + 1e-12
+            and battery >= other_battery - battery_tol
+            and dark <= other_dark + dark_tol
+        )
+    ]
+    front.append((g, battery, dark))
+
+
 def astar_4d(
     cost_cube: np.ndarray,
     wait_cost_cube: np.ndarray,
@@ -295,6 +397,8 @@ def astar_4d(
     rover: Mapping[str, Any],
     slope_grid: np.ndarray | None = None,
     elevation_grid: np.ndarray | None = None,
+    shadow_cube: np.ndarray | None = None,
+    initial_soc_frac: float = 1.0,
 ) -> dict[str, Any]:
     """Plan through space and time. Returns path_states, path_pixels, metrics.
 
@@ -304,6 +408,36 @@ def astar_4d(
     Without it neither can be evaluated, and the two planners in this product
     would disagree about which edges are safe -- the same class of divergence
     round 2 fixed for corner-cutting. (Round 3 review, H-1 and H-2.)
+
+    The rover's envelope in the state
+    ---------------------------------
+    *shadow_cube*, when supplied, is the (T, H, W) shadow ratio each label is
+    exposed to. Every search label then carries the battery (Wh) and the
+    continuous shadow hours accrued so far, integrated with the same physics
+    ``wait_cost`` and the simulator use (``cost_engine.move_battery_drain_wh``
+    and ``wait_battery_drain_wh``). A transition is refused when it would
+    drain the battery below ``soc_min_pct`` of ``e_cap_wh`` -- unless it is a
+    wait that CHARGES, so a rover parked under its reserve in sunlight may
+    recover -- or keep the rover in continuous shadow beyond
+    ``h_max_shadow_h``. Refusals are tallied as ``soc_floor`` and
+    ``shadow_endurance``.
+
+    This replaces the round-4 rule that closed a cell whenever its regolith
+    skin fell below -150 C at that slice. Measured on the production grid at
+    a lunar-night epoch that rule closed every cell within 2.5 h and refused
+    every route for the whole night, while the catalogue gives LPR-1 50 h of
+    darkness. The ground's skin temperature is priced by the cube; whether
+    the rover may be there is decided here, by the rover.
+
+    Labels at one (row, col, slice) are kept as a Pareto front over (cost,
+    battery, shadow hours) so the search stays a label-setting A* rather
+    than one state per drain value. The cost and the heuristic are
+    unchanged, so admissibility is untouched: the envelope only removes
+    edges.
+
+    Without *shadow_cube* the envelope is not tracked: the battery is
+    reported at ``initial_soc_frac`` throughout and shadow hours at zero,
+    which is the pre-envelope behaviour the toy-cube tests exercise.
     """
     t0 = time.perf_counter()
 
@@ -318,6 +452,9 @@ def astar_4d(
     n_slices, height, width = cost.shape
     if passable.shape != (height, width):
         return _empty("traversable shape must match cost_cube slices")
+    shadow = None if shadow_cube is None else np.asarray(shadow_cube, dtype=np.float64)
+    if shadow is not None and shadow.shape != cost.shape:
+        return _empty("shadow_cube shape must match cost_cube")
 
     def in_bounds(r: int, c: int) -> bool:
         return 0 <= r < height and 0 <= c < width
@@ -383,43 +520,166 @@ def astar_4d(
         hours_lower_bound = distance_m / v_max_ms / 3600.0
         return hours_lower_bound * (1.0 + min_cost)
 
-    start_state = (start[0], start[1], 0)
-    g_score: dict[tuple[int, int, int], float] = {start_state: 0.0}
-    came_from: dict[tuple[int, int, int], tuple[int, int, int]] = {}
-    closed: set[tuple[int, int, int]] = set()
+    # -- The envelope -------------------------------------------------------
+    e_cap_wh = float(rover["e_cap_wh"])
+    reserve_wh = e_cap_wh * float(rover.get("soc_min_pct") or 0.0)
+    h_max_shadow = float(rover["h_max_shadow_h"])
+    battery0 = min(1.0, max(0.0, float(initial_soc_frac))) * e_cap_wh
+    track = shadow is not None
+
+    endurance_finite = math.isfinite(h_max_shadow) and h_max_shadow > 0.0
+    dark_quantum_h = (
+        h_max_shadow / _DARK_BINS_PER_ENDURANCE
+        if endurance_finite
+        else max(slice_hours, 1e-6)
+    )
+    battery_tol = e_cap_wh * _BATTERY_DOMINANCE_TOL_FRAC
+    dark_tol = (
+        h_max_shadow * _DARK_DOMINANCE_TOL_FRAC if endurance_finite else slice_hours
+    )
+
+    # The drain arithmetic, inlined: cost_engine.move_battery_drain_wh and
+    # wait_battery_drain_wh are the reference (and the simulator's), and
+    # test_pathfinder_4d checks this integration against them exactly, but
+    # calling them per edge re-derived the travel time three times over and
+    # doubled the planner's time per node.
+    p_base_w = float(rover["p_base_w"])
+    mu_coeff = float(rover["mu_coeff"])
+    p_idle_w = float(rover["p_idle_w"])
+    p_shadow_w = rover.get("p_shadow_w")
+    shadow_extra_w = (
+        max(0.0, float(p_shadow_w) - p_idle_w)
+        if p_shadow_w is not None
+        else float(rover.get("p_heater_w") or 0.0)
+    )
+    p_solar_w = float(rover.get("p_solar_w") or 0.0)
+
+    def housekeeping_w(ratio: float) -> float:
+        return p_idle_w + ratio * shadow_extra_w
+
+    def battery_key(battery_wh: float) -> int:
+        if e_cap_wh <= 0.0:
+            return 0
+        return int(battery_wh / e_cap_wh * _BATTERY_BINS_PER_CAPACITY)
+
+    def dark_key(dark_h: float) -> int:
+        return int(dark_h / dark_quantum_h)
+
+    def label_of(r: int, c: int, t: int, battery_wh: float, dark_h: float):
+        return (r, c, t, battery_key(battery_wh), dark_key(dark_h))
+
+    def envelope_after(
+        exposure: float,
+        hours: float,
+        battery_wh: float,
+        dark_h: float,
+        drain_wh: float,
+    ) -> tuple[float, float, str | None]:
+        """Battery and shadow hours after a transition, or the refusal key.
+
+        *exposure* is the shadow ratio the rover is exposed to across the
+        transition (the slice waited through, or the arrival cell for a
+        move); *drain_wh* the signed battery change it costs.
+        """
+        new_battery = min(e_cap_wh, battery_wh - drain_wh)
+        # Below the reserve is refused -- unless the transition CHARGES, so
+        # a rover parked under its reserve in sunlight is allowed to recover.
+        if new_battery < reserve_wh and new_battery < battery_wh:
+            return battery_wh, dark_h, "soc_floor"
+        if exposure >= _DARK_RATIO_THRESHOLD:
+            new_dark = dark_h + hours * exposure
+        else:
+            new_dark = 0.0
+        if new_dark > h_max_shadow + 1e-9:
+            return battery_wh, dark_h, "shadow_endurance"
+        return new_battery, new_dark, None
+
+    # -- Label-setting A* ---------------------------------------------------
+    start_label = label_of(start[0], start[1], 0, battery0, 0.0)
+    g_score: dict[tuple, float] = {start_label: 0.0}
+    battery_of: dict[tuple, float] = {start_label: battery0}
+    dark_of: dict[tuple, float] = {start_label: 0.0}
+    came_from: dict[tuple, tuple] = {}
+    fronts: dict[tuple[int, int, int], list[tuple[float, float, float]]] = {
+        (start[0], start[1], 0): [(0.0, battery0, 0.0)]
+    }
+    closed: set[tuple] = set()
     counter = 0
-    heap: list[tuple[float, float, int, tuple[int, int, int]]] = [
-        (heuristic(*start), 0.0, counter, start_state)
+    heap: list[tuple[float, float, int, tuple]] = [
+        (heuristic(*start), 0.0, counter, start_label)
     ]
     nodes_expanded = 0
-    goal_state: tuple[int, int, int] | None = None
+    goal_label: tuple | None = None
+
+    def push(
+        r: int, c: int, t: int, g_new: float, battery_wh: float, dark_h: float, parent: tuple
+    ) -> None:
+        nonlocal counter
+        node = (r, c, t)
+        front = fronts.setdefault(node, [])
+        if _dominated(front, g_new, battery_wh, dark_h, battery_tol, dark_tol):
+            return
+        _insert_label(front, g_new, battery_wh, dark_h, battery_tol, dark_tol)
+        label = label_of(r, c, t, battery_wh, dark_h)
+        if g_new < g_score.get(label, math.inf):
+            g_score[label] = g_new
+            battery_of[label] = battery_wh
+            dark_of[label] = dark_h
+            came_from[label] = parent
+            counter += 1
+            h = heuristic(r, c)
+            heapq.heappush(heap, (g_new + h, h, counter, label))
 
     while heap:
-        _f, _h, _n, state = heapq.heappop(heap)
-        if state in closed:
+        _f, _h, _n, label = heapq.heappop(heap)
+        if label in closed:
             continue
-        closed.add(state)
+        row, col, slice_index, _bkey, _dkey = label
+        current_g = g_score[label]
+        battery_wh = battery_of[label]
+        dark_h = dark_of[label]
+        # A label pushed earlier may have been dominated since by a better
+        # one at the same node; expanding it would only re-derive worse
+        # successors.
+        if _dominated(
+            fronts.get((row, col, slice_index), []),
+            current_g,
+            battery_wh,
+            dark_h,
+            battery_tol,
+            dark_tol,
+            strict=True,
+        ):
+            continue
+        closed.add(label)
         nodes_expanded += 1
 
-        row, col, slice_index = state
         if (row, col) == goal:
-            goal_state = state
+            goal_label = label
             break
-
-        current_g = g_score[state]
 
         # WAIT edge
         if slice_index + 1 < n_slices:
-            wait_state = (row, col, slice_index + 1)
-            tentative = current_g + float(wait[slice_index, row, col])
-            if math.isfinite(tentative) and tentative < g_score.get(
-                wait_state, math.inf
-            ):
-                g_score[wait_state] = tentative
-                came_from[wait_state] = state
-                counter += 1
-                h = heuristic(row, col)
-                heapq.heappush(heap, (tentative + h, h, counter, wait_state))
+            wait_step = float(wait[slice_index, row, col])
+            if math.isfinite(wait_step):
+                if track:
+                    exposure = float(shadow[slice_index, row, col])
+                    # == wait_battery_drain_wh(exposure, slice_hours, rover)
+                    drain_wh = (
+                        housekeeping_w(exposure) - p_solar_w * (1.0 - exposure)
+                    ) * slice_hours
+                    new_battery, new_dark, refused = envelope_after(
+                        exposure, slice_hours, battery_wh, dark_h, drain_wh
+                    )
+                else:
+                    new_battery, new_dark, refused = battery_wh, dark_h, None
+                if refused is not None:
+                    rejections[refused] += 1
+                else:
+                    push(
+                        row, col, slice_index + 1,
+                        current_g + wait_step, new_battery, new_dark, label,
+                    )
 
         # MOVE edges
         for d_row, d_col, diagonal in _OFFSETS:
@@ -486,18 +746,39 @@ def astar_4d(
                 rejections["cost_infinite"] += 1
                 continue
 
-            step = (travel_s / 3600.0) * (1.0 + 0.5 * (from_cost + to_cost))
-            neighbour = (nr, nc, arrival)
-            tentative = current_g + step
-            if tentative < g_score.get(neighbour, math.inf):
-                g_score[neighbour] = tentative
-                came_from[neighbour] = state
-                counter += 1
-                h = heuristic(nr, nc)
-                heapq.heappush(heap, (tentative + h, h, counter, neighbour))
+            travel_h = travel_s / 3600.0
+            if track:
+                # The edge is half in each cell: the drain follows the mean
+                # exposure, the same trapezoid the cost uses; the shadow
+                # clock follows where the rover ends up.
+                mean_exposure = 0.5 * (
+                    float(shadow[slice_index, row, col])
+                    + float(shadow[arrival, nr, nc])
+                )
+                # == move_battery_drain_wh(edge_slope, distance_m,
+                #                          mean_exposure, rover)
+                traction_w = p_base_w * (
+                    1.0 + mu_coeff * math.sin(math.radians(max(0.0, edge_slope)))
+                )
+                drain_wh = (
+                    traction_w
+                    + housekeeping_w(mean_exposure)
+                    - p_solar_w * (1.0 - mean_exposure)
+                ) * travel_h
+                new_battery, new_dark, refused = envelope_after(
+                    float(shadow[arrival, nr, nc]), travel_h, battery_wh, dark_h, drain_wh
+                )
+                if refused is not None:
+                    rejections[refused] += 1
+                    continue
+            else:
+                new_battery, new_dark = battery_wh, dark_h
+
+            step = travel_h * (1.0 + 0.5 * (from_cost + to_cost))
+            push(nr, nc, arrival, current_g + step, new_battery, new_dark, label)
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
-    if goal_state is None:
+    if goal_label is None:
         return _empty(
             no_path_reason_4d(rejections, rover, n_slices, slice_hours),
             elapsed_ms,
@@ -505,10 +786,14 @@ def astar_4d(
             nodes_expanded,
         )
 
-    states: list[tuple[int, int, int]] = [goal_state]
-    while states[-1] in came_from:
-        states.append(came_from[states[-1]])
-    states.reverse()
+    labels: list[tuple] = [goal_label]
+    while labels[-1] in came_from:
+        labels.append(came_from[labels[-1]])
+    labels.reverse()
+
+    states: list[tuple[int, int, int]] = [(r, c, t) for r, c, t, _b, _d in labels]
+    batteries = [battery_of[label] for label in labels]
+    darks = [dark_of[label] for label in labels]
 
     wait_steps = sum(
         1
@@ -516,14 +801,23 @@ def astar_4d(
         if previous[:2] == current[:2]
     )
 
+    if e_cap_wh > 0.0:
+        battery_pct = [round(100.0 * wh / e_cap_wh, 3) for wh in batteries]
+    else:
+        battery_pct = [100.0 for _ in batteries]
+    energy_drawn = sum(max(0.0, a - b) for a, b in zip(batteries[:-1], batteries[1:]))
+    energy_charged = sum(max(0.0, b - a) for a, b in zip(batteries[:-1], batteries[1:]))
+
     return {
         "path_states": states,
         "path_pixels": [(r, c) for r, c, _ in states],
+        "path_battery_pct": battery_pct,
+        "path_dark_hours": [round(d, 4) for d in darks],
         "metrics": {
             "wait_steps": wait_steps,
             "move_steps": len(states) - 1 - wait_steps,
-            "arrival_slice": goal_state[2],
-            "total_cost": round(float(g_score[goal_state]), 6),
+            "arrival_slice": goal_label[2],
+            "total_cost": round(float(g_score[goal_label]), 6),
             # MOVE edges cost travel HOURS scaled by the weighted cell cost,
             # and WAIT edges cost slice hours the same way -- so this total
             # is in weighted hours. app.pathfinder's total_weighted_cost is
@@ -536,6 +830,13 @@ def astar_4d(
             "edges_rejected": dict(rejections),
             "edges_dropped_at_horizon": rejections["horizon"],
             "horizon_truncated": rejections["horizon"] > 0,
+            # The envelope along the route, as the planner accounted for it.
+            "min_battery_pct": round(min(battery_pct), 3),
+            "final_battery_pct": battery_pct[-1],
+            "max_continuous_shadow_h": round(max(darks), 4),
+            "energy_drawn_wh": round(energy_drawn, 3),
+            "energy_charged_wh": round(energy_charged, 3),
+            "envelope_tracked": track,
         },
         "error": None,
     }

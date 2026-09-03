@@ -19,7 +19,6 @@ from typing import Any
 
 import numpy as np
 
-from .constants import THERMAL_MIN_TRAVERSABLE_C
 from .costmap import PlanContext, default_cost_map
 from .thermal_model import (
     REGOLITH_THERMAL_TAU_S,
@@ -198,24 +197,25 @@ def build_cost_cube(
         else:
             thermal_slice = thermal_c
 
-        # A cell whose temperature at THIS slice is outside the traversable
-        # band is impassable at this slice and passable later -- which is
-        # what finally gives the WAIT edge something to buy. Before the
-        # coupling, shadow only made a cell more expensive, never
-        # impassable, so waiting could never pay for the time it costs.
-        #
-        # It is folded into the slice's OWN traversable mask rather than
-        # applied afterwards, so CostMap.total is the single place that
-        # decides passability and a caller can reproduce the slice exactly
-        # by building the same PlanContext.
-        traversable_slice = traversable_c & (
-            thermal_slice >= THERMAL_MIN_TRAVERSABLE_C
-        )
+        # The per-slice temperature is a COST, never a veto. Round 4 also
+        # ANDed ``thermal_slice >= THERMAL_MIN_TRAVERSABLE_C`` into this
+        # slice's traversable mask so that a WAIT edge had something to buy.
+        # Measured on the production grid at a lunar-night epoch
+        # (2026-09-07): every statically passable cell fell below the gate
+        # within 2.5 h -- the fully shadowed equilibrium is the 90 K PSR
+        # floor, 33 C under the gate, and the skin relaxes there with a 1 h
+        # time constant -- so the whole map was impassable for the whole
+        # night and /api/plan-4d refused every pair with "no finite cost",
+        # while the catalogue gives LPR-1 50 h of darkness. The skin
+        # temperature of the ground is not what limits the rover; its own
+        # battery and shadow endurance are, and those now live in the
+        # planner's state (pathfinder_4d). The static cold-trap gate stays
+        # where it always was, in the base traversable mask.
         context = PlanContext(
             slope=slope_c,
             thermal=thermal_slice,
             shadow_ratio=shadow_c,
-            traversable=traversable_slice,
+            traversable=traversable_c,
             resolution_m=resolution_c,
             rover=rover,
         )

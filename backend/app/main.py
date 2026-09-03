@@ -413,6 +413,21 @@ class Plan4DRequest(BaseModel):
             "shadow_model='static'."
         ),
     )
+    # The planner carries the battery in its state: a route is refused where
+    # it would drain below the rover's reserve (soc_min_pct) or keep the rover
+    # in continuous shadow longer than h_max_shadow_h. Where the rover starts
+    # on that scale is the caller's to say; a full battery is the default.
+    initial_soc_pct: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "State of charge at the first slice as a fraction of e_cap_wh "
+            "(0-1]. The route must keep the battery above the rover's "
+            "soc_min_pct reserve; starting under the reserve is allowed only "
+            "where waiting in sunlight can charge it back."
+        ),
+    )
 
 
 # A bare list[int] let a 3-element start reach astar and raise IndexError as
@@ -1106,6 +1121,12 @@ def plan_4d(req: Plan4DRequest, request: Request):
     wait_cube = build_wait_cost_cube(
         illum_series, rover, slice_hours, weights_dict, coarsen=req.coarsen
     )
+    # The illumination each label is exposed to, on the planner's own grid:
+    # this is what drains or charges the battery and what counts as shadow
+    # time, so it has to be the same field the cubes were built from.
+    shadow_cube = np.stack(
+        [coarsen_grid(snapshot, req.coarsen) for snapshot in shadow_series], axis=0
+    )
 
     result = astar_4d(
         cost_cube,
@@ -1122,16 +1143,40 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # the two planners disagreed about which edges are safe.
         # (Round 3 review, H-1 and H-2.)
         elevation_grid=coarse_elevation,
+        shadow_cube=shadow_cube,
+        initial_soc_frac=req.initial_soc_pct,
     )
     if result["error"]:
         # move_count already accounted for the edge gates, so a failure here
-        # is a horizon or cost problem rather than a geometric one -- and the
-        # planner's own message now names which. (Round 4 review, H-2.)
+        # is a horizon, envelope or cost problem rather than a geometric one
+        # -- and the planner's own message now names which. (Round 4 review,
+        # H-2.)
         detail = (
             f"{result['error']} (the shortest gated coarse route needs at "
             f"least {move_count} moves at {n_slices} slices of "
             f"{slice_hours:.4f} h)"
         )
+        # Say when the site itself is dark: a refusal at a lunar-night epoch
+        # used to read as a slope problem. The first lit slice, if any, is
+        # the number a caller needs to pick a horizon or an epoch.
+        if shadow_provenance.get("time_varying"):
+            lit_fraction = [float(np.mean(1.0 - snapshot)) for snapshot in shadow_series]
+            first_lit = next(
+                (index for index, value in enumerate(lit_fraction) if value > 0.01),
+                None,
+            )
+            horizon_h = n_slices * slice_hours
+            if first_lit is None:
+                detail += (
+                    f" The site is in darkness for the entire {horizon_h:.1f} h "
+                    "horizon from start_utc: no slice is lit, so the route must "
+                    "run on battery, or start at a lit epoch."
+                )
+            elif first_lit > 0:
+                detail += (
+                    f" The site is dark until {first_lit * slice_hours:.1f} h "
+                    f"into the {horizon_h:.1f} h horizon."
+                )
         raise HTTPException(status_code=404, detail=detail)
 
     # The planner solves on the coarse grid, but the caller asked in fine
@@ -1158,6 +1203,10 @@ def plan_4d(req: Plan4DRequest, request: Request):
         "path_pixels": fine_pixels,
         "path_pixels_coarse": result["path_pixels"],
         "path_states": result["path_states"],
+        # One entry per state: the battery the planner accounted for and the
+        # continuous shadow the rover had accrued on arrival there.
+        "path_battery_pct": result["path_battery_pct"],
+        "path_dark_hours": result["path_dark_hours"],
         "metrics": metrics,
         # Whether the cube this plan solved actually varied with time, and
         # why not when it did not. A caller reading wait_steps needs this to

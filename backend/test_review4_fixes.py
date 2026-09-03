@@ -223,7 +223,14 @@ def test_h3_regolith_lag_separates_a_passing_shadow_from_a_cold_trap():
     assert after_day == pytest.approx(PSR_C, abs=1.0)
 
 
-def test_h3_sustained_shadow_eventually_closes_a_cell_but_one_slice_does_not():
+def test_h3_sustained_shadow_makes_a_cell_costlier_but_never_closes_it():
+    """H-3 introduced the regolith lag so that one slice of shadow is not a
+    cold trap. It also closed the cell once the skin fell below -150 C, and
+    that rule shut the entire production grid for the whole lunar night
+    (measured 2026-09-07: 0 percent passable after 2.5 h) while the
+    catalogue gives LPR-1 50 h of darkness. The lag stays; the veto is gone.
+    Whether the rover may sit in a dark cell is now decided by its own
+    battery and shadow endurance in the planner's state (pathfinder_4d)."""
     grids = _grids(thermal=10.0, shadow=0.0)
     rover = get_rover()
     dark = np.ones(grids["slope"].shape)
@@ -233,7 +240,8 @@ def test_h3_sustained_shadow_eventually_closes_a_cell_but_one_slice_does_not():
     )
     assert np.isfinite(cube[0, 0, 0])
     assert np.isfinite(cube[1, 0, 0]), "one hour of shadow is not a cold trap"
-    assert np.isinf(cube[-1, 0, 0]), "sustained shadow must close the cell"
+    assert np.isfinite(cube[-1, 0, 0]), "sustained shadow is priced, not banned"
+    assert cube[-1, 0, 0] > cube[1, 0, 0], "the surface keeps cooling, so cost keeps rising"
 
 
 def test_h3_traversability_gates_on_the_cold_end():
