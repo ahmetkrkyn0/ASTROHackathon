@@ -40,8 +40,12 @@ export interface AstarMetrics {
   path_length_nodes: number
   total_distance_m: number
   total_weighted_cost: number
-  total_energy_wh: number
-  total_shadow_hours: number
+  // Always null: pathfinder.py:734-735 and 790-791 emit these as None and
+  // point at the simulation summary instead. Real energy is
+  // summary.total_energy_consumed_wh; real shadow exposure is
+  // summary.total_shadow_exposure / summary.max_continuous_shadow_h.
+  total_energy_wh: number | null
+  total_shadow_hours: number | null
   max_slope_deg: number
   max_thermal_risk: number
   min_surface_temp_c: number
