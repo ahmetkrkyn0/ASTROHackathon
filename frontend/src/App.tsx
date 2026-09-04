@@ -130,6 +130,7 @@ export default function App() {
   const [sliceIndex, setSliceIndex] = useState(0)
   const [terrainSlices, setTerrainSlices] = useState(0)
   const [photoDrape, setPhotoDrape] = useState(false)
+  const [terrainPhotoAvailable, setTerrainPhotoAvailable] = useState(false)
 
   // Payload simulator specs
   const [payloadW, setPayloadW] = useState(35)
@@ -684,12 +685,19 @@ export default function App() {
                   <TerrainCanvas3D
                     viewMode={viewMode}
                     waypoints={planResult?.waypoints ?? null}
+                    activeWaypoint={
+                      routePlaybackStep !== null
+                        ? (planResult?.waypoints[routePlaybackStep] ?? null)
+                        : (planResult?.waypoints[0] ?? null)
+                    }
                     exaggeration={null}
                     sliceIndex={sliceIndex}
                     photo={photoDrape}
-                    onReady={({ slices, timeVarying, brightestSlice }) => {
+                    onReady={({ slices, timeVarying, brightestSlice, photoAvailable }) => {
                       setTerrainSlices(timeVarying ? slices : 0)
                       setSliceIndex(brightestSlice)
+                      setTerrainPhotoAvailable(photoAvailable)
+                      if (!photoAvailable) setPhotoDrape(false)
                     }}
                     onError={(message) =>
                       pushToast({ tone: 'warning', title: '3D Terrain', message })
@@ -705,9 +713,14 @@ export default function App() {
                     <input
                       type="checkbox"
                       checked={photoDrape}
+                      disabled={!terrainPhotoAvailable}
                       onChange={(event) => setPhotoDrape(event.target.checked)}
                     />
-                    <span>Photographic Overlay (LROC NAC, 1 m/px)</span>
+                    <span>
+                      {terrainPhotoAvailable
+                        ? 'Photographic Overlay (LROC NAC, 1 m/px)'
+                        : 'Photographic Overlay (not aligned with current DEM window)'}
+                    </span>
                   </label>
                   {photoDrape ? (
                     <span className="terrain3d-note">

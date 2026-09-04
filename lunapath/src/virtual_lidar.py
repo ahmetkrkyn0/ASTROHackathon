@@ -11,11 +11,12 @@ forcing it into a per-origin loop would defeat that vectorisation. This
 module reuses the geometry, not the vectorised code path.
 
 LIMITATION -- restate this wherever this module's output is used: an
-80 m/px orbital DEM cannot resolve the 30 cm rocks a real LiDAR sees. A
-scan at LiDAR-realistic ranges (tens of metres) barely leaves the origin
-cell on that grid. This module exists to prove the Corridor contract
-(app.corridor) actually feeds a downstream consumer -- it is an interface
-test, not a perception simulation.
+The current working input (Site11) is 5 m/px, read at runtime from processed
+metadata rather than assumed here. That is fine enough for a tens-of-metres
+scan to cross several DEM cells and measure resolved slopes/ridges, but it
+still cannot resolve the sub-metre rocks a rover LiDAR sees. This module is
+therefore the orbital-DEM side of the simulation; the 3-D scene adds explicit
+metre-scale rock meshes for the local perception demonstration.
 """
 
 from __future__ import annotations
@@ -37,13 +38,35 @@ DEFAULT_ELEVATION_ANGLES_DEG: tuple[float, ...] = tuple(
 )
 
 
-def _nearest_elevation(elevation: np.ndarray, row: float, col: float) -> float | None:
+def _sample_elevation(elevation: np.ndarray, row: float, col: float) -> float | None:
+    """Bilinear elevation at a fractional pixel coordinate.
+
+    A 0.5 m ray step on a 5 m grid should not see ten copies of one flat cell
+    followed by a vertical wall at the next pixel boundary. Interpolation
+    represents the continuous surface implied between DEM sample centres.
+    Nodata only invalidates contributors whose interpolation weight is nonzero.
+    """
     height, width = elevation.shape
-    r, c = int(round(row)), int(round(col))
-    if not (0 <= r < height and 0 <= c < width):
+    if not (0.0 <= row <= height - 1 and 0.0 <= col <= width - 1):
         return None
-    value = elevation[r, c]
-    return float(value) if np.isfinite(value) else None
+
+    r0, c0 = int(np.floor(row)), int(np.floor(col))
+    r1, c1 = min(r0 + 1, height - 1), min(c0 + 1, width - 1)
+    fr, fc = row - r0, col - c0
+    samples = (
+        (elevation[r0, c0], (1.0 - fr) * (1.0 - fc)),
+        (elevation[r0, c1], (1.0 - fr) * fc),
+        (elevation[r1, c0], fr * (1.0 - fc)),
+        (elevation[r1, c1], fr * fc),
+    )
+    value = 0.0
+    for sample, weight in samples:
+        if weight == 0.0:
+            continue
+        if not np.isfinite(sample):
+            return None
+        value += float(sample) * weight
+    return value
 
 
 def virtual_scan(
@@ -66,17 +89,32 @@ def virtual_scan(
     at open sky. Azimuth convention matches app.horizon: 0 = North
     (decreasing row), 90 = East (increasing column).
 
-    LIMITATION: on the 80 m/px orbital DEM this is an interface rehearsal,
-    not perception -- a 30 m scan does not even reach the neighbouring cell.
+    The current 5 m/px working DEM resolves terrain relief, not sub-metre
+    hazards. ``resolution_m`` remains an explicit runtime input so another DEM
+    can be used without changing this function.
     """
     elev = np.asarray(elevation, dtype=np.float64)
-    origin_elevation = _nearest_elevation(elev, origin_row, origin_col)
+    if not np.isfinite(resolution_m) or resolution_m <= 0:
+        raise ValueError("resolution_m must be positive and finite")
+    origin_elevation = _sample_elevation(elev, origin_row, origin_col)
     if origin_elevation is None:
         raise ValueError("origin_row/origin_col fall outside the elevation grid")
     sensor_z = origin_elevation + float(sensor_height_m)
 
-    step_m = float(range_step_m) if range_step_m else max(resolution_m / 4.0, 0.5)
-    n_steps = max(1, int(round(float(max_range_m) / step_m)))
+    # Site11 is 5 m/px: resolution/10 gives 0.5 m ray samples. The clamp keeps
+    # finer DEMs useful without exploding work on coarse legacy inputs.
+    step_m = (
+        float(range_step_m)
+        if range_step_m is not None
+        else min(max(float(resolution_m) / 10.0, 0.25), 1.0)
+    )
+    if not np.isfinite(step_m) or step_m <= 0:
+        raise ValueError("range_step_m must be positive and finite")
+    if not np.isfinite(max_range_m) or max_range_m <= 0:
+        raise ValueError("max_range_m must be positive and finite")
+    # Ceil plus the clamp below guarantees one final sample exactly at range;
+    # non-divisible steps must never overshoot the advertised sensor range.
+    n_steps = max(1, int(np.ceil(float(max_range_m) / step_m)))
 
     points: list[tuple[float, float, float]] = []
     for a_i in range(int(n_azimuth)):
@@ -88,10 +126,10 @@ def virtual_scan(
             tan_elev = np.tan(np.radians(float(elev_deg)))
 
             for step in range(1, n_steps + 1):
-                distance_m = step * step_m
+                distance_m = min(step * step_m, float(max_range_m))
                 row = origin_row + d_row * distance_m / resolution_m
                 col = origin_col + d_col * distance_m / resolution_m
-                ground_z = _nearest_elevation(elev, row, col)
+                ground_z = _sample_elevation(elev, row, col)
                 if ground_z is None:
                     break  # ray left the grid: no return
 

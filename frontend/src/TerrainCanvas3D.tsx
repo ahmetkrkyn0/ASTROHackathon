@@ -26,6 +26,14 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { MapViewMode } from './MapCanvas'
 import type { Waypoint } from './api'
+import {
+  generateRockField,
+  LIDAR_CONFIG,
+  sampleTerrainHeight,
+  seededRandom,
+  simulateLidarScan,
+} from './lidarSimulation'
+import type { LidarScanResult, LidarScanSummary, TerrainField } from './lidarSimulation'
 
 /** Which binary layer paints the surface, per 2-D view mode. */
 const LAYER_FOR_VIEW: Record<MapViewMode, string> = {
@@ -77,6 +85,7 @@ const FALLBACK_RAMP: [THREE.Color, THREE.Color] = [
 
 interface TerrainManifest {
   grid: { rows: number; cols: number; resolution_m: number }
+  georeference: { origin: { x: number; y: number } }
   elevation: { min_m: number; max_m: number; vertical_exaggeration_suggested: number }
   layers: Record<string, { min: number | null; max: number | null; binary_url: string }>
 }
@@ -139,6 +148,28 @@ const PHOTO_TEXTURE_URL = '/textures/nac-site11-2048.jpg'
  * photograph.
  */
 const DETAIL_TEXTURE_URL = '/textures/nac-site11-detail-2048.jpg'
+
+// The bundled NAC crops are georeferenced assets, not generic lunar textures.
+// Only drape them when the live backend is serving the exact window they were
+// cut from; otherwise the image would put real craters at false coordinates.
+const NAC_TEXTURE_WINDOW = {
+  originX: -32_500,
+  originY: 11_000,
+  rows: 500,
+  cols: 500,
+  resolutionM: 5,
+}
+
+function hasAlignedNacTexture(manifest: TerrainManifest): boolean {
+  const { grid, georeference } = manifest
+  return (
+    grid.rows === NAC_TEXTURE_WINDOW.rows &&
+    grid.cols === NAC_TEXTURE_WINDOW.cols &&
+    Math.abs(grid.resolution_m - NAC_TEXTURE_WINDOW.resolutionM) < 1e-6 &&
+    Math.abs(georeference.origin.x - NAC_TEXTURE_WINDOW.originX) < 1e-6 &&
+    Math.abs(georeference.origin.y - NAC_TEXTURE_WINDOW.originY) < 1e-6
+  )
+}
 
 async function fetchF32(url: string): Promise<Float32Array> {
   const response = await fetch(url)
@@ -390,9 +421,99 @@ function createSunFlareSprite(): THREE.Sprite {
   return sprite
 }
 
+function createRockTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const context = canvas.getContext('2d')!
+  const image = context.createImageData(canvas.width, canvas.height)
+  const random = seededRandom(0x4c554e41)
+
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const index = (y * canvas.width + x) * 4
+      const broad = 12 * Math.sin(x * 0.17) * Math.cos(y * 0.11)
+      const grain = (random() - 0.5) * 34
+      const value = THREE.MathUtils.clamp(104 + broad + grain, 55, 148)
+      image.data[index] = value
+      image.data[index + 1] = value * 0.965
+      image.data[index + 2] = value * 0.92
+      image.data[index + 3] = 255
+    }
+  }
+  context.putImageData(image, 0, 0)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.wrapS = THREE.RepeatWrapping
+  texture.wrapT = THREE.RepeatWrapping
+  texture.repeat.set(2.5, 2.5)
+  return texture
+}
+
+function createRoverModel(): { group: THREE.Group; lidarHead: THREE.Group } {
+  const group = new THREE.Group()
+  const chassisMaterial = new THREE.MeshStandardMaterial({
+    color: 0x151b24,
+    roughness: 0.64,
+    metalness: 0.58,
+  })
+  const metalMaterial = new THREE.MeshStandardMaterial({
+    color: 0xa7b0b8,
+    roughness: 0.38,
+    metalness: 0.75,
+  })
+  const tireMaterial = new THREE.MeshStandardMaterial({
+    color: 0x171717,
+    roughness: 0.96,
+    metalness: 0.05,
+  })
+
+  const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.42, 1.85), chassisMaterial)
+  chassis.position.y = 0.6
+  group.add(chassis)
+
+  for (const x of [-0.88, 0.88]) {
+    for (const z of [-0.62, 0.62]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.24, 16), tireMaterial)
+      wheel.rotation.z = Math.PI / 2
+      wheel.position.set(x, 0.34, z)
+      group.add(wheel)
+    }
+  }
+
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.065, 0.82, 12), metalMaterial)
+  mast.position.y = 1.16
+  group.add(mast)
+
+  const lidarHead = new THREE.Group()
+  lidarHead.position.y = 1.6
+  const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.14, 24), metalMaterial)
+  const apertureMaterial = new THREE.MeshBasicMaterial({ color: 0x44ddff })
+  const aperture = new THREE.Mesh(new THREE.CylinderGeometry(0.195, 0.195, 0.055, 24, 1, true), apertureMaterial)
+  aperture.position.y = 0.01
+  lidarHead.add(lower, aperture)
+  group.add(lidarHead)
+
+  return { group, lidarHead }
+}
+
+function disposeObjectTree(root: THREE.Object3D): void {
+  const materials = new Set<THREE.Material>()
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return
+    object.geometry.dispose()
+    const objectMaterials = Array.isArray(object.material) ? object.material : [object.material]
+    objectMaterials.forEach((material) => materials.add(material))
+  })
+  materials.forEach((material) => material.dispose())
+}
+
 interface Props {
   viewMode: MapViewMode
   waypoints: Waypoint[] | null
+  /** Playback pose; the rover and its local LiDAR follow this waypoint. */
+  activeWaypoint: Waypoint | null
   exaggeration: number | null
   sliceIndex: number
   /** Drape the real NAC photograph instead of shading a flat albedo. */
@@ -401,6 +522,7 @@ interface Props {
     slices: number
     timeVarying: boolean
     sun: SunSample[]
+    photoAvailable: boolean
     /** Slice with the most ground lit -- where the view should open. */
     brightestSlice: number
   }) => void
@@ -410,6 +532,7 @@ interface Props {
 export default function TerrainCanvas3D({
   viewMode,
   waypoints,
+  activeWaypoint,
   exaggeration,
   sliceIndex,
   photo,
@@ -418,7 +541,11 @@ export default function TerrainCanvas3D({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('fps')
+  // Start in a relief-independent overview. The old FPS default spawned two
+  // metres above a cell that became a steep face in the new DEM window.
+  const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('orbit')
+  const [lidarEnabled, setLidarEnabled] = useState(true)
+  const [lidarTelemetry, setLidarTelemetry] = useState<LidarScanSummary | null>(null)
 
   const sceneRef = useRef<{
     mesh: THREE.Mesh
@@ -431,7 +558,18 @@ export default function TerrainCanvas3D({
     lightMask: Float32Array | null
     photoTexture: THREE.Texture | null
     detailTexture: THREE.Texture | null
+    photoAvailable: boolean
     routeGroup: THREE.Group
+    rockGroup: THREE.Group
+    rockMaterial: THREE.MeshStandardMaterial
+    rockTexture: THREE.Texture
+    roverGroup: THREE.Group
+    lidarHead: THREE.Group
+    lidarPoints: THREE.Points
+    lidarSweep: THREE.LineSegments
+    lidarScan: LidarScanResult | null
+    lidarOrigin: THREE.Vector3
+    lidarRevolutionStartedAt: number
     earthMesh?: THREE.Mesh
     sunSprite?: THREE.Sprite
     camera?: THREE.PerspectiveCamera
@@ -456,7 +594,7 @@ export default function TerrainCanvas3D({
     const milkyWay = createMilkyWayDust(2000, 68000)
     scene.add(milkyWay)
 
-    const camera = new THREE.PerspectiveCamera(45, 1, 1, 100000)
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000)
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -491,6 +629,57 @@ export default function TerrainCanvas3D({
     const routeGroup = new THREE.Group()
     scene.add(routeGroup)
 
+    // Local, metre-scale geometry fills the sensing gap left by the orbital
+    // DEM. These objects are rebuilt around the rover from stable world-chunk
+    // seeds, so they remain fixed when the rover advances along a route.
+    const rockTexture = createRockTexture()
+    const rockMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8b867f,
+      map: rockTexture,
+      roughness: 1,
+      metalness: 0,
+      flatShading: true,
+    })
+    const rockGroup = new THREE.Group()
+    scene.add(rockGroup)
+
+    const rover = createRoverModel()
+    scene.add(rover.group)
+
+    const lidarPointGeometry = new THREE.BufferGeometry()
+    const lidarPointMaterial = new THREE.PointsMaterial({
+      size: 2,
+      // Screen-space dots stay legible in orbit view; their world positions
+      // and occlusion are still fully metric.
+      sizeAttenuation: false,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+    const lidarPoints = new THREE.Points(lidarPointGeometry, lidarPointMaterial)
+    lidarPoints.renderOrder = 4
+    scene.add(lidarPoints)
+
+    const sweepGeometry = new THREE.BufferGeometry()
+    sweepGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(LIDAR_CONFIG.elevationAnglesDeg.length * 2 * 3), 3),
+    )
+    const lidarSweep = new THREE.LineSegments(
+      sweepGeometry,
+      new THREE.LineBasicMaterial({
+        color: 0x5ff4ff,
+        transparent: true,
+        opacity: 0.34,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    )
+    lidarSweep.renderOrder = 3
+    scene.add(lidarSweep)
+
     let frame = 0
     const onResize = () => {
       const { clientWidth: w, clientHeight: h } = container
@@ -505,6 +694,7 @@ export default function TerrainCanvas3D({
     const build = async () => {
       const manifest: TerrainManifest = await (await fetch('/api/terrain')).json()
       if (disposed) return
+      const photoAvailable = hasAlignedNacTexture(manifest)
       const { rows, cols, resolution_m: res } = manifest.grid
       const { min_m: minM } = manifest.elevation
 
@@ -569,9 +759,16 @@ export default function TerrainCanvas3D({
       scene.add(sunFlare)
       sunFlare.position.copy(sun.position).normalize().multiplyScalar(55000)
 
-      // Frame the camera closer so the 3D Moon fills the screen prominently
-      camera.position.set(span * 0.35, span * 0.28, span * 0.45)
-      controls.target.set(0, 0, 0)
+      // Frame from the live relief so changing DEM windows cannot place the
+      // overview camera inside a ridge or point it below the terrain.
+      const relief = manifest.elevation.max_m - manifest.elevation.min_m
+      const targetY = relief * 0.35
+      camera.position.set(
+        span * 0.72,
+        Math.max(targetY + span * 0.75, relief + span * 0.45),
+        span * 0.75,
+      )
+      controls.target.set(0, targetY, 0)
       controls.minDistance = 150
       controls.maxDistance = span * 4.0
       controls.update()
@@ -587,7 +784,18 @@ export default function TerrainCanvas3D({
         lightMask: null,
         photoTexture: null,
         detailTexture: null,
+        photoAvailable,
         routeGroup,
+        rockGroup,
+        rockMaterial,
+        rockTexture,
+        roverGroup: rover.group,
+        lidarHead: rover.lidarHead,
+        lidarPoints,
+        lidarSweep,
+        lidarScan: null,
+        lidarOrigin: new THREE.Vector3(),
+        lidarRevolutionStartedAt: performance.now(),
         earthMesh: earth.mesh,
         sunSprite: sunFlare,
         camera,
@@ -600,6 +808,16 @@ export default function TerrainCanvas3D({
           milkyWay.geometry.dispose()
           baseBox.geometry.dispose()
           earth.mesh.geometry.dispose()
+          rockGroup.children.forEach((rock) => {
+            if (rock instanceof THREE.Mesh) rock.geometry.dispose()
+          })
+          rockMaterial.dispose()
+          rockTexture.dispose()
+          disposeObjectTree(rover.group)
+          lidarPointGeometry.dispose()
+          lidarPointMaterial.dispose()
+          sweepGeometry.dispose()
+          ;(lidarSweep.material as THREE.Material).dispose()
           sceneRef.current?.photoTexture?.dispose()
           sceneRef.current?.detailTexture?.dispose()
         },
@@ -630,6 +848,7 @@ export default function TerrainCanvas3D({
         slices: series?.slices ?? 0,
         timeVarying: Boolean(series?.shadow_model.time_varying),
         sun: series?.sun ?? [],
+        photoAvailable,
         brightestSlice,
       })
     }
@@ -643,8 +862,31 @@ export default function TerrainCanvas3D({
     const animate = () => {
       frame = requestAnimationFrame(animate)
       controls.update()
-      if (sceneRef.current?.earthMesh) {
-        sceneRef.current.earthMesh.rotation.y += 0.0004
+      const state = sceneRef.current
+      if (state?.earthMesh) {
+        state.earthMesh.rotation.y += 0.0004
+      }
+      if (state?.lidarScan && state.lidarSweep.visible) {
+        const revolutionMs = 1000 / LIDAR_CONFIG.scanRateHz
+        const phase = ((performance.now() - state.lidarRevolutionStartedAt) % revolutionMs) / revolutionMs
+        const azimuthIndex = Math.min(
+          LIDAR_CONFIG.azimuthSteps - 1,
+          Math.floor(phase * LIDAR_CONFIG.azimuthSteps),
+        )
+        const azimuth = (azimuthIndex / LIDAR_CONFIG.azimuthSteps) * Math.PI * 2
+        state.lidarHead.rotation.y = -azimuth
+
+        const endpoint = state.lidarScan.azimuthEndpoints[azimuthIndex]
+          ?? state.lidarOrigin.clone().add(
+            new THREE.Vector3(Math.sin(azimuth), -0.08, -Math.cos(azimuth))
+              .normalize()
+              .multiplyScalar(LIDAR_CONFIG.maxRangeM),
+          )
+        const sweepPositions = state.lidarSweep.geometry.getAttribute('position') as THREE.BufferAttribute
+        sweepPositions.setXYZ(0, state.lidarOrigin.x, state.lidarOrigin.y, state.lidarOrigin.z)
+        sweepPositions.setXYZ(1, endpoint.x, endpoint.y, endpoint.z)
+        sweepPositions.needsUpdate = true
+        state.lidarSweep.geometry.setDrawRange(0, 2)
       }
       renderer.render(scene, camera)
     }
@@ -702,6 +944,16 @@ export default function TerrainCanvas3D({
       state.material.emissive.set(0x000000)
       state.material.color.set(0xffffff)
       state.material.needsUpdate = true
+      return
+    }
+
+    if (!state.photoAvailable) {
+      state.material.map = null
+      state.material.emissiveMap = null
+      state.material.emissive.set(0x000000)
+      state.material.color.copy(SURFACE_ALBEDO)
+      state.material.needsUpdate = true
+      onError?.('NAC fotoğrafı mevcut DEM penceresiyle hizalı değil; kaplama uygulanmadı.')
       return
     }
 
@@ -776,7 +1028,7 @@ export default function TerrainCanvas3D({
     // cell must read as no-data rather than as ground that happens to be there.
     const flat = viewMode === 'surface'
 
-    if (flat) {
+    if (flat && state.photoAvailable) {
       const applyDetail = (texture: THREE.Texture) => {
         if (cancelled || !sceneRef.current) return
         texture.colorSpace = THREE.SRGBColorSpace
@@ -797,7 +1049,7 @@ export default function TerrainCanvas3D({
         })
     } else {
       state.material.map = null
-      state.material.color.set(0xffffff)
+      state.material.color.copy(flat ? SURFACE_ALBEDO : new THREE.Color(0xffffff))
       state.material.needsUpdate = true
     }
 
@@ -939,6 +1191,112 @@ export default function TerrainCanvas3D({
         : (exaggeration ?? state.manifest.elevation.vertical_exaggeration_suggested)
   }, [exaggeration, cameraMode, status])
 
+  // Local rock field + real first-return scan. This deliberately runs after
+  // vertical scaling so obstacles, DEM returns and the rendered ground share
+  // one coordinate frame in both camera modes.
+  useEffect(() => {
+    const state = sceneRef.current
+    if (!state || status !== 'ready' || !state.heights) return
+    const heights = state.heights
+
+    const timer = window.setTimeout(() => {
+      const { rows, cols, resolution_m: resolutionM } = state.manifest.grid
+      const source = activeWaypoint ?? waypoints?.[0] ?? null
+      const row = THREE.MathUtils.clamp(source?.row ?? Math.floor(rows / 2), 0, rows - 1)
+      const col = THREE.MathUtils.clamp(source?.col ?? Math.floor(cols / 2), 0, cols - 1)
+      const width = cols * resolutionM
+      const depth = rows * resolutionM
+      const stepX = width / (cols - 1)
+      const stepZ = depth / (rows - 1)
+      const roverX = col * stepX - width / 2
+      const roverZ = row * stepZ - depth / 2
+      const terrain: TerrainField = {
+        rows,
+        cols,
+        resolutionM,
+        minElevationM: state.manifest.elevation.min_m,
+        heights,
+        verticalScale: state.mesh.scale.z,
+      }
+      const roverGroundY = sampleTerrainHeight(terrain, roverX, roverZ) ?? 0
+
+      for (const child of [...state.rockGroup.children]) {
+        state.rockGroup.remove(child)
+        if (child instanceof THREE.Mesh) child.geometry.dispose()
+      }
+
+      for (const descriptor of generateRockField(roverX, roverZ)) {
+        const groundY = sampleTerrainHeight(terrain, descriptor.x, descriptor.z)
+        if (groundY === null) continue
+        const geometry = new THREE.IcosahedronGeometry(1, 1)
+        const positions = geometry.getAttribute('position') as THREE.BufferAttribute
+        const random = seededRandom(descriptor.seed)
+        for (let i = 0; i < positions.count; i++) {
+          const x = positions.getX(i)
+          const y = positions.getY(i)
+          const z = positions.getZ(i)
+          const weathering = 0.82 + random() * 0.29
+          positions.setXYZ(
+            i,
+            x * descriptor.radiusX * weathering,
+            y * descriptor.radiusY * (0.9 + random() * 0.18),
+            z * descriptor.radiusZ * weathering,
+          )
+        }
+        positions.needsUpdate = true
+        geometry.computeVertexNormals()
+        geometry.computeBoundingSphere()
+        const rock = new THREE.Mesh(geometry, state.rockMaterial)
+        rock.position.set(descriptor.x, groundY - descriptor.radiusY * 0.12, descriptor.z)
+        rock.rotation.set((random() - 0.5) * 0.18, descriptor.rotationY, (random() - 0.5) * 0.18)
+        rock.userData.lidarRockId = descriptor.id
+        state.rockGroup.add(rock)
+      }
+
+      state.roverGroup.position.set(roverX, roverGroundY, roverZ)
+      const waypointIndex = source
+        ? waypoints?.findIndex((waypoint) => waypoint.step === source.step) ?? -1
+        : -1
+      const nextWaypoint = waypointIndex >= 0 ? waypoints?.[waypointIndex + 1] : null
+      if (nextWaypoint) {
+        const nextX = nextWaypoint.col * stepX - width / 2
+        const nextZ = nextWaypoint.row * stepZ - depth / 2
+        state.roverGroup.rotation.y = Math.atan2(nextX - roverX, nextZ - roverZ)
+      }
+      state.roverGroup.updateMatrixWorld(true)
+      state.rockGroup.updateMatrixWorld(true)
+
+      state.lidarOrigin.set(roverX, roverGroundY + 1.6, roverZ)
+      const rockMeshes = state.rockGroup.children.filter(
+        (object): object is THREE.Mesh => object instanceof THREE.Mesh,
+      )
+      const scan = simulateLidarScan(
+        state.lidarOrigin,
+        terrain,
+        rockMeshes,
+        ((row + 1) * 73856093) ^ ((col + 1) * 19349663),
+      )
+      state.lidarScan = scan
+      state.lidarRevolutionStartedAt = performance.now()
+
+      const pointGeometry = state.lidarPoints.geometry
+      pointGeometry.setAttribute('position', new THREE.BufferAttribute(scan.positions, 3))
+      pointGeometry.setAttribute('color', new THREE.BufferAttribute(scan.colors, 3))
+      pointGeometry.computeBoundingSphere()
+      setLidarTelemetry(scan.summary)
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints])
+
+  useEffect(() => {
+    const state = sceneRef.current
+    if (!state || status !== 'ready') return
+    state.lidarPoints.visible = lidarEnabled
+    state.lidarSweep.visible = lidarEnabled
+    state.lidarHead.visible = lidarEnabled
+  }, [lidarEnabled, status])
+
   // ── Planned route, drawn in the same metric frame as the mesh. ─────────────
   useEffect(() => {
     const state = sceneRef.current
@@ -980,7 +1338,7 @@ export default function TerrainCanvas3D({
       ).translateX(p.x).translateY(p.y).translateZ(p.z)
     routeGroup.add(marker(points[0], 0x2ee59d))
     routeGroup.add(marker(points[points.length - 1], 0xff5252))
-  }, [waypoints, exaggeration, status])
+  }, [waypoints, exaggeration, cameraMode, status])
 
   // ── 3D Camera Mode (FPS Surface View vs Orbit Overview) ─────────────────────
   const fpsAngles = useRef({ yaw: 0.35, pitch: 0.02 })
@@ -1002,21 +1360,35 @@ export default function TerrainCanvas3D({
       controls.enabled = false
 
       // Spawn on a level, flat surface patch (row 248, col 248 has ~2.0° slope)
-      const r = waypoints && waypoints.length > 0 ? waypoints[0].row : 248
-      const c = waypoints && waypoints.length > 0 ? waypoints[0].col : 248
+      const poseWaypoint = activeWaypoint ?? waypoints?.[0]
+      const r = THREE.MathUtils.clamp(
+        poseWaypoint?.row ?? Math.floor(rows / 2),
+        1,
+        rows - 2,
+      )
+      const c = THREE.MathUtils.clamp(
+        poseWaypoint?.col ?? Math.floor(cols / 2),
+        1,
+        cols - 2,
+      )
       const idx = r * cols + c
       const altM = heights && idx < heights.length && !Number.isNaN(heights[idx]) ? heights[idx] : minM + 325
 
       const rx = c * stepX - halfX
       const rz = r * stepZ - halfZ
-      const ry = altM - minM + 2.0 // eye height above surface
+      const ry = altM - minM + 3.2 // eye height above surface
 
       camera.position.set(rx, ry, rz)
       camera.up.set(0, 1, 0)
 
       // Look across the lunar plain towards the horizon and the Earth in the sky
-      const yaw = 0.35
-      const pitch = 0.02
+      const sample = (row: number, col: number) => heights?.[row * cols + col] ?? altM
+      const gradientX = (sample(r, c + 1) - sample(r, c - 1)) / (2 * stepX)
+      const gradientZ = (sample(r + 1, c) - sample(r - 1, c)) / (2 * stepZ)
+      // The view vector below is (sin(yaw), y, -cos(yaw)); this bearing
+      // points down the local gradient instead of directly into an uphill face.
+      const yaw = Math.atan2(-gradientX, gradientZ)
+      const pitch = 0.06
       fpsAngles.current = { yaw, pitch }
 
       const dir = new THREE.Vector3(
@@ -1030,14 +1402,20 @@ export default function TerrainCanvas3D({
       controls.enabled = true
       camera.fov = 45
       camera.updateProjectionMatrix()
-      camera.position.set(span * 0.35, span * 0.28, span * 0.45)
-      controls.target.set(0, 0, 0)
+      const relief = manifest.elevation.max_m - manifest.elevation.min_m
+      const targetY = relief * 0.35
+      camera.position.set(
+        span * 0.72,
+        Math.max(targetY + span * 0.75, relief + span * 0.45),
+        span * 0.75,
+      )
+      controls.target.set(0, targetY, 0)
       controls.minDistance = 150
       controls.maxDistance = span * 4.0
       controls.maxPolarAngle = Math.PI / 2 - 0.02
       controls.update()
     }
-  }, [cameraMode, waypoints, status])
+  }, [activeWaypoint, cameraMode, waypoints, status])
 
   // ── FPS Mouse Drag Look Handler ─────────────────────────────────────────────
   useEffect(() => {
@@ -1118,6 +1496,61 @@ export default function TerrainCanvas3D({
       {status === 'loading' && <div className="terrain3d-status">Arazi yükleniyor…</div>}
       {status === 'error' && (
         <div className="terrain3d-status">3B arazi yüklenemedi — API çalışıyor mu?</div>
+      )}
+
+      {status === 'ready' && (
+        <aside className={`terrain3d-lidar ${lidarEnabled ? 'is-live' : 'is-off'}`}>
+          <div className="terrain3d-lidar-head">
+            <div className="terrain3d-lidar-title">
+              <span className="terrain3d-radar-icon" aria-hidden="true"><span /></span>
+              <div>
+                <strong>LiDAR perception</strong>
+                <small>FIRST RETURN · 16 CH · {LIDAR_CONFIG.scanRateHz} HZ</small>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="terrain3d-lidar-toggle"
+              aria-pressed={lidarEnabled}
+              onClick={() => setLidarEnabled((enabled) => !enabled)}
+            >
+              {lidarEnabled ? 'LIVE' : 'OFF'}
+            </button>
+          </div>
+
+          {lidarEnabled && lidarTelemetry && (
+            <>
+              <div className="terrain3d-lidar-grid">
+                <div><span>RANGE</span><strong>{LIDAR_CONFIG.maxRangeM} m</strong></div>
+                <div><span>RETURNS</span><strong>{lidarTelemetry.returns.toLocaleString()}</strong></div>
+                <div><span>ROCK HITS</span><strong>{lidarTelemetry.rockReturns}</strong></div>
+                <div>
+                  <span>NEAREST</span>
+                  <strong className={
+                    lidarTelemetry.nearestObstacleM !== null && lidarTelemetry.nearestObstacleM < 12
+                      ? 'is-danger'
+                      : ''
+                  }>
+                    {lidarTelemetry.nearestObstacleM === null
+                      ? '--'
+                      : `${lidarTelemetry.nearestObstacleM.toFixed(1)} m`}
+                  </strong>
+                </div>
+              </div>
+              <div className="terrain3d-lidar-footer">
+                <span><i className="is-terrain" /> terrain return</span>
+                <span><i className="is-rock" /> obstacle return</span>
+                <b className={
+                  lidarTelemetry.nearestObstacleM !== null && lidarTelemetry.nearestObstacleM < 12
+                    ? 'is-danger'
+                    : ''
+                }>
+                  {lidarTelemetry.detectedRocks} rocks tracked
+                </b>
+              </div>
+            </>
+          )}
+        </aside>
       )}
 
       {/* 3D Camera Mode Switcher (FPS vs Kuşbakışı Orbit) */}

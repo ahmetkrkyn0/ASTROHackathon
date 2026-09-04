@@ -1,9 +1,10 @@
 """Contracts LunaPath publishes to downstream consumers.
 
-The Corridor is the single interface between LunaPath (global planner,
-80 m cells, on the ground) and any local layer (LiDAR/stereo, sub-metre,
-on the rover). It travels over both shells: FastAPI JSON and, in Phase 4,
-the ROS 2 ``lunapath_msgs/Corridor`` message.
+The Corridor is the single interface between LunaPath (global planner on a
+metadata-defined DEM; the current Site11 work set is 5 m/px) and any local
+layer (LiDAR/stereo, sub-metre, on the rover). The resolution is contextual,
+not a project-wide constant. The contract travels over both shells: FastAPI
+JSON and, in Phase 4, the ROS 2 ``lunapath_msgs/Corridor`` message.
 """
 
 from __future__ import annotations

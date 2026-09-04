@@ -13,12 +13,11 @@ _BACKEND_ROOT = str(Path(__file__).resolve().parent.parent.parent / "backend")
 if _BACKEND_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_ROOT)
 
-from virtual_lidar import virtual_scan
+from virtual_lidar import _sample_elevation, virtual_scan
 
-# Fine resolution keeps the scan geometry (not the LunaPath 80 m grid) under
-# test -- see the module-level limitation notice for why 80 m is unusable
-# at LiDAR-scale ranges.
-RES_M = 2.0
+# Match the current Site11 working DEM without loading the real raster. Tests
+# remain synthetic and the implementation still accepts any runtime resolution.
+RES_M = 5.0
 SHAPE = (60, 60)
 ORIGIN = (30.0, 30.0)
 
@@ -40,6 +39,25 @@ def _approx(expected: float, tol: float):
 
 def _flat_grid() -> np.ndarray:
     return np.zeros(SHAPE, dtype=np.float64)
+
+
+def test_fractional_coordinates_are_bilinearly_interpolated():
+    elevation = np.array([[0.0, 10.0], [20.0, 30.0]])
+    assert _sample_elevation(elevation, 0.5, 0.5) == _approx(15.0, 1e-9)
+
+
+def test_resolution_and_step_must_be_positive():
+    for resolution_m, range_step_m in ((0.0, None), (RES_M, 0.0)):
+        try:
+            virtual_scan(
+                _flat_grid(),
+                resolution_m,
+                *ORIGIN,
+                range_step_m=range_step_m,
+            )
+        except ValueError:
+            continue
+        raise AssertionError("expected invalid scan spacing to be rejected")
 
 
 def test_downward_beam_hits_flat_ground_at_the_analytic_range():
@@ -154,10 +172,10 @@ def test_a_ridge_produces_a_shorter_range_than_flat_ground():
     elev = _flat_grid()
     # Raise ground north of the origin so a downward beam meets it early.
     # The ridge must start *inside* the flat-ground intercept
-    # (1.0 / tan(10 deg) ~= 5.67 m ~= 2.8 px at 2 m/px), otherwise the beam
+    # (1.0 / tan(10 deg) ~= 5.67 m ~= 1.1 px at 5 m/px), otherwise the beam
     # has already returned off flat ground before reaching it and both
     # scans measure the same range.
-    elev[:28, :] = 3.0
+    elev[:30, :] = 3.0
     scan_ridge = virtual_scan(
         elev, RES_M, *ORIGIN,
         sensor_height_m=1.0,

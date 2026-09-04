@@ -251,7 +251,7 @@ export interface RoverCatalogResponse {
 // null (`np.where(np.isfinite(...), layer, None)`) and every reader branches
 // on `typeof value === 'number'`, which is true for NaN. Leaving NaN in
 // would poison the colour ramps and range scans silently rather than
-// visibly -- cost alone carries 39 937 impassable cells.
+// visibly -- cost alone carries about 60 000 impassable cells in the current grid.
 function reshapeF32(buf: Float32Array, rows: number, cols: number): (number | null)[][] {
   const grid: (number | null)[][] = new Array(rows)
   for (let row = 0; row < rows; row += 1) {

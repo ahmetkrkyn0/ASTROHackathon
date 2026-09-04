@@ -58,7 +58,7 @@ from app.traversability import (  # noqa: E402
 )
 
 _DEFAULT_PROCESSED = _ROOT / "lunapath" / "data" / "processed"
-_DEFAULT_RAW_DEM = _ROOT / "lunapath" / "data" / "raw" / "Site01_final_adj_5mpp_surf.tif"
+_DEFAULT_RAW_DEM = _ROOT / "lunapath" / "data" / "raw" / "Site11_final_adj_5mpp_surf.tif"
 
 # Same sun track the P1 pipeline samples, so a rebuilt shadow layer is
 # comparable with the one it replaces.

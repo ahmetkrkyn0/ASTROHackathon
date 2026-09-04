@@ -4731,3 +4731,211 @@ select {
   box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
 }
 
+.terrain3d-lidar {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 24;
+  width: min(330px, calc(100% - 32px));
+  padding: 12px;
+  border: 1px solid rgba(95, 244, 255, 0.28);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(8, 20, 30, 0.94), rgba(6, 11, 25, 0.9)),
+    repeating-linear-gradient(0deg, transparent 0 4px, rgba(95, 244, 255, 0.025) 5px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5), inset 0 0 24px rgba(34, 211, 238, 0.035);
+  color: #dffbff;
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.terrain3d-lidar.is-off {
+  width: 248px;
+  border-color: rgba(148, 163, 184, 0.2);
+  opacity: 0.78;
+}
+
+.terrain3d-lidar-head,
+.terrain3d-lidar-title,
+.terrain3d-lidar-footer {
+  display: flex;
+  align-items: center;
+}
+
+.terrain3d-lidar-head {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.terrain3d-lidar-title {
+  min-width: 0;
+  gap: 10px;
+}
+
+.terrain3d-lidar-title strong,
+.terrain3d-lidar-title small {
+  display: block;
+}
+
+.terrain3d-lidar-title strong {
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.terrain3d-lidar-title small {
+  margin-top: 2px;
+  color: rgba(165, 243, 252, 0.58);
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  letter-spacing: 0.09em;
+}
+
+.terrain3d-radar-icon {
+  position: relative;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(95, 244, 255, 0.48);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #8bfbff 0 1px, transparent 2px),
+    repeating-radial-gradient(circle, transparent 0 5px, rgba(95, 244, 255, 0.19) 6px 6.5px);
+}
+
+.terrain3d-radar-icon::before,
+.terrain3d-radar-icon::after {
+  position: absolute;
+  content: '';
+  background: rgba(95, 244, 255, 0.18);
+}
+
+.terrain3d-radar-icon::before { inset: 14px 2px auto; height: 1px; }
+.terrain3d-radar-icon::after { inset: 2px auto 2px 14px; width: 1px; }
+
+.terrain3d-radar-icon span {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(95, 244, 255, 0.74), transparent 23%);
+  animation: terrain3d-radar-sweep 0.2s linear infinite;
+}
+
+@keyframes terrain3d-radar-sweep {
+  to { transform: rotate(360deg); }
+}
+
+.terrain3d-lidar-toggle {
+  min-width: 48px;
+  padding: 5px 8px;
+  border: 1px solid rgba(46, 229, 157, 0.5);
+  border-radius: 999px;
+  background: rgba(46, 229, 157, 0.12);
+  box-shadow: 0 0 13px rgba(46, 229, 157, 0.12);
+  color: #70f4bd;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.terrain3d-lidar.is-off .terrain3d-lidar-toggle {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.08);
+  box-shadow: none;
+  color: #94a3b8;
+}
+
+.terrain3d-lidar-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  margin-top: 11px;
+  overflow: hidden;
+  border: 1px solid rgba(95, 244, 255, 0.11);
+  border-radius: 7px;
+  background: rgba(95, 244, 255, 0.09);
+}
+
+.terrain3d-lidar-grid div {
+  min-width: 0;
+  padding: 7px 6px;
+  background: rgba(5, 13, 24, 0.82);
+}
+
+.terrain3d-lidar-grid span,
+.terrain3d-lidar-grid strong {
+  display: block;
+  white-space: nowrap;
+}
+
+.terrain3d-lidar-grid span {
+  color: rgba(165, 243, 252, 0.47);
+  font-family: var(--font-mono, monospace);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+}
+
+.terrain3d-lidar-grid strong {
+  margin-top: 3px;
+  color: #d9fbff;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.terrain3d-lidar .is-danger {
+  color: #ff9b66;
+  text-shadow: 0 0 10px rgba(255, 112, 67, 0.38);
+}
+
+.terrain3d-lidar-footer {
+  gap: 10px;
+  margin-top: 9px;
+  color: rgba(203, 213, 225, 0.58);
+  font-size: 8px;
+  letter-spacing: 0.025em;
+}
+
+.terrain3d-lidar-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.terrain3d-lidar-footer i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.terrain3d-lidar-footer i.is-terrain { color: #43e8ff; background: currentColor; }
+.terrain3d-lidar-footer i.is-rock { color: #ff8f3d; background: currentColor; }
+
+.terrain3d-lidar-footer b {
+  margin-left: auto;
+  color: rgba(223, 251, 255, 0.78);
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .terrain3d-lidar {
+    bottom: 10px;
+    left: 10px;
+    width: min(300px, calc(100% - 20px));
+  }
+
+  .terrain3d-camera-switch {
+    top: 8px;
+  }
+
+  .terrain3d-cam-btn {
+    padding-inline: 9px;
+  }
+}
+

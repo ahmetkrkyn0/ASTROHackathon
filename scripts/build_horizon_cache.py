@@ -46,7 +46,7 @@ def main() -> int:
         type=Path,
         default=(
             Path(__file__).resolve().parent.parent
-            / "lunapath" / "data" / "raw" / "Site01_final_adj_5mpp_surf.tif"
+            / "lunapath" / "data" / "raw" / "Site11_final_adj_5mpp_surf.tif"
         ),
         help=(
             "DEM the planning window was cut from. When present the horizon "

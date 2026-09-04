@@ -16,6 +16,7 @@ if _BACKEND_ROOT not in sys.path:
     sys.path.insert(0, _BACKEND_ROOT)
 
 # --- Test edilecek fonksiyonlari import et -----------------------------------
+import process_lunar_data as pipeline
 from process_lunar_data import (
     make_slope_grid,
     make_aspect_grid,
@@ -24,22 +25,34 @@ from process_lunar_data import (
     make_traversability_grid,
     make_cost_grid,
     SLOPE_MAX_DEG,
-    RESOLUTION_M,
 )
 from app.traversability import THERMAL_MIN_TRAVERSABLE_C
+
+# Synthetic fixture aligned with the current Site11 working data. Production
+# code still reads this value from metadata; this is not a global constant.
+TEST_RESOLUTION_M = 5.0
+TEST_LAT_DEG = -89.0
+TEST_LON_DEG = 0.0
+# A valid lunar south-polar stereographic CRS keeps the thermal test on the
+# same coordinate-convergence path as the real Site11 metadata.  An arbitrary
+# placeholder only worked while the optional pyproj/heat1d stack was absent.
+TEST_CRS = (
+    "+proj=stere +lat_0=-90 +lon_0=0 +k=1 "
+    "+a=1737400 +b=1737400 +units=m +no_defs"
+)
 
 
 def test_slope_grid():
     """Duz zemin -> 0 egim; rampa -> pozitif egim."""
     flat = np.ones((10, 10), dtype=np.float64) * 100.0
-    slope = make_slope_grid(flat, 80.0)
+    slope = make_slope_grid(flat, TEST_RESOLUTION_M)
     assert np.allclose(slope, 0.0, atol=1e-10), \
         f"Duz zemin egimi 0 olmali, got max={slope.max()}"
 
     ramp = np.zeros((10, 10), dtype=np.float64)
     for i in range(10):
-        ramp[i, :] = i * 80.0 * np.tan(np.radians(10.0))  # ~10 derece rampa
-    slope_ramp = make_slope_grid(ramp, 80.0)
+        ramp[i, :] = i * TEST_RESOLUTION_M * np.tan(np.radians(10.0))
+    slope_ramp = make_slope_grid(ramp, TEST_RESOLUTION_M)
     # Kenar pikseller haric ic piksellerde ~10 derece olmali
     inner = slope_ramp[2:-2, 2:-2]
     assert np.all(inner > 5.0) and np.all(inner < 15.0), \
@@ -51,7 +64,7 @@ def test_slope_grid():
 def test_aspect_grid():
     """Aspect 0-360 araliginda olmali."""
     elev = np.random.RandomState(42).rand(50, 50).astype(np.float64) * 1000
-    aspect = make_aspect_grid(elev, 80.0)
+    aspect = make_aspect_grid(elev, TEST_RESOLUTION_M)
     assert np.all(aspect >= 0.0) and np.all(aspect <= 360.0), \
         f"Aspect [0,360] disinda deger var: min={aspect.min()}, max={aspect.max()}"
     print("  test_aspect_grid PASSED")
@@ -60,7 +73,13 @@ def test_aspect_grid():
 def test_shadow_ratio():
     """En yuksek nokta -> 0, en alcak nokta -> 1."""
     elev = np.array([[100, 200], [300, 400]], dtype=np.float64)
-    shadow = make_shadow_ratio_grid(elev)
+    shadow, _validity = make_shadow_ratio_grid(
+        elev,
+        TEST_RESOLUTION_M,
+        TEST_LAT_DEG,
+        TEST_LON_DEG,
+        TEST_CRS,
+    )
     # 400m -> elev_norm=1.0 -> shadow=0.0
     assert shadow[1, 1] < 0.01, f"En yuksek noktada shadow ~0 olmali, got {shadow[1,1]}"
     # 100m -> elev_norm=0.0 -> shadow=1.0
@@ -68,12 +87,24 @@ def test_shadow_ratio():
     print("  test_shadow_ratio PASSED")
 
 
-def test_thermal_grid_range():
+def test_thermal_grid_range(monkeypatch):
     """Termal grid [-250, 130] araliginda olmali."""
+    # This is a grid-logic unit test, not a multi-minute heat1d integration
+    # run. Exercise the deterministic fallback regardless of which optional
+    # packages happen to be installed in the developer environment.
+    monkeypatch.setattr(pipeline.Heat1DModel, "available", staticmethod(lambda: False))
     elev = np.random.RandomState(42).rand(50, 50).astype(np.float64) * 5000 - 3000
-    slope = make_slope_grid(elev, 80.0)
-    aspect = make_aspect_grid(elev, 80.0)
-    thermal = make_thermal_grid(elev, slope, aspect, 80.0)
+    slope = make_slope_grid(elev, TEST_RESOLUTION_M)
+    aspect = make_aspect_grid(elev, TEST_RESOLUTION_M)
+    thermal, _validity = make_thermal_grid(
+        elev,
+        slope,
+        aspect,
+        TEST_RESOLUTION_M,
+        TEST_LAT_DEG,
+        TEST_LON_DEG,
+        TEST_CRS,
+    )
     assert np.nanmin(thermal) >= -250.0, f"Thermal min < -250: {np.nanmin(thermal)}"
     assert np.nanmax(thermal) <= 130.0, f"Thermal max > 130: {np.nanmax(thermal)}"
     print("  test_thermal_grid_range PASSED")
@@ -111,11 +142,11 @@ def test_cost_grid_weight_sensitivity():
     trav = np.ones_like(slope)
 
     cost_slope = make_cost_grid(
-        slope, thermal, shadow, RESOLUTION_M, trav,
+        slope, thermal, shadow, TEST_RESOLUTION_M, trav,
         {"w_slope": 0.8, "w_energy": 0.1, "w_shadow": 0.05, "w_thermal": 0.05},
     )
     cost_shadow = make_cost_grid(
-        slope, thermal, shadow, RESOLUTION_M, trav,
+        slope, thermal, shadow, TEST_RESOLUTION_M, trav,
         {"w_slope": 0.1, "w_energy": 0.1, "w_shadow": 0.4, "w_thermal": 0.4},
     )
 

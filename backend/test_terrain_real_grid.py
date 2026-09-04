@@ -4,16 +4,13 @@ test_terrain_api.py asserts the contract on an 8x6 fixture, where the
 cell ceiling, the payload budget and the real distribution of no-data never
 come near their production values. The claims this file makes -- that the
 binary layer is a quarter the size of the JSON preview it replaces, that
-~40 000 impassable cells arrive as NaN rather than infinity, that 425.7 m
-of relief over 2.5 km wants a modest vertical exaggeration -- are claims
+~60 000 impassable cells arrive as NaN rather than infinity, that 1 147.7 m
+of relief over 2.5 km needs no artificial vertical exaggeration -- are claims
 about THIS repository's grid, and are worth nothing on a fixture.
 
-The grid is Site11 (de Gerlache Rim) window row=2400 col=2500, centred on
-88.920 S / 287.328 E. It replaced Site01 row=0 col=700, which was measured
-to be 94.7% a single tilted plane -- 1064 m of relief that rendered as a
-featureless ramp because almost none of it was terrain STRUCTURE. The
-window in use is 0.3% planar with five coherent impassable barriers, the
-largest 8.6 hectares, so the planner has something real to route around.
+The grid is the current Site11 5 m/px working window at row=1500 col=1000.
+It is the action-rich window selected by the current pipeline, so the planner
+and local LiDAR have real relief and coherent barriers to exercise.
 
 Skips entirely when the P1 pipeline has not been run, matching
 test_plan_4d_real_grid.py: the `.npy` artefacts are gitignored, so a fresh
@@ -53,19 +50,15 @@ def test_manifest_describes_the_production_grid(client):
     assert manifest["grid"]["span_m"] == [2500.0, 2500.0]
     assert manifest["binary_format"]["bytes_per_layer"] == 500 * 500 * 4
     assert manifest["georeference"]["crs"]
-    assert manifest["georeference"]["window_offset"] == {"row": 2400, "col": 2500}
+    assert manifest["georeference"]["window_offset"] == {"row": 1500, "col": 1000}
 
 
 def test_exaggeration_default_follows_this_site_relief(client):
-    """425.7 m of relief over a 2.5 km span is 1:5.9 -- gentler than the
-    1:5 ratio at which terrain reads as terrain unaided, so the manifest
-    starts the slider slightly above neutral rather than leaving the client
-    to guess. (The previous window's 1064 m answered 1.0 here; that number
-    was real and still rendered as a ramp, which is why relief alone was
-    never the right measure of a site.)"""
+    """The current 1 147.7 m relief over 2.5 km is already visually strong,
+    so the manifest must not add artificial vertical exaggeration."""
     elevation = client.get("/api/terrain").json()["elevation"]
-    assert elevation["relief_m"] == pytest.approx(425.7, abs=1.0)
-    assert elevation["vertical_exaggeration_suggested"] == 1.5
+    assert elevation["relief_m"] == pytest.approx(1147.7, abs=1.0)
+    assert elevation["vertical_exaggeration_suggested"] == 1.0
 
 
 def test_binary_lifts_the_ceiling_that_caps_the_json_preview(client):
@@ -91,9 +84,9 @@ def test_impassable_cells_arrive_as_nan_not_infinity(client):
     values = np.frombuffer(binary.content, dtype=BINARY_DTYPE)
     assert not np.isinf(values).any()
     nan_count = int(np.isnan(values).sum())
-    # The Site11 grid has 39 937; assert the order, not the exact figure,
+    # The current Site11 grid has 60 033; assert the order, not the exact figure,
     # so a legitimate re-run of the pipeline does not fail the suite.
-    assert 30_000 < nan_count < 60_000
+    assert 50_000 < nan_count < 80_000
     assert int(binary.headers["X-Layer-Nodata"]) == nan_count
 
 

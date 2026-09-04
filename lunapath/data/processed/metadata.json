@@ -1,7 +1,8 @@
 {
+  "source_dem": "Site11_final_adj_5mpp_surf.tif",
   "origin": {
-    "x": -32500.0,
-    "y": 11000.0
+    "x": -40000.0,
+    "y": 15500.0
   },
   "resolution_m": 5.0,
   "shape": [
@@ -10,8 +11,8 @@
   ],
   "crs": "PROJCS[\"unnamed\",GEOGCS[\"unnamed ellipse\",DATUM[\"unknown\",SPHEROID[\"unnamed\",1737400,0]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]]],PROJECTION[\"Polar_Stereographic\"],PARAMETER[\"latitude_of_origin\",-90],PARAMETER[\"central_meridian\",0],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1],AXIS[\"Easting\",NORTH],AXIS[\"Northing\",NORTH]]",
   "window_offset": {
-    "row": 2400,
-    "col": 2500
+    "row": 1500,
+    "col": 1000
   },
   "grids": [
     "elevation_grid",
@@ -35,10 +36,10 @@
     "elevation": "MEASURED",
     "slope": "DERIVED",
     "aspect": "DERIVED",
-    "shadow_ratio": "DERIVED",
-    "thermal": "DERIVED",
-    "thermal_min": "DERIVED",
-    "traversable": "DERIVED",
-    "cost": "DERIVED"
+    "shadow_ratio": "SYNTHETIC",
+    "thermal": "SYNTHETIC",
+    "thermal_min": "SYNTHETIC",
+    "traversable": "SYNTHETIC",
+    "cost": "SYNTHETIC"
   }
 }
