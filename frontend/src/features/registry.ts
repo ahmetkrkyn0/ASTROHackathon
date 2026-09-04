@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import type { MissionMode } from '../mission/types'
 import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
+import { Assistant } from './assistant'
 import { CorridorFeature } from './corridor'
 import { CostExplain } from './cost-explain'
 import { LayerPicker } from './layer-picker'
@@ -110,6 +111,9 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // No modes: the cost of the cell under the pointer is worth reading while a
   // route is being placed and while one is being reviewed.
   { id: 'cost-explain', slot: 'rightRail', Component: CostExplain },
+  // Floating, not railed: the assistant opens over the mission and has to
+  // keep working with both rails collapsed.
+  { id: 'assistant', slot: 'globalOverlay', Component: Assistant },
   // Analyze only: it compares a route that already exists against alternative
   // weightings, which is a question asked after one has been planned.
   { id: 'profile-compare', slot: 'rightRail', Component: ProfileCompare, modes: ['analyze'] },

@@ -6,10 +6,15 @@
 /* Above every ordinary surface in the app (map overlays reach 3), below the
    loading and landing screens (110, 120) and below toasts (150), which stay
    readable whatever else is on screen. */
+/* Placement, surface and accent come from the cockpit's own assistant mock,
+   which is deleted with this change: a floating instrument in this console
+   sits 24px off the corner, is lavender-edged and blurs what it covers. The
+   geometry below stays this component's, because its bounds are
+   viewport-relative and the mock's were fixed pixels. */
 .chat-launcher {
   position: fixed;
-  right: 22px;
-  bottom: 22px;
+  right: 24px;
+  bottom: 24px;
   z-index: 100;
   width: 46px;
   height: 46px;
@@ -17,12 +22,14 @@
   place-items: center;
   padding: 0;
   border-radius: 14px;
-  border: 1px solid rgba(70, 70, 81, 0.55);
-  background: linear-gradient(180deg, rgba(31, 31, 40, 0.98), rgba(17, 18, 27, 0.99));
-  box-shadow: 0 10px 26px rgba(2, 3, 8, 0.45);
+  border: 1px solid rgba(180, 168, 232, 0.4);
+  background: rgba(14, 19, 32, 0.94);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
   color: rgba(214, 212, 224, 0.86);
   cursor: pointer;
-  transition: border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+  transition: border-color 0.16s ease, color 0.16s ease, transform 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .chat-launcher svg {
@@ -31,7 +38,9 @@
 }
 
 .chat-launcher:hover {
-  border-color: rgba(160, 160, 255, 0.5);
+  border-color: var(--accent-lavender);
+  box-shadow: 0 0 20px rgba(180, 168, 232, 0.3);
+  transform: translateY(-2px);
   color: var(--text);
 }
 
@@ -61,9 +70,10 @@
 
 .chat-window {
   position: fixed;
-  right: 22px;
-  /* Sits above the launcher rather than on top of it. */
-  bottom: 80px;
+  right: 24px;
+  /* Sits above the launcher rather than on top of it: 24px corner inset,
+     plus the launcher's 46px, plus the gap between them. */
+  bottom: 84px;
   z-index: 100;
   display: flex;
   flex-direction: column;
@@ -118,8 +128,9 @@
   margin: 0;
   padding: 14px 16px;
   overflow: hidden;
-  border-color: rgba(70, 70, 81, 0.5);
-  box-shadow: 0 24px 60px rgba(2, 3, 8, 0.55);
+  background: #080c18;
+  border-color: var(--border-line);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.85);
 }
 
 .chat-header {

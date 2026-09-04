@@ -26,7 +26,6 @@ import {
 
 // New Mission Control Workstation Components
 import TopBar, { type MissionMode } from './components/TopBar/TopBar'
-import MissionAssistant from './components/Assistant/MissionAssistant'
 import FleetSelectionView from './components/Fleet/FleetSelectionView'
 
 // Modular shell: App knows the slots, never the features.
@@ -774,16 +773,6 @@ export default function App() {
           </aside>
         </main>
       )}
-
-        {/* Global Mission Decision Assistant Instrument */}
-        <MissionAssistant
-          mode={missionMode}
-          selectedRover={selectedRover}
-          weights={weights}
-          start={start}
-          goal={goal}
-          planResult={planResult}
-        />
 
         {/* Application-level floating utilities. Sits immediately before the
             toast stack and shares its parent: shell.css moves the toasts clear
