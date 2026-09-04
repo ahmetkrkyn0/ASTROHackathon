@@ -697,7 +697,10 @@ export default function App() {
                       setTerrainSlices(timeVarying ? slices : 0)
                       setSliceIndex(brightestSlice)
                       setTerrainPhotoAvailable(photoAvailable)
-                      if (!photoAvailable) setPhotoDrape(false)
+                      // Mirror availability: the real NAC crop is strictly
+                      // more detailed than the shaded/procedural fallback, so
+                      // default to it whenever the current DEM window has one.
+                      setPhotoDrape(photoAvailable)
                     }}
                     onError={(message) =>
                       pushToast({ tone: 'warning', title: '3D Terrain', message })

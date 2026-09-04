@@ -149,9 +149,6 @@ const PHOTO_TEXTURE_URL = '/textures/nac-site11-2048.jpg'
  */
 const DETAIL_TEXTURE_URL = '/textures/nac-site11-detail-2048.jpg'
 
-// The bundled NAC crops are georeferenced assets, not generic lunar textures.
-// Only drape them when the live backend is serving the exact window they were
-// cut from; otherwise the image would put real craters at false coordinates.
 const NAC_TEXTURE_WINDOW = {
   originX: -32_500,
   originY: 11_000,
@@ -448,15 +445,68 @@ function createRockTexture(): THREE.CanvasTexture {
   texture.wrapS = THREE.RepeatWrapping
   texture.wrapT = THREE.RepeatWrapping
   texture.repeat.set(2.5, 2.5)
+  // Rocks are seen at a steep grazing angle from FPS eye height; without
+  // anisotropic filtering the mips blur into the streaky, muddy look a flat
+  // ground texture gets when viewed edge-on.
+  texture.anisotropy = 16
   return texture
+}
+
+/** Direction-neutral micro-albedo for DEM windows without an aligned NAC crop. */
+function createRegolithTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 256
+  canvas.height = 256
+  const context = canvas.getContext('2d')!
+  const image = context.createImageData(canvas.width, canvas.height)
+  const random = seededRandom(0x5245474f)
+
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const index = (y * canvas.width + x) * 4
+      const broad = 7 * Math.sin(x * 0.08) * Math.cos(y * 0.06)
+      const grain = (random() - 0.5) * 22
+      const value = THREE.MathUtils.clamp(122 + broad + grain, 88, 154)
+      image.data[index] = value
+      image.data[index + 1] = value * 0.965
+      image.data[index + 2] = value * 0.92
+      image.data[index + 3] = 255
+    }
+  }
+  context.putImageData(image, 0, 0)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.wrapS = THREE.RepeatWrapping
+  texture.wrapT = THREE.RepeatWrapping
+  texture.repeat.set(18, 18)
+  texture.anisotropy = 16
+  return texture
+}
+
+/** Soft round sprite for point clouds and locator markers -- a flat square
+ * PointsMaterial/SpriteMaterial dot reads as a pixelated smear at any scale;
+ * this alpha-fades to the edge so clusters blend instead of tiling visibly. */
+function createSoftDotTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const ctx = canvas.getContext('2d')!
+  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
+  grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)')
+  grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.65)')
+  grad.addColorStop(1, 'rgba(255, 255, 255, 0)')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, 64, 64)
+  return new THREE.CanvasTexture(canvas)
 }
 
 function createRoverModel(): { group: THREE.Group; lidarHead: THREE.Group } {
   const group = new THREE.Group()
   const chassisMaterial = new THREE.MeshStandardMaterial({
-    color: 0x151b24,
-    roughness: 0.64,
-    metalness: 0.58,
+    color: 0xd5d9dc,
+    roughness: 0.7,
+    metalness: 0.22,
   })
   const metalMaterial = new THREE.MeshStandardMaterial({
     color: 0xa7b0b8,
@@ -541,11 +591,22 @@ export default function TerrainCanvas3D({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  // Start in a relief-independent overview. The old FPS default spawned two
-  // metres above a cell that became a steep face in the new DEM window.
-  const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('orbit')
+  // Preserve the original berke-3d presentation: enter at rover height with
+  // the route stretching across the terrain. The live-gradient camera setup
+  // below keeps that view safe when the DEM window changes.
+  const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('fps')
   const [lidarEnabled, setLidarEnabled] = useState(true)
   const [lidarTelemetry, setLidarTelemetry] = useState<LidarScanSummary | null>(null)
+
+  // The raw NAC crop still carries its own 2010 grazing-light shadow
+  // micro-texture (see PHOTO_TEXTURE_URL's own comment on why it is drawn
+  // unlit). That reads as fine crater texture from an orbit-scale view, but
+  // magnified to FPS eye height the same texels become visible streaks -- the
+  // photo just is not shot at a resolution meant to be stood on. The DETAIL
+  // texture divides that illumination back out and is re-lit dynamically, so
+  // FPS always uses it regardless of the toggle; the checkbox only controls
+  // what orbit view drapes.
+  const effectivePhoto = photo && cameraMode === 'orbit'
 
   const sceneRef = useRef<{
     mesh: THREE.Mesh
@@ -558,9 +619,12 @@ export default function TerrainCanvas3D({
     lightMask: Float32Array | null
     photoTexture: THREE.Texture | null
     detailTexture: THREE.Texture | null
+    regolithTexture: THREE.CanvasTexture
     photoAvailable: boolean
     routeGroup: THREE.Group
     rockGroup: THREE.Group
+    rockMarkerGroup: THREE.Group
+    rockMarkerMaterial: THREE.SpriteMaterial
     rockMaterial: THREE.MeshStandardMaterial
     rockTexture: THREE.Texture
     roverGroup: THREE.Group
@@ -610,7 +674,7 @@ export default function TerrainCanvas3D({
     // Airless body: a shadow gets no fill. The small non-zero term is earthshine
     // and scattered light off nearby slopes, kept just high enough that a fully
     // shadowed cell reads as "dark surface" rather than "hole in the render".
-    scene.add(new THREE.AmbientLight(0xc8cede, 0.05))
+    scene.add(new THREE.AmbientLight(0xc8cede, 0.1))
 
     // Near-white, not the warm 0xfff4e0 a terrestrial scene wants: the Sun's
     // colour on an airless body is not filtered through an atmosphere, and a
@@ -643,12 +707,30 @@ export default function TerrainCanvas3D({
     const rockGroup = new THREE.Group()
     scene.add(rockGroup)
 
+    const softDotTexture = createSoftDotTexture()
+
+    // Metre-scale rocks are correctly tiny across a 2.5 km overview. These
+    // non-colliding markers make their locations inspectable in orbit mode;
+    // the actual meshes and LiDAR intersections remain at physical scale.
+    const rockMarkerMaterial = new THREE.SpriteMaterial({
+      map: softDotTexture,
+      color: 0xff9b52,
+      transparent: true,
+      opacity: 0.75,
+      depthTest: false,
+    })
+    const rockMarkerGroup = new THREE.Group()
+    scene.add(rockMarkerGroup)
+
+    const regolithTexture = createRegolithTexture()
+
     const rover = createRoverModel()
     scene.add(rover.group)
 
     const lidarPointGeometry = new THREE.BufferGeometry()
     const lidarPointMaterial = new THREE.PointsMaterial({
-      size: 2,
+      map: softDotTexture,
+      size: 3.5,
       // Screen-space dots stay legible in orbit view; their world positions
       // and occlusion are still fully metric.
       sizeAttenuation: false,
@@ -694,6 +776,8 @@ export default function TerrainCanvas3D({
     const build = async () => {
       const manifest: TerrainManifest = await (await fetch('/api/terrain')).json()
       if (disposed) return
+      // A NAC crop is only valid on the exact georeferenced window it was cut
+      // from. Other DEM windows receive the neutral procedural regolith map.
       const photoAvailable = hasAlignedNacTexture(manifest)
       const { rows, cols, resolution_m: res } = manifest.grid
       const { min_m: minM } = manifest.elevation
@@ -742,14 +826,6 @@ export default function TerrainCanvas3D({
       }
       const span = Math.max(rows, cols) * res
 
-      // Solid lunar bedrock pedestal underneath the terrain mesh
-      const baseBox = new THREE.Mesh(
-        new THREE.BoxGeometry(cols * res * 0.996, 350, rows * res * 0.996),
-        new THREE.MeshStandardMaterial({ color: 0x080b14, roughness: 0.98, metalness: 0.0 }),
-      )
-      baseBox.position.set(0, -175, 0)
-      scene.add(baseBox)
-
       // The Earth in deep space hovering above the lunar horizon
       const earth = createEarth(span)
       scene.add(earth.group)
@@ -784,9 +860,12 @@ export default function TerrainCanvas3D({
         lightMask: null,
         photoTexture: null,
         detailTexture: null,
+        regolithTexture,
         photoAvailable,
         routeGroup,
         rockGroup,
+        rockMarkerGroup,
+        rockMarkerMaterial,
         rockMaterial,
         rockTexture,
         roverGroup: rover.group,
@@ -806,13 +885,15 @@ export default function TerrainCanvas3D({
           material.dispose()
           starfield.geometry.dispose()
           milkyWay.geometry.dispose()
-          baseBox.geometry.dispose()
           earth.mesh.geometry.dispose()
           rockGroup.children.forEach((rock) => {
             if (rock instanceof THREE.Mesh) rock.geometry.dispose()
           })
           rockMaterial.dispose()
           rockTexture.dispose()
+          rockMarkerMaterial.dispose()
+          regolithTexture.dispose()
+          softDotTexture.dispose()
           disposeObjectTree(rover.group)
           lidarPointGeometry.dispose()
           lidarPointMaterial.dispose()
@@ -861,7 +942,11 @@ export default function TerrainCanvas3D({
 
     const animate = () => {
       frame = requestAnimationFrame(animate)
-      controls.update()
+      // OrbitControls.update() re-aims the camera at controls.target every
+      // call, independent of `enabled` -- calling it unconditionally here
+      // fought FPS mode's own camera.lookAt() every frame and snapped the
+      // "surface" view back to staring down at the orbit target.
+      if (controls.enabled) controls.update()
       const state = sceneRef.current
       if (state?.earthMesh) {
         state.earthMesh.rotation.y += 0.0004
@@ -934,11 +1019,11 @@ export default function TerrainCanvas3D({
     if (!state || status !== 'ready') return
     let cancelled = false
 
-    if (!photo) {
+    if (!effectivePhoto) {
       // Back to a lit surface. Clearing the emissive term is the part that
-      // matters here; the colouring effect below runs on the same flip (photo
-      // is in its deps) and puts back either the detail texture or the data
-      // ramp, whichever the current view mode wants.
+      // matters here; the colouring effect below runs on the same flip
+      // (effectivePhoto is in its deps) and puts back either the detail
+      // texture or the data ramp, whichever the current view mode wants.
       state.material.map = null
       state.material.emissiveMap = null
       state.material.emissive.set(0x000000)
@@ -948,18 +1033,22 @@ export default function TerrainCanvas3D({
     }
 
     if (!state.photoAvailable) {
-      state.material.map = null
+      // Never stretch a georeferenced photograph over a different DEM
+      // footprint. App disables the toggle from the same manifest signal.
+      state.material.map = state.regolithTexture
       state.material.emissiveMap = null
       state.material.emissive.set(0x000000)
-      state.material.color.copy(SURFACE_ALBEDO)
+      state.material.color.set(0xffffff)
       state.material.needsUpdate = true
-      onError?.('NAC fotoğrafı mevcut DEM penceresiyle hizalı değil; kaplama uygulanmadı.')
       return
     }
 
     const apply = (texture: THREE.Texture) => {
       if (cancelled || !sceneRef.current) return
       texture.colorSpace = THREE.SRGBColorSpace
+      // FPS eye height views this drape at a steep grazing angle; without
+      // anisotropic filtering the mip chain blurs it into streaks.
+      texture.anisotropy = 16
       // PlaneGeometry's v runs 1 -> 0 from the +Y (north) edge, and three's
       // default flipY puts image row 0 at v = 1. The crop's row 0 is the
       // window's north edge, so the two already agree -- no flip needed.
@@ -1008,12 +1097,12 @@ export default function TerrainCanvas3D({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photo, status])
+  }, [effectivePhoto, status])
 
   // ── Surface colouring follows the 2-D view mode. ───────────────────────────
   useEffect(() => {
     const state = sceneRef.current
-    if (!state || status !== 'ready' || photo) return
+    if (!state || status !== 'ready' || effectivePhoto) return
     let cancelled = false
 
     const layerName = LAYER_FOR_VIEW[viewMode] ?? 'elevation'
@@ -1028,16 +1117,19 @@ export default function TerrainCanvas3D({
     // cell must read as no-data rather than as ground that happens to be there.
     const flat = viewMode === 'surface'
 
-    if (flat && state.photoAvailable) {
+    if (flat) {
       const applyDetail = (texture: THREE.Texture) => {
         if (cancelled || !sceneRef.current) return
         texture.colorSpace = THREE.SRGBColorSpace
+        texture.anisotropy = 16
         state.detailTexture = texture
         state.material.map = texture
         state.material.color.set(0xffffff)
         state.material.needsUpdate = true
       }
-      if (state.detailTexture) applyDetail(state.detailTexture)
+      if (!state.photoAvailable) {
+        applyDetail(state.regolithTexture)
+      } else if (state.detailTexture) applyDetail(state.detailTexture)
       else
         new THREE.TextureLoader().load(DETAIL_TEXTURE_URL, applyDetail, undefined, () => {
           // No texture: put the albedo back on the material so the ground is
@@ -1049,7 +1141,7 @@ export default function TerrainCanvas3D({
         })
     } else {
       state.material.map = null
-      state.material.color.copy(flat ? SURFACE_ALBEDO : new THREE.Color(0xffffff))
+      state.material.color.set(0xffffff)
       state.material.needsUpdate = true
     }
 
@@ -1107,7 +1199,7 @@ export default function TerrainCanvas3D({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, status, photo])
+  }, [viewMode, status, effectivePhoto])
 
   // ── Sun position and cast shadows follow the time slice. ───────────────────
   useEffect(() => {
@@ -1117,8 +1209,11 @@ export default function TerrainCanvas3D({
     const span = Math.max(manifest.grid.rows, manifest.grid.cols) * manifest.grid.resolution_m
 
     if (!series || !series.sun.length) {
-      // No ephemeris: a fixed grazing light, so the scene still reads as polar.
-      state.sun.position.set(0.6, 0.09, -0.8).multiplyScalar(span * 4)
+      // No ephemeris: keep the azimuth fixed but use the same 20-degree
+      // shading floor as the SPICE path. The previous ~5-degree fallback made
+      // one half of the high-relief DEM effectively black and looked like a
+      // torn texture, even though it was simply the Lambert term collapsing.
+      state.sun.position.set(0.6, 0.36, -0.8).normalize().multiplyScalar(span * 4)
       if (state.sunSprite) {
         state.sunSprite.position.copy(state.sun.position).normalize().multiplyScalar(55000)
       }
@@ -1152,7 +1247,7 @@ export default function TerrainCanvas3D({
     // In photographic mode the drape already carries the 2010 acquisition's
     // own shadows. Applying the simulated mask on top would darken the same
     // ground twice, from two epochs that were measured not to agree.
-    if (!shadowCube || photo) return
+    if (!shadowCube || effectivePhoto) return
     const [, sr, sc] = series.binary_format.shape
     const slab = shadowCube.subarray(slice * sr * sc, (slice + 1) * sr * sc)
     const { rows, cols } = manifest.grid
@@ -1179,7 +1274,7 @@ export default function TerrainCanvas3D({
     }
     state.lightMask = mask
     applyColors()
-  }, [sliceIndex, status, photo])
+  }, [sliceIndex, status, effectivePhoto])
 
   // ── Vertical exaggeration (flat 1.0 in FPS mode for natural level ground) ──
   useEffect(() => {
@@ -1224,22 +1319,26 @@ export default function TerrainCanvas3D({
         state.rockGroup.remove(child)
         if (child instanceof THREE.Mesh) child.geometry.dispose()
       }
+      state.rockMarkerGroup.clear()
 
       for (const descriptor of generateRockField(roverX, roverZ)) {
         const groundY = sampleTerrainHeight(terrain, descriptor.x, descriptor.z)
         if (groundY === null) continue
-        const geometry = new THREE.IcosahedronGeometry(1, 1)
+        // Detail 1 (12 vertices) reads as a crumpled polyhedron, not a rock --
+        // detail 2 (42 vertices) gives enough facets for the per-vertex
+        // weathering below to read as texture rather than as the whole shape.
+        const geometry = new THREE.IcosahedronGeometry(1, 2)
         const positions = geometry.getAttribute('position') as THREE.BufferAttribute
         const random = seededRandom(descriptor.seed)
         for (let i = 0; i < positions.count; i++) {
           const x = positions.getX(i)
           const y = positions.getY(i)
           const z = positions.getZ(i)
-          const weathering = 0.82 + random() * 0.29
+          const weathering = 0.92 + random() * 0.13
           positions.setXYZ(
             i,
             x * descriptor.radiusX * weathering,
-            y * descriptor.radiusY * (0.9 + random() * 0.18),
+            y * descriptor.radiusY * (0.94 + random() * 0.1),
             z * descriptor.radiusZ * weathering,
           )
         }
@@ -1251,6 +1350,12 @@ export default function TerrainCanvas3D({
         rock.rotation.set((random() - 0.5) * 0.18, descriptor.rotationY, (random() - 0.5) * 0.18)
         rock.userData.lidarRockId = descriptor.id
         state.rockGroup.add(rock)
+
+        const marker = new THREE.Sprite(state.rockMarkerMaterial)
+        marker.position.set(descriptor.x, groundY + descriptor.radiusY + 3, descriptor.z)
+        marker.scale.set(4, 4, 1)
+        marker.userData.rockId = descriptor.id
+        state.rockMarkerGroup.add(marker)
       }
 
       state.roverGroup.position.set(roverX, roverGroundY, roverZ)
@@ -1279,6 +1384,11 @@ export default function TerrainCanvas3D({
       state.lidarScan = scan
       state.lidarRevolutionStartedAt = performance.now()
 
+      // Visibility aids are deliberately visual-only. Ray intersections above
+      // were computed against the unscaled physical meshes.
+      state.roverGroup.scale.setScalar(cameraMode === 'orbit' ? 8 : 1)
+      state.rockMarkerGroup.visible = cameraMode === 'orbit'
+
       const pointGeometry = state.lidarPoints.geometry
       pointGeometry.setAttribute('position', new THREE.BufferAttribute(scan.positions, 3))
       pointGeometry.setAttribute('color', new THREE.BufferAttribute(scan.colors, 3))
@@ -1292,10 +1402,16 @@ export default function TerrainCanvas3D({
   useEffect(() => {
     const state = sceneRef.current
     if (!state || status !== 'ready') return
-    state.lidarPoints.visible = lidarEnabled
-    state.lidarSweep.visible = lidarEnabled
+    // The raw return cloud and sweep line are legible at FPS range -- each
+    // point is metres from the sensor. At orbit scale the whole 60 m scan
+    // collapses into a few dozen screen pixels around the rover and reads as
+    // noise, not data; the rock markers already say "something is here" at
+    // that scale, so the point cloud stays hidden there.
+    const showLidarDetail = lidarEnabled && cameraMode === 'fps'
+    state.lidarPoints.visible = showLidarDetail
+    state.lidarSweep.visible = showLidarDetail
     state.lidarHead.visible = lidarEnabled
-  }, [lidarEnabled, status])
+  }, [lidarEnabled, cameraMode, status])
 
   // ── Planned route, drawn in the same metric frame as the mesh. ─────────────
   useEffect(() => {
@@ -1359,18 +1475,9 @@ export default function TerrainCanvas3D({
     if (cameraMode === 'fps') {
       controls.enabled = false
 
-      // Spawn on a level, flat surface patch (row 248, col 248 has ~2.0° slope)
       const poseWaypoint = activeWaypoint ?? waypoints?.[0]
-      const r = THREE.MathUtils.clamp(
-        poseWaypoint?.row ?? Math.floor(rows / 2),
-        1,
-        rows - 2,
-      )
-      const c = THREE.MathUtils.clamp(
-        poseWaypoint?.col ?? Math.floor(cols / 2),
-        1,
-        cols - 2,
-      )
+      const r = THREE.MathUtils.clamp(poseWaypoint?.row ?? Math.floor(rows / 2), 1, rows - 2)
+      const c = THREE.MathUtils.clamp(poseWaypoint?.col ?? Math.floor(cols / 2), 1, cols - 2)
       const idx = r * cols + c
       const altM = heights && idx < heights.length && !Number.isNaN(heights[idx]) ? heights[idx] : minM + 325
 
@@ -1381,23 +1488,38 @@ export default function TerrainCanvas3D({
       camera.position.set(rx, ry, rz)
       camera.up.set(0, 1, 0)
 
-      // Look across the lunar plain towards the horizon and the Earth in the sky
+      // Look across the lunar plain towards the horizon and the Earth in the sky.
+      // A fixed shallow pitch is not safe here: this site's terrain carries
+      // real local slopes up to ~20 deg, and a pitch shallower than the
+      // ground's own downhill slope never re-intersects the surface -- the
+      // sightline flies over the terrain forever, rendering nothing but the
+      // background colour. Aiming at an actual point ON the terrain some
+      // distance ahead makes the pitch self-correct to whatever the ground
+      // requires, on any slope.
       const sample = (row: number, col: number) => heights?.[row * cols + col] ?? altM
       const gradientX = (sample(r, c + 1) - sample(r, c - 1)) / (2 * stepX)
       const gradientZ = (sample(r + 1, c) - sample(r - 1, c)) / (2 * stepZ)
-      // The view vector below is (sin(yaw), y, -cos(yaw)); this bearing
-      // points down the local gradient instead of directly into an uphill face.
+      // This bearing points down the local gradient instead of directly into
+      // an uphill face.
       const yaw = Math.atan2(-gradientX, gradientZ)
-      const pitch = 0.06
-      fpsAngles.current = { yaw, pitch }
 
-      const dir = new THREE.Vector3(
-        Math.sin(yaw) * Math.cos(pitch),
-        Math.sin(pitch),
-        -Math.cos(yaw) * Math.cos(pitch),
-      )
-      camera.lookAt(camera.position.clone().add(dir))
+      const LOOKAHEAD_M = 60 // matches the LiDAR's own max range
+      const targetWorldX = rx + Math.sin(yaw) * LOOKAHEAD_M
+      const targetWorldZ = rz - Math.cos(yaw) * LOOKAHEAD_M
+      const targetCol = THREE.MathUtils.clamp(Math.round((targetWorldX + halfX) / stepX), 0, cols - 1)
+      const targetRow = THREE.MathUtils.clamp(Math.round((targetWorldZ + halfZ) / stepZ), 0, rows - 1)
+      const targetIdx = targetRow * cols + targetCol
+      const targetAltM =
+        heights && targetIdx < heights.length && !Number.isNaN(heights[targetIdx])
+          ? heights[targetIdx]
+          : altM
+      const targetWorldY = targetAltM - minM + 1.6
+
+      camera.lookAt(targetWorldX, targetWorldY, targetWorldZ)
       camera.updateProjectionMatrix()
+
+      const forward = new THREE.Vector3(targetWorldX - rx, targetWorldY - ry, targetWorldZ - rz).normalize()
+      fpsAngles.current = { yaw, pitch: Math.asin(THREE.MathUtils.clamp(forward.y, -1, 1)) }
     } else {
       controls.enabled = true
       camera.fov = 45
@@ -1430,6 +1552,10 @@ export default function TerrainCanvas3D({
     let startX = 0
     let startY = 0
 
+    const isSceneControl = (target: EventTarget | null) =>
+      target instanceof Element &&
+      Boolean(target.closest('button, input, label, .terrain3d-lidar, .terrain3d-camera-switch'))
+
     const updateLook = () => {
       const { yaw, pitch } = fpsAngles.current
       const dir = new THREE.Vector3(
@@ -1442,7 +1568,10 @@ export default function TerrainCanvas3D({
     }
 
     const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 0) return
+      // Camera controls live inside the same container as the WebGL canvas.
+      // Capturing their pointer here retargets pointerup to the container and
+      // prevents the browser from emitting the button's click event.
+      if (e.button !== 0 || isSceneControl(e.target)) return
       isDown = true
       startX = e.clientX
       startY = e.clientY
