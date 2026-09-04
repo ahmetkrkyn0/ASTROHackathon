@@ -235,6 +235,90 @@ def test_the_guide_evidence_source_has_a_label():
     assert "'planning-guide': 'Planlama rehberi'" in CHAT_PANEL
 
 
+# ── unread: any completed turn that lands unseen ─────────────────────────────
+
+def _send_body() -> str:
+    return CHAT_PANEL[
+        CHAT_PANEL.index("const send = useCallback(") : CHAT_PANEL.index(
+            "const startNewChat = useCallback("
+        )
+    ]
+
+
+def _catch_branch() -> str:
+    body = _send_body()
+    return body[body.index("} catch (err) {") : body.index("} finally {")]
+
+
+def _finally_branch() -> str:
+    """The finally block only -- not the useCallback dependency array below it.
+
+    `onAnswerWhileHidden` legitimately appears in the deps, so the slice has to
+    stop at the end of the block or the assertion measures the wrong thing.
+    """
+    body = _send_body()
+    tail = body[body.index("} finally {") :]
+    return tail[: tail.index("      }\n")]
+
+
+def test_a_transport_failure_marks_unread():
+    """The defect this pass closes.
+
+    A failure that lands while the window is minimized used to append its turn
+    and say nothing, so the operator sat waiting for a reply that had already
+    come back.
+    """
+    assert "noteLanded()" in _catch_branch()
+
+
+def test_a_landed_answer_still_marks_unread():
+    body = _send_body()
+    success = body[body.index("try {") : body.index("} catch (err) {")]
+    assert "noteLanded()" in success
+
+
+def test_unread_is_never_marked_from_finally():
+    """`finally` also runs on the abort and stale-generation paths.
+
+    Those return before appending anything, so marking there would point a dot
+    at a turn that does not exist.
+    """
+    tail = _finally_branch()
+    assert "noteLanded" not in tail
+    assert "onAnswerWhileHidden" not in tail
+
+
+@pytest.mark.parametrize("branch", ["success", "failure"])
+def test_the_turn_is_appended_before_it_is_announced(branch):
+    """No appended turn -> no unread. Appended while hidden -> unread."""
+    body = _send_body()
+    if branch == "success":
+        section = body[body.index("try {") : body.index("} catch (err) {")]
+    else:
+        section = _catch_branch()
+    guard = section.index("generationRef.current !== generation) return")
+    append = section.index("setTurns((current) => [")
+    announce = section.index("noteLanded()")
+    assert guard < append < announce
+
+
+def test_unread_is_only_marked_when_the_window_is_hidden():
+    body = _send_body()
+    helper = body[body.index("const noteLanded = () => {") :]
+    helper = helper[: helper.index("}")]
+    assert "if (!visibleRef.current) onAnswerWhileHidden?.()" in helper
+
+
+def test_opening_the_assistant_still_clears_the_dot():
+    assert "setIsOpen(true)" in USE_ASSISTANT
+    open_body = USE_ASSISTANT[
+        USE_ASSISTANT.index("const open = useCallback(") : USE_ASSISTANT.index(
+            "const close = useCallback("
+        )
+    ]
+    assert "setUnread(false)" in open_body
+
+
 # ── the explanation level is still an explicit choice ────────────────────────
 
 def test_nothing_is_sent_before_a_level_is_chosen():

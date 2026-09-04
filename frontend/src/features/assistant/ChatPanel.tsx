@@ -379,6 +379,29 @@ export default function ChatPanel({
       const controller = new AbortController()
       abortRef.current = controller
 
+      /**
+       * One completed turn just landed. Tell the shell if nobody was looking.
+       *
+       * Called AFTER the turn is appended, on both the answer path and the
+       * failure path, and deliberately NOT from `finally`: the abort and
+       * stale-generation paths return before appending anything, and a dot
+       * pointing at a turn that does not exist is worse than no dot.
+       *
+       *   no appended turn                  -> no unread
+       *   appended turn while hidden        -> unread
+       *
+       * A failure is a completed turn. The operator needs to know something
+       * arrived; which kind it was is what opening the panel is for -- and a
+       * transport failure is the one case where staying silent leaves them
+       * waiting for a reply that already came back.
+       *
+       * `visibleRef` rather than `isVisible`: this closure is built before the
+       * request goes out, and the operator can minimize while it is in flight.
+       */
+      const noteLanded = () => {
+        if (!visibleRef.current) onAnswerWhileHidden?.()
+      }
+
       // Only user and assistant turns travel; the server rejects any other
       // role, and refuses more messages than it will accept.
       const wire: AiChatMessage[] = windowMessages(
@@ -409,7 +432,7 @@ export default function ChatPanel({
           },
         ])
         setStatusCue('Yanıt hazır.')
-        if (!visibleRef.current) onAnswerWhileHidden?.()
+        noteLanded()
       } catch (err) {
         if (controller.signal.aborted || generationRef.current !== generation) return
         // The detail is never rendered: a 503 from this route can name a server
@@ -432,6 +455,7 @@ export default function ChatPanel({
           },
         ])
         setStatusCue('İstek tamamlanamadı.')
+        noteLanded()
       } finally {
         if (abortRef.current === controller) abortRef.current = null
         if (generationRef.current === generation) setPending(false)
