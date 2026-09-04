@@ -48,8 +48,13 @@ Hiçbir SLAM/VO algoritması içermez, hiçbir odometri kütüphanesine bağlanm
   profiliyle eşlenerek drift'siz mutlak konumun bu veriden çıkabildiğini
   gösterir; düz arazide eşleşme güvenilir diye değil, `ambiguity_ratio`
   etiketiyle döner.
-- `backend/app/slip_model.py` **UNCALIBRATED** etiketlidir: yön iddiası
-  (eğimde enerji artar) taşır, büyüklük iddiası taşımaz.
+- `backend/app/slip_model.py` **MODEL** etiketlidir (C3): eğri VIPER'ın
+  15°/%40 tasarım kısıtına (PSJ 2025, GRC-1) ve Yutu-2'nin Chang'e-4'te
+  ölçülmüş slip aralığına (0 … −0,075, ≤ 8,86°; Nat. Comms 2024) bağlı,
+  çapalar arası üstel ve kapı 0,9; `edge_travel_time_s` üzerinden tek
+  noktadan süre ve enerjiye girer. **Kutup regolitinde ölçülmüş değildir**;
+  aktarılan çapalar katalogda `assumption:` ile yazılıdır. Önce/sonra:
+  [docs/research/slip_calibration_report.md](docs/research/slip_calibration_report.md).
 - Koridorun gerçek bir odometri hata bütçesiyle uyumu sayıyla gösterilir:
   [docs/research/localization_budget.md](docs/research/localization_budget.md).
 
@@ -143,6 +148,7 @@ Backend açılışta işlenmiş grid’leri bulursa yükler; bulamazsa API üzer
 - Belirsizlik katmanları (B3) için NASA PGDA'nın Site11 DEM klonları: `python scripts/build_dem_clone_cache.py` (varsayılan 20 klon, 1 km yakın-alan dolgusu; `--n-clones 100` ile genişletilir; `horizon_map.npy` varsa klon ufuk küplerini de üretir). Ürün: https://pgda.gsfc.nasa.gov/products/78
 - Formal güvenlik monitörü (D3): gereksinimler `docs/requirements/lunapath.fret.json` (FRETISH + STL), robustness `rtamt==0.3.5` ile (requirements.txt'te; kurulu değilse yerleşik değerlendirici aynı sonucu verir ve yanıt `monitor.engine` ile söyler). Rapor: `python scripts/safety_monitor_report.py`.
 - Sürekli-aydınlık koridoru (A2, CMU'nun sun-synchronous x-y-t budaması): `/api/plan-4d` `require_continuous_illumination` + `lit_rule`, yanıtta `illumination_corridor` bloğu ve `metrics.max_dwell_hours`; küp `GET /api/illumination-corridor?...&format=f32`. Rapor: `python scripts/illumination_corridor_report.py` (ufuk küpü + çekirdek gerekir).
+- Slip kalibrasyonu (C3, Yutu-2 ölçümü + VIPER tasarım kısıtı): `/api/rovers` her rover'da `slip_model` (çapalar, kaynaklar, 0–25° tablo, etiket `MODEL`) ve `declared_only.regolith`; `/api/plan`, `/api/plan-4d`, `/api/compare`, `/api/plan-multi` yanıtlarında `slip_model` bloğu (rotanın ortalama/maks slip'i, slip'in eklediği saat ve Wh). Önce/sonra raporu: `python scripts/slip_calibration_report.py` (ufuk küpü + çekirdek gerekir).
 
 ---
 

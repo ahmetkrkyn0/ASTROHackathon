@@ -37,6 +37,8 @@ from typing import Any
 
 import numpy as np
 
+from .cost_engine import edge_travel_time_s_array
+
 #: One synodic month: long enough to contain a full no-link period for every
 #: cell, whatever its horizon.
 DEFAULT_SAFE_HAVEN_SPAN_HOURS: float = 708.7
@@ -171,11 +173,12 @@ def _gated_edges(
     ``astar_4d`` apply per edge -- both cells passable and no corner cut;
     along-track step slope within ``slope_max_deg``; cross-slope within
     ``slope_lateral_max_deg`` -- and the same travel time: the mean of the
-    two cell slopes through ``cost_engine.edge_travel_time_s``
-    (``distance / (v_max cos^2)``). Kept identical on purpose: the deadline
-    the planner enforces is measured on this graph, and a cell the planner
-    can reach that this graph cannot (or the reverse) would make the rule
-    lie in one direction or the other.
+    two cell slopes through ``cost_engine.edge_travel_time_s`` -- its
+    vectorised twin ``edge_travel_time_s_array``, same operation order, slip
+    included since C3, bit-equal to the scalar the planner calls per edge.
+    Kept identical on purpose: the deadline the planner enforces is measured
+    on this graph, and a cell the planner can reach that this graph cannot
+    (or the reverse) would make the rule lie in one direction or the other.
     """
     mask = np.asarray(passable, dtype=bool)
     height, width = mask.shape
@@ -192,7 +195,6 @@ def _gated_edges(
         raise ValueError("slope shape must match traversable")
 
     res = float(resolution_m)
-    v_max = float(rover["v_max_ms"])
     tan_slope_max = math.tan(math.radians(float(rover["slope_max_deg"])))
     tan_lat_max_sq = math.tan(math.radians(float(rover["slope_lateral_max_deg"]))) ** 2
     if elev is not None:
@@ -226,12 +228,11 @@ def _gated_edges(
             lat_tan = np.abs(g_row * -unit_c + g_col * unit_r)
             ok &= lat_tan * lat_tan <= tan_lat_max_sq
         edge_slope = 0.5 * (slopes[src] + slopes[dst])
-        cos_t = np.cos(np.radians(edge_slope))
-        with np.errstate(divide="ignore", invalid="ignore"):
-            # edge_travel_time_s: L = d / cos, v = v_max cos  ->  d / (v_max cos^2)
-            travel_h = np.where(
-                cos_t > 0.0, distance_m / (v_max * cos_t * cos_t) / 3600.0, np.inf
-            )
+        # The planner's own edge_travel_time_s, vectorised in the same
+        # operation order (slip included since C3): bit-equal to the scalar
+        # the planner calls per edge, so a move of exactly one slice never
+        # rounds differently here and there.
+        travel_h = edge_travel_time_s_array(edge_slope, distance_m, rover) / 3600.0
         ok &= np.isfinite(travel_h)
         sources.append(index[src][ok])
         targets.append(index[dst][ok])
@@ -295,6 +296,65 @@ def time_to_safe_haven_hours(
     result[:] = distances
     result[sources] = 0.0
     return result.reshape(height, width)
+
+
+def gated_shortest_drive(
+    traversable: np.ndarray,
+    elevation: np.ndarray | None,
+    slope: np.ndarray | None,
+    resolution_m: float,
+    rover: Any,
+    start: tuple[int, int],
+    goal: tuple[int, int],
+) -> tuple[float, int] | None:
+    """``(hours, moves)`` of the FASTEST drivable route from *start* to
+    *goal* on the gated graph, or ``None`` when no route exists.
+
+    Sizes ``/api/plan-4d``'s default horizon (C3). The planner advances time
+    in whole slices per move, ``ceil(edge hours / slice)``, so along the
+    fastest route it arrives no later than ``ceil(hours / slice) + moves``
+    slices -- each move can lose at most one slice to rounding -- and a
+    horizon of that length plus a wait pad is sufficient whenever the pair
+    is connected. The previous sizing multiplied the BFS move count by the
+    slowest conceivable edge (``slope_max_deg``, diagonal); with slip that
+    edge is ten times slower than a typical one and the product overshot
+    ``MAX_PLAN_4D_SLICES`` on routes that fit in a quarter of it.
+
+    Same graph, same hours as :func:`time_to_safe_haven_hours`; single-
+    source Dijkstra with predecessors so the move count is that route's.
+    """
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import dijkstra
+
+    mask = np.asarray(traversable, dtype=bool)
+    height, width = mask.shape
+    for cell in (start, goal):
+        if not (0 <= cell[0] < height and 0 <= cell[1] < width) or not mask[cell]:
+            return None
+    origin = int(start[0]) * width + int(start[1])
+    target = int(goal[0]) * width + int(goal[1])
+    if origin == target:
+        return 0.0, 0
+
+    src, dst, hours = _gated_edges(mask, elevation, slope, resolution_m, rover)
+    if src.size == 0:
+        return None
+    n_cells = height * width
+    graph = coo_matrix((hours, (src, dst)), shape=(n_cells, n_cells)).tocsr()
+    distances, predecessors = dijkstra(
+        graph, directed=False, indices=origin, return_predecessors=True
+    )
+    total = float(distances[target])
+    if not math.isfinite(total):
+        return None
+    moves = 0
+    node = target
+    while node != origin:
+        node = int(predecessors[node])
+        if node < 0:
+            return None
+        moves += 1
+    return total, moves
 
 
 # ── The Earthset deadline ────────────────────────────────────────────────────

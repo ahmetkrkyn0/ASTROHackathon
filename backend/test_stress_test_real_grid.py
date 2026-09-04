@@ -43,7 +43,13 @@ needs_real_inputs = pytest.mark.skipif(
 #: (89,123) -> (51,106) at coarsen 4, i.e. these fine block centres.
 _EPOCH_VIPER = "2027-05-30T00:00:00"
 _VIPER_START = {"row": 358, "col": 494}
-_VIPER_GOAL = {"row": 206, "col": 426}
+# The A1 pair's goal was (206, 426). Under the slip curve (C3) that 40-move
+# leg is refused -- it would take the battery below the 20 percent reserve
+# (test_slip_calibration_real_grid locks that verdict) -- so the protocol is
+# exercised on the nearest haven-to-haven leg the curve leaves feasible:
+# 8 coarse moves, ending at a haven, found by scanning the haven map from
+# the same start by drive time.
+_VIPER_GOAL = {"row": 346, "col": 462}
 #: A lit, linked epoch on the way into the September night (A4 / A1).
 _EPOCH_SUNRISE = "2026-09-22T00:00:00"
 
@@ -110,8 +116,10 @@ def test_route_sky_columns_are_the_planners_cubes_read_at_the_route(grids):
 
 @needs_real_inputs
 def test_vipers_haven_to_haven_route_survives_sherpas_protocol(client):
-    """Plan the A1 pair under the leg rule, then stress it 1 000 times with
-    SHERPA's defaults: the sky and the haven fields are the real ones, the
+    """Plan a haven-to-haven leg from the A1 start under the leg rule (the
+    nearest leg the slip curve leaves feasible, see _VIPER_GOAL), then
+    stress it 1 000 times with SHERPA's defaults: the sky and the haven
+    fields are the real ones, the
     unperturbed run reaches the haven, the summary is complete, and the
     whole thing takes seconds."""
     plan = client.post(

@@ -507,3 +507,29 @@ def test_auto_slice_hours_is_positive_when_nothing_is_traversable():
     )
     assert hours > 0.0
     assert math.isfinite(hours)
+
+
+
+# ── C3: the auto slice follows the slip-lengthened crossing ─────────────────
+
+
+def test_auto_slice_hours_grows_with_the_profiles_slip():
+    """The slice is one cell crossing at the median slope; that crossing now
+    includes the rover's slip, so a slip-free view of the same profile
+    yields a shorter slice by exactly 1 / (1 - slip(median))."""
+    import pytest
+
+    from app.constants import get_rover
+    from app.cost_cube import auto_slice_hours
+    from app.cost_engine import slip_free_view
+    from app.slip_model import slip_ratio
+
+    slope = np.full((6, 6), 10.0)
+    traversable = np.ones((6, 6), dtype=bool)
+    rover = get_rover("nasa_viper")
+
+    with_slip = auto_slice_hours(slope, traversable, 320.0, rover)
+    without = auto_slice_hours(slope, traversable, 320.0, slip_free_view(rover))
+
+    assert with_slip > without
+    assert with_slip / without == pytest.approx(1.0 / (1.0 - slip_ratio(10.0, rover)))

@@ -47,6 +47,11 @@ NIGHT_EPOCH = "2026-09-13T00:00:00"
 NIGHT_START, NIGHT_GOAL = (186, 34), (494, 450)
 START = {"row": 358, "col": 494}
 GOAL = {"row": 206, "col": 426}
+# Under the slip curve (C3) the unconstrained plan to GOAL is refused for the
+# battery reserve; the corridor block is read from the nearest feasible
+# haven-to-haven leg. The corridor RULE is still tested on the standard pair
+# (its start block is dark at the first slice either way).
+VIPER_LEG_GOAL = {"row": 346, "col": 462}
 #: The horizon and slice pinned so the test can rebuild the endpoint's
 #: corridor to pick a pair inside it (the default horizon depends on the pair).
 HORIZON_HOURS = 8.0
@@ -77,7 +82,7 @@ def _fine_centre(cell):
 
 @needs_real_inputs
 def test_viper_epoch_has_a_corridor_but_the_standard_route_starts_in_the_dark(client):
-    free = _plan(client, start=START, goal=GOAL, rover_id="nasa_viper", start_utc=VIPER_EPOCH)
+    free = _plan(client, start=START, goal=VIPER_LEG_GOAL, rover_id="nasa_viper", start_utc=VIPER_EPOCH)
     assert free.status_code == 200, free.text
     payload = free.json()
     block = payload["illumination_corridor"]
@@ -86,7 +91,6 @@ def test_viper_epoch_has_a_corridor_but_the_standard_route_starts_in_the_dark(cl
     assert 0 < block["voxels"]["corridor"] <= block["voxels"]["lit_safe"]
     assert block["components"]["count"] >= 1
     assert block["start"]["in_corridor_t0"] is False
-    assert block["goal"]["corridor_slices"] == 0
     assert block["route"]["inside"] is False
     assert payload["metrics"]["states_outside_corridor"] >= 1
     assert max(payload["path_dark_hours"]) > 0.0

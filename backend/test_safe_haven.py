@@ -500,3 +500,111 @@ def test_block_min_takes_the_earliest_earthset_in_each_block():
     assert block_min(fine, 1) is not None and block_min(fine, 1).shape == fine.shape
     with pytest.raises(ValueError):
         block_min(fine, 3)
+
+
+# ── C3: the gated graph's hours are the planner's, bit for bit, and the
+#       shortest DRIVE (hours, moves) sizes the default horizon ───────────────
+
+
+def _random_terrain(seed: int, shape=(9, 9)):
+    rng = np.random.default_rng(seed)
+    passable = rng.random(shape) > 0.2
+    elevation = rng.normal(0.0, 10.0, size=shape)
+    grad_r, grad_c = np.gradient(elevation, RES_M)
+    slope = np.degrees(np.arctan(np.hypot(grad_r, grad_c)))
+    return passable, elevation, slope
+
+
+def test_gated_edge_hours_equal_the_planners_scalar_travel_time_bit_for_bit():
+    """astar_4d prices each move with the scalar edge_travel_time_s; the
+    gated graph is vectorised. With slip in the model the two must still
+    be the SAME number, or a move of exactly one slice rounds differently
+    in the corridor tables and in the planner."""
+    import math
+
+    from app.cost_engine import edge_travel_time_s
+    from app.safe_haven import _gated_edges
+
+    passable, elevation, slope = _random_terrain(21)
+    rover = get_rover("nasa_viper")
+    src, dst, hours = _gated_edges(passable, elevation, slope, RES_M, rover)
+    assert src.size > 0
+    flat = slope.ravel()
+    width = slope.shape[1]
+    expected = []
+    for s, d in zip(src, dst):
+        d_row = int(d // width - s // width)
+        d_col = int(d % width - s % width)
+        distance = RES_M * math.sqrt(2.0) if (d_row != 0 and d_col != 0) else RES_M
+        expected.append(
+            edge_travel_time_s(0.5 * (flat[s] + flat[d]), distance, rover) / 3600.0
+        )
+    assert np.array_equal(hours, np.array(expected))
+
+
+def test_gated_shortest_drive_sums_the_edge_hours_of_the_fastest_route():
+    from app.safe_haven import gated_shortest_drive
+
+    passable = np.ones((1, 5), dtype=bool)
+    elevation = np.zeros((1, 5))
+    slope = np.array([[0.0, 10.0, 20.0, 10.0, 0.0]])
+
+    result = gated_shortest_drive(passable, elevation, slope, RES_M, get_rover(), (0, 0), (0, 4))
+
+    assert result is not None
+    hours, moves = result
+    assert moves == 4
+    assert hours == pytest.approx(
+        _flat_hours(RES_M, 5.0) + _flat_hours(RES_M, 15.0) + _flat_hours(RES_M, 15.0) + _flat_hours(RES_M, 5.0)
+    )
+
+
+def test_gated_shortest_drive_prefers_the_faster_of_two_routes_not_the_shorter():
+    """Two rows: the top one is flat, the bottom one steep. From the bottom-
+    left corner the fewest-moves route stays on the steep row; the fastest
+    goes up to the flat row and back down."""
+    from app.pathfinder_4d import gated_move_count
+    from app.safe_haven import gated_shortest_drive
+
+    passable = np.ones((2, 6), dtype=bool)
+    elevation = np.zeros((2, 6))
+    slope = np.array([[0.0] * 6, [0.0, 19.0, 19.0, 19.0, 19.0, 0.0]])
+    rover = get_rover()
+
+    hours, moves = gated_shortest_drive(passable, elevation, slope, RES_M, rover, (1, 0), (1, 5))
+    straight = sum(
+        _flat_hours(RES_M, 0.5 * (slope[1, i] + slope[1, i + 1])) for i in range(5)
+    )
+    assert hours < straight
+    assert moves >= gated_move_count(passable, (1, 0), (1, 5), elevation, RES_M, rover)
+
+
+def test_gated_shortest_drive_is_none_behind_a_wall_and_zero_at_the_goal():
+    from app.safe_haven import gated_shortest_drive
+
+    passable = np.ones((1, 5), dtype=bool)
+    elevation = np.zeros((1, 5))
+    elevation[0, 2] = 1000.0
+    rover = get_rover()
+    assert gated_shortest_drive(passable, elevation, np.zeros((1, 5)), RES_M, rover, (0, 0), (0, 4)) is None
+    assert gated_shortest_drive(passable, elevation, np.zeros((1, 5)), RES_M, rover, (0, 1), (0, 1)) == (0.0, 0)
+
+
+def test_gated_shortest_drive_agrees_with_gated_move_count_on_reachability():
+    from app.pathfinder_4d import gated_move_count
+    from app.safe_haven import gated_shortest_drive
+
+    passable, elevation, slope = _random_terrain(33)
+    rover = get_rover()
+    cells = [tuple(int(v) for v in cell) for cell in np.argwhere(passable)]
+    rng = np.random.default_rng(1)
+    for _ in range(40):
+        start = cells[rng.integers(len(cells))]
+        goal = cells[rng.integers(len(cells))]
+        count = gated_move_count(passable, start, goal, elevation, RES_M, rover)
+        drive = gated_shortest_drive(passable, elevation, slope, RES_M, rover, start, goal)
+        assert (drive is None) == (count is None), (start, goal)
+        if drive is not None:
+            hours, moves = drive
+            assert moves >= count
+            assert hours >= 0.0 and (hours > 0.0 or start == goal)

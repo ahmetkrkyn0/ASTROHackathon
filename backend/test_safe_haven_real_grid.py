@@ -180,9 +180,13 @@ def _coarse_setup(grids, rover_id: str, epoch: str, coarsen: int = 4):
     return passable, havens, elevation, resolution_m
 
 
-def _pair(passable, sources, targets, elevation, resolution_m, rover, seed: int):
+def _pair(
+    passable, sources, targets, elevation, resolution_m, rover, seed: int,
+    min_moves: int = 15, max_moves: int = 40,
+):
     """A (start, goal) pair in coarse cells, start drawn from *sources* and
-    goal from *targets*, joined by a gated route of 15-40 moves."""
+    goal from *targets*, joined by a gated route of min_moves-max_moves
+    moves (the longest such pair among 200 draws)."""
     from app.pathfinder_4d import gated_move_count
 
     rng = np.random.default_rng(seed)
@@ -193,7 +197,7 @@ def _pair(passable, sources, targets, elevation, resolution_m, rover, seed: int)
         a = tuple(int(v) for v in source_cells[rng.integers(len(source_cells))])
         b = tuple(int(v) for v in target_cells[rng.integers(len(target_cells))])
         moves = gated_move_count(passable, a, b, elevation, resolution_m, rover)
-        if moves is not None and 15 <= moves <= 40 and (best is None or moves > best[2]):
+        if moves is not None and min_moves <= moves <= max_moves and (best is None or moves > best[2]):
             best = (a, b, moves)
     assert best is not None, "no suitable pair on this grid"
     return best
@@ -211,7 +215,13 @@ def test_plan_4d_between_two_havens_satisfies_the_leg_rule_on_the_real_grid(clie
     rover = get_rover("nasa_viper")
     passable, havens, elevation, resolution_m = _coarse_setup(grids, "nasa_viper", _EPOCH_VIPER)
     assert havens.sum() > 100
-    start, goal, moves = _pair(passable, havens, havens, elevation, resolution_m, rover, seed=5)
+    # A shorter leg than the other pairs in this file: under the slip curve
+    # (C3) a 40-move VIPER leg on this terrain breaches the 20 percent
+    # reserve (test_slip_calibration_real_grid), and the rule under test is
+    # the leg rule, not the battery.
+    start, goal, moves = _pair(
+        passable, havens, havens, elevation, resolution_m, rover, seed=5, min_moves=8, max_moves=16
+    )
 
     response = client.post(
         "/api/plan-4d",

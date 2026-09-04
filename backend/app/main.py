@@ -36,7 +36,7 @@ from .cost_cube import (
     coarsen_grid,
     coarsen_traversable,
 )
-from .cost_engine import edge_travel_time_s
+from .cost_engine import edge_travel_time_s, gross_energy_per_metre_wh
 from .corridor import build_corridor
 from .costmap import PlanContext, default_cost_map
 from .pathfinder_4d import astar_4d, gated_move_count
@@ -69,7 +69,9 @@ from .localization import evaluate_pose
 from .pose import PoseEstimate
 from .replan_triggers import evaluate_triggers_detailed
 from .rover_grids import grids_for_rover
+from .slip_model import route_slip_summary
 from .safe_haven import (
+    gated_shortest_drive,
     DEFAULT_EARTHSET_LOOKAHEAD_HOURS,
     DEFAULT_SAFE_HAVEN_SPAN_HOURS,
     DEFAULT_SAFE_HAVEN_STEP_HOURS,
@@ -1012,6 +1014,10 @@ def plan(req: PlanRequest, request: Request):
     if safety_block is not None:
         response["safety_margins"] = safety_block
 
+    # The slip the route paid for (C3): the model's label, its anchors'
+    # claim, and the hours and Wh slip added along this route.
+    response["slip_model"] = _slip_block_2d(states, rover)
+
     # Published only once the response the caller receives is fully built.
     # Assigning mid-request meant a plan whose serialisation then failed
     # (422/500) still replaced the corridor /api/pose judges against with
@@ -1599,30 +1605,54 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # routes whose start and goal were genuinely far apart on the real
         # production grid -- 24 slices at an auto-derived ~0.03 h/slice
         # covers only ~24 coarse cells, 480 m on a 2.5 km grid (measured:
-        # 10/12 random traversable pairs failed). Size the default to the
-        # EXACT worst case for the known shortest route: move_count moves,
-        # each costing up to the slowest possible edge (slope_max_deg,
-        # diagonal), plus a pad for an optional WAIT. This is provably
-        # sufficient whenever the route is reachable, not a guessed
-        # multiplier. (Faz 1-2-3 review, H1.)
-        diag_m = effective_resolution_m * math.sqrt(2.0)
-        worst_edge_s = edge_travel_time_s(float(rover["slope_max_deg"]), diag_m, rover)
-        max_slices_per_move = (
-            max(1, int(math.ceil(worst_edge_s / 3600.0 / slice_hours)))
-            if math.isfinite(worst_edge_s)
-            else 1
+        # 10/12 random traversable pairs failed). (Faz 1-2-3 review, H1.)
+        # Size the default from the FASTEST gated route (C3): the planner
+        # advances ceil(edge hours / slice) per move, so along that route it
+        # arrives within ceil(hours / slice) + moves slices -- each move can
+        # lose at most one slice to rounding -- plus a pad for an optional
+        # WAIT. Provably sufficient whenever the pair is connected. The
+        # previous bound, move_count x the slowest conceivable edge
+        # (slope_max_deg, diagonal), overshot MAX_PLAN_4D_SLICES once slip
+        # made that edge ten times slower than a typical one (measured on
+        # Site11 with the slip curve: LPR-1's 113-move lunar-night route
+        # needed 1 602 slices under the old bound and 270 under this one;
+        # the 40-move day route 580 against 120 -- C3 report).
+        drive = gated_shortest_drive(
+            coarse_traversable,
+            coarse_elevation,
+            coarse_slope,
+            effective_resolution_m,
+            rover,
+            coarse_start,
+            coarse_goal,
         )
+        if drive is None:
+            # Same gates as gated_move_count, which just proved the pair
+            # connected; kept as a guard rather than an assumption.
+            diag_m = effective_resolution_m * math.sqrt(2.0)
+            worst_edge_s = edge_travel_time_s(float(rover["slope_max_deg"]), diag_m, rover)
+            per_move = (
+                max(1, int(math.ceil(worst_edge_s / 3600.0 / slice_hours)))
+                if math.isfinite(worst_edge_s)
+                else 1
+            )
+            fastest_hours, fastest_moves = float(move_count * per_move * slice_hours), 0
+        else:
+            fastest_hours, fastest_moves = drive
         default_n_slices = (
-            move_count * max_slices_per_move + DEFAULT_HORIZON_WAIT_PAD_SLICES
+            int(math.ceil(fastest_hours / slice_hours))
+            + fastest_moves
+            + DEFAULT_HORIZON_WAIT_PAD_SLICES
         )
         if default_n_slices > MAX_PLAN_4D_SLICES:
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"the shortest coarse route is {move_count} moves, needing "
-                    f"up to {default_n_slices} slices at a {slice_hours:.4f} h "
-                    f"slice -- over the {MAX_PLAN_4D_SLICES} cap; raise coarsen, "
-                    "or pin a shorter horizon_hours/n_slices/slice_hours."
+                    f"the fastest coarse route drives {fastest_hours:.2f} h over "
+                    f"{fastest_moves} moves, needing up to {default_n_slices} slices "
+                    f"at a {slice_hours:.4f} h slice -- over the {MAX_PLAN_4D_SLICES} "
+                    "cap; raise coarsen, or pin a shorter "
+                    "horizon_hours/n_slices/slice_hours."
                 ),
             )
         n_slices = max(2, default_n_slices)
@@ -1944,6 +1974,9 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # CMU's continuous-illumination corridor (A2): volume, pruning,
         # components, where the start/goal/route stand, dwell, provenance.
         "illumination_corridor": corridor_block,
+        # The slip the route paid for (C3): label, claim, and the hours and
+        # Wh slip added along this route on the planner's own edges.
+        "slip_model": _slip_block_4d(result, geometry, shadow_cube, rover),
         "n_slices": n_slices,
         "slice_hours": slice_hours,
         "slice_hours_source": slice_hours_source,
@@ -2480,6 +2513,50 @@ def _safety_margins_4d(
         return None
 
 
+def _slip_block_2d(states: list, rover: dict) -> dict[str, Any]:
+    """``slip_model`` for a simulated 2-D route (C3): one leg per driven
+    step, priced at the grade the simulator drove (the worse of the cell and
+    the segment slope) with its own time and drawn energy."""
+    legs = []
+    for previous, current in zip(states[:-1], states[1:]):
+        distance = float(current.distance_m) - float(previous.distance_m)
+        if distance <= 0.0:
+            continue
+        drive_slope = max(float(current.slope_deg), float(current.segment_slope_deg))
+        seconds = edge_travel_time_s(drive_slope, distance, rover)
+        hours = seconds / 3600.0 if math.isfinite(seconds) else float("inf")
+        legs.append((drive_slope, distance, hours, float(current.step_energy_wh)))
+    return route_slip_summary(legs, rover)
+
+
+def _slip_block_4d(
+    result: dict, geometry: "_CoarseGeometry", shadow_cube: np.ndarray | None, rover: dict
+) -> dict[str, Any]:
+    """``slip_model`` for a 4-D route (C3): one leg per MOVE, priced exactly
+    as ``astar_4d`` priced it -- the trapezoidal block slope, the coarse
+    edge length, the planner's travel time -- with the energy drawn over
+    that time at the mean exposure of the two blocks."""
+    states = result.get("path_states") or []
+    res = float(geometry.resolution_m)
+    legs = []
+    for (r0, c0, t0), (r1, c1, t1) in zip(states[:-1], states[1:]):
+        if (r0, c0) == (r1, c1):
+            continue
+        diagonal = r0 != r1 and c0 != c1
+        distance = res * math.sqrt(2.0) if diagonal else res
+        edge_slope = 0.5 * (float(geometry.slope[r0, c0]) + float(geometry.slope[r1, c1]))
+        seconds = edge_travel_time_s(edge_slope, distance, rover)
+        if not math.isfinite(seconds):
+            legs.append((edge_slope, distance, float("inf"), None))
+            continue
+        drawn = None
+        if shadow_cube is not None:
+            exposure = 0.5 * (float(shadow_cube[t0, r0, c0]) + float(shadow_cube[t1, r1, c1]))
+            drawn = gross_energy_per_metre_wh(edge_slope, exposure, rover) * distance
+        legs.append((edge_slope, distance, seconds / 3600.0, drawn))
+    return route_slip_summary(legs, rover)
+
+
 def _attach_constraint_check(
     result: dict, profile: dict, grids: dict, rover: dict
 ) -> None:
@@ -2511,6 +2588,8 @@ def _attach_constraint_check(
             safety_block = _safety_margins_2d(states, result["path_pixels"], grids, rover)
             if safety_block is not None:
                 result["safety_margins"] = safety_block
+            # And the slip the route paid for (C3).
+            result["slip_model"] = _slip_block_2d(states, rover)
         except Exception:
             logger.warning(
                 "Constraint check skipped for %s: %s",

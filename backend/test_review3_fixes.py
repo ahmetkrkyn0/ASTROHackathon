@@ -418,7 +418,7 @@ def test_h4_scalar_and_vector_forms_agree_including_shadow():
 
 
 def test_h4_cost_model_id_was_bumped():
-    assert COST_MODEL_ID.endswith("_v3")
+    assert COST_MODEL_ID.endswith("_v4")  # C3: slip entered the grid
 
 
 # ══════════════════════════════════════════════════════════════════════════

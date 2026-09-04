@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from . import constants as C
+from .slip_model import slip_ratio, slip_ratio_array
 
 # Identifies the formula compute_cost_grid implements. Bump this whenever a
 # penalty term changes shape, so anything holding a cost grid computed by an
@@ -20,8 +21,11 @@ from . import constants as C
 # longer matches this code instead of being silently reused. The v2 bump is
 # review #1: f_energy -> f_energy_cell. (Review #5.) The v3 bump is round 3
 # review H-4: f_energy_cell now reads shadow as well as slope, so the energy
-# criterion is no longer a monotone restatement of the slope criterion.
-COST_MODEL_ID: str = "weighted_cell_cost_shadow_aware_energy_v3"
+# criterion is no longer a monotone restatement of the slope criterion. The
+# v4 bump is C3: edge_travel_time_s applies the rover's slip curve, so the
+# per-metre energies behind f_energy_cell -- and with them the grid -- now
+# grow with slip.
+COST_MODEL_ID: str = "weighted_cell_cost_shadow_aware_energy_slip_v4"
 
 _WEIGHT_KEYS: tuple[str, ...] = (
     "w_slope",
@@ -35,6 +39,34 @@ def _resolve_rover(rover: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
     if rover is None:
         return C.get_rover()
     return rover
+
+
+class _SlipFreeView(Mapping):
+    """A read-only view of a rover profile with its ``slip_curve`` hidden, so
+    ``slip_model.curve_for`` finds none and every time/energy function
+    evaluates slip-free. Used for the energy criterion's reference scale
+    (see :func:`f_energy_cell`) and by the C3 report's before/after runs."""
+
+    __slots__ = ("_base",)
+
+    def __init__(self, base: Mapping[str, Any]) -> None:
+        self._base = base
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "slip_curve":
+            raise KeyError(key)
+        return self._base[key]
+
+    def __iter__(self):
+        return (key for key in self._base if key != "slip_curve")
+
+    def __len__(self) -> int:
+        return len(self._base) - (1 if "slip_curve" in self._base else 0)
+
+
+def slip_free_view(rover: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+    """The same profile evaluated without its slip curve (C3)."""
+    return _SlipFreeView(_resolve_rover(rover))
 
 
 def default_weights(rover: Mapping[str, Any] | None = None) -> dict[str, float]:
@@ -262,9 +294,20 @@ def f_energy_cell(
     if theta > slope_max:
         return float("inf")
 
-    best_wh = net_energy_per_metre_wh(0.0, 0.0, rover_cfg)
+    # C3: the cell's own energy includes slip; the SCALE does not. Normalising
+    # against the slip-inclusive worst admissible cell (25 deg at slip 0.9,
+    # ten times the slip-free time) squeezed every ordinary cell into
+    # [0, 0.15] -- measured: LPR-1's dark 10 deg cell fell from 0.58 to
+    # 0.07 -- and the criterion collapsed back towards a monotone function
+    # of slope, the very H-4 failure above. The reference span therefore
+    # stays the slip-free best/worst pair: slip raises a cell's penalty on
+    # that fixed scale, and a cell whose slip-inclusive energy exceeds the
+    # slip-free worst saturates at 1.0 (its time and battery cost are still
+    # charged in full by the planner and the simulator).
+    reference = slip_free_view(rover_cfg)
+    best_wh = net_energy_per_metre_wh(0.0, 0.0, reference)
     here_wh = net_energy_per_metre_wh(max(0.0, theta), shadow_ratio, rover_cfg)
-    worst_wh = net_energy_per_metre_wh(slope_max, 1.0, rover_cfg)
+    worst_wh = net_energy_per_metre_wh(slope_max, 1.0, reference)
     if not math.isfinite(here_wh) or best_wh < 0.0:
         return float("inf")
 
@@ -391,7 +434,19 @@ def edge_travel_time_s(
     d_m: float,
     rover: Mapping[str, Any] | None = None,
 ) -> float:
-    """Return traversal time for one edge in seconds."""
+    """Return traversal time for one edge in seconds.
+
+    ``L = d / cos(theta)`` is the ground length of the edge, ``v = v_max *
+    cos(theta)`` the speed the wheels can hold on that grade, and -- since C3
+    -- ``L / (1 - slip)`` the WHEEL distance needed to cover ``L`` on the
+    rover's slip curve (``slip_model.slip_ratio``; 0 for a profile that
+    declares no curve). This is the ONE place slip enters the model: every
+    energy figure is a power times this time, so time and energy grow
+    together and every consumer (planner, simulator, corridor, Monte Carlo,
+    safe-haven distances, corridor slice counts, auto slice length) stays
+    consistent. :func:`edge_travel_time_s_array` is the vectorised twin in
+    the same operation order.
+    """
     rover_cfg = _resolve_rover(rover)
     cos_t = math.cos(math.radians(theta_deg))
     if cos_t <= 0:
@@ -400,7 +455,34 @@ def edge_travel_time_s(
     if v <= 0:
         return float("inf")
     L = d_m / cos_t
-    return L / v
+    L_wheel = L / (1.0 - slip_ratio(theta_deg, rover_cfg))
+    return L_wheel / v
+
+
+def edge_travel_time_s_array(
+    theta_deg: np.ndarray,
+    d_m: np.ndarray | float,
+    rover: Mapping[str, Any] | None = None,
+) -> np.ndarray:
+    """:func:`edge_travel_time_s` over arrays, in the same operation order.
+
+    ``inf`` wherever ``cos(theta) <= 0``. Bit-for-bit equal to the scalar on
+    this platform (tested per profile), which is what lets the gated graph
+    (``safe_haven._gated_edges``) and the corridor tables be built
+    vectorised while the 4-D planner calls the scalar per edge: a move whose
+    travel is exactly one slice rounds the same way in all three.
+    """
+    rover_cfg = _resolve_rover(rover)
+    theta = np.asarray(theta_deg, dtype=np.float64)
+    distance = np.asarray(d_m, dtype=np.float64)
+    cos_t = np.cos(np.radians(theta))
+    v_max = float(rover_cfg["v_max_ms"])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        v = v_max * cos_t
+        L = distance / cos_t
+        L_wheel = L / (1.0 - slip_ratio_array(theta, rover_cfg))
+        seconds = L_wheel / v
+    return np.where((cos_t > 0.0) & (v > 0.0), seconds, np.inf)
 
 
 def edge_energy_wh(
@@ -408,7 +490,10 @@ def edge_energy_wh(
     d_m: float,
     rover: Mapping[str, Any] | None = None,
 ) -> float:
-    """Return physical edge energy in Wh."""
+    """Return physical edge energy in Wh: traction power over the edge's
+    travel time. The distance / (1 - slip) correction of C3 enters through
+    :func:`edge_travel_time_s`, so this and every per-metre energy grow by
+    the same factor as the time."""
     rover_cfg = _resolve_rover(rover)
     theta_rad = math.radians(theta_deg)
     cos_t = math.cos(theta_rad)

@@ -20,13 +20,13 @@ from app.simulation import (
     DRIVE_POWER_W,
     HEATER_POWER_W,
     IDLE_POWER_W,
-    NOMINAL_SPEED_MS,
     PIXEL_SIZE_M,
     RoverState,
     simulate_path,
     summarize_simulation,
 )
 from app.constants import get_rover
+from app.cost_engine import edge_travel_time_s  # C3: flat ground still slips a little
 
 GRID_SHAPE = (50, 50)
 
@@ -191,7 +191,7 @@ def test_cardinal_step():
     check(abs(s1.distance_m - PIXEL_SIZE_M) < 1e-6, "cardinal step_dist = 80 m")
 
     # At 0° slope: speed_factor=1.0, actual_speed=0.2 m/s
-    expected_time_h = PIXEL_SIZE_M / NOMINAL_SPEED_MS / 3600.0
+    expected_time_h = edge_travel_time_s(0.0, PIXEL_SIZE_M, get_rover()) / 3600.0
     check(abs(s1.elapsed_hours - expected_time_h) < 1e-9, "elapsed_hours matches")
 
     # slope_mult at 0° = 1.0, shadow=0
@@ -229,7 +229,7 @@ def test_shadow_heater_contribution():
     path = [[0, 0], [0, 1]]
     states = simulate_path(_astar_result(path), *grids)
     s1 = states[1]
-    step_time_h = PIXEL_SIZE_M / NOMINAL_SPEED_MS / 3600.0
+    step_time_h = edge_travel_time_s(0.0, PIXEL_SIZE_M, get_rover()) / 3600.0
     expected_energy = (
         DRIVE_POWER_W * 1.0
         + HEATER_POWER_W * shadow
@@ -245,7 +245,7 @@ def test_custom_rover_changes_energy_and_speed():
     states = simulate_path(_astar_result(path), *grids, rover=rover)
     s1 = states[1]
 
-    expected_time_h = PIXEL_SIZE_M / float(rover["v_max_ms"]) / 3600.0
+    expected_time_h = edge_travel_time_s(0.0, PIXEL_SIZE_M, rover) / 3600.0
     expected_energy = (float(rover["p_base_w"]) + float(rover["p_idle_w"])) * expected_time_h
     expected_solar = float(rover["p_solar_w"]) * expected_time_h
     expected_battery = min(
@@ -419,7 +419,7 @@ def test_summarize_shadow_exposure():
     states = simulate_path(_astar_result(path), *grids)
     s = summarize_simulation(states)
     # 2 moving steps, each full shadow
-    step_time_h = PIXEL_SIZE_M / NOMINAL_SPEED_MS / 3600.0
+    step_time_h = edge_travel_time_s(0.0, PIXEL_SIZE_M, get_rover()) / 3600.0
     expected = 2 * shadow * step_time_h
     # summarize rounds to 4 decimal places, so allow 1e-4 tolerance
     check(abs(s["total_shadow_exposure"] - round(expected, 4)) < 1e-6,

@@ -37,7 +37,6 @@ measured; ``UNCERTAINTY_NOTE`` travels with every response.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -161,23 +160,19 @@ def edge_tables(
 ) -> EdgeTables:
     """Build :class:`EdgeTables` from ``safe_haven._gated_edges``.
 
-    The gates are the planner's; the slice count is recomputed here with
-    the planner's own operation order (``(d / cos) / (v_max cos)``, then
-    ``/ 3600 / slice_hours``, then ``ceil``) rather than read from the
-    gated graph's ``d / (v_max cos^2)`` hours, so that a move whose travel
-    is exactly one slice long -- every edge at the median slope when the
-    slice is auto-sized -- rounds the same way in both places. numpy's and
-    math's cos agree to the bit on this platform (measured); the order of
-    operations is what would otherwise differ.
+    The gates are the planner's and so are the hours: since C3 the gated
+    graph prices every edge with ``cost_engine.edge_travel_time_s_array``,
+    the planner's scalar function in the same operation order (slip
+    included), so ``hours / slice_hours`` here is the planner's
+    ``travel_s / 3600 / slice_hours`` to the bit and a move whose travel is
+    exactly one slice long -- every edge at the median slope when the slice
+    is auto-sized -- rounds the same way in both places. (Before C3 this
+    function recomputed the time in the planner's order because the graph
+    used ``d / (v_max cos^2)``.)
     """
     mask = np.asarray(traversable, dtype=bool)
     height, width = mask.shape
-    slopes = (
-        np.zeros(mask.shape, dtype=np.float64)
-        if slope is None
-        else np.asarray(slope, dtype=np.float64)
-    )
-    src, dst, _hours = _gated_edges(mask, elevation, slope, float(resolution_m), rover)
+    src, dst, hours = _gated_edges(mask, elevation, slope, float(resolution_m), rover)
 
     ok = [np.zeros(mask.shape, dtype=bool) for _ in OFFSETS]
     slices = [np.zeros(mask.shape, dtype=np.int32) for _ in OFFSETS]
@@ -186,16 +181,7 @@ def edge_tables(
 
     d_row = dst // width - src // width
     d_col = dst % width - src % width
-    diagonal = (d_row != 0) & (d_col != 0)
-    distance_m = np.where(diagonal, float(resolution_m) * math.sqrt(2.0), float(resolution_m))
-    flat_slopes = slopes.ravel()
-    edge_slope = 0.5 * (flat_slopes[src] + flat_slopes[dst])
-    # == cost_engine.edge_travel_time_s, vectorised in the same order.
-    cos_t = np.cos(np.radians(edge_slope))
-    v_max = float(rover["v_max_ms"])
-    with np.errstate(divide="ignore", invalid="ignore"):
-        travel_s = (distance_m / cos_t) / (v_max * cos_t)
-        ratio = travel_s / 3600.0 / float(slice_hours)
+    ratio = hours / float(slice_hours)
     d_slices = np.maximum(1, np.ceil(ratio)).astype(np.int32)
 
     index = {offset: k for k, offset in enumerate(OFFSETS)}

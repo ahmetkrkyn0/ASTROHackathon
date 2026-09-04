@@ -78,7 +78,9 @@ print("\n=== f_energy ===")
 
 # Flat terrain, 50m grid → known analytical value
 # mu=1.0, v=0.2, L=50, t=250s, E=200*1*250/3600=13.89 Wh, ratio=13.89/5420=0.00256
-check("f_energy(0, 50)", f_energy(0, 50), 0.00256, tol=0.0001)
+from app.slip_model import slip_ratio  # noqa: E402
+# C3: the wheel distance is 50 / (1 - slip(0 deg)), so E and the ratio grow by that factor.
+check("f_energy(0, 50)", f_energy(0, 50), 0.00256 / (1.0 - slip_ratio(0.0)), tol=0.0001)
 
 # Steeper = more energy (monotonicity for fixed distance)
 print("  Monotonicity (fixed d=50m)...", end=" ")

@@ -41,11 +41,16 @@ _client = TestClient(app)
 
 START = {"row": 358, "col": 494}
 GOAL = {"row": 206, "col": 426}
+# Under the slip curve (C3) VIPER's 40-move leg to (206, 426) is refused for
+# the battery reserve (test_slip_calibration_real_grid); the 4-D margins are
+# read back on the nearest feasible haven-to-haven leg instead. The 2-D
+# tests keep the standard pair.
+VIPER_LEG_GOAL = {"row": 346, "col": 462}
 VIPER_4D = {
     "rover_id": "nasa_viper",
     "start_utc": "2027-05-30T00:00:00",
     "start": START,
-    "goal": GOAL,
+    "goal": VIPER_LEG_GOAL,
     "coarsen": 4,
     "require_safe_haven": True,
 }
@@ -98,7 +103,7 @@ def test_lpr1_without_a_reachable_haven_violates_the_leg_rule_unboundedly(client
     # B5: on 2026-09-28 no safe haven is reachable from any state of this
     # route while the Earth link ends in ~184 h -- the leg rule cannot be
     # met at all, and the monitor must say so rather than call None "open".
-    body = dict(VIPER_4D, rover_id="lpr_1", start_utc="2026-09-28T00:00:00", require_safe_haven=False)
+    body = dict(VIPER_4D, goal=GOAL, rover_id="lpr_1", start_utc="2026-09-28T00:00:00", require_safe_haven=False)
     response = client.post("/api/plan-4d", json=body)
     assert response.status_code == 200, response.text
     payload = response.json()

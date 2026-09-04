@@ -584,3 +584,36 @@ def test_the_slice_and_gather_paths_agree(monkeypatch):
     gathered = ic.prune_corridor(volume, tables)
     for a, b in zip(sliced, gathered):
         assert np.array_equal(a, b)
+
+
+
+# ── C3: with slip in the model the tables must still follow the planner ──────
+
+
+def test_edge_tables_follow_the_planners_ceil_on_a_random_slope_field():
+    """Every table entry equals max(1, ceil(edge_travel_time_s(mean slope,
+    distance) / 3600 / slice)) with the planner's SCALAR function -- which
+    since C3 includes the rover's slip -- for every gated edge."""
+    rng = np.random.default_rng(9)
+    shape = (7, 7)
+    passable = rng.random(shape) > 0.2
+    elevation = rng.normal(0.0, 8.0, size=shape)
+    grad_r, grad_c = np.gradient(elevation, RES_M)
+    slope = np.degrees(np.arctan(np.hypot(grad_r, grad_c)))
+    slice_hours = _flat_slice_hours()
+
+    tables = ic.edge_tables(passable, elevation, slope, RES_M, ROVER, slice_hours)
+
+    checked = 0
+    for k, (dr, dc) in enumerate(tables.offsets):
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                if not tables.ok[k][r, c]:
+                    continue
+                distance = RES_M * math.sqrt(2.0) if (dr != 0 and dc != 0) else RES_M
+                edge_slope = 0.5 * (float(slope[r, c]) + float(slope[r + dr, c + dc]))
+                travel_s = edge_travel_time_s(edge_slope, distance, ROVER)
+                expected = max(1, int(math.ceil(travel_s / 3600.0 / slice_hours)))
+                assert tables.slices[k][r, c] == expected, (k, r, c)
+                checked += 1
+    assert checked > 0

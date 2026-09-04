@@ -62,7 +62,10 @@ needs_clone_horizons = pytest.mark.skipif(
 #: The lunar day and pair B5 stress-tested: VIPER haven to haven (A1).
 _EPOCH_VIPER = "2027-05-30T00:00:00"
 _VIPER_START = {"row": 358, "col": 494}
-_VIPER_GOAL = {"row": 206, "col": 426}
+# Was (206, 426): under the slip curve (C3) that 40-move leg is refused for
+# the battery reserve (test_slip_calibration_real_grid); the DEM band is
+# read on the nearest feasible haven-to-haven leg instead.
+_VIPER_GOAL = {"row": 346, "col": 462}
 
 
 @pytest.fixture(scope="module")

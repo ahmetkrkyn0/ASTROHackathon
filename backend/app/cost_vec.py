@@ -22,7 +22,12 @@ from typing import Any
 
 import numpy as np
 
-from .cost_engine import _SHADOW_LAMBDA, _resolve_rover
+from .cost_engine import (
+    _SHADOW_LAMBDA,
+    _resolve_rover,
+    edge_travel_time_s_array,
+    slip_free_view,
+)
 
 
 def f_slope_grid(
@@ -57,8 +62,12 @@ def f_energy_cell_grid(
     theta = np.asarray(slope_deg, dtype=np.float64)
     shadow = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
 
-    best_wh = _energy_per_metre_wh_scalar(0.0, 0.0, rover_cfg)
-    worst_wh = _energy_per_metre_wh_scalar(slope_max, 1.0, rover_cfg)
+    # C3: the reference scale is the slip-free best/worst pair, exactly as
+    # in the scalar form (see f_energy_cell for why); the cell's own energy
+    # below includes slip.
+    reference = slip_free_view(rover_cfg)
+    best_wh = _energy_per_metre_wh_scalar(0.0, 0.0, reference)
+    worst_wh = _energy_per_metre_wh_scalar(slope_max, 1.0, reference)
     if not np.isfinite(best_wh) or best_wh < 0.0:
         return np.full(np.broadcast(theta, shadow).shape, np.inf, dtype=np.float64)
 
@@ -88,17 +97,16 @@ def _energy_per_metre_wh_grid(
 ) -> np.ndarray:
     """Array form of :func:`app.cost_engine.net_energy_per_metre_wh`.
 
-    ``edge_travel_time_s(theta, 1.0) = (1 / cos) / (v_max * cos)``, so cos
-    enters SQUARED -- the same identity the scalar form relies on.
+    The per-metre time is ``edge_travel_time_s(theta, 1.0)`` -- since C3
+    including the rover's slip curve -- taken from its vectorised twin so
+    the two forms cannot drift.
     """
     mu_coeff = float(rover_cfg["mu_coeff"])
     p_base = float(rover_cfg["p_base_w"])
-    v_max = float(rover_cfg["v_max_ms"])
 
-    theta_rad = np.radians(np.clip(np.asarray(theta_deg, dtype=np.float64), 0.0, None))
-    cos_t = np.cos(theta_rad)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        seconds = 1.0 / (v_max * cos_t * cos_t)
+    theta_clipped = np.clip(np.asarray(theta_deg, dtype=np.float64), 0.0, None)
+    theta_rad = np.radians(theta_clipped)
+    seconds = edge_travel_time_s_array(theta_clipped, 1.0, rover_cfg)
     traction_w = p_base * (1.0 + mu_coeff * np.sin(theta_rad))
     ratio = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
     solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio)

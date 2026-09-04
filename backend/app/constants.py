@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .slip_model import SlipAnchor, rover_slip_block
+
 # Shared environment constants
 GRAVITY_MOON = 1.62
 LOG_BARRIER_MU = 0.1
@@ -47,6 +49,9 @@ MODELLED_FIELDS: frozenset[str] = frozenset(
         "w_thermal",
         "sensor_payload_w",
         "sensor_heater_w",
+        # C3: the anchors cost_engine.edge_travel_time_s reads through
+        # slip_model.slip_ratio -- every time and energy figure depends on it.
+        "slip_curve",
     }
 )
 
@@ -58,7 +63,118 @@ DECLARED_ONLY_FIELDS: tuple[str, ...] = (
     "regen_efficiency",
     "thermal_tau_s",
     "h_design_shadow_h",
+    # C3: published regolith / test-bed parameters behind the slip anchors
+    # (Yutu-2's Bekker-type ranges, VIPER's GRC-1 test bed). Reference only:
+    # no Bekker equation is coded; the slip curve reads its anchors, not this.
+    "regolith",
 )
+
+# ── C3: slip anchors ─────────────────────────────────────────────────────────
+# The two sourced points every slip curve in the catalogue is built from.
+# No anchor exists without a source; a profile that has no slip data of its
+# own carries these as EXPLICIT assumptions (kind "assumption", source
+# starting with "assumption:"), never as a silent default. See
+# app/slip_model.py for the claim limits.
+
+SLIP_ANCHOR_YUTU2_FLAT = SlipAnchor(
+    slope_deg=0.0,
+    slip=0.0375,
+    sigma=0.01875,
+    kind="measured",
+    source=(
+        "Yutu-2 (Chang'e-4) measured wheel slip ratio: 'most the wheel slip "
+        "ratios are between 0 and -0.075' (skid) on slopes up to 8.86 deg; the "
+        "magnitude midpoint of |0..0.075| is taken as the flat-ground value and "
+        "sigma = range/4 -- Nature Communications 2024 (PMC11258293), Methods, "
+        "'Lunar regolith parameter estimation'"
+    ),
+)
+
+SLIP_ANCHOR_YUTU2_STEEPEST = SlipAnchor(
+    slope_deg=8.86,
+    slip=0.075,
+    sigma=0.01875,
+    kind="measured_bound",
+    source=(
+        "Yutu-2 (Chang'e-4) measured: the upper end of the |0..0.075| slip "
+        "range at the steepest slope driven (8.86 deg, outbound traverse) -- "
+        "Nature Communications 2024 (PMC11258293), Results, 'Topographic and "
+        "mobility hazards analysis'"
+    ),
+)
+
+SLIP_ANCHOR_VIPER_15 = SlipAnchor(
+    slope_deg=15.0,
+    slip=0.40,
+    sigma=0.20,
+    kind="design_constraint",
+    source=(
+        "VIPER mobility design requirement: 'a maximum of 40% slip up a maximum "
+        "slope of 15 deg' (an upper bound, not a typical value); GRC-1 simulant "
+        "at 15-20 percent relative density, MGRU test unit, slip from wheel "
+        "rotation rates against Optitrack motion tracking -- PSJ 2025 "
+        "(10.3847/PSJ/add13f) sect. 3.5 and 3.2. sigma: assumption, Yutu-2's "
+        "relative spread (sigma/mu = 0.5) transferred"
+    ),
+)
+
+
+def _transferred(anchor: SlipAnchor, note: str) -> SlipAnchor:
+    """The same point, re-labelled as an assumption for a profile it was not
+    measured or specified for. The original source travels with it."""
+    return SlipAnchor(
+        slope_deg=anchor.slope_deg,
+        slip=anchor.slip,
+        sigma=anchor.sigma,
+        kind="assumption",
+        source=f"assumption: {note} | {anchor.source}",
+    )
+
+
+_YUTU2_FLAT_TRANSFERRED = _transferred(
+    SLIP_ANCHOR_YUTU2_FLAT,
+    "flat-ground slip transferred from Yutu-2's Chang'e-4 measurement (flat-"
+    "ground slip of a driven wheel is only weakly terrain-dependent); no "
+    "published flat-ground slip for this profile",
+)
+_VIPER_15_TRANSFERRED = _transferred(
+    SLIP_ANCHOR_VIPER_15,
+    "VIPER's 15 deg design ceiling used as this profile's 15 deg anchor; no "
+    "published slip-versus-slope data for this vehicle",
+)
+
+# Published regolith / test-bed parameters behind the anchors. Reference
+# only ("read_by": "nothing"): no Bekker/Wong equation is coded here.
+REGOLITH_YUTU2: dict[str, Any] = {
+    "site": "Chang'e-4 landing region, Von Karman crater (lunar far side)",
+    "internal_friction_angle_deg": [21.5, 42.0],
+    "cohesion_pa": [520, 3154],
+    "sinkage_exponent": [0.87, 1.0],
+    "mean_wheel_sinkage_mm": 8.0,
+    "wheel_sinkage_range_mm": [5.0, 15.0],
+    "bearing_strength_kpa": 4.0,
+    "max_slope_driven_deg": 8.86,
+    "slip_ratio_range": [-0.075, 0.0],
+    "validity": "MEASURED at the Chang'e-4 site (far-side mare), not at the pole",
+    "source": (
+        "Nature Communications 2024 (PMC11258293), Results 'Mechanical property "
+        "identification' (Fig. 4) and 'Topographic and mobility hazards "
+        "analysis'; Ding et al., Science Robotics 2022 (abj6660)"
+    ),
+    "read_by": "nothing",
+}
+
+REGOLITH_VIPER_TESTBED: dict[str, Any] = {
+    "site": "VIPER MGRU mobility test bed (laboratory)",
+    "simulant": "GRC-1",
+    "relative_density_pct": [15, 20],
+    "validity": (
+        "GROUND_TEST: loose GRC-1 as a lower-bound strength case for the "
+        "south pole; not a measurement of polar regolith"
+    ),
+    "source": "PSJ 2025 (10.3847/PSJ/add13f), sect. 3.2",
+    "read_by": "nothing",
+}
 
 # Multi-rover catalogue
 ROVERS: dict[str, dict[str, Any]] = {
@@ -90,6 +206,9 @@ ROVERS: dict[str, dict[str, Any]] = {
         "elec_op_max_c": 40,
         "f_net_n": 210,
         "mu_coeff": 3.471,
+        # C3: no published slip data for LPR-1 -- both anchors are transfers.
+        "slip_curve": (_YUTU2_FLAT_TRANSFERRED, _VIPER_15_TRANSFERRED),
+        "regolith": None,
         "w_slope": 0.409,
         "w_energy": 0.259,
         "w_shadow": 0.142,
@@ -125,6 +244,9 @@ ROVERS: dict[str, dict[str, Any]] = {
         "elec_op_max_c": None,
         "f_net_n": 50,
         "mu_coeff": 1.296,
+        # C3: no published slip data for LUVMI-M -- both anchors are transfers.
+        "slip_curve": (_YUTU2_FLAT_TRANSFERRED, _VIPER_15_TRANSFERRED),
+        "regolith": None,
         "w_slope": 0.40,
         "w_energy": 0.30,
         "w_shadow": 0.30,
@@ -160,6 +282,13 @@ ROVERS: dict[str, dict[str, Any]] = {
         "elec_op_max_c": 50,
         "f_net_n": 200,
         "mu_coeff": 3.645,
+        # C3: VIPER's own 15 deg / 40 percent design requirement; the flat-
+        # ground point is Yutu-2's, transferred. Yutu-2's 8.86 deg point is
+        # NOT transferred: Chang'e-4 mare regolith and loose GRC-1 are
+        # different soils, and joining them would put an unsourced kink
+        # between 8.86 and 15 deg.
+        "slip_curve": (_YUTU2_FLAT_TRANSFERRED, SLIP_ANCHOR_VIPER_15),
+        "regolith": REGOLITH_VIPER_TESTBED,
         "w_slope": 0.35,
         "w_energy": 0.25,
         "w_shadow": 0.20,
@@ -195,6 +324,14 @@ ROVERS: dict[str, dict[str, Any]] = {
         "elec_op_max_c": 55,
         "f_net_n": 80,
         "mu_coeff": 2.835,
+        # C3: Yutu-2's own measured points (0 deg, 8.86 deg); beyond its
+        # measured slopes VIPER's 15 deg ceiling is transferred.
+        "slip_curve": (
+            SLIP_ANCHOR_YUTU2_FLAT,
+            SLIP_ANCHOR_YUTU2_STEEPEST,
+            _VIPER_15_TRANSFERRED,
+        ),
+        "regolith": REGOLITH_YUTU2,
         "w_slope": 0.50,
         "w_energy": 0.30,
         "w_shadow": 0.20,
@@ -284,6 +421,10 @@ def rover_catalog() -> list[dict[str, Any]]:
                 "declared_only": {
                     field: rover.get(field) for field in DECLARED_ONLY_FIELDS
                 },
+                # C3: the slip curve the model applies, its anchors and their
+                # sources, and the claim limit -- a literature-anchored
+                # MODEL, never a measurement.
+                "slip_model": rover_slip_block(rover),
             }
         )
     return catalog

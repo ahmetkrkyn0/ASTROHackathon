@@ -913,6 +913,113 @@ büzülüyor); Ay gecesi 13 Eylül 2026'da hiçbir voksel aydınlık değil. Kor
 kurulumu 100 dilimde ~0,14 s (`all`) / ~0,29 s (`majority`), 246 dilimde
 ~0,3 s.
 
+## Slip modeli — Yutu-2 ölçümü ve VIPER tasarım kısıtıyla kalibrasyon (4 Eylül 2026 eki, C3)
+
+`slip_model.py` artık `UNCALIBRATED` değil: eğri **kaynaklı çapalardan**
+geçer ve **tek noktadan** modele bağlıdır — `cost_engine.edge_travel_time_s`
+komutlanan mesafeyi tekerlek mesafesine çevirir (`d → d / (1 − slip(eğim))`),
+bu yüzden süre ve enerji birlikte büyür ve planlayıcı (2-B ve 4-B),
+simülatör, koridor bütçeleri, Monte Carlo (B5), safe-haven süreleri (A1) ve
+koridor dilimleri (A2) aynı sayıyı görür. Çapalar: **VIPER** mobilite tasarım
+gereksinimi *"a maximum of 40% slip up a maximum slope of 15°"* (PSJ 2025;
+GRC-1 simülantı, %15–20 bağıl yoğunluk — bir **üst sınır**, tipik değer
+değil) ve **Yutu-2**'nin Chang'e-4'te **ölçülmüş** slip oranı (0 … −0,075,
+en fazla 8,86° eğimde, çoğunlukla skid; Nature Communications 2024).
+Çapalar arası ve ötesi biçim üstel (log-doğrusal), kap 0,9; `|eğim|`
+simetrik. **İddia sınırı:** eğri **ölçülmüş değil, literatüre bağlı bir
+MODEL**dir; "kutup regolitinde ölçüldü" denmez. Kendi verisi olmayan
+profiller (LPR-1, LUVMI-M) ve rover'lar arası aktarımlar katalogda
+`kind: "assumption"` ve `source: "assumption: …"` ile yazılıdır; kaynağı
+olmayan çapa yoktur.
+
+**Mevcut alanlar değişmedi, ama sayılar değişti:** `/api/plan` ve
+`/api/plan-4d`'nin süre, enerji, `path_battery_pct`, `metrics.arrival_hours`,
+`safety_margins` (LP-R02), `/api/stress-test` dağılımları, `/api/safe-haven`
+`time_to_safe_haven_h`, `/api/plan-4d` `n_slices`/`slice_hours` (otomatik
+dilim medyan eğimdeki slip kadar uzar) artık slip'i içerir; slip'siz eski
+raporların sayıları (B5, B3, D3, A2, A1) yeniden üretilmedi, önce/sonra
+farkı `docs/research/slip_calibration_report.md`'dedir. Maliyet gridi kimliği
+`weighted_cell_cost_shadow_aware_energy_slip_v4`.
+
+### `GET /api/rovers` — her rover'da `slip_model` ve `declared_only.regolith`
+
+```json
+"slip_model": {
+  "applied": true,
+  "validity": "MODEL",
+  "model_id": "anchored_loglinear_v1",
+  "max_slip_ratio": 0.9,
+  "claim": "Literature-anchored MODEL, not a measurement: ...",
+  "anchors": [
+    {"slope_deg": 0.0, "slip": 0.0375, "sigma": 0.01875, "kind": "assumption",
+     "source": "assumption: flat-ground slip transferred from Yutu-2's Chang'e-4 measurement ... | Yutu-2 (Chang'e-4) measured wheel slip ratio: 'most the wheel slip ratios are between 0 and -0.075' ... Nature Communications 2024 (PMC11258293) ..."},
+    {"slope_deg": 15.0, "slip": 0.40, "sigma": 0.20, "kind": "design_constraint",
+     "source": "VIPER mobility design requirement: 'a maximum of 40% slip up a maximum slope of 15 deg' ... PSJ 2025 (10.3847/PSJ/add13f) sect. 3.5 and 3.2 ..."}
+  ],
+  "table": [
+    {"slope_deg": 0.0,  "slip": 0.0375, "sigma": 0.0188, "time_energy_factor": 1.039, "within_slope_limit": true},
+    {"slope_deg": 5.0,  "slip": 0.083,  "sigma": 0.041,  "time_energy_factor": 1.09,  "within_slope_limit": true},
+    {"slope_deg": 10.0, "slip": 0.182,  "sigma": 0.091,  "time_energy_factor": 1.22,  "within_slope_limit": true},
+    {"slope_deg": 15.0, "slip": 0.40,   "sigma": 0.20,   "time_energy_factor": 1.67,  "within_slope_limit": true},
+    {"slope_deg": 20.0, "slip": 0.881,  "sigma": 0.44,   "time_energy_factor": 8.4,   "within_slope_limit": true},
+    {"slope_deg": 25.0, "slip": 0.9,    "sigma": 0.45,   "time_energy_factor": 10.0,  "within_slope_limit": false}
+  ],
+  "references": [{"id": "viper_psj_2025", "title": "...", "url": "...", "used_for": "..."}, "..."]
+},
+"declared_only": {
+  "...": "...",
+  "regolith": {
+    "site": "Chang'e-4 landing region, Von Karman crater (lunar far side)",
+    "internal_friction_angle_deg": [21.5, 42.0], "cohesion_pa": [520, 3154],
+    "sinkage_exponent": [0.87, 1.0], "mean_wheel_sinkage_mm": 8.0, "wheel_sinkage_range_mm": [5.0, 15.0],
+    "bearing_strength_kpa": 4.0, "max_slope_driven_deg": 8.86, "slip_ratio_range": [-0.075, 0.0],
+    "validity": "MEASURED at the Chang'e-4 site (far-side mare), not at the pole",
+    "source": "Nature Communications 2024 (PMC11258293) ...", "read_by": "nothing"
+  }
+}
+```
+
+| Alan | Anlam |
+|---|---|
+| `slip_model.validity` | Her zaman `"MODEL"` (`"MEASURED"` asla). `applied` `false` ise profil eğri bildirmiyor demektir (katalogda böyle profil yok; elle kurulan profiller için). |
+| `slip_model.anchors[*]` | `slope_deg`, `slip` (μ), `sigma` (σ, B2 için), `kind ∈ measured / measured_bound / design_constraint / assumption`, `source` (zorunlu; aktarılanlar `"assumption: "` ile başlar ve özgün kaynağı `|` sonrasında taşır). |
+| `slip_model.table[*]` | Eğri 0/5/10/15/20/25°'de: `slip`, `sigma`, `time_energy_factor = 1/(1−slip)`, `within_slope_limit` (rover'ın `slope_max_deg`'i içinde mi). Yukarıdaki örnek VIPER (0° Yutu-2 aktarımı + 15° kendi kısıtı); Yutu-2'nin kendi eğrisi üç çapalı (0 / 8,86 / 15°), 20°'de kap. |
+| `slip_model.claim`, `references` | İddia sınırı cümlesi ve dört kaynak (PSJ 2025, Nat. Comms 2024, Sci. Robotics 2022, Cunningham RSS 2017 — sonuncusu yalnızca kanca). |
+| `declared_only.regolith` | Yutu-2: ölçülmüş Bekker-tipi aralıklar (Chang'e-4, kutup değil); VIPER: GRC-1 test yatağı (`simulant`, `relative_density_pct`, `validity: "GROUND_TEST …"`); LPR-1 / LUVMI-M `null`. `read_by: "nothing"` — hiçbir formül okumaz, referanstır. |
+
+### `POST /api/plan`, `POST /api/plan-4d`, `/api/compare.results[*]`, `/api/plan-multi.results[*]` — `slip_model` bloğu
+
+```json
+"slip_model": {
+  "applied": true,
+  "validity": "MODEL",
+  "model_id": "anchored_loglinear_v1",
+  "route": {
+    "moves": 40, "skipped_edges": 0,
+    "mean_slip": 0.21, "max_slip": 0.62, "max_slip_slope_deg": 17.8,
+    "distance_factor": 1.31,
+    "extra_hours": 1.9, "extra_drawn_wh": 640.0
+  },
+  "claim": "Literature-anchored MODEL, not a measurement: ..."
+}
+```
+
+| Alan | Anlam |
+|---|---|
+| `route.moves` | Sayılan sürüş kenarı (4-B: MOVE sayısı; 2-B: adım sayısı). `skipped_edges`: süresi sonlu olmayan kenarlar (normalde 0). |
+| `route.mean_slip`, `max_slip`, `max_slip_slope_deg` | Mesafe ağırlıklı ortalama slip; en yüksek slip ve hangi eğimde. 4-B'de kenar eğimi iki kaba bloğun (blok-maks) ortalaması, 2-B'de sürülen eğim (`max(hücre, segment)`). |
+| `route.distance_factor` | Σ d/(1−s) / Σ d — tekerleklerin yerden ne kadar fazla döndüğü. |
+| `route.extra_hours`, `extra_drawn_wh` | Slip'in **bu rotaya** eklediği saat ve çekilen Wh (`t = t0/(1−s)` ⇒ eklenen `t·s`; enerji süreyle orantılı olduğundan `E·s`). Bir "slip'siz" yanıt üretmeden önce/sonra farkını verir. 4-B'de Wh, gölge küpünün iki bloktaki ortalama maruziyetiyle planlayıcının kendi kenar enerjisidir. |
+
+**Ölçülen örnek (Site11, `docs/research/slip_calibration_report.md`):** LPR-1 28 Eyl 2026, (358,494)→(206,426), `/api/plan-4d`: varış 2,16 → 2,98 h (×1,38), en düşük SOC %96,2 → %92,5, `slip_model.route`: `mean_slip` 0,326, `max_slip` 0,537 @ 16,9°, `extra_hours` 0,75, `extra_drawn_wh` 321, `distance_factor` 1,53; otomatik dilim 0,0287 → 0,0359 h; B5 nominal en düşük SOC %97,9 → %94,5. Ay gecesi rotası 5,35 → 6,75 h (×1,26), SOC %72,7 → %67,4. **VIPER'ın standart haven→haven leg'i slip'li modelde 404** (283 148 kenar bataryayı %20 rezervin altına düşürürdü; haven kuralsız ve 24 h ufukla da 404) — slip'siz plan zaten %32 SOC'de bitiyor ve B5 koşumların yalnızca %1,4'ünü rezerv içinde buluyordu; en yakın uygulanabilir leg (358,494)→(346,462): 8 hamle, 1,53 → 2,23 h, SOC %85,4 → %72,3, SHERPA tam başarı %99,7 → %95,0. 2-B `/api/plan`: VIPER 4,33 → 5,40 h, 2 156 → 2 742 Wh (×1,27), SOC %67,2 → %57,6 (`extra_hours` 1,08, `extra_drawn_wh` 587); LPR-1 1,30 → 1,62 h, 469 → 597 Wh.
+
+**Frontend'in çizebileceği (kod değişmeden):** rover kartında `slip_model.table`
+(0–25° eğri; `within_slope_limit` dışı satırlar soluk) ve çapaların
+`kind`/`source` etiketi; rota kartında `slip_model.route.extra_hours` ve
+`extra_drawn_wh` ("slip'in payı") ile `mean_slip`; her sayının yanında
+`validity: MODEL` etiketi (FRONTEND_YAPISI kuralı: etiketsiz gösterilmez).
+`declared_only.regolith` bir "referans" sekmesi.
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,
