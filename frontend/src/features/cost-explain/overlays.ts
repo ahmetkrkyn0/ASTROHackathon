@@ -8,7 +8,7 @@ export function hoverCellOverlay(cell: [number, number] | null): OverlayCommand[
       kind: 'points',
       id: 'cost-explain-hover',
       points: [{ row: cell[0], col: cell[1] }],
-      style: { color: '#f8fafc', radiusPx: 5, opacity: 0.95 },
+      style: { color: '#e7eaf1', radiusPx: 5, opacity: 0.95 },
     },
   ]
 }

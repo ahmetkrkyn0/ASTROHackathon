@@ -155,7 +155,7 @@ function createStarfieldTexture(): THREE.Texture {
   const ctx = canvas.getContext('2d')
   if (!ctx) return new THREE.Texture()
   const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-  grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)')
+  grad.addColorStop(0, 'rgba(231, 234, 241, 1.0)')
   grad.addColorStop(0.15, 'rgba(240, 245, 255, 0.9)')
   grad.addColorStop(0.4, 'rgba(180, 220, 255, 0.35)')
   grad.addColorStop(0.7, 'rgba(120, 170, 255, 0.08)')
@@ -275,13 +275,13 @@ function createEarth(span: number): { group: THREE.Group; mesh: THREE.Mesh } {
   const ctx = canvas.getContext('2d')!
 
   const oceanGrad = ctx.createLinearGradient(0, 0, 0, 512)
-  oceanGrad.addColorStop(0, '#0a1d4a')
-  oceanGrad.addColorStop(0.5, '#0e2b6e')
-  oceanGrad.addColorStop(1, '#0a1d4a')
+  oceanGrad.addColorStop(0, '#0c1018')
+  oceanGrad.addColorStop(0.5, '#0e131d')
+  oceanGrad.addColorStop(1, '#0c1018')
   ctx.fillStyle = oceanGrad
   ctx.fillRect(0, 0, 1024, 512)
 
-  ctx.fillStyle = '#1e3a29'
+  ctx.fillStyle = '#12251c'
   ctx.beginPath()
   ctx.ellipse(560, 220, 160, 100, 0.2, 0, Math.PI * 2)
   ctx.fill()
@@ -295,7 +295,7 @@ function createEarth(span: number): { group: THREE.Group; mesh: THREE.Mesh } {
   ctx.ellipse(330, 340, 70, 100, 0.2, 0, Math.PI * 2)
   ctx.fill()
 
-  ctx.fillStyle = '#785428'
+  ctx.fillStyle = '#3a2f16'
   ctx.beginPath()
   ctx.ellipse(520, 250, 70, 35, 0.05, 0, Math.PI * 2)
   ctx.fill()
@@ -303,7 +303,7 @@ function createEarth(span: number): { group: THREE.Group; mesh: THREE.Mesh } {
   ctx.ellipse(750, 360, 60, 45, 0.1, 0, Math.PI * 2)
   ctx.fill()
 
-  ctx.fillStyle = '#f8fafc'
+  ctx.fillStyle = '#e7eaf1'
   ctx.beginPath()
   ctx.ellipse(512, 18, 480, 26, 0, 0, Math.PI * 2)
   ctx.fill()
@@ -311,7 +311,7 @@ function createEarth(span: number): { group: THREE.Group; mesh: THREE.Mesh } {
   ctx.ellipse(512, 496, 440, 30, 0, 0, Math.PI * 2)
   ctx.fill()
 
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.72)'
+  ctx.fillStyle = 'rgba(231, 234, 241, 0.72)'
   ctx.beginPath()
   ctx.ellipse(340, 180, 120, 35, 0.3, 0, Math.PI * 2)
   ctx.ellipse(600, 260, 180, 40, -0.2, 0, Math.PI * 2)
@@ -319,7 +319,7 @@ function createEarth(span: number): { group: THREE.Group; mesh: THREE.Mesh } {
   ctx.ellipse(720, 170, 140, 30, 0.25, 0, Math.PI * 2)
   ctx.fill()
 
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)'
+  ctx.strokeStyle = 'rgba(231, 234, 241, 0.65)'
   ctx.lineWidth = 10
   ctx.beginPath()
   ctx.arc(380, 210, 40, 0, Math.PI * 1.5)
@@ -369,7 +369,7 @@ function createSunFlareSprite(): THREE.Sprite {
   const ctx = canvas.getContext('2d')!
 
   const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
-  grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)')
+  grad.addColorStop(0, 'rgba(231, 234, 241, 1.0)')
   grad.addColorStop(0.12, 'rgba(254, 240, 138, 0.95)')
   grad.addColorStop(0.35, 'rgba(251, 146, 60, 0.4)')
   grad.addColorStop(0.65, 'rgba(244, 63, 94, 0.1)')

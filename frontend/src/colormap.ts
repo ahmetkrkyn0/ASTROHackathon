@@ -66,37 +66,37 @@ const DEFAULT_ORIGIN_X = 176000
 const DEFAULT_ORIGIN_Y = 48000
 const DEFAULT_RESOLUTION_M = 80
 
-export const START_MINT = '#2ee59d'
-export const GOAL_CORAL = '#ff5252'
-export const ROUTE_CYAN = '#00e5ff'
-export const LAVENDER_ACCENT = '#a78bfa'
+export const START_MINT = '#5fe3b0'
+export const GOAL_CORAL = '#ff7a5c'
+export const ROUTE_CYAN = '#4fd8f0'
+export const LAVENDER_ACCENT = '#b3a5ff'
 
 export function riskToHex(level: string): string {
   switch (level.toUpperCase()) {
     case 'LOW':
-      return '#22c55e'
+      return '#4fd08a'
     case 'MEDIUM':
-      return '#eab308'
+      return '#e8c85a'
     case 'HIGH':
-      return '#f97316'
+      return '#f09a4a'
     case 'CRITICAL':
-      return '#ef4444'
+      return '#ee5a52'
     default:
-      return '#94a3b8'
+      return '#8b94a6'
   }
 }
 
 export function batteryToHex(percent: number): string {
   if (percent > 50) {
-    return '#22c55e'
+    return '#4fd08a'
   }
   if (percent > 25) {
-    return '#eab308'
+    return '#e8c85a'
   }
   if (percent > 10) {
-    return '#f97316'
+    return '#f09a4a'
   }
-  return '#ef4444'
+  return '#ee5a52'
 }
 
 export function thermalToRgb(value: number | null, min: number, max: number, lut?: number[]): RGB {

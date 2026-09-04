@@ -22,7 +22,7 @@ interface RoverDetailMeta {
 const ROVER_META: Record<string, RoverDetailMeta> = {
   lpr_1: {
     agency: 'ESA / LUNAPATH',
-    agencyColor: '#38bdf8',
+    agencyColor: '#4fd8f0',
     highlight: 'Flagship Autonomous Polar Explorer',
     payload: '360° LiDAR Turret, Panoramic Stereo NavCam, Deep Regolith Temperature Probes',
     image: '/rovers/lpr_1.jpg',
@@ -31,7 +31,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   },
   luvmi_m: {
     agency: 'LUNAPATH EXP',
-    agencyColor: '#b4a8e8',
+    agencyColor: '#b3a5ff',
     highlight: 'Agile Crater Descent Micro-Rover',
     payload: 'High-Torque Mesh Wheels, Micro-LiDAR, Stereo Camera Mast, Rock Abrasion Tool',
     image: '/rovers/luvmi_m.jpg',
@@ -40,7 +40,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   },
   luvm_m: {
     agency: 'LUNAPATH EXP',
-    agencyColor: '#b4a8e8',
+    agencyColor: '#b3a5ff',
     highlight: 'Agile Crater Descent Micro-Rover',
     payload: 'High-Torque Mesh Wheels, Micro-LiDAR, Stereo Camera Mast, Rock Abrasion Tool',
     image: '/rovers/luvmi_m.jpg',
@@ -49,7 +49,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   },
   nasa_viper: {
     agency: 'NASA',
-    agencyColor: '#fbbf24',
+    agencyColor: '#e8c85a',
     highlight: 'Subsurface Volatiles Prospector',
     payload: 'The TRIDENT 1-Meter Hammer Drill, Neutron Spectrometer System (NSS), NIRVSS',
     image: '/rovers/nasa_viper.jpg',
@@ -58,7 +58,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   },
   viper: {
     agency: 'NASA',
-    agencyColor: '#fbbf24',
+    agencyColor: '#e8c85a',
     highlight: 'Subsurface Volatiles Prospector',
     payload: 'The TRIDENT 1-Meter Hammer Drill, Neutron Spectrometer System (NSS), NIRVSS',
     image: '/rovers/nasa_viper.jpg',
@@ -67,7 +67,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   },
   cnsa_yutu_2: {
     agency: 'CNSA',
-    agencyColor: '#f87171',
+    agencyColor: '#ee5a52',
     highlight: 'Far-Side Lunar Endurance Rover',
     payload: 'Lunar Penetrating Radar (LPR), Visible & Near-Infrared Imaging Spectrometer (VNIS)',
     image: '/rovers/cnsa_yutu_2.jpg',
@@ -76,7 +76,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   },
   yutu_2: {
     agency: 'CNSA',
-    agencyColor: '#f87171',
+    agencyColor: '#ee5a52',
     highlight: 'Far-Side Lunar Endurance Rover',
     payload: 'Lunar Penetrating Radar (LPR), Visible & Near-Infrared Imaging Spectrometer (VNIS)',
     image: '/rovers/cnsa_yutu_2.jpg',

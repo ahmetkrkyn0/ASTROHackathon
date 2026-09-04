@@ -1,6 +1,6 @@
 .lp-val-card {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 10px; padding: 12px 14px; background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(139, 148, 166, 0.22);
+  border-radius: var(--radius); padding: 12px 14px; background: rgba(12, 16, 24, 0.45);
 }
 
 .lp-val-table {
@@ -10,25 +10,25 @@
 
 .lp-val-table th {
   text-align: right; font-size: 9px; letter-spacing: 0.07em;
-  text-transform: uppercase; color: #64748b; padding: 3px 5px;
+  text-transform: uppercase; color: var(--text-dim-2); padding: 3px 5px;
 }
 
 .lp-val-table th:first-child, .lp-val-table td:first-child { text-align: left; }
 
 .lp-val-table td {
-  text-align: right; padding: 4px 5px; color: #cbd5f5;
-  border-top: 1px solid rgba(148, 163, 184, 0.1);
+  text-align: right; padding: 4px 5px; color: var(--text-2);
+  border-top: 1px solid rgba(139, 148, 166, 0.1);
 }
 
-.lp-val-ours td { color: #38bdf8; }
+.lp-val-ours td { color: var(--cyan); }
 
 .lp-val-caveat {
-  margin: 9px 0 0; font-size: 10px; line-height: 1.5; color: #fbbf24;
+  margin: 9px 0 0; font-size: 10px; line-height: 1.5; color: var(--risk-med);
 }
 
 .lp-val-subhead {
   margin: 13px 0 6px; font-size: 9px; letter-spacing: 0.1em;
-  text-transform: uppercase; color: #64748b; font-weight: 600;
+  text-transform: uppercase; color: var(--text-dim-2); font-weight: 600;
 }
 
 .lp-val-hist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
@@ -37,24 +37,24 @@
   display: grid; grid-template-columns: 62px 1fr 34px; align-items: center; gap: 8px;
 }
 
-.lp-val-bin { font-size: 10px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+.lp-val-bin { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
 .lp-val-track {
-  height: 6px; border-radius: 999px; background: rgba(148, 163, 184, 0.16); overflow: hidden;
+  height: 6px; border-radius: var(--radius); background: rgba(139, 148, 166, 0.16); overflow: hidden;
 }
 
-.lp-val-fill { display: block; height: 100%; background: #60a5fa; }
+.lp-val-fill { display: block; height: 100%; background: var(--cyan); }
 
 .lp-val-count {
-  font-size: 10px; text-align: right; color: #cbd5f5; font-variant-numeric: tabular-nums;
+  font-size: 10px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums;
 }
 
 .lp-val-risk { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
 
 .lp-val-risk li {
-  display: flex; justify-content: space-between; font-size: 11px; color: #cbd5f5;
+  display: flex; justify-content: space-between; font-size: 11px; color: var(--text-2);
 }
 
-.lp-val-temps { margin: 11px 0 0; font-size: 11px; color: #94a3b8; }
-.lp-val-note { margin: 9px 0 0; font-size: 11px; color: #94a3b8; }
-.lp-val-warn { color: #fbbf24; }
+.lp-val-temps { margin: 11px 0 0; font-size: 11px; color: var(--text-muted); }
+.lp-val-note { margin: 9px 0 0; font-size: 11px; color: var(--text-muted); }
+.lp-val-warn { color: var(--risk-med); }

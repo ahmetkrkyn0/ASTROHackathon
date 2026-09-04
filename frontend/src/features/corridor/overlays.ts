@@ -47,13 +47,13 @@ export function corridorOverlays(
       id: 'corridor-band',
       points: center,
       halfWidthCells,
-      style: { color: '#38bdf8', opacity: 0.22 },
+      style: { color: '#4fd8f0', opacity: 0.22 },
     },
     {
       kind: 'points',
       id: 'corridor-havens',
       points: fallback,
-      style: { color: '#34d399', radiusPx: 2.5, opacity: 0.7 },
+      style: { color: '#4fd08a', radiusPx: 2.5, opacity: 0.7 },
     },
   ]
 }

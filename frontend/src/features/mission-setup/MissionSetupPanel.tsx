@@ -37,7 +37,6 @@ export const MissionSetupPanel: React.FC = () => {
     setClickMode: onSetClickMode,
     planRoute: onPlanRoute,
     resetMission: onReset,
-    setMissionMode,
   } = useMissionActions()
   const hasRoute = Boolean(planResult)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -64,37 +63,16 @@ export const MissionSetupPanel: React.FC = () => {
       {/* ── 1. VEHICLE ASSIGNMENT & QUICK SELECTOR TABS ── */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">VEHICLE ASSIGNMENT</span>
+          <span className="lp-meta-label">MISSION SETUP</span>
           <button
             type="button"
             className="lp-text-action-btn"
-            onClick={() => setMissionMode('fleet')}
-            title="Open comprehensive full-screen fleet hangar"
+            onClick={() => setDrawerOpen(true)}
+            title="Browse the fleet and pick a different rover"
           >
-            Fleet Hangar ⤢
+            Change Rover
           </button>
         </div>
-
-        {/* Quick Rover Switcher Tabs */}
-        {rovers.length > 0 && (
-          <div className="lp-rover-segmented-tabs" role="tablist" aria-label="Select Rover Profile">
-            {rovers.map((rover) => {
-              const isSelected = rover.id === selectedRover?.id
-              return (
-                <button
-                  key={rover.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isSelected}
-                  className={`lp-rover-tab ${isSelected ? 'is-active' : ''}`}
-                  onClick={() => onSelectRover(rover)}
-                >
-                  {rover.name.split(' ')[0]}
-                </button>
-              )
-            })}
-          </div>
-        )}
 
         {/* Selected Rover Specs Card */}
         {selectedRover ? (
@@ -136,77 +114,74 @@ export const MissionSetupPanel: React.FC = () => {
       {/* ── 2. MISSION SEQUENCE & TARGET PICKERS ── */}
       <section className="lp-panel-section lp-mission-sequence-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">MISSION SEQUENCE & TARGETS</span>
+          <span className="lp-meta-label">MISSION SEQUENCE</span>
         </div>
 
         <div className="lp-sequence-list">
           {/* Step 01: Rover */}
           <div className="lp-sequence-item is-complete">
             <span className="lp-seq-num">01</span>
-            <div className="lp-seq-info">
-              <span className="lp-seq-title">Rover Profile</span>
-              <span className="lp-seq-sub">{selectedRover?.name ?? 'Assigned'}</span>
-            </div>
-            <span className="lp-seq-status is-ready">{selectedRover?.id.toUpperCase() ?? 'SET'}</span>
+            <span className="lp-seq-title">Rover</span>
+            <span className="lp-seq-status is-ready">
+              {selectedRover?.id.toUpperCase() ?? 'SET'}
+            </span>
           </div>
 
-          {/* Step 02: Start Point Button */}
+          {/* Step 02: Start Point */}
           <div className={`lp-sequence-item ${start ? 'is-complete' : 'is-active'}`}>
             <span className="lp-seq-num">02</span>
-            <div className="lp-seq-info">
-              <span className="lp-seq-title">Start Point</span>
-              <span className="lp-seq-sub">
-                {start ? `Grid: ${start[0]}, ${start[1]}` : 'Click button to place on map'}
-              </span>
-            </div>
-            <button
-              type="button"
-              className={`lp-seq-action-btn ${clickMode === 'start' ? 'is-picking-start' : ''} ${start ? 'is-set-start' : ''}`}
-              onClick={() => onSetClickMode(clickMode === 'start' ? 'idle' : 'start')}
-            >
-              {start
-                ? `START [${start[0]}, ${start[1]}]`
-                : clickMode === 'start'
-                  ? 'Pick on Map...'
-                  : 'Select Start'}
-            </button>
+            <span className="lp-seq-title">Start</span>
+            <span className={`lp-seq-status ${start ? 'is-ready' : ''}`}>
+              {start ? `${start[0]}, ${start[1]}` : clickMode === 'start' ? 'PICKING' : 'SELECT'}
+            </span>
           </div>
 
-          {/* Step 03: Goal Target Button */}
+          {/* Step 03: Goal Target */}
           <div className={`lp-sequence-item ${goal ? 'is-complete' : start ? 'is-active' : ''}`}>
             <span className="lp-seq-num">03</span>
-            <div className="lp-seq-info">
-              <span className="lp-seq-title">Goal Target</span>
-              <span className="lp-seq-sub">
-                {goal ? `Grid: ${goal[0]}, ${goal[1]}` : 'Click button to place on map'}
-              </span>
-            </div>
-            <button
-              type="button"
-              className={`lp-seq-action-btn ${clickMode === 'goal' ? 'is-picking-goal' : ''} ${goal ? 'is-set-goal' : ''}`}
-              onClick={() => onSetClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
-            >
-              {goal
-                ? `GOAL [${goal[0]}, ${goal[1]}]`
-                : clickMode === 'goal'
-                  ? 'Pick on Map...'
-                  : 'Select Goal'}
-            </button>
+            <span className="lp-seq-title">Goal</span>
+            <span className={`lp-seq-status ${goal ? 'is-ready' : ''}`}>
+              {goal ? `${goal[0]}, ${goal[1]}` : clickMode === 'goal' ? 'PICKING' : 'WAITING'}
+            </span>
           </div>
 
           {/* Step 04: Path Solution Status */}
           <div className={`lp-sequence-item ${hasRoute ? 'is-complete' : ''}`}>
             <span className="lp-seq-num">04</span>
-            <div className="lp-seq-info">
-              <span className="lp-seq-title">Path Solution</span>
-              <span className="lp-seq-sub">
-                {hasRoute ? 'Ready for engineering review' : 'Kinematic A* solver'}
-              </span>
-            </div>
+            <span className="lp-seq-title">Route</span>
             <span className={`lp-seq-status ${hasRoute ? 'is-ready' : ''}`}>
-              {hasRoute ? 'LOCKED' : 'WAITING'}
+              {hasRoute ? 'LOCKED' : 'NOT GENERATED'}
             </span>
           </div>
+        </div>
+
+        {/* The pickers, full width under the list they report on. Cramming a
+            button into each row squeezed the sub-line to one word per line at
+            the 264px the design actually asks for. */}
+        <div className="lp-pick-actions">
+          <button
+            type="button"
+            className={`lp-pick-btn ${clickMode === 'start' ? 'is-picking' : ''} ${start ? 'is-set-start' : ''}`}
+            onClick={() => onSetClickMode(clickMode === 'start' ? 'idle' : 'start')}
+          >
+            {start
+              ? `START ${start[0]}, ${start[1]}`
+              : clickMode === 'start'
+                ? 'Pick on map…'
+                : 'Select Start'}
+          </button>
+          <button
+            type="button"
+            className={`lp-pick-btn ${clickMode === 'goal' ? 'is-picking' : ''} ${goal ? 'is-set-goal' : ''}`}
+            onClick={() => onSetClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
+            disabled={!start}
+          >
+            {goal
+              ? `GOAL ${goal[0]}, ${goal[1]}`
+              : clickMode === 'goal'
+                ? 'Pick on map…'
+                : 'Select Goal'}
+          </button>
         </div>
 
         {/* Action Controls directly in the Left Dashboard */}

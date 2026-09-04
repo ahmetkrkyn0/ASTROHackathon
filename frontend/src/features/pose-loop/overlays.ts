@@ -30,10 +30,10 @@ export function poseOverlays(
         // too uncertain to trust it, white otherwise.
         color:
           result?.recommended_action === 'stop_and_localize'
-            ? '#fbbf24'
+            ? '#e8c85a'
             : result && result.fired_triggers.length > 0
-              ? '#f87171'
-              : '#f8fafc',
+              ? '#ee5a52'
+              : '#e7eaf1',
         radiusPx: 5,
       },
     },
@@ -53,7 +53,7 @@ export function poseOverlays(
       kind: 'polyline',
       id: 'pose-deviation',
       points: [poseCell, metresToPixel(nearest[0], nearest[1], frame)],
-      style: { color: '#fbbf24', widthPx: 1.5, dash: [4, 3], opacity: 0.9 },
+      style: { color: '#e8c85a', widthPx: 1.5, dash: [4, 3], opacity: 0.9 },
     })
   }
 

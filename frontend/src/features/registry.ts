@@ -38,6 +38,20 @@ export type FeatureSlot =
   | 'canvasOverlay'
   | 'globalOverlay'
 
+/**
+ * The two surfaces a rail/dock feature can live on.
+ *
+ * `primary` is the default cockpit: the task and the context you work with
+ * while planning and reviewing a route. `systems` is the "Systems & Evidence"
+ * drawer -- the panels that prove the stack is real (ROS bridge, reality
+ * check, provenance, corridor, pose loop, replan triggers) but are not part of
+ * the moment-to-moment task. Splitting them is what keeps the default cockpit
+ * from being nine competing cards. Omitted means `primary`, for the same
+ * reason an omitted `modes` means every mode: nobody hides a panel by leaving
+ * the field off.
+ */
+export type FeatureGroup = 'primary' | 'systems'
+
 export interface FeatureRegistration {
   /** Stable, unique, and used as the React key. */
   id: string
@@ -53,6 +67,13 @@ export interface FeatureRegistration {
    * collapsed, and selectFeatures' tests pin that down.
    */
   modes?: readonly MissionMode[]
+  /**
+   * Which surface the feature lives on. OMITTED MEANS `primary` (the rails).
+   * `systems` moves it out of the rails and into the Systems & Evidence
+   * drawer; the feature keeps its `slot` for ordering, but the drawer renders
+   * it in a flat grid rather than in that rail.
+   */
+  group?: FeatureGroup
 }
 
 /**
@@ -100,14 +121,21 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // The first two features to come back from the parking lot, and the only
   // two that needed no retyping: neither draws an overlay and neither reads a
   // mission field that changed name.
-  { id: 'ros-showcase', slot: 'leftRail', Component: RosShowcase },
-  { id: 'layer-provenance', slot: 'leftRail', Component: LayerProvenance },
+  //
+  // These six are the "Systems & Evidence" set: they demonstrate the stack is
+  // real -- the ROS bridge, layer provenance, the reality-check against flown
+  // missions, the corridor, the pose loop, the replan triggers -- but none is
+  // part of the moment-to-moment task of placing and reading a route. group:
+  // 'systems' pulls them out of the rails and into the drawer, which is what
+  // takes the default cockpit from nine competing cards down to task+context.
+  { id: 'ros-showcase', slot: 'leftRail', Component: RosShowcase, group: 'systems' },
+  { id: 'layer-provenance', slot: 'leftRail', Component: LayerProvenance, group: 'systems' },
   // Plan only: it asks what would force a new route from where the rover is,
   // which is a question about a route still being decided.
-  { id: 'replan', slot: 'leftRail', Component: Replan, modes: ['plan'] },
-  { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation },
-  { id: 'corridor', slot: 'rightRail', Component: CorridorFeature },
-  { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop },
+  { id: 'replan', slot: 'leftRail', Component: Replan, modes: ['plan'], group: 'systems' },
+  { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation, group: 'systems' },
+  { id: 'corridor', slot: 'rightRail', Component: CorridorFeature, group: 'systems' },
+  { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop, group: 'systems' },
   // No modes: the cost of the cell under the pointer is worth reading while a
   // route is being placed and while one is being reviewed.
   { id: 'cost-explain', slot: 'rightRail', Component: CostExplain },
@@ -133,9 +161,30 @@ export function selectFeatures(
   features: readonly FeatureRegistration[],
   slot: FeatureSlot,
   mode: MissionMode,
+  group: FeatureGroup = 'primary',
 ): readonly FeatureRegistration[] {
   return features.filter(
     (feature) =>
-      feature.slot === slot && (feature.modes === undefined || feature.modes.includes(mode)),
+      feature.slot === slot &&
+      (feature.modes === undefined || feature.modes.includes(mode)) &&
+      (feature.group ?? 'primary') === group,
+  )
+}
+
+/**
+ * The Systems & Evidence drawer's contents for one mode, in registration
+ * order. Slot-agnostic on purpose: the drawer lays these out in a flat grid,
+ * so a feature's `slot` still orders it but does not place it in a rail. Mirror
+ * of selectFeatures' mode rule -- omitted modes means every mode, an empty
+ * array means none.
+ */
+export function selectSystemsFeatures(
+  features: readonly FeatureRegistration[],
+  mode: MissionMode,
+): readonly FeatureRegistration[] {
+  return features.filter(
+    (feature) =>
+      feature.group === 'systems' &&
+      (feature.modes === undefined || feature.modes.includes(mode)),
   )
 }

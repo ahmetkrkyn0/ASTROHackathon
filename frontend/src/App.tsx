@@ -26,13 +26,13 @@ import {
 
 // New Mission Control Workstation Components
 import TopBar, { type MissionMode } from './components/TopBar/TopBar'
-import FleetSelectionView from './components/Fleet/FleetSelectionView'
 
 // Modular shell: App knows the slots, never the features.
 import { MissionProvider } from './mission/MissionProvider'
 import { MissionRuntimeProvider } from './mission/MissionRuntimeProvider'
 import type { MissionActions, MissionRuntime, MissionValue } from './mission/types'
 import { OverlayProvider } from './overlay/OverlayProvider'
+import SystemsDrawer from './shell/SystemsDrawer'
 import {
   BottomDock,
   CanvasOverlaySlot,
@@ -84,10 +84,10 @@ interface ToastItem {
 }
 
 const LEGEND_ITEMS = [
-  { label: 'Safe', color: '#22c55e' },
-  { label: 'Caution', color: '#eab308' },
-  { label: 'High', color: '#f97316' },
-  { label: 'Critical', color: '#ef4444' },
+  { label: 'Safe', color: '#4fd08a' },
+  { label: 'Caution', color: '#e8c85a' },
+  { label: 'High', color: '#f09a4a' },
+  { label: 'Critical', color: '#ee5a52' },
 ]
 
 export default function App() {
@@ -104,8 +104,8 @@ export default function App() {
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>('loading')
   const [planningEngaged, setPlanningEngaged] = useState(false)
 
-  // Workstation mode: 'fleet', 'plan', or 'analyze'
-  const [missionMode, setMissionMode] = useState<MissionMode>('fleet')
+  // Workstation mode: the two working modes of the design, PLAN and ANALYZE.
+  const [missionMode, setMissionMode] = useState<MissionMode>('plan')
   const [isSolving, setIsSolving] = useState(false)
 
   // Rail and HUD collapse states
@@ -113,6 +113,7 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(true)
   const [hudOpen, setHudOpen] = useState(true)
   const [hudMinimized, setHudMinimized] = useState(false)
+  const [systemsOpen, setSystemsOpen] = useState(false)
 
   // Raster layers
   const [elevationLayer, setElevationLayer] = useState<LayerResponse | null>(null)
@@ -539,29 +540,14 @@ export default function App() {
           hasRoute={Boolean(planResult)}
           missionStatus={missionStatus}
           dataLinkActive={hasData}
-          resolutionM={focusTelemetry.resolutionM}
-          gridDimensions={[500, 500]}
           isSolving={isSolving}
-          leftOpen={leftOpen}
-          onToggleLeft={() => setLeftOpen((v) => !v)}
-          rightOpen={rightOpen}
-          onToggleRight={() => setRightOpen((v) => !v)}
-          hudOpen={hudOpen}
-          onToggleHud={() => setHudOpen((v) => !v)}
+          systemsOpen={systemsOpen}
+          onToggleSystems={() => setSystemsOpen((v) => !v)}
         />
 
-        {/* Main Workstation View: Stage 1 Fleet Selection vs Stage 2/3 Surface Map & Analysis */}
-        {missionMode === 'fleet' ? (
-          <FleetSelectionView
-            rovers={rovers}
-            selectedRover={selectedRover}
-            onSelectRover={handleRoverSelect}
-            weights={weights}
-            onWeightsChange={setWeights}
-            onDeployToMap={() => setMissionMode('plan')}
-          />
-        ) : (
-          <main
+        {/* The cockpit. Rover selection is a drawer off the left rail, not a
+            stage of its own -- the mission shell never gets replaced. */}
+        <main
             className={`content-grid ${!leftOpen ? 'left-collapsed' : ''} ${!rightOpen ? 'right-collapsed' : ''}`}
           >
             {/* ── LEFT RAIL: MISSION SETUP (PLAN) vs MISSION SNAPSHOT (ANALYZE) ── */}
@@ -613,15 +599,6 @@ export default function App() {
                           aria-label="Minimize HUD"
                         >
                           –
-                        </button>
-                        <button
-                          type="button"
-                          className="lp-hud-btn"
-                          onClick={() => setHudOpen(false)}
-                          title="Hide HUD overlay (reopen via top-bar or toolbar)"
-                          aria-label="Close HUD"
-                        >
-                          ✕
                         </button>
                       </div>
                     </div>
@@ -772,12 +749,15 @@ export default function App() {
             <RightRailSlot />
           </aside>
         </main>
-      )}
 
         {/* Application-level floating utilities. Sits immediately before the
             toast stack and shares its parent: shell.css moves the toasts clear
             of an open assistant with a sibling combinator, which needs both. */}
         <GlobalOverlaySlot />
+
+        {/* Systems & Evidence: the diagnostics/proof panels, pulled out of the
+            rails so the default cockpit stays task + context. */}
+        <SystemsDrawer open={systemsOpen} onClose={() => setSystemsOpen(false)} />
 
         {/* Floating System Toasts */}
         {toasts.length > 0 && (
