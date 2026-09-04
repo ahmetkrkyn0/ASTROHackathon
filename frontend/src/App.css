@@ -4913,8 +4913,27 @@ select {
   box-shadow: 0 0 6px currentColor;
 }
 
-.terrain3d-lidar-footer i.is-terrain { color: #43e8ff; background: currentColor; }
-.terrain3d-lidar-footer i.is-rock { color: #ff8f3d; background: currentColor; }
+.terrain3d-lidar-ramp-label {
+  gap: 5px;
+}
+
+/* Same jet stops the point cloud itself is coloured with (jetColor() in
+   lidarSimulation.ts) -- this swatch is the ramp's legend, not a decoration,
+   so it has to stay in sync with that function by eye if it ever changes. */
+.terrain3d-lidar-ramp {
+  width: 34px;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(
+    90deg,
+    #0000ff 0%,
+    #00ffff 25%,
+    #00ff00 50%,
+    #ffff00 75%,
+    #ff0000 100%
+  );
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.25);
+}
 
 .terrain3d-lidar-footer b {
   margin-left: auto;

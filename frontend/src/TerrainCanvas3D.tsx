@@ -703,6 +703,12 @@ export default function TerrainCanvas3D({
       roughness: 1,
       metalness: 0,
       flatShading: true,
+      // Defensive, not decorative: independent per-vertex displacement below
+      // can fold a facet back on itself at high subdivision, flipping its
+      // winding relative to the camera. FrontSide culls that facet outright,
+      // which reads as a torn hole with the void showing through. DoubleSide
+      // costs nothing visible on a convex rock and guarantees no gaps.
+      side: THREE.DoubleSide,
     })
     const rockGroup = new THREE.Group()
     scene.add(rockGroup)
@@ -738,7 +744,10 @@ export default function TerrainCanvas3D({
       transparent: true,
       opacity: 0.92,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      // NOT additive: the jet ramp below encodes real elevation, and additive
+      // blending washes overlapping points toward white, destroying exactly
+      // the colour a height ramp exists to show. Normal blending keeps each
+      // point's true colour, the way CloudCompare/RViz/PDAL render one.
     })
     const lidarPoints = new THREE.Points(lidarPointGeometry, lidarPointMaterial)
     lidarPoints.renderOrder = 4
@@ -1334,11 +1343,17 @@ export default function TerrainCanvas3D({
           const x = positions.getX(i)
           const y = positions.getY(i)
           const z = positions.getZ(i)
-          const weathering = 0.92 + random() * 0.13
+          // ONE factor per vertex, applied to all three axes: a radial
+          // displacement along the vertex's own direction. Three independent
+          // per-axis factors sheared neighbouring facets against each other
+          // at this subdivision level, folding a facet back on itself often
+          // enough to be the torn-hole look DoubleSide above now also guards
+          // against.
+          const weathering = 0.93 + random() * 0.12
           positions.setXYZ(
             i,
             x * descriptor.radiusX * weathering,
-            y * descriptor.radiusY * (0.94 + random() * 0.1),
+            y * descriptor.radiusY * weathering,
             z * descriptor.radiusZ * weathering,
           )
         }
@@ -1667,8 +1682,10 @@ export default function TerrainCanvas3D({
                 </div>
               </div>
               <div className="terrain3d-lidar-footer">
-                <span><i className="is-terrain" /> terrain return</span>
-                <span><i className="is-rock" /> obstacle return</span>
+                <span className="terrain3d-lidar-ramp-label">
+                  <i className="terrain3d-lidar-ramp" />
+                  LOW&nbsp;&rarr;&nbsp;HIGH (elev.)
+                </span>
                 <b className={
                   lidarTelemetry.nearestObstacleM !== null && lidarTelemetry.nearestObstacleM < 12
                     ? 'is-danger'

@@ -48,6 +48,22 @@ export interface LidarScanResult {
   summary: LidarScanSummary
 }
 
+/**
+ * Classic "jet" colour ramp (blue -> cyan -> green -> yellow -> red),
+ * the height-encoding every point-cloud tool (CloudCompare, RViz, PDAL)
+ * defaults to. Point-cloud viewers colour by elevation, not by category, so
+ * an obstacle reads as a hot (red/yellow) local peak against a cool ground
+ * plane the same way it would in one of those tools -- no separate hazard
+ * hue needed, and no surprise when this output sits next to a real one.
+ */
+function jetColor(t: number): [number, number, number] {
+  const x = THREE.MathUtils.clamp(t, 0, 1)
+  const r = THREE.MathUtils.clamp(1.5 - Math.abs(4 * x - 3), 0, 1)
+  const g = THREE.MathUtils.clamp(1.5 - Math.abs(4 * x - 2), 0, 1)
+  const b = THREE.MathUtils.clamp(1.5 - Math.abs(4 * x - 1), 0, 1)
+  return [r, g, b]
+}
+
 function hash2(a: number, b: number): number {
   let h = Math.imul(a | 0, 0x45d9f3b) ^ Math.imul(b | 0, 0x119de1f3)
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b)
@@ -186,7 +202,6 @@ export function simulateLidarScan(
   scanSeed = 1,
 ): LidarScanResult {
   const positions: number[] = []
-  const colors: number[] = []
   const azimuthEndpoints: Array<THREE.Vector3 | null> = []
   const raycaster = new THREE.Raycaster()
   raycaster.near = LIDAR_CONFIG.minRangeM
@@ -196,6 +211,12 @@ export function simulateLidarScan(
   let rockReturns = 0
   let terrainReturns = 0
   let nearestObstacleM: number | null = null
+  // Height range of this scan, tracked while walking beams so the jet ramp
+  // below can be applied in a second, cheap pass once it is known -- an
+  // obstacle is not "coloured red" by category, it just IS the local high
+  // point, and that is what the ramp needs the true min/max to show.
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
 
   for (let azimuthIndex = 0; azimuthIndex < LIDAR_CONFIG.azimuthSteps; azimuthIndex++) {
     const azimuth = (azimuthIndex / LIDAR_CONFIG.azimuthSteps) * Math.PI * 2
@@ -232,8 +253,9 @@ export function simulateLidarScan(
       )
       const point = origin.clone().addScaledVector(direction, measuredDistance)
       positions.push(point.x, point.y, point.z)
+      if (point.y < minY) minY = point.y
+      if (point.y > maxY) maxY = point.y
 
-      const rangeT = measuredDistance / LIDAR_CONFIG.maxRangeM
       if (rockDistance < groundDistance) {
         rockReturns++
         const rockId = String(rockHit.object.userData.lidarRockId ?? rockHit.object.uuid)
@@ -241,11 +263,8 @@ export function simulateLidarScan(
         nearestObstacleM = nearestObstacleM === null
           ? measuredDistance
           : Math.min(nearestObstacleM, measuredDistance)
-        // Hazard returns are amber/red; terrain remains cyan-blue.
-        colors.push(1, 0.34 + 0.38 * rangeT, 0.08)
       } else {
         terrainReturns++
-        colors.push(0.1 + 0.18 * rangeT, 0.95 - 0.38 * rangeT, 1)
       }
 
       if (measuredDistance < nearestForAzimuthDistance) {
@@ -258,9 +277,21 @@ export function simulateLidarScan(
 
   const beams = LIDAR_CONFIG.azimuthSteps * LIDAR_CONFIG.elevationAnglesDeg.length
   const returns = positions.length / 3
+  // A flat scan (minY === maxY, e.g. a single beam or perfectly level ground)
+  // divides by zero -- pin the whole cloud to the ramp's midpoint instead.
+  const ySpan = maxY - minY
+  const colors = new Float32Array(positions.length)
+  for (let i = 0; i < returns; i++) {
+    const y = positions[i * 3 + 1]
+    const t = ySpan > 1e-6 ? (y - minY) / ySpan : 0.5
+    const [r, g, b] = jetColor(t)
+    colors[i * 3] = r
+    colors[i * 3 + 1] = g
+    colors[i * 3 + 2] = b
+  }
   return {
     positions: new Float32Array(positions),
-    colors: new Float32Array(colors),
+    colors,
     azimuthEndpoints,
     summary: {
       beams,
