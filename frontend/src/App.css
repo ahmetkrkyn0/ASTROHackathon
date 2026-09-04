@@ -821,11 +821,6 @@ select {
 .footer-copy,
 .footer-live,
 .map-data-label,
-.scale-copy {
-  font-family: var(--font-data);
-  text-transform: uppercase;
-}
-
 .panel-kicker {
   margin: 0 0 4px;
   color: rgba(139, 148, 166, 0.58);
@@ -1383,18 +1378,6 @@ select {
   gap: 10px;
 }
 
-.map-overlay-bottom-left {
-  left: 24px;
-  bottom: 24px;
-  padding: 10px 12px;
-}
-
-.map-overlay-bottom-center {
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-}
-
 .map-data-grid {
   display: grid;
   grid-template-columns: auto auto;
@@ -1467,47 +1450,6 @@ select {
   font-family: var(--font-display);
   font-size: 13px;
   letter-spacing: 0.02em;
-}
-
-.scale-line {
-  width: 120px;
-  height: 10px;
-  border-left: 1px solid var(--primary-container);
-  border-right: 1px solid var(--primary-container);
-  border-bottom: 1px solid var(--primary-container);
-}
-
-.scale-copy {
-  display: inline-block;
-  margin-top: 8px;
-  color: var(--primary-container);
-  font-size: 9px;
-  letter-spacing: 0.16em;
-}
-
-.legend-ribbon {
-  padding: 10px 16px;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-.legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-muted);
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
 }
 
 .telemetry-header {
@@ -1865,8 +1807,7 @@ select {
   }
 
   .map-overlay-top-left,
-  .map-overlay-top-center,
-  .map-overlay-bottom-left {
+  .map-overlay-top-center {
     left: 12px;
   }
 
@@ -1886,19 +1827,6 @@ select {
 
   .map-switch {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .map-overlay-bottom-left {
-    bottom: 12px;
-  }
-
-  .map-overlay-bottom-center {
-    bottom: 12px;
-    max-width: calc(100% - 24px);
-  }
-
-  .legend-ribbon {
-    overflow-x: auto;
   }
 
   .map-canvas-shell {
@@ -2015,9 +1943,6 @@ select {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .legend-ribbon {
-    gap: 14px;
-  }
 }
 
 /* ── 3-D terrain view ─────────────────────────────────────────────────────── */
@@ -2125,9 +2050,9 @@ select {
 .map-overlay-bottom-right {
   right: 24px;
   bottom: 24px;
-  /* At narrower widths this sits in the same band as the centred
-     legend-ribbon; without this it wins the paint order and the photo-drape
-     checkbox underneath becomes unclickable. */
+  /* The bottom band is the status strip's now, but this still shares a corner
+     with the map's own controls; without this it loses the paint order and the
+     photo-drape checkbox underneath becomes unclickable. */
   z-index: 3;
 }
 
@@ -3772,99 +3697,127 @@ select {
   color: var(--text-muted);
 }
 
-/* Playback Dock */
+/* ── Playback transport, inline in the status strip ── */
 .lp-playback-dock {
-  position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 25;
-  background: rgba(8, 11, 18, 0.92);
-  border: 1px solid rgba(79, 216, 240, 0.3);
-  box-shadow: var(--shadow-float);
-  border-radius: var(--radius);
-  padding: 8px 18px;
   display: flex;
   align-items: center;
-  gap: 16px;
-  min-width: 540px;
+  gap: 12px;
+  min-width: 0;
 }
 
 .lp-playback-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex: none;
 }
 
 .lp-play-btn {
-  background: rgba(79, 216, 240, 0.15);
-  border: 1px solid rgba(79, 216, 240, 0.4);
+  background: none;
+  border: 1px solid var(--line-card);
   border-radius: var(--radius);
-  color: var(--accent-cyan);
-  font-family: var(--font-data);
+  color: var(--text-2);
+  font-family: var(--font-body);
   font-size: 11px;
-  font-weight: 700;
-  padding: 6px 12px;
+  letter-spacing: 0.06em;
+  padding: 5px 11px;
   cursor: pointer;
-  transition: all 140ms ease;
+  white-space: nowrap;
+  transition: border-color 140ms ease, color 140ms ease;
 }
 
 .lp-play-btn:hover {
-  background: var(--accent-cyan);
-  color: var(--void);
+  border-color: var(--line-accent-hover);
+  color: var(--lavender-bright);
 }
 
+/* Label and value sit on one line here; the strip has 44px, not two rows. */
 .lp-playback-meta {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: 7px;
+  flex: none;
 }
 
 .lp-playback-slider-block {
-  flex-grow: 1;
   display: flex;
   align-items: center;
+  width: 190px;
+  flex: none;
 }
 
 .lp-playback-range {
   width: 100%;
-  height: 4px;
+  height: 16px;
   appearance: none;
-  background: rgba(199, 205, 219, 0.15);
-  border-radius: var(--radius);
+  background: transparent;
   outline: none;
+  cursor: pointer;
+}
+
+.lp-playback-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: #232a3a;
 }
 
 .lp-playback-range::-webkit-slider-thumb {
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 10px;
+  height: 10px;
+  margin-top: -4px;
   border-radius: 50%;
-  background: var(--accent-cyan);
+  background: var(--lavender);
+  cursor: pointer;
+}
+
+.lp-playback-range::-moz-range-track {
+  height: 2px;
+  background: #232a3a;
+}
+
+.lp-playback-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--lavender);
   cursor: pointer;
 }
 
 .lp-playback-readouts {
   display: flex;
+  align-items: baseline;
   gap: 14px;
+  flex: none;
 }
 
 .lp-playback-stat {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: 6px;
 }
 
 .lp-stat-name {
   font-family: var(--font-data);
-  font-size: 8px;
-  color: var(--text-dim-2);
-  letter-spacing: 0.05em;
+  font-size: 9px;
+  color: var(--text-dimmest);
+  letter-spacing: 0.12em;
 }
 
 .lp-stat-val {
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: 10.5px;
   color: var(--text-2);
-  font-weight: 600;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+/* Below this the transport loses the scrubber before it loses the readouts:
+   the numbers are the point, dragging is the convenience. */
+@media (max-width: 1200px) {
+  .lp-playback-slider-block {
+    display: none;
+  }
 }
 
 /* Common Animations */
@@ -4974,7 +4927,7 @@ select {
    ════════════════════════════════════════════════════════════════════════════ */
 
 .app-shell {
-  background: var(--bg-card);
+  background: var(--void);
 }
 
 /* A section is a label, a hairline and aligned data -- not a bordered card.
@@ -5047,3 +5000,122 @@ select {
   font-weight: 700;
 }
 
+
+/* ── Status strip ─────────────────────────────────────────────────────────
+   44px, in flow under the cockpit, on the same hairline the rails use. The
+   scale and the risk legend used to float over the terrain they describe,
+   and the playback transport floated over the route it scrubs; all three
+   read the map, so none of them belongs on top of it. */
+.lp-status-bar {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 16px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.lp-status-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* Right padding keeps the last readout clear of the assistant launcher, which
+   is pinned to the same corner. */
+.lp-status-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding-right: 62px;
+}
+
+.lp-scale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* A ruler, drawn the way a chart draws one: a rule with a tick at each end. */
+.lp-scale-rule {
+  position: relative;
+  width: 52px;
+  height: 1px;
+  background: var(--text-dim-2);
+}
+
+.lp-scale-rule::before,
+.lp-scale-rule::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  width: 1px;
+  height: 7px;
+  background: var(--text-dim-2);
+}
+
+.lp-scale-rule::before {
+  left: 0;
+}
+
+.lp-scale-rule::after {
+  right: 0;
+}
+
+.lp-scale-copy {
+  color: var(--text-muted-2);
+  font-family: var(--font-data);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.lp-risk-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.lp-risk-legend::-webkit-scrollbar {
+  display: none;
+}
+
+.lp-legend-label {
+  color: var(--text-dimmest);
+  font-family: var(--font-data);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  flex: none;
+}
+
+.lp-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+  flex: none;
+}
+
+.lp-legend-swatch {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius);
+  flex: none;
+}
+
+@media (max-width: 900px) {
+  .lp-risk-legend {
+    display: none;
+  }
+}

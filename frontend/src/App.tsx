@@ -39,6 +39,7 @@ import {
   GlobalOverlaySlot,
   LeftRailSlot,
   RightRailSlot,
+  StatusBarSlot,
 } from './shell/slots'
 
 const DEFAULT_WEIGHTS: PlanWeights = {
@@ -710,26 +711,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* Bottom-Left Scale Bar */}
-              <div className="map-overlay map-overlay-bottom-left">
-                <div className="scale-line" />
-                <span className="scale-copy">
-                  0 - {focusTelemetry.spanKm.toFixed(1)} KM | {focusTelemetry.resolutionM.toFixed(0)} M/PIX
-                </span>
-              </div>
-
-              {/* Bottom-Center Calibrated Risk Legend Ribbon */}
-              <div className="map-overlay map-overlay-bottom-center legend-ribbon">
-                {LEGEND_ITEMS.map((item) => (
-                  <span key={item.label} className="legend-item">
-                    <span
-                      className="legend-dot"
-                      style={{ color: item.color, background: item.color }}
-                    />
-                    {item.label}
-                  </span>
-                ))}
-              </div>
             </div>
 
             <BottomDock />
@@ -749,6 +730,32 @@ export default function App() {
             <RightRailSlot />
           </aside>
         </main>
+
+        {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
+        <footer className="lp-status-bar">
+          <div className="lp-status-left">
+            <div className="lp-scale">
+              <span className="lp-scale-rule" aria-hidden="true" />
+              <span className="lp-scale-copy">
+                0 - {focusTelemetry.spanKm.toFixed(1)} km · {focusTelemetry.resolutionM.toFixed(0)} m/px
+              </span>
+            </div>
+
+            <div className="lp-risk-legend">
+              <span className="lp-legend-label">RISK</span>
+              {LEGEND_ITEMS.map((item) => (
+                <span key={item.label} className="lp-legend-item">
+                  <span className="lp-legend-swatch" style={{ background: item.color }} />
+                  {item.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="lp-status-right">
+            <StatusBarSlot />
+          </div>
+        </footer>
 
         {/* Application-level floating utilities. Sits immediately before the
             toast stack and shares its parent: shell.css moves the toasts clear

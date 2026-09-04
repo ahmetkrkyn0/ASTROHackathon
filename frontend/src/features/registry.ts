@@ -36,6 +36,7 @@ export type FeatureSlot =
   | 'rightRail'
   | 'bottomDock'
   | 'canvasOverlay'
+  | 'statusBar'
   | 'globalOverlay'
 
 /**
@@ -104,10 +105,11 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // renders nothing without waypoints, so knowing what an empty route looks
   // like stays inside the feature.
   //
-  // canvasOverlay rather than bottomDock, decided when time-axis arrived:
-  // the bar is absolutely positioned and floats over the map, so in the
-  // bottom strip it simply covered whatever in-flow feature was there.
-  { id: 'playback', slot: 'canvasOverlay', Component: Playback, modes: ['analyze'] },
+  // statusBar, not canvasOverlay: it used to float over the terrain because
+  // the bottom dock was in-flow under the map and the two fought for the same
+  // space. The status strip is the design's home for the transport, beside the
+  // scale and the risk legend it reads against.
+  { id: 'playback', slot: 'statusBar', Component: Playback, modes: ['analyze'] },
   // The bottom dock's first in-flow occupant, and the reason it had to
   // become a real strip under the map.
   { id: 'time-axis', slot: 'bottomDock', Component: TimeAxis, modes: ['analyze'] },

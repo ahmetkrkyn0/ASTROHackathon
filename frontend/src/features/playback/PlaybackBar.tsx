@@ -55,9 +55,9 @@ export const PlaybackBar: React.FC = () => {
   if (totalSteps === 0) return null
 
   return (
-    // pointerEvents: the canvas overlay slot turns them off so an empty
-    // layer cannot swallow clicks meant for the map; a control opts back in.
-    <div className="lp-playback-dock" style={{ pointerEvents: 'auto' }}>
+    // Lives in the status strip now, which is in flow and takes its own
+    // clicks; the pointer-events opt-in the canvas overlay needed is gone.
+    <div className="lp-playback-dock">
       <div className="lp-playback-controls">
         <button
           type="button"

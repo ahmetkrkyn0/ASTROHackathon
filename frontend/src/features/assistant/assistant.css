@@ -13,8 +13,9 @@
    viewport-relative and the mock's were fixed pixels. */
 .chat-launcher {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
+  right: 16px;
+  /* Clears the 44px status strip: 44 + 12px of air. */
+  bottom: 56px;
   z-index: 100;
   width: 46px;
   height: 46px;
@@ -68,15 +69,15 @@
 
 .chat-window {
   position: fixed;
-  right: 24px;
-  /* Sits above the launcher rather than on top of it: 24px corner inset,
-     plus the launcher's 46px, plus the gap between them. */
-  bottom: 84px;
+  right: 16px;
+  /* Sits above the launcher rather than on top of it: the launcher's own
+     56px offset clear of the status strip, plus its 46px, plus the gap. */
+  bottom: 114px;
   z-index: 100;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  width: 404px;
+  width: 394px;
   max-width: calc(100vw - 24px);
   /* Every bound is viewport-relative, so a short window cannot push the
      assistant off the top of the screen: height, floor and ceiling all shrink
@@ -126,8 +127,9 @@
   margin: 0;
   padding: 14px 16px;
   overflow: hidden;
-  background: var(--bg-surface);
-  border-color: var(--border-line);
+  background: var(--bg-inset);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
   box-shadow: var(--shadow-float);
 }
 
@@ -242,24 +244,23 @@
 
 .chat-levels {
   display: flex;
-  gap: 4px;
-  padding: 3px;
+  border: 1px solid var(--line-card);
   border-radius: var(--radius);
-  border: 1px solid rgba(29, 36, 50, 0.28);
-  background: rgba(8, 11, 18, 0.6);
+  overflow: hidden;
 }
 
 .chat-level-option {
   flex: 1;
-  padding: 5px 8px;
-  border-radius: var(--radius);
-  border: 1px solid transparent;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
-  color: rgba(139, 148, 166, 0.7);
+  color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
   cursor: pointer;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition: background 0.14s ease, color 0.14s ease;
 }
 
 .chat-level-option:hover {
@@ -267,9 +268,8 @@
 }
 
 .chat-level-option.is-active {
-  border-color: rgba(179, 165, 255, 0.45);
-  background: rgba(50, 43, 87, 0.55);
-  color: rgba(199, 205, 219, 0.96);
+  background: rgba(179, 165, 255, 0.14);
+  color: var(--lavender-bright);
 }
 
 /* The default is shown as a suggestion until the operator confirms it, so a
@@ -333,22 +333,21 @@
 }
 
 .chat-suggestion {
-  padding: 6px 11px;
+  padding: 5px 9px;
   border-radius: var(--radius);
-  border: 1px solid rgba(29, 36, 50, 0.4);
-  background: rgba(20, 21, 30, 0.7);
-  color: rgba(199, 205, 219, 0.85);
+  border: 1px solid var(--line-card);
+  background: none;
+  color: var(--text-3);
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: 10.5px;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+  transition: border-color 0.14s ease, color 0.14s ease;
 }
 
 .chat-suggestion:hover:not(:disabled) {
-  border-color: rgba(179, 165, 255, 0.5);
-  background: rgba(50, 43, 87, 0.35);
-  color: var(--text);
+  border-color: var(--line-accent-hover);
+  color: var(--lavender-bright);
 }
 
 .chat-suggestion:disabled {
@@ -414,15 +413,14 @@
 }
 
 .chat-context {
-  padding: 2px 8px;
-  border-radius: var(--radius);
-  border: 1px solid rgba(179, 165, 255, 0.28);
-  background: rgba(50, 43, 87, 0.32);
+  padding: 0;
+  border: 0;
+  background: none;
   font-family: var(--font-data);
   font-size: 9px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(194, 193, 255, 0.9);
+  color: var(--text-dim-2);
 }
 
 .chat-text {
@@ -837,4 +835,52 @@
   height: 1px;
   background: currentColor;
   opacity: 0.28;
+}
+
+/* ── Canvas header proportions ────────────────────────────────────────────
+   The assistant is an instrument in the cockpit, so its title is set like a
+   section label -- 11px, letterspaced -- rather than like an 18px page
+   heading, and the mission context under it is mono because it is a readout.
+   Scoped to .chat-panel: .panel-title and .panel-kicker are shared with the
+   rail panels, which want their own sizes. */
+.chat-panel .panel-title {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.chat-panel .panel-kicker {
+  order: 2;
+  margin: 5px 0 0;
+  color: var(--text-dim-2);
+  font-family: var(--font-data);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+}
+
+.chat-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The opening line is quoted from the assistant, so it gets the rule a quote
+   gets, not a card. */
+.chat-intro {
+  border-left: 2px solid var(--line-accent);
+  padding: 2px 0 2px 11px;
+}
+
+.chat-intro-copy,
+.chat-intro-title {
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+
+.chat-intro-title {
+  font-family: var(--font-body);
+  font-weight: 500;
+  color: var(--text-2);
 }
