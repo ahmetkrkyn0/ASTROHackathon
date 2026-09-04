@@ -383,11 +383,19 @@ sekiz vakalık bir testi var; chatbot'unki geometrisini private tutuyor ve o
 dalda hiç frontend testi yok.
 
 **Dosyalar:**
-- Oluştur: `frontend/src/overlay/OverlayContext.tsx` (chatbot'tan)
 - Üzerine yaz: `frontend/src/overlay/types.ts`, `frontend/src/overlay/useOverlays.ts` (chatbot'tan)
+- Oluştur: `frontend/src/overlay/OverlayContext.ts` — context'ler + `EMPTY_COMMANDS` + `OverlayRegistry`
+- Oluştur: `frontend/src/overlay/OverlayProvider.tsx` — yalnızca provider bileşeni
 - Değiştir: `frontend/src/overlay/draw2d.ts` (kendi dosyamız, yeni tiplere göre)
 - Değiştir: `frontend/src/overlay/draw2d.test.ts`
-- Sil: `frontend/src/overlay/OverlayProvider.tsx`
+- Değiştir: `frontend/src/MapCanvas.tsx` — `OverlayLayer` → `readonly OverlayCommand[]`, 3 yerde
+
+`MapCanvas` bu listede çünkü `drawOverlays`'in tek çağıranı o ve `overlays`
+prop'unu taşıyor; planın ilk sürümü onu atlamıştı.
+
+Chatbot'un `OverlayContext.tsx`'i de Task 3'teki `MissionContext.tsx` ile aynı
+sebepten ikiye ayrılıyor: hem `OverlayProvider` bileşenini hem context'leri
+dışa açıyor ve `react-refresh/only-export-components` bunu geçirmiyor.
 
 **Arayüzler:**
 - Üretir: `OverlayCommand` (`PolylineCommand | RibbonCommand | PointsCommand | FieldCommand`),
@@ -470,6 +478,16 @@ function widthsFor(command: RibbonCommand): number[] {
 `normaliseToDomain` bugün `NaN` için `null` döndürüyor; kanonik `FieldCommand`
 boş hücreyi `null` ile gösterdiği için çağrı yeri `NaN` yerine `null`
 kontrolü yapar, fonksiyonun kendisi ve testleri değişmez.
+
+**Yeni saf fonksiyon: `sampleRamp`.** Eski sözleşme dört isimli rampa taşıyordu
+(`'viridis'`, `'magma'`, …) ve `draw2d` onları `colormap.ts`'ten çağırıyordu.
+Kanonik `FieldCommand` bunun yerine kendi RGB duraklarını getiriyor, dolayısıyla
+normalize edilmiş değer ile piksel arasında duran tek şey durakları örnekleyen
+fonksiyon oluyor. Bu dosyanın kuralı gereği dışa açık ve saf yazılır — yanlış
+olduğu her hâlde makul bir resim çizer: ters duraklar okumayı tersine çevirir,
+bant indeksindeki bir kayma her rengi bir basamak öteler, yuvarlama atlanırsa
+Canvas kesirli kanalı kırpar ve katmanın tamamı bir birim koyu okunur. Beş
+vakayla test edilir; chatbot dalında bu mantık private ve testsizdi.
 
 - [ ] **Adım 5: Testi çalıştır, geçtiğini gör**
 

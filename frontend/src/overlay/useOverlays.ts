@@ -1,25 +1,41 @@
-import { createContext, useContext } from 'react'
-import type { OverlayLayer } from './types'
+import { useContext } from 'react'
+import {
+  EMPTY_COMMANDS,
+  OverlayCommandsContext,
+  OverlayRegistryContext,
+  type OverlayRegistry,
+} from './OverlayContext'
+import type { OverlayCommand } from './types'
 
-export interface OverlayRegistry {
-  layers: OverlayLayer[]
-  register: (id: string, layers: OverlayLayer[]) => void
-  unregister: (id: string) => void
-}
-
-export const OverlayContext = createContext<OverlayRegistry | null>(null)
-
-const EMPTY: OverlayRegistry = {
-  layers: [],
-  register: () => undefined,
-  unregister: () => undefined,
+/**
+ * Register drawing commands for one feature.
+ *
+ * ```tsx
+ * const overlays = useOverlays()
+ * // MEMOISED. An array rebuilt every render re-runs the effect forever.
+ * const commands = useMemo(() => [{ kind: 'polyline', id: 'route', points, style }], [points])
+ * useEffect(() => overlays.register('corridor', commands), [overlays, commands])
+ * ```
+ *
+ * `register` has a stable identity, so it never causes the effect to re-run by
+ * itself. Returning its cleanup from the effect is what removes the commands on
+ * unmount; a feature owns its own entry and no other.
+ */
+export function useOverlays(): OverlayRegistry {
+  const registry = useContext(OverlayRegistryContext)
+  if (!registry) {
+    throw new Error('useOverlays must be called inside <OverlayProvider>')
+  }
+  return registry
 }
 
 /**
- * Outside an OverlayProvider this returns a no-op registry rather than
- * throwing: a feature module must stay renderable in isolation.
+ * Every registered command, for a renderer.
+ *
+ * Falls back to the shared empty list outside a provider rather than throwing:
+ * MapCanvas is a plain renderer and has to stay usable without the shell around
+ * it.
  */
-export function useOverlays(): OverlayRegistry {
-  const ctx = useContext(OverlayContext)
-  return ctx ?? EMPTY
+export function useOverlayCommands(): readonly OverlayCommand[] {
+  return useContext(OverlayCommandsContext) ?? EMPTY_COMMANDS
 }

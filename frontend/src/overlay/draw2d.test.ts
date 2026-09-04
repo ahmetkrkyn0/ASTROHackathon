@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { normaliseToDomain, ribbonEdges } from './draw2d'
-import type { PixelPoint } from './types'
+import { normaliseToDomain, ribbonEdges, sampleRamp } from './draw2d'
+import type { CellRef } from '../mission/types'
 
 // A straight run east: col increases, row does not. The perpendicular is
 // therefore purely in row, which makes every offset readable by eye.
-const EAST: PixelPoint[] = [
+const EAST: CellRef[] = [
   { row: 10, col: 0 },
   { row: 10, col: 1 },
   { row: 10, col: 2 },
@@ -87,5 +87,55 @@ describe('normaliseToDomain', () => {
     // min === max happens for real: a fully shadowed slice has shadow = 1
     // everywhere. Dividing by the zero span would blank the layer.
     expect(normaliseToDomain(7, [7, 7])).toBe(0)
+  })
+})
+
+// sampleRamp replaces the four named ramps the old contract carried. A field
+// command now brings its own stops, so this is the only thing standing between
+// a normalised value and a pixel -- and every way it can be wrong still paints
+// a plausible picture: reversed stops invert the reading, an off-by-one on the
+// segment index shifts every colour one band, and a missing round leaves
+// fractional channel values that Canvas silently truncates.
+describe('sampleRamp', () => {
+  const BLACK_TO_WHITE: Array<[number, number, number]> = [
+    [0, 0, 0],
+    [255, 255, 255],
+  ]
+
+  it('returns the end stops at the ends of the interval', () => {
+    expect(sampleRamp(BLACK_TO_WHITE, 0)).toEqual([0, 0, 0])
+    expect(sampleRamp(BLACK_TO_WHITE, 1)).toEqual([255, 255, 255])
+  })
+
+  it('interpolates between two stops', () => {
+    expect(sampleRamp(BLACK_TO_WHITE, 0.5)).toEqual([128, 128, 128])
+  })
+
+  it('places a value inside the correct band of three stops', () => {
+    // Evenly spaced: stop 0 at t=0, stop 1 at t=0.5, stop 2 at t=1. So
+    // t=0.25 is halfway through the FIRST band, not the second.
+    const stops: Array<[number, number, number]> = [
+      [0, 0, 0],
+      [100, 0, 0],
+      [200, 0, 0],
+    ]
+    expect(sampleRamp(stops, 0.25)).toEqual([50, 0, 0])
+    expect(sampleRamp(stops, 0.5)).toEqual([100, 0, 0])
+    expect(sampleRamp(stops, 0.75)).toEqual([150, 0, 0])
+  })
+
+  it('returns integer channels', () => {
+    // Canvas truncates a fractional channel rather than rounding it, so a
+    // ramp that never rounds reads consistently one unit dark.
+    const [r, g, b] = sampleRamp(BLACK_TO_WHITE, 1 / 3)
+    for (const channel of [r, g, b]) {
+      expect(Number.isInteger(channel)).toBe(true)
+    }
+  })
+
+  it('handles a single stop as a flat colour', () => {
+    const one: Array<[number, number, number]> = [[10, 20, 30]]
+    expect(sampleRamp(one, 0)).toEqual([10, 20, 30])
+    expect(sampleRamp(one, 1)).toEqual([10, 20, 30])
   })
 })

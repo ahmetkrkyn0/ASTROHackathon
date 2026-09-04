@@ -8,7 +8,7 @@ import React, {
 } from 'react'
 import type { Waypoint } from './api'
 import { drawOverlays } from './overlay/draw2d'
-import type { OverlayLayer } from './overlay/types'
+import type { OverlayCommand } from './overlay/types'
 import {
   aspectToRgb,
   computeHillshade,
@@ -62,7 +62,7 @@ interface Props {
   onAnimationStepChange?: (step: number | null) => void
   onHoverCellChange?: (cell: [number, number] | null) => void
   /** Feature-module marks, drawn above the base map. See overlay/types.ts. */
-  overlays?: OverlayLayer[]
+  overlays?: readonly OverlayCommand[]
 }
 
 export interface MapCanvasHandle {
@@ -317,7 +317,7 @@ function redraw(
   currentStep: number | null,
   hoverCell: [number, number] | null,
   gridRows: number,
-  overlays?: OverlayLayer[],
+  overlays?: readonly OverlayCommand[],
 ) {
   if (baseImage) {
     ctx.putImageData(baseImage, 0, 0)
