@@ -1,6 +1,6 @@
 import { useTerrainManifest } from '../../mission/useTerrainManifest'
 import { useMission } from '../../mission/MissionContext'
-import type { MapViewMode } from '../../mission/MissionContext'
+import type { ViewModeId } from '../../mission/types'
 
 /**
  * The map's view modes and the grid layers behind them.
@@ -9,7 +9,7 @@ import type { MapViewMode } from '../../mission/MissionContext'
  * Kept here rather than guessed in the panel so a renamed view mode fails
  * to compile instead of silently showing the wrong provenance.
  */
-export const LAYER_FOR_VIEW: Record<MapViewMode, string> = {
+export const LAYER_FOR_VIEW: Record<ViewModeId, string> = {
   surface: 'elevation',
   thermal: 'thermal',
   cost: 'cost',

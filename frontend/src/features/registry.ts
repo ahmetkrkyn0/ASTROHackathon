@@ -4,6 +4,7 @@ import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
 import { CorridorFeature } from './corridor'
 import { LayerPicker } from './layer-picker'
+import { LayerProvenance } from './layer-provenance'
 import { MissionSetup } from './mission-setup'
 import { MissionValidation } from './mission-validation'
 import { Playback } from './playback'
@@ -88,6 +89,7 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // two that needed no retyping: neither draws an overlay and neither reads a
   // mission field that changed name.
   { id: 'ros-showcase', slot: 'leftRail', Component: RosShowcase },
+  { id: 'layer-provenance', slot: 'leftRail', Component: LayerProvenance },
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation },
   { id: 'corridor', slot: 'rightRail', Component: CorridorFeature },
   { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop },
