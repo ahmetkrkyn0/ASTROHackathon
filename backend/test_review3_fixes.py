@@ -728,7 +728,11 @@ def test_m10_risk_level_reads_the_step_low_point():
         np.full(shape, 0.5),
         np.full(shape, 24.0),
         np.full(shape, -50.0),
-        np.full(shape, 0.0),
+        # Half shadow: with the array credited while driving (B5), a
+        # 24-degree climb in full sun nets only ~15 Wh per step and 200
+        # steps never reach the reserve; at 0.5 it is ~44 Wh and the stop
+        # still charges.
+        np.full(shape, 0.5),
         rover=rover,
         pixel_size_m=80.0,
     )

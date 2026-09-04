@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass, replace as dataclass_replace
 import os
 import traceback
 from contextlib import asynccontextmanager
@@ -87,6 +88,14 @@ from .route_analysis import route_statistics as compute_route_statistics
 from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
 from .mission_reference import reference_summary
 from .simulation import simulate_path, summarize_simulation
+from .stress_test import (
+    SHERPA_DEFAULTS,
+    Perturbations,
+    RouteSky,
+    route_legs,
+    route_sky_columns,
+    stress_test_route,
+)
 from .terrain import (
     BINARY_LAYER_HEADERS,
     BINARY_MEDIA_TYPE,
@@ -506,6 +515,57 @@ class CompareRequest(BaseModel):
     start: PixelPair
     goal: PixelPair
     rover_id: str = DEFAULT_ROVER_ID
+
+
+# A (row, col, slice) planner state, as /api/plan-4d publishes path_states.
+PlannerState = conlist(int, min_length=3, max_length=3)
+
+
+class PerturbationOverrides(BaseModel):
+    """Any of SHERPA's distribution parameters, overriding the defaults in
+    stress_test.SHERPA_DEFAULTS. Sigmas are fractions except the delay (h)."""
+
+    start_delay_sigma_h: Optional[float] = Field(default=None, ge=0.0, le=48.0)
+    initial_soc_sigma: Optional[float] = Field(default=None, ge=0.0, le=0.9)
+    power_draw_sigma: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    speed_sigma: Optional[float] = Field(default=None, ge=0.0, le=0.9)
+    speed_multiplier_floor: Optional[float] = Field(default=None, gt=0.0, le=1.0)
+    z_max: Optional[float] = Field(default=None, gt=0.0, le=6.0)
+    dsn_outage_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    dsn_outage_mean_h: Optional[float] = Field(default=None, ge=0.0, le=336.0)
+    sep_event_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    sep_event_mean_h: Optional[float] = Field(default=None, ge=0.0, le=336.0)
+
+
+class StressTestRequest(BaseModel):
+    """SHERPA's Monte Carlo traverse evaluation of a /api/plan-4d route (B5).
+
+    The environment is rebuilt exactly as the plan saw it, so the fields that
+    shaped the plan come back with the route: ``rover_id``, ``coarsen``,
+    ``slice_hours`` (the plan response echoes it), ``start_utc`` and
+    ``initial_soc_pct``.
+    """
+
+    path_states: list[PlannerState] = Field(
+        ...,
+        min_length=1,
+        description="path_states from the /api/plan-4d response: [row, col, slice] on the coarse grid.",
+    )
+    rover_id: str = DEFAULT_ROVER_ID
+    coarsen: int = Field(default=4, ge=1, le=16)
+    slice_hours: float = Field(
+        ..., gt=0.0, le=24.0, description="The plan's slice length (its response's slice_hours)."
+    )
+    start_utc: Optional[str] = Field(
+        default=None,
+        description="The plan's epoch. Without it the sky is static and the response says so.",
+    )
+    initial_soc_pct: float = Field(default=1.0, gt=0.0, le=1.0)
+    n_runs: int = Field(default=1000, ge=1, le=20000)
+    seed: int = Field(default=0, ge=0)
+    perturbations: Optional[PerturbationOverrides] = None
+    label: Optional[str] = Field(default=None, max_length=80)
+    n_bins: int = Field(default=20, ge=5, le=100)
 
 
 class LoadDEMRequest(BaseModel):
@@ -1133,6 +1193,77 @@ def _earthset_lookahead(
     }
 
 
+@dataclass(frozen=True)
+class _CoarseGeometry:
+    """The planner's grid at a coarsen factor: what /api/plan-4d searches on
+    and what /api/stress-test replays on."""
+
+    traversable: np.ndarray
+    slope: np.ndarray
+    elevation: np.ndarray
+    resolution_m: float
+
+
+def _coarse_geometry(grids_for_plan: dict, coarsen: int) -> _CoarseGeometry:
+    """Block-reduce the rover's grids the way the 4-D planner does.
+
+    Traversability is the conservative AND, slope the block maximum, and the
+    elevation the block CENTRE -- not the mean: path_pixels publishes block
+    centres as waypoints, so the geometry a rover meets driving between two
+    of them is the geometry at those centres. A block mean smooths the
+    terrain -- measured at coarsen=4 it left the step-slope gate rejecting
+    nothing at all where the fine gate rejected 1 894 edges. (Round 4
+    review, L-11.)
+    """
+    metadata = grids_for_plan["metadata"]
+    rows, cols = int(metadata["shape"][0]), int(metadata["shape"][1])
+    if rows % coarsen or cols % coarsen:
+        raise HTTPException(
+            status_code=422,
+            detail=f"grid {rows}x{cols} is not divisible by coarsen={coarsen}",
+        )
+    return _CoarseGeometry(
+        traversable=coarsen_traversable(grids_for_plan["traversable"], coarsen),
+        slope=coarsen_grid(grids_for_plan["slope"], coarsen, how="max"),
+        elevation=coarsen_grid(grids_for_plan["elevation"], coarsen, how="center"),
+        resolution_m=float(metadata["resolution_m"]) * coarsen,
+    )
+
+
+def _coarse_time_to_haven(
+    grids_for_plan: dict,
+    rover_id: str,
+    start_utc: str | None,
+    rover: dict,
+    geometry: _CoarseGeometry,
+    coarsen: int,
+) -> tuple[np.ndarray | None, np.ndarray | None, dict[str, Any]]:
+    """``(coarse_safe, coarse_tts, info)``: the month's safe haven map on
+    the fine grid (cached), coarsened like traversability (a block is a
+    haven only if every fine cell is), and the driving hours to the nearest
+    haven on the planner's own grid. ``(None, None, info)`` with the reason
+    when the map is unavailable. (A1.)
+    """
+    haven_layers, _fine_tts, haven_info = safe_haven_for_grids(
+        grids_for_plan, rover_id, start_utc
+    )
+    if haven_layers is None:
+        return None, None, dict(haven_info)
+    coarse_safe = coarsen_traversable(haven_layers["safe_haven"], coarsen)
+    coarse_tts = time_to_safe_haven_hours(
+        coarse_safe,
+        geometry.traversable,
+        geometry.elevation,
+        geometry.slope,
+        geometry.resolution_m,
+        rover,
+    )
+    return coarse_safe, coarse_tts, {
+        **haven_info,
+        "coarse_safe_haven_cells": int(coarse_safe.sum()),
+    }
+
+
 @app.post("/api/plan-4d")
 def plan_4d(req: Plan4DRequest, request: Request):
     """Plan through space AND time, with an explicit WAIT decision.
@@ -1187,17 +1318,11 @@ def plan_4d(req: Plan4DRequest, request: Request):
     # functions of the grid and coarsen factor, not of the request's start
     # or goal, so recomputing them per use (the pre-fix code called
     # coarsen_traversable twice) was wasted work, not a correctness issue.
-    coarse_traversable = coarsen_traversable(grids_for_plan["traversable"], req.coarsen)
-    coarse_slope = coarsen_grid(grids_for_plan["slope"], req.coarsen, how="max")
-    # "center", not "mean": path_pixels publishes block CENTRES as waypoints,
-    # so the geometry a rover meets driving between two of them is the
-    # geometry at those centres. A block mean smooths the terrain -- measured
-    # at coarsen=4 it left the step-slope gate rejecting nothing at all where
-    # the fine gate rejected 1 894 edges. (Round 4 review, L-11.)
-    coarse_elevation = coarsen_grid(
-        grids_for_plan["elevation"], req.coarsen, how="center"
-    )
-    effective_resolution_m = float(metadata["resolution_m"]) * req.coarsen
+    geometry = _coarse_geometry(grids_for_plan, req.coarsen)
+    coarse_traversable = geometry.traversable
+    coarse_slope = geometry.slope
+    coarse_elevation = geometry.elevation
+    effective_resolution_m = geometry.resolution_m
 
     # coarsen_traversable is conservative (AND over every fine cell in a
     # block), so a coarse cell it marks passable is guaranteed finite-cost:
@@ -1401,13 +1526,11 @@ def plan_4d(req: Plan4DRequest, request: Request):
     # the driving time to the nearest haven on the planner's own grid, and
     # the hours of Earth link left per (slice, cell) -- inside the horizon
     # from the Earth cube, beyond it from a 14-day lookahead.
-    coarse_tts = None
     deadline_cube = None
-    coarse_safe = None
-    haven_layers, _fine_tts, haven_info = safe_haven_for_grids(
-        grids_for_plan, req.rover_id, req.start_utc
+    coarse_safe, coarse_tts, haven_info = _coarse_time_to_haven(
+        grids_for_plan, req.rover_id, req.start_utc, rover, geometry, req.coarsen
     )
-    if haven_layers is None:
+    if coarse_safe is None:
         haven_provenance: dict[str, Any] = dict(haven_info)
     elif earth_cube is None or not earth_provenance.get("time_varying"):
         haven_provenance = {
@@ -1419,24 +1542,11 @@ def plan_4d(req: Plan4DRequest, request: Request):
             ),
         }
     else:
-        coarse_safe = coarsen_traversable(haven_layers["safe_haven"], req.coarsen)
-        coarse_tts = time_to_safe_haven_hours(
-            coarse_safe,
-            coarse_traversable,
-            coarse_elevation,
-            coarse_slope,
-            effective_resolution_m,
-            rover,
-        )
         after_end, lookahead = _earthset_lookahead(
             metadata, req.start_utc, n_slices, slice_hours, req.coarsen
         )
         deadline_cube = hours_until_earthset_cube(earth_cube, slice_hours, after_end)
-        haven_provenance = {
-            **haven_info,
-            "coarse_safe_haven_cells": int(coarse_safe.sum()),
-            "earthset_lookahead": lookahead,
-        }
+        haven_provenance = {**haven_info, "earthset_lookahead": lookahead}
     if req.require_safe_haven and deadline_cube is None:
         raise HTTPException(
             status_code=422,
@@ -1606,6 +1716,198 @@ def plan_4d(req: Plan4DRequest, request: Request):
         "coarsen": req.coarsen,
         "effective_resolution_m": effective_resolution_m,
         "rover_id": req.rover_id,
+    }
+
+
+#: The route-local sky may not run past this many slices, lookahead included.
+MAX_STRESS_TEST_SLICES = 60_000
+
+
+def _stress_test_sky(
+    grids_for_plan: dict,
+    rover: dict,
+    req: "StressTestRequest",
+    legs,
+    perturbations: Perturbations,
+    geometry: _CoarseGeometry,
+) -> tuple[RouteSky, dict[str, Any], dict[str, Any], float]:
+    """``(sky, sky_model, safe_haven_model, sky_ms)`` for the route.
+
+    The sky is built for the route's cells only, over a horizon long enough
+    for the slowest sampled run (planned duration over the speed floor, plus
+    the largest start delay and the injected outages) and, for the Earth,
+    the 14-day Earthset lookahead -- so no run outlives it and the deadline
+    is exact rather than open-ended. Time-varying needs an epoch, the
+    horizon cube and the kernels; otherwise the long-run layers are held
+    constant and ``sky_model`` says why, as /api/plan-4d does.
+    """
+    import time as _time
+
+    t0 = _time.perf_counter()
+    metadata = grids_for_plan["metadata"]
+    p = perturbations
+    outage_pad = 0.0
+    if p.dsn_outage_probability > 0.0:
+        outage_pad += 2.5 * p.dsn_outage_mean_h
+    if p.sep_event_probability > 0.0:
+        outage_pad += 2.5 * p.sep_event_mean_h
+    longest_h = (
+        legs.planned_duration_h / max(p.speed_multiplier_floor, 1e-3)
+        + p.z_max * p.start_delay_sigma_h
+        + outage_pad
+    )
+    n_extended = int(math.ceil(longest_h / req.slice_hours)) + 2
+    lookahead_slices = int(math.ceil(DEFAULT_EARTHSET_LOOKAHEAD_HOURS / req.slice_hours))
+    n_total = n_extended + lookahead_slices
+    if n_total > MAX_STRESS_TEST_SLICES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"the stress test needs {n_total} slices of {req.slice_hours:.4f} h "
+                f"to cover the slowest run plus the Earthset lookahead, over the "
+                f"{MAX_STRESS_TEST_SLICES} cap; raise slice_hours."
+            ),
+        )
+    cells = [(int(r), int(c)) for r, c in legs.cells]
+    rows = np.asarray([r for r, _ in cells])
+    cols = np.asarray([c for _, c in cells])
+
+    def _static(reason: str) -> tuple[RouteSky, dict[str, Any], dict[str, Any], float]:
+        base = coarsen_grid(np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64), req.coarsen)
+        shadow = np.tile(base[rows, cols], (n_extended, 1))
+        earth_base = grids_for_plan.get("earth_visibility")
+        earth = None
+        if earth_base is not None:
+            linked = coarsen_traversable(np.asarray(earth_base, dtype=np.float64) > 0.5, req.coarsen)
+            earth = np.tile(linked[rows, cols], (n_extended, 1))
+        sky = RouteSky(shadow, earth, None, None, req.slice_hours, time_varying=False)
+        sky_model = {
+            "model": "static",
+            "time_varying": False,
+            "reason": reason,
+            "n_slices_extended": n_extended,
+            "horizon_hours_extended": round(n_extended * req.slice_hours, 4),
+        }
+        haven_model = {
+            "model": "unavailable",
+            "reason": "the safe haven fields need the time-varying sky: " + reason,
+        }
+        return sky, sky_model, haven_model, (_time.perf_counter() - t0) * 1000.0
+
+    if req.start_utc is None:
+        return _static(
+            "no start epoch given; illumination is a function of time and cannot "
+            "vary without one"
+        )
+    cache_path = horizon_cache_path(metadata)
+    if cache_path is None:
+        return _static(
+            "no horizon_map.npy beside the processed grids; run "
+            "scripts/build_horizon_cache.py to enable time-varying shadow"
+        )
+    try:
+        shadow, earth = route_sky_columns(
+            np.load(cache_path, mmap_mode="r"),
+            metadata,
+            cells,
+            req.coarsen,
+            req.start_utc,
+            n_total,
+            req.slice_hours,
+        )
+    except Exception as exc:
+        # The same reasoning as build_shadow_series: a missing kernel
+        # degrades to the honest static sky rather than a 500.
+        return _static(f"real illumination unavailable ({exc})")
+
+    deadline = hours_until_earthset_cube(earth[:, :, None], req.slice_hours)[:, :, 0]
+    coarse_safe, coarse_tts, haven_info = _coarse_time_to_haven(
+        grids_for_plan, req.rover_id, req.start_utc, rover, geometry, req.coarsen
+    )
+    tts = None if coarse_tts is None else coarse_tts[rows, cols]
+    sky = RouteSky(shadow, earth, deadline, tts, req.slice_hours, time_varying=True)
+    sky_model = {
+        "model": "spice_horizon",
+        "time_varying": True,
+        "horizon_cache": cache_path,
+        "start_utc": req.start_utc,
+        "n_slices_extended": n_extended,
+        "horizon_hours_extended": round(n_extended * req.slice_hours, 4),
+        "earthset_lookahead_hours": DEFAULT_EARTHSET_LOOKAHEAD_HOURS,
+    }
+    return sky, sky_model, dict(haven_info), (_time.perf_counter() - t0) * 1000.0
+
+
+@app.post("/api/stress-test")
+def stress_test(req: StressTestRequest, request: Request):
+    """SHERPA's "Traverse Evaluation" for a /api/plan-4d route (B5).
+
+    The route is executed ``n_runs`` times with the physics the planner
+    used to choose it and the uncertainties VIPER's team injects -- start
+    delay, initial battery, power draw and effective speed as truncated
+    Gaussians, optional DSN outages and SEP events -- under the operator's
+    policy (ahead: hold; behind: skip charge breaks and drive through
+    shadow). Returned: completion and full-success rates with Wilson 95
+    percent intervals, first-cause failure counts, SHERPA's metric
+    distributions (p5/p50/p95), histograms, the per-state arrival and
+    battery envelope, the unperturbed run for reference and a verdict.
+    """
+    import time as _time
+
+    t0 = _time.perf_counter()
+    grids = _active_grids(request)
+    rover = get_rover(req.rover_id)
+    grids_for_plan = grids_for_rover(grids, req.rover_id, PlanWeights().model_dump())
+    geometry = _coarse_geometry(grids_for_plan, req.coarsen)
+
+    try:
+        legs = route_legs(
+            req.path_states,
+            geometry.slope,
+            geometry.resolution_m,
+            rover,
+            req.slice_hours,
+            traversable=geometry.traversable,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"path_states: {exc}") from exc
+
+    overrides = {} if req.perturbations is None else {
+        key: value
+        for key, value in req.perturbations.model_dump().items()
+        if value is not None
+    }
+    perturbations = dataclass_replace(SHERPA_DEFAULTS, **overrides)
+
+    sky, sky_model, haven_model, sky_ms = _stress_test_sky(
+        grids_for_plan, rover, req, legs, perturbations, geometry
+    )
+    result = stress_test_route(
+        legs,
+        sky,
+        rover,
+        initial_soc_frac=req.initial_soc_pct,
+        n_runs=req.n_runs,
+        seed=req.seed,
+        perturbations=perturbations,
+        n_bins=req.n_bins,
+    )
+    runs_ms = result.pop("timing_ms")["runs"]
+    return {
+        "label": req.label,
+        "rover_id": req.rover_id,
+        "coarsen": req.coarsen,
+        "slice_hours": req.slice_hours,
+        "start_utc": req.start_utc,
+        "initial_soc_pct": req.initial_soc_pct,
+        **result,
+        "sky_model": sky_model,
+        "safe_haven_model": haven_model,
+        "timing_ms": {
+            "sky": round(sky_ms, 3),
+            "runs": runs_ms,
+            "total": round((_time.perf_counter() - t0) * 1000.0, 3),
+        },
     }
 
 

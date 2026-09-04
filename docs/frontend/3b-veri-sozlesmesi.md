@@ -534,6 +534,72 @@ marjını söyler ("… the start block is 2.10 h from the nearest with 61.0 h o
 Earth link left"). `require_earth_visibility` ile birlikte açılınca plan
 VIPER'ın iki kuralını da taşır.
 
+## Monte Carlo stres testi — SHERPA "Traverse Evaluation" (4 Eylül 2026 eki, B5)
+
+VIPER'ın planlama ekibi her planı binlerce kez, kesik Gauss dağılımlarıyla
+bozarak yürütür ve metriklerin **dağılımını** raporlar. `/api/plan-4d`'nin
+verdiği rota artık aynı protokolle stres testine sokulabiliyor: aynı fizik
+(planlayıcının çekiş/idare/güneş aritmetiği), rota-yerel gerçek gökyüzü,
+SHERPA'nın dağılımları (gecikme σ 2 h; batarya σ %20 aşağı; güç σ %20 yukarı;
+hız σ %20/30/40/50 aşağı, taban 0,25; DSN kesintisi ve SEP olayı olasılıkla,
+varsayılan 0) ve operatör politikası: önde iken planlanan kalkışa kadar bekle,
+geride iken şarj molasını atla ve gölgeden bataryayla geç.
+
+### `POST /api/stress-test`
+
+İstek — `/api/plan-4d` yanıtındaki `path_states` ve planı şekillendiren alanlar:
+
+```json
+{ "path_states": [[89,123,0],[88,122,2], ...],
+  "rover_id": "nasa_viper", "coarsen": 4, "slice_hours": 0.0956,
+  "start_utc": "2027-05-30T00:00:00", "initial_soc_pct": 1.0,
+  "n_runs": 1000, "seed": 0, "label": "haven to haven",
+  "perturbations": { "speed_sigma": 0.3, "dsn_outage_probability": 0.1 } }
+```
+
+`slice_hours` zorunludur (plan yanıtının `slice_hours`'u); `perturbations`
+opsiyonel ve alan alan üstüne yazar (`start_delay_sigma_h`,
+`initial_soc_sigma`, `power_draw_sigma`, `speed_sigma`,
+`speed_multiplier_floor`, `z_max`, `dsn_outage_probability`,
+`dsn_outage_mean_h`, `sep_event_probability`, `sep_event_mean_h`);
+`n_runs` 1–20.000, `n_bins` 5–100. Aynı `seed` aynı sonucu verir.
+
+Yanıt:
+
+| Alan | Tip | Anlamı |
+|---|---|---|
+| `route` | nesne | `n_states`, `move_steps`, `wait_steps`, `planned_duration_h`, `odometry_m`, `ends_at_safe_haven` (`null`: haven alanı yok) |
+| `sky_model` | nesne | `spice_horizon` (+ `n_slices_extended`, `horizon_hours_extended`, `earthset_lookahead_hours`) veya `static` + `reason` (epoch/ufuk/çekirdek yok; gecikmenin etkisi olmaz) |
+| `safe_haven_model` | nesne | A1 haritasının kaynağı veya `unavailable` + `reason` |
+| `rates.completion` | `{count, rate, ci95:[lo,hi]}` | Hedefe canlı varan koşumlar, Wilson %95 aralığıyla |
+| `rates.reached_within_reserve` | aynı | …ve bataryası hiç `soc_min_pct` rezervinin altına inmeyenler |
+| `rates.full_success` | aynı | …ve (haven alanları biliniyorsa) hiçbir durumda Dünya batış süresi aşılmayanlar |
+| `rates.reserve_breached` | aynı | Rezervin altına inen koşumlar |
+| `failures` | nesne | İlk arıza nedeni sayıları: `battery_depleted`, `shadow_endurance`, `horizon_exceeded` |
+| `metrics.<ad>` | `{mean,std,p5,p50,p95,min,max,n} \| null` | `duration_h`, `duration_normalized`, `odometry_m`, `min_battery_pct`, `final_battery_pct`, `max_continuous_shadow_h`, `time_to_sun_shadow_min_h`/`_mean_h`, `time_to_dsn_shadow_min_h`, `time_to_zero_soc_min_h`, `dsn_shadow_events`, `dsn_shadow_hours`, `states_past_haven_deadline`, örneklenen girdiler (`start_delay_h`, `speed_multiplier`, `power_multiplier`, `initial_soc_pct`). `null` = hiçbir koşumda tanımlı değil (ör. Dünya serisi yokken DSN marjı) |
+| `histograms.<ad>` | `{edges, counts}` | `n_bins` kutu; süre, batarya, gölge ve marjlar için |
+| `per_state` | nesne | `arrival_h` ve `battery_pct` için `p5/p50/p95` listeleri (durum başına; ölen koşumlar `null`), `alive_fraction` — rota boyunca "fan chart" için |
+| `outages` | nesne | `dsn` / `sep`: `runs`, `mean_window_h`, `mean_hold_h` |
+| `nominal` | nesne | Tüm çarpanlar 1, gecikme 0: `reached`, `duration_h`, `min_battery_pct`, `final_battery_pct`, `max_continuous_shadow_h`, marjlar |
+| `verdict` | nesne | `reaches_goal_at_95pct`, `full_success_at_95pct` (Wilson alt sınırı ≥ 0,95), `haven_rule_known`, `text` |
+| `perturbations` | nesne | Kullanılan parametreler + `source` |
+| `timing_ms` | nesne | `sky`, `runs`, `total` |
+
+Hatalar: `path_states` bozuksa (sınır dışı, komşu olmayan, geçilmez hücre,
+dilim sırası, 0'dan başlamıyor) 422 gerekçeli; grid yüklü değilse 503.
+
+Ölçülen (Site11, 1.000 koşum): VIPER haven→haven planı (30 Mayıs 2027,
+40 hareket, 7,4 h, planlayıcıya göre en düşük batarya %32) → `completion`
+0,296 (CI 0,269–0,325), hız σ %50'de 0,158; 704 koşum batarya tükenmesi;
+`nominal.min_battery_pct` 23,2 (planlayıcı dilim yuvarlamasındaki bekleme
+idaresini saymıyor). LPR-1 28 Eylül 2026 rotası (2,2 h) → `completion` 1,0
+(CI 0,996–1,0), `min_battery_pct.p5` 52, `full_success` 0 çünkü o Ay gününde
+haven yok (`states_past_haven_deadline` = 41/41, `verdict.text` söyler).
+Süre: gökyüzü 0,8–2,1 s + koşumlar 0,06–0,6 s; plan-4d ayrıca 8–10 s.
+
+İki rotayı kıyaslamak: iki çağrı, `label` ile; `rates.full_success.ci95`
+ve `verdict` kıyas anahtarıdır ("hangisi %95 güvenle varıyor").
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,
