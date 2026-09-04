@@ -1182,10 +1182,44 @@ git commit -m "feat(route-analysis): register the inspector for analyze mode"
 - Tüketir: `useMission()` — `planResult`.
 - Üretir: `Playback`; kayıt id'si `'playback'`, `modes: ['analyze']`.
 
-**Not:** `routePlaybackStep` state'i bugün `App.tsx`'te ve `MapCanvas` de onu
-okuyor. Bu görevde **taşınmaz**: iki tüketicisi olan bir state'i feature'ın
-içine gömmek `MapCanvas`'ı kırar. `App.tsx`'te kalır ve `PlaybackBar` ona
-`useMission()` üzerinden erişir; alan Task 7'de kurulan değere eklenir.
+**Not:** `routePlaybackStep` state'i bugün `App.tsx`'te. Bu görevde
+**taşınmaz**: iki yazarı olan bir state'i feature'ın içine gömmek `MapCanvas`'ı
+kırar. `App.tsx`'te kalır ve `PlaybackBar` ona `useMission()` üzerinden erişir;
+alan Task 7'de kurulan değere eklenir.
+
+> **Bilinen kusur — `goktug/ai-scene`'den miras, bu planın kapsamı dışında.**
+>
+> 4 Eylül'de tarayıcıda üretilip doğrulandı: `PlaybackBar`'daki Play çalışıyor
+> ama **yalnızca sayıları sürüyor.** Harita takip etmiyor.
+>
+> Sebep, aynı state'e yazan iki ayrı oynatma motoru:
+>
+> | | `MapCanvas` | `PlaybackBar` |
+> |---|---|---|
+> | Adım state'i | `animStep`, **private** | yok; `routePlaybackStep`'e yazar |
+> | Timer | 33/66 ms | 50 ms |
+> | Rotayı çizen | **bu** | — |
+> | Dışarıdan sürülebilir mi | yalnızca ref'teki `startAnimation()` | `currentStep` prop'u |
+>
+> `MapCanvas`'ın `Props`'unda adımı **dışarıdan alan bir alan yok**. Plan
+> geldiğinde `App.tsx:345` `startAnimation()`'ı çağırıyor, `MapCanvas` rotayı
+> bir kez sonuna kadar çiziyor ve `onAnimationStepChange` ile adımı yukarı
+> bildiriyor. Sonra Play'e basıldığında `PlaybackBar` `routePlaybackStep`'i
+> sıfırlayıp ilerletiyor — sayaç, kaydırıcı, telemetri ve analiz paneli
+> güncelleniyor, ama `animStep`'e kimse dokunamadığı için rota tam çizili
+> kalıyor.
+>
+> Doğru düzeltme `animStep`'i `MapCanvas`'tan kaldırmaktır: tek doğru kaynak
+> `App.tsx`'teki `routePlaybackStep` olur, `MapCanvas` gelen adıma kadar çizen
+> saf bir görüntüleyiciye döner ve iki yazarlı durum ortadan kalkar. Yanına
+> aralığın yavaşlatılması gerekir — 50 ms × 86 waypoint, tüm oynatmayı dört
+> saniyede bitiriyor.
+>
+> **Karar (4 Eylül): düzeltme Göktuğ'a bırakıldı**, kendi feature'ı ve tasarım
+> niyetini o biliyor. Bu görev `PlaybackBar`'ı yalnızca kayda taşır,
+> davranışına dokunmaz. Göktuğ düzeltmeyi bu görevden önce yaparsa taşıma
+> değişmez; sonra yaparsa `MapCanvas`'ın yeni prop'u `MissionValue`'daki
+> `routePlaybackStep`'ten beslenir.
 
 - [ ] **Adım 1: Dosyayı taşı**
 
