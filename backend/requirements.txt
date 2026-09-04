@@ -41,3 +41,7 @@ numba==0.67.0
 llvmlite==0.49.0
 astropy==8.0.1
 spiceypy==6.0.0
+# The decision-support chat layer talks to the OpenAI Responses API from the
+# server only -- the key never reaches the browser bundle. app.ai_provider
+# imports it lazily, so the rest of the API still starts without it.
+openai==3.6.0

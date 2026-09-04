@@ -1,8 +1,20 @@
+/**
+ * The legacy endpoint client.
+ *
+ * Frozen, not deprecated: everything here works and keeps working. New endpoint
+ * families do not come here -- they go to api/<family>.ts, alongside
+ * api/assistant.ts, so that adding one is not an edit to a file five other
+ * people are also editing. The shared transport primitives live in api/client.ts
+ * so a new family never has to import this module to get them.
+ */
+import { BASE } from './api/client'
 // Type-only, so it is erased at build time and creates no runtime cycle
 // with net/types.ts importing PlanWeights back from here.
 import type { CellTelemetryResponse } from './net/types'
 
-const BASE = '/api'
+// Transitional re-export for callers that still reach for it here. New code
+// imports ApiError from api/client, or from its own api/<family> module.
+export { ApiError } from './api/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -32,30 +44,63 @@ export interface SimSummary {
   final_battery_pct: number
   min_battery_pct: number
   max_slope_deg: number
+  max_segment_slope_deg: number
   total_energy_consumed_wh: number
+  // The backend sends this, but its unit is not stated anywhere in the
+  // codebase and max_continuous_shadow_h is a separate field in hours, so it
+  // is probably a different quantity. Typed so it is not mistaken for a
+  // missing field; never displayed, and never sent to the AI layer.
   total_shadow_exposure: number
   critical_steps_count: number
   high_or_above_steps_count: number
   waypoint_count: number
   total_recharges: number
+  stranded: boolean
+  stranded_at_step: number | null
+  // The real continuous-shadow figure. astar_metrics.total_shadow_hours is
+  // always null; this is what any shadow claim must come from.
+  max_continuous_shadow_h: number
+  shadow_limit_h: number | null
+  shadow_limit_exceeded: boolean | null
+  peak_power_exceeded_steps: number
 }
 
 export interface AstarMetrics {
   path_length_nodes: number
   total_distance_m: number
   total_weighted_cost: number
-  // Always null: pathfinder.py:734-735 and 790-791 emit these as None and
-  // point at the simulation summary instead. Real energy is
-  // summary.total_energy_consumed_wh; real shadow exposure is
-  // summary.total_shadow_exposure / summary.max_continuous_shadow_h.
-  total_energy_wh: number | null
-  total_shadow_hours: number | null
+  total_weighted_cost_cells_only: number
+  barrier_share: number | null
+  cost_units: string
+  // Both are always null: pathfinder.py emits None for these and points at
+  // the simulation summary instead, where the real numbers are
+  // (summary.total_energy_consumed_wh, summary.total_shadow_exposure).
+  // Typed as null-only so reaching for one is a type error rather than a
+  // plausible-looking zero.
+  total_energy_wh: null
+  total_shadow_hours: null
   max_slope_deg: number
+  max_segment_slope_deg: number
+  max_cell_slope_deg: number
   max_thermal_risk: number
   min_surface_temp_c: number
+  max_surface_temp_c: number
   nodes_expanded: number
   computation_time_ms: number
+  edges_rejected: Record<string, number>
   [key: string]: unknown
+}
+
+export interface RouteStatistics {
+  [key: string]: unknown
+}
+
+export interface PlanExecution {
+  stranded: boolean
+  planned_nodes: number
+  executable_nodes: number
+  truncated: boolean
+  reason: string | null
 }
 
 export interface PlanResponse {
@@ -64,6 +109,8 @@ export interface PlanResponse {
   summary: SimSummary
   geojson: object
   waypoints: Waypoint[]
+  route_statistics?: RouteStatistics
+  execution?: PlanExecution
   rover?: {
     id: string
     name: string

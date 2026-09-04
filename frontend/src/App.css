@@ -1049,7 +1049,8 @@ select {
 .toast-stack {
   position: fixed;
   right: 22px;
-  bottom: 22px;
+  /* Clears the assistant launcher, which owns this corner. */
+  bottom: 78px;
   z-index: 150;
   width: min(360px, calc(100vw - 32px));
   display: flex;
