@@ -1,19 +1,29 @@
-import React from 'react'
-import { MissionContext } from './MissionContext'
-import type { MissionValue } from './MissionContext'
+import type { ReactNode } from 'react'
+import { FocusTelemetryContext, MissionContext } from './MissionContext'
+import type { FocusTelemetry, MissionValue } from './types'
 
 /**
- * A file of its own, holding nothing but the component -- same reason as
- * OverlayProvider.tsx. This one wraps the entire cockpit, so a file that
- * cost Fast Refresh here would full-reload the app on every edit to the
- * context's shape. (react-refresh/only-export-components.)
+ * Publishes both halves of the mission to every feature below.
+ *
+ * A component and nothing else. The contexts and the hooks that read them are
+ * in ./MissionContext; keeping them apart is what lets Fast Refresh work on
+ * this file, and it is why `react-refresh/only-export-components` stays an
+ * error rather than being switched off.
  */
 export function MissionProvider({
   value,
+  focusTelemetry,
   children,
 }: {
   value: MissionValue
-  children: React.ReactNode
+  focusTelemetry: FocusTelemetry
+  children: ReactNode
 }) {
-  return <MissionContext.Provider value={value}>{children}</MissionContext.Provider>
+  return (
+    <MissionContext.Provider value={value}>
+      <FocusTelemetryContext.Provider value={focusTelemetry}>
+        {children}
+      </FocusTelemetryContext.Provider>
+    </MissionContext.Provider>
+  )
 }

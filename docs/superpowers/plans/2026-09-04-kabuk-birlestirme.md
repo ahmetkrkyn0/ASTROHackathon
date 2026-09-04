@@ -275,8 +275,20 @@ EOF
 ### Task 3: Kanonik `mission/` sözleşmesini benimse
 
 **Dosyalar:**
-- Oluştur: `frontend/src/mission/MissionContext.tsx`, `types.ts`, `selectors.ts`, `geo.ts` (chatbot dalından birebir)
-- Sil: `frontend/src/mission/MissionContext.ts`, `frontend/src/mission/MissionProvider.tsx`
+- Oluştur: `frontend/src/mission/types.ts`, `selectors.ts`, `geo.ts` (chatbot dalından birebir)
+- Oluştur: `frontend/src/mission/MissionContext.ts` — iki context + `useMission` + `useFocusTelemetry`
+- Oluştur: `frontend/src/mission/MissionProvider.tsx` — yalnızca provider bileşeni
+- Sil: eski `MissionContext.ts` ve `MissionProvider.tsx` içerikleri (dosya adları
+  kalır, içerikleri kanonikle değişir)
+
+**Dosya düzeni chatbot dalınınkinden neden ayrılıyor.** O dalda provider ve iki
+hook tek bir `MissionContext.tsx`'te duruyor. Bu projede lint bunu geçirmiyor:
+`react-refresh/only-export-components`, bir modül hem bileşen hem başka bir şey
+dışa açtığında Fast Refresh'in o modül için bozulduğunu söylüyor ve
+`--max-warnings 0` altında bu bir hatadır. `berke-3d-frontend` aynı ayrımı
+bağımsız olarak zaten yapmıştı — chatbot dalında flat config olmadığı için orada
+uyarı hiç görülmedi. Kanonik olan sözleşmedir; dosya düzeni kendi araçlarımızın
+gerekçeli tercihidir. Task 4'teki `draw2d.ts` istisnasıyla aynı mantık.
 
 **Arayüzler:**
 - Üretir: `MissionValue`, `CellRef { row: number; col: number }`, `GridMeta`,
@@ -772,18 +784,22 @@ isimle var. Taşınması gereken tek state `rawCellTelemetry`.
 
 `berke-3d-frontend`'in `App.tsx`'inde bu state `/api/cell-telemetry` yanıtını
 ham hâliyle tutuyor ve `cost-explain` (Task 21) buna bağlı. `App.tsx`'te
-`hoverPoint` tanımının hemen ardına:
+**`rawCellTelemetry` taşınmaz.** Bu, planın ilk sürümünde vardı ve Task 3'te
+düzeltildi: kanonik `MissionValue`'da ne `hoverCell` ne de `cellTelemetry`
+alanı var, ve bu bir eksiklik değil, yazılı bir karar. `MissionContext.ts`'in
+`useFocusTelemetry` yorumu şöyle bitiyor:
 
-```tsx
-const [rawCellTelemetry, setRawCellTelemetry] = useState<CellTelemetryResponse | null>(null)
-```
+> A feature that needs the telemetry of a particular cell should fetch that
+> cell: `fetchCellTelemetry(row, col)`.
 
-Onu dolduran efekt de aynı dosyadan taşınır: `hoverPoint` değiştiğinde
-`/api/cell-telemetry` çağrılır ve yanıt olduğu gibi saklanır.
+Yani hücre telemetrisini App yayınlamaz; ihtiyacı olan feature kendi çeker.
+`cost-explain` bunu Task 21'de yapacak. Bu adımda `App.tsx`'e yeni state
+eklenmez.
 
 - [ ] **Adım 2: `missionValue`'yu kur**
 
-`App.tsx`'te, JSX'ten önce:
+`App.tsx`'te, JSX'ten önce. Alanlar kanonik `MissionValue`'nun tam olarak
+istediği kadar — fazlası TypeScript'in fazla-özellik denetimine takılır:
 
 ```tsx
 const missionValue: MissionValue = useMemo(
@@ -800,24 +816,28 @@ const missionValue: MissionValue = useMemo(
     start,
     goal,
     planResult,
-    hoverCell: hoverPoint,
-    cellTelemetry: rawCellTelemetry,
+    // Kanonik tipte her zaman null: bu kokpitte "hücre seç" diye bir kontrol
+    // yok. Analiz odağı isteyen feature selectors.ts'teki
+    // selectStableAnalysisCell'i adıyla çağırır.
+    selectedCell: null,
     activeViewMode: viewMode,
     dimension,
     missionMode,
-    setStart,
-    setGoal,
   }),
   [
-    dimension, elevationLayer, focusTelemetry.resolutionM, goal, hoverPoint,
-    missionMode, planResult, rawCellTelemetry, selectedRoverId, setGoal,
-    setStart, start, viewMode, weights,
+    dimension, elevationLayer, focusTelemetry.resolutionM, goal, missionMode,
+    planResult, selectedRoverId, start, viewMode, weights,
   ],
 )
 ```
 
-`hoverCell` ile `selectedCell` kanonik `MissionValue`'da **ayrı alanlardır**;
-biri diğerinin yerine geçmez. `selectedCell` Task 21'de doldurulur.
+`missionMode` kanonik tipe bu planla eklenen tek alandır; kayıt bir feature'ın
+hangi modda görüneceğini ona bakarak süzüyor. `mission/types.ts`'teki
+`MissionValue`'ya eklenmesi bu adımın parçasıdır.
+
+`setStart`/`setGoal` **eklenmez**: kanonik `MissionValue` salt okunur ve
+bugün hiçbir feature onları çağırmıyor. İhtiyaç çıkarsa o feature'ın kendi
+görevinde, gerekçesiyle eklenir.
 
 - [ ] **Adım 3: Provider'ları ve beş slot'u yerleştir**
 
@@ -1647,26 +1667,23 @@ git commit -m "feat(layer-provenance): read activeViewMode from the canonical mi
 cd frontend/src/features && git mv _pending/replan .
 ```
 
-- [ ] **Adım 2: Demet erişimlerini alan erişimine çevir**
+- [ ] **Adım 2: `start`/`goal` kullanımlarını doğrula — değişiklik beklenmiyor**
 
-13 kullanım var (`start` 6, `goal` 7). Değişim mekaniktir:
-
-```ts
-// eski
-const [row, col] = start
-// yeni
-const { row, col } = start
-```
-
-Ağ katmanına gönderilen gövde demet bekliyorsa dönüşüm çağrı yerinde yapılır:
+Bu adım Task 3'te ölçülen bir düzeltmeyi taşıyor. Kanonik tip şu:
 
 ```ts
-// net/replan.ts hâlâ [row, col] bekliyor
-body: { start: [start.row, start.col], goal: [goal.row, goal.col] }
+export type Cell = [row: number, col: number]        // DEMET
+export interface CellRef { row: number; col: number } // obje, yalnızca overlay için
 ```
 
-Ağ sözleşmesi backend'e aittir ve bu planda **değişmez**; dönüşüm yalnızca
-sınırda yapılır.
+`MissionValue.start` ve `.goal` **demettir**, tıpkı `berke-3d-frontend`'deki
+gibi. Bu planın ilk sürümü onları obje sanıyordu ve 13 kullanımın
+dönüştürülmesini istiyordu; **gerek yok.** `const [row, col] = start` olduğu
+gibi kalır, ağ sınırında dönüşüm de gerekmez.
+
+Yapılacak tek şey: `useMission()`'dan okunan alanların adlarının tuttuğunu
+doğrulamak. Tutmayan bir alan çıkarsa `mission/types.ts`'e eklenir ve
+`App.tsx`'teki `missionValue`'da doldurulur.
 
 - [ ] **Adım 3: Kayda ekle**
 
@@ -1693,12 +1710,12 @@ doğrulanır).
 ```bash
 git add -A
 git commit -m "$(cat <<'EOF'
-feat(replan): move start and goal from tuples to CellRef
+feat(replan): bring replan back through the registry
 
-The canonical MissionValue carries cells as objects. The network contract
-still takes [row, col] pairs and does not change here, so the conversion
-happens at the boundary in net/replan.ts rather than spreading through the
-feature.
+No cell conversion after all: the canonical Cell is a tuple, the same shape
+this feature already used, so start and goal are untouched. The plan's first
+draft had them as objects and asked for thirteen rewrites that turned out to
+be unnecessary.
 EOF
 )"
 ```
@@ -1719,10 +1736,10 @@ EOF
 cd frontend/src/features && git mv _pending/profile-compare .
 ```
 
-- [ ] **Adım 2: `start`/`goal`'ü `CellRef`'e çevir**
+- [ ] **Adım 2: `start`/`goal` kullanımlarını doğrula — değişiklik beklenmiyor**
 
-10 kullanım (`start` 5, `goal` 5). `const [row, col] = start` →
-`const { row, col } = start`; ağ sınırında demete geri çevrilir.
+10 kullanım (`start` 5, `goal` 5). Kanonik `Cell` bir demet olduğu için
+(bkz. Task 18 Adım 2) bunlar olduğu gibi kalır; dönüşüm gerekmez.
 
 - [ ] **Adım 3: `overlays.ts`'i kanonik tiplere çevir**
 
@@ -1781,10 +1798,10 @@ git commit -m "feat(profile-compare): retype cells and overlay commands for anal
 cd frontend/src/features && git mv _pending/time-axis .
 ```
 
-- [ ] **Adım 2: `start`/`goal`'ü `CellRef`'e çevir**
+- [ ] **Adım 2: `start`/`goal` kullanımlarını doğrula — değişiklik beklenmiyor**
 
-16 kullanım (`start` 9, `goal` 7) — bu feature'ın en yoğun kısmı.
-`const [row, col] = start` → `const { row, col } = start`; ağ sınırında demet.
+16 kullanım (`start` 9, `goal` 7). Kanonik `Cell` bir demet olduğu için
+(bkz. Task 18 Adım 2) bunlar olduğu gibi kalır; dönüşüm gerekmez.
 
 - [ ] **Adım 3: `overlays.ts`'i kanonik tiplere çevir**
 
@@ -1863,7 +1880,7 @@ EOF
 )"
 ```
 
-### Task 21: `cost-explain` — `hoverCell` kararı
+### Task 21: `cost-explain` — telemetriyi kendi çeker
 
 Faz 3'ün tek semantik kararı burada. Diğer sekiz feature `hoverCell`'e hiç
 dokunmuyor; bu feature 7 kez kullanıyor ve `cellTelemetry`'yi 3 kez.
@@ -1873,8 +1890,8 @@ dokunmuyor; bu feature 7 kez kullanıyor ve `cellTelemetry`'yi 3 kez.
 - Değiştir: `frontend/src/features/cost-explain/useCostExplain.ts`, `overlays.ts`, `frontend/src/features/registry.ts`
 
 **Arayüzler:**
-- Tüketir: `useMission()` — `hoverCell: CellRef | null`, `cellTelemetry`;
-  `useOverlays()`.
+- Tüketir: `useFocusTelemetry()` — imleci izleyen `row`/`col`;
+  `fetchCellTelemetry(row, col)`; `useOverlays()`.
 - Üretir: kayıt id'si `'cost-explain'`.
 
 - [ ] **Adım 1: Dizini çıkar**
@@ -1883,28 +1900,44 @@ dokunmuyor; bu feature 7 kez kullanıyor ve `cellTelemetry`'yi 3 kez.
 cd frontend/src/features && git mv _pending/cost-explain .
 ```
 
-- [ ] **Adım 2: Kararı ver ve yaz**
+- [ ] **Adım 2: Veriyi kanonik yoldan al**
 
-`cost-explain`, **imlecin altındaki** hücrenin maliyet dökümünü gösteriyor ve
-`/api/cell-telemetry`'yi o hücre için çağırıyor. Bu `hoverCell` semantiğidir ve
-kasıtlıdır: kullanıcı haritada gezinirken döküm anında değişir, tıklama
-gerektirmez. `selectedCell`'e bağlanırsa panel yalnızca tıklamayla güncellenir
-ve özellik anlamını kaybeder.
+Planın ilk sürümü `hoverCell` ve `cellTelemetry`'yi `MissionValue`'ya
+ekletiyordu. Task 3 bunun yanlış olduğunu gösterdi: kanonik tipte bu iki alan
+**bilerek** yok ve gerekçesi `MissionContext.ts`'te yazılı —
 
-Karar: **`hoverCell` kullanılmaya devam edilir.** Task 7'de kanonik
-`MissionValue`'ya bu alan zaten eklendi; `selectedCell` bu feature tarafından
-okunmaz.
+> A feature that needs the telemetry of a particular cell should fetch that
+> cell: `fetchCellTelemetry(row, col)`.
 
-- [ ] **Adım 3: `hoverCell`'i `CellRef`'e çevir**
+Davranış korunur, kaynak değişir. `cost-explain` yine **imlecin altındaki**
+hücreyi açıklar; imleç konumunu artık `useFocusTelemetry()`'den okur (o hook
+`hoverPoint ?? goal ?? start`'ı izler, tam da bu feature'ın istediği şey) ve
+`/api/cell-telemetry`'yi kendi çağırır.
 
-7 kullanımda demet erişimi alan erişimine döner:
+Bu, App'ten bir yük almak anlamına da geliyor: telemetriyi tek tüketicisi
+çekiyor, kokpit onu herkese yayınlamıyor.
 
 ```ts
-// eski
-const [row, col] = hoverCell
-// yeni
-const { row, col } = hoverCell
+const focus = useFocusTelemetry()
+// Istek imlecle birlikte saniyede onlarca kez tetiklenebilir; hucre
+// degismedikce yeniden cekilmez ve ucus halindeki istek iptal edilir.
+useEffect(() => {
+  const controller = new AbortController()
+  fetchCellTelemetry(focus.row, focus.col, controller.signal)
+    .then(setTelemetry)
+    .catch(ignoreAbort)
+  return () => controller.abort()
+}, [focus.row, focus.col])
 ```
+
+`selectedCell` bu feature tarafından **okunmaz**: kanonik tipte her zaman null
+ve bir seçim değil, seçim yokluğunu bildiren bir alan.
+
+- [ ] **Adım 3: `hoverCell` erişimlerini yeni kaynağa bağla**
+
+7 kullanım `useMission().hoverCell` yerine `focus.row` / `focus.col`'a döner.
+Demet açma (`const [row, col] = hoverCell`) tamamen kalkar; `FocusTelemetry`
+zaten `row` ve `col` alanlarını ayrı ayrı taşıyor.
 
 - [ ] **Adım 4: `overlays.ts`'i kanonik tiplere çevir**
 

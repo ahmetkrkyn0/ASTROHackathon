@@ -1,56 +1,55 @@
 import { createContext, useContext } from 'react'
-import type { PlanResponse, PlanWeights } from '../api'
-import type { CellTelemetryResponse } from '../net/types'
-
-export type MapViewMode =
-  | 'surface'
-  | 'thermal'
-  | 'cost'
-  | 'shadow'
-  | 'traversability'
-  | 'slope'
-  | 'aspect'
+import type { FocusTelemetry, MissionValue } from './types'
 
 /**
- * What App.tsx ALREADY owns, published read-only.
+ * The mission a feature may read.
  *
- * Nothing new lives here. A feature module keeps its own state in its own
- * hook; this exists so nine modules can read the cockpit's current
- * selection without App.tsx growing nine more useStates.
+ * Two contexts, not one, and the split is the point. The stable half changes
+ * only when a mission value actually changes; the volatile half changes as the
+ * pointer moves and as the route plays back, thirty times a second. A feature
+ * that reads the stable half is not dragged into that churn, and -- more
+ * importantly -- nothing in the stable half can be mistaken for a value that
+ * tracks the mouse.
+ *
+ * The provider itself lives in ./MissionProvider so this file exports no
+ * component: mixing a component with hooks in one module breaks Fast Refresh
+ * for the module, which `react-refresh/only-export-components` flags and this
+ * project treats as an error.
  */
-export interface MissionState {
-  gridMeta: { rows: number; cols: number; resolutionM: number } | null
-  roverId: string
-  weights: PlanWeights
-  start: [number, number] | null
-  goal: [number, number] | null
-  /** The FULL /api/plan response -- corridor, route_statistics and execution included. */
-  planResult: PlanResponse | null
-  /**
-   * The cell under the pointer, NOT a click selection. App publishes its
-   * hover state here because that is what drives /api/cell-telemetry today;
-   * a module that wants a sticky selection has to hold it itself.
-   */
-  hoverCell: [number, number] | null
-  /** The RAW /api/cell-telemetry response, cost_breakdown and layer_validity included. */
-  cellTelemetry: CellTelemetryResponse | null
-  activeLayer: MapViewMode
-  dimension: '2d' | '3d'
-}
-
-export interface MissionActions {
-  setStart: (cell: [number, number] | null) => void
-  setGoal: (cell: [number, number] | null) => void
-}
-
-export type MissionValue = MissionState & MissionActions
-
 export const MissionContext = createContext<MissionValue | null>(null)
+export const FocusTelemetryContext = createContext<FocusTelemetry | null>(null)
 
+/**
+ * The cockpit's current mission state, read-only.
+ *
+ * Throws outside a provider rather than handing back a plausible empty
+ * mission: a feature rendered outside the shell is a wiring mistake, and a
+ * default value would let it render "no route planned" forever instead.
+ */
 export function useMission(): MissionValue {
-  const ctx = useContext(MissionContext)
-  if (!ctx) {
-    throw new Error('useMission must be used inside <MissionProvider>')
+  const value = useContext(MissionContext)
+  if (!value) {
+    throw new Error('useMission must be called inside <MissionProvider>')
   }
-  return ctx
+  return value
+}
+
+/**
+ * The map's coordinate readout: latitude, longitude, altitude, temperature.
+ *
+ * This is NOT the telemetry of `mission.selectedCell`, and the two routinely
+ * disagree. It follows `hoverPoint ?? goal ?? start`, and during route playback
+ * it follows the waypoint being animated instead -- a new value every 33 ms.
+ * It is what the scale line and the LAT/LON/ALT/TMP block display, nothing
+ * more.
+ *
+ * A feature that needs the telemetry of a particular cell should fetch that
+ * cell: `fetchCellTelemetry(row, col)`.
+ */
+export function useFocusTelemetry(): FocusTelemetry {
+  const value = useContext(FocusTelemetryContext)
+  if (!value) {
+    throw new Error('useFocusTelemetry must be called inside <MissionProvider>')
+  }
+  return value
 }

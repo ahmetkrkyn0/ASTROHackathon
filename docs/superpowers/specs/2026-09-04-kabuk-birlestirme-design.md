@@ -113,7 +113,7 @@ okur. Göktuğ'un `missionMode === 'plan' ? … : …` koşullu JSX'i böylece
 | Kanonik (chatbot dalından) | Silinecek (`berke-3d-frontend`'den) |
 |---|---|
 | `shell/slots.tsx`, `shell/FeatureHost.tsx` | `shell/slots.tsx` |
-| `mission/MissionContext.tsx`, `types.ts`, `selectors.ts`, `geo.ts` | `mission/MissionContext.ts`, `mission/MissionProvider.tsx` |
+| `mission/types.ts`, `selectors.ts`, `geo.ts` ve `MissionContext.tsx`'in içeriği | `mission/MissionContext.ts`, `mission/MissionProvider.tsx` (içerik kanonikle değişir) |
 | `overlay/OverlayContext.tsx`, `types.ts`, `useOverlays.ts` | `overlay/OverlayProvider.tsx`, `overlay/useOverlays.ts` |
 | `features/registry.ts` (+ `modes`) | — |
 
@@ -306,11 +306,18 @@ Kapsamı ölçüldü ve ilk sanıldığından çok dar çıktı. `useMission` on
 | diğer sekizi | 0 | 0 |
 
 Dolayısıyla bu risk on bir dosyalık bir denetim değil, tek bir görevde verilen
-tek bir karardır. `cost-explain` imlecin altındaki hücrenin maliyet dökümünü
-gösteriyor; `hoverCell` semantiği kasıtlıdır ve `cellTelemetry` ile birlikte
-taşınmalıdır. Kanonik `MissionValue` bu yüzden `selectedCell`'in yanında
-`hoverCell` alanını da taşır — ikisi farklı şeydir ve biri diğerinin yerine
-geçemez.
+tek bir karardır.
+
+Uygulama sırasında kanonik tip okununca karar kendini yazdı. `MissionValue`'da
+ne `hoverCell` ne `cellTelemetry` var ve bu bir eksiklik değil:
+`MissionContext.ts`, imleci izleyen okumanın `useFocusTelemetry` ile
+yayınlandığını, bir hücrenin telemetrisini isteyen feature'ın onu kendisinin
+çekmesi gerektiğini yazıyor. `selectedCell` ise her zaman null — bu kokpitte
+"hücre seç" diye bir kontrol yok.
+
+Sonuç: `cost-explain`'in **davranışı korunur** (yine imlecin altındaki hücreyi
+açıklar), yalnızca kaynağı değişir — konumu `useFocusTelemetry()`'den okur,
+`/api/cell-telemetry`'yi kendi çağırır. `MissionValue` genişletilmez.
 
 ### 1b. Taşınmamış feature'lar derlemeyi kırar
 

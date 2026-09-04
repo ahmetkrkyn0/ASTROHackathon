@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react'
 
-export type MissionMode = 'fleet' | 'plan' | 'analyze'
+// Tipin sahibi mission katmani: kayit bir feature'in hangi modlarda
+// gorunecegini buna bakarak suzuyor. Buradan yeniden disa aciliyor cunku
+// App.tsx bugun tipi TopBar'dan aliyor ve o import Task 7'ye kadar calismali.
+import type { MissionMode } from '../../mission/types'
+
+export type { MissionMode }
 
 interface TopBarProps {
   mode: MissionMode
