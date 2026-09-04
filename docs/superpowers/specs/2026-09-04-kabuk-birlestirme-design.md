@@ -124,10 +124,10 @@ yalnızca kanonik tiplere göre yeniden yazılır.** Gerekçe ölçüldü:
 |---|---|---|
 | Dışa açılan | `drawOverlays`, `ribbonEdges`, `normaliseToDomain` | yalnızca `drawOverlayCommands` |
 | Geometri | dışa açık, saf fonksiyon | private (`drawRibbon`, `sampleRamp`, …) |
-| Test | `draw2d.test.ts` — 9 vaka | dalda **hiç frontend testi yok** |
+| Test | `draw2d.test.ts` — 8 vaka | dalda **hiç frontend testi yok** |
 
 Chatbot'un dosyası alınırsa NaN, tekrarlanan waypoint, dejenere segment ve düz
-alan durumlarını kapsayan dokuz test silinir ve yerine gelen mantık private
+alan durumlarını kapsayan sekiz test silinir ve yerine gelen mantık private
 olduğu için test edilemez. Bunlar koridor çizimini sessizce bozan uç
 durumlardır. Kanonik olan tip sözleşmesidir, o sözleşmeyi en iyi test edilmiş
 uygulama karşılar.

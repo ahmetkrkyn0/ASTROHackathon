@@ -80,7 +80,7 @@ src/
     types.ts              OverlayCommand ailesi        [chatbot'tan]
     useOverlays.ts                                     [chatbot'tan]
     draw2d.ts             KENDİ dosyamız, kanonik tiplere göre yeniden yazılır
-    draw2d.test.ts        9 vakalık mevcut test, korunur
+    draw2d.test.ts        8 vakalık mevcut test, korunur
 
   net/                    senin API istemcin (client, plan4d, series, replan, …)
   grid/geo.ts             piksel/hücre dönüşümleri
@@ -367,7 +367,7 @@ EOF
 
 Spec'in tek istisnası burada: tip sözleşmesi chatbot'tan, çizim uygulaması
 bizden. `berke-3d-shell`'in `draw2d.ts`'i üç saf fonksiyon dışa açıyor ve
-dokuz vakalık bir testi var; chatbot'unki geometrisini private tutuyor ve o
+sekiz vakalık bir testi var; chatbot'unki geometrisini private tutuyor ve o
 dalda hiç frontend testi yok.
 
 **Dosyalar:**
@@ -397,7 +397,7 @@ git rm frontend/src/overlay/OverlayProvider.tsx
 - [ ] **Adım 2: Testi yeni tiplere göre yaz (önce test)**
 
 `frontend/src/overlay/draw2d.test.ts` başındaki import ve fixture, `PixelPoint`
-yerine `CellRef` kullanacak şekilde değişir. Geri kalan dokuz vaka aynen kalır —
+yerine `CellRef` kullanacak şekilde değişir. Geri kalan sekiz vaka aynen kalır —
 davranış değişmiyor, yalnızca tipin adı değişiyor.
 
 ```ts
@@ -444,7 +444,7 @@ edilir:
  * Tek genişlik verildiyse her merkez noktası için tekrarlanır.
  *
  * Ayrı bir adım olarak duruyor çünkü ribbonEdges'in kendisi dizi bekliyor ve
- * o testlerin kapsadığı hâli; normalizasyonu çağrı yerine koymak dokuz vakayı
+ * o testlerin kapsadığı hâli; normalizasyonu çağrı yerine koymak sekiz vakayı
  * yeniden yazmayı gerektirirdi.
  */
 function widthsFor(command: RibbonCommand): number[] {
@@ -465,7 +465,7 @@ kontrolü yapar, fonksiyonun kendisi ve testleri değişmez.
 cd frontend && npm test -- draw2d
 ```
 
-Beklenen: dokuz vakanın tamamı PASS.
+Beklenen: sekiz vakanın tamamı PASS.
 
 - [ ] **Adım 6: Kapı**
 
@@ -482,7 +482,7 @@ feat(overlay): adopt the canonical command types, keep our renderer
 
 types.ts, OverlayContext.tsx and useOverlays.ts come from the chatbot
 branch and become canonical. draw2d.ts does not: ours exports drawOverlays,
-ribbonEdges and normaliseToDomain as pure functions with nine tests covering
+ribbonEdges and normaliseToDomain as pure functions with eight tests covering
 NaN, repeated waypoints, degenerate segments and flat fields, while the
 chatbot branch keeps that geometry private and ships no frontend tests at
 all. The contract is what we adopt; the best-tested implementation of it
