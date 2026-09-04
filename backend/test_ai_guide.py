@@ -535,13 +535,40 @@ def _tokens(envelope: AnalysisEnvelope) -> frozenset[str]:
     )
 
 
-def test_the_bare_rover_name_survives_the_digit_scan():
-    """The catalogue publishes "LPR-1 (Varsayilan)"; prose says "LPR-1"."""
-    envelope = _guide_envelope(topic="rover", rover_ids=["lpr_1"])
+@pytest.mark.parametrize(
+    "rover_id", [entry["id"] for entry in rover_catalog()]
+)
+def test_the_bare_rover_name_survives_the_digit_scan(rover_id):
+    """The catalogue publishes "LPR-1 (Varsayilan)"; prose says "LPR-1".
+
+    Parametrized over the whole catalogue rather than the default rover,
+    because the digit is not in the same place for each of them. "LPR-1"
+    carries it in the published name, "CNSA Yutu-2" carries it after a word
+    the whitelist does not otherwise contain, and "NASA VIPER" and "LUVMI-M"
+    carry none at all -- so a whitelist that happened to work for one of them
+    proves very little about the others. This is the assertion that would have
+    caught the bare-name gap for Yutu-2 rather than only for LPR-1.
+    """
+    entry = next(item for item in rover_catalog() if item["id"] == rover_id)
+    name = short_name(str(entry["name"]))
+    envelope = _guide_envelope(topic="rover", rover_ids=[rover_id])
     verdict = validate_draft(
-        "LPR-1 kataloğun varsayılan rover'ıdır.", envelope, _tokens(envelope)
+        f"{name} katalogda tanımlı bir rover'dır.", envelope, _tokens(envelope)
     )
-    assert verdict.ok, diagnostic(verdict)
+    assert verdict.ok, (name, diagnostic(verdict))
+
+
+@pytest.mark.parametrize(
+    "rover_id", [entry["id"] for entry in rover_catalog()]
+)
+def test_every_rover_publishes_its_specs_as_registered_metrics(rover_id):
+    """A name that masks is not enough; the numbers beside it must too."""
+    envelope = _guide_envelope(topic="rover", rover_ids=[rover_id])
+    displays = [metric.display for metric in envelope.numeric_registry]
+    assert len(displays) > 1, rover_id
+    draft = " ".join(f"Değer {display}." for display in displays)
+    verdict = validate_draft(draft, envelope, _tokens(envelope))
+    assert verdict.ok, (rover_id, diagnostic(verdict))
 
 
 def test_the_view_identifiers_survive_the_digit_scan():
