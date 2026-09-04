@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import type { MissionMode } from '../mission/types'
 import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
+import { CorridorFeature } from './corridor'
 import { LayerPicker } from './layer-picker'
 import { MissionSetup } from './mission-setup'
 import { MissionValidation } from './mission-validation'
@@ -87,6 +88,7 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // mission field that changed name.
   { id: 'ros-showcase', slot: 'leftRail', Component: RosShowcase },
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation },
+  { id: 'corridor', slot: 'rightRail', Component: CorridorFeature },
 ]
 
 /**
