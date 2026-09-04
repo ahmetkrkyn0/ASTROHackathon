@@ -4,7 +4,9 @@ import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
 import { LayerPicker } from './layer-picker'
 import { MissionSetup } from './mission-setup'
+import { MissionValidation } from './mission-validation'
 import { Playback } from './playback'
+import { RosShowcase } from './ros-showcase'
 import { RouteAnalysis } from './route-analysis'
 import { SolvingIndicator } from './solving-indicator'
 
@@ -80,6 +82,11 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // comes after the picker it may draw over.
   { id: 'layer-picker', slot: 'canvasOverlay', Component: LayerPicker },
   { id: 'solving-indicator', slot: 'canvasOverlay', Component: SolvingIndicator },
+  // The first two features to come back from the parking lot, and the only
+  // two that needed no retyping: neither draws an overlay and neither reads a
+  // mission field that changed name.
+  { id: 'ros-showcase', slot: 'leftRail', Component: RosShowcase },
+  { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation },
 ]
 
 /**
