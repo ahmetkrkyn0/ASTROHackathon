@@ -99,4 +99,13 @@ export interface MissionValue {
   selectedCell: Cell | null
   activeViewMode: ViewModeId
   dimension: MapDimension
+  /**
+   * Which stage the cockpit is in.
+   *
+   * Published here rather than passed to each slot as a prop: the registry
+   * decides visibility from it, so `FeatureHost` reads it and `App.tsx` writes
+   * `<LeftRailSlot />` without knowing that a slot's contents depend on the
+   * stage at all.
+   */
+  missionMode: MissionMode
 }
