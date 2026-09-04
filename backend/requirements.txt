@@ -1,4 +1,13 @@
 fastapi==0.115.6
+# Transitive dep of FastAPI, but pinned for the same reason pydantic is
+# pinned below: it arrived unpinned in a file where everything else is
+# ==-pinned, and a fresh install picked up starlette 1.0.0, which dropped
+# the on_startup/on_shutdown parameters from Router.__init__(). FastAPI
+# 0.115.6 still passes them, so app.main failed at import time with
+# "TypeError: Router.__init__() got an unexpected keyword argument
+# 'on_startup'" -- before any of our code ran. 0.41.3 is the version
+# FastAPI 0.115.6 resolves against.
+starlette==0.41.3
 # Used DIRECTLY by app.main and app.pose (BaseModel, Field, field_validator,
 # conlist), not merely pulled in by FastAPI. It arrived transitively, in a
 # file where every other dependency is ==-pinned, so a FastAPI bump could

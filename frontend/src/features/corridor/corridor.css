@@ -1,0 +1,66 @@
+.lp-corridor-card {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.lp-corridor-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.lp-corridor-id {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: #38bdf8;
+}
+
+.lp-corridor-count { font-size: 10px; color: #64748b; }
+
+.lp-corridor-tight {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #94a3b8;
+}
+
+.lp-corridor-tight strong { color: #e2e8f0; }
+
+.lp-corridor-scroll { max-height: 210px; overflow-y: auto; overflow-x: auto; }
+
+.lp-corridor-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-corridor-table th {
+  position: sticky;
+  top: 0;
+  background: #0f172a;
+  text-align: right;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+  padding: 4px 6px;
+}
+
+.lp-corridor-table th:first-child,
+.lp-corridor-table td:first-child { text-align: left; color: #64748b; }
+
+.lp-corridor-table td {
+  text-align: right;
+  padding: 3px 6px;
+  color: #cbd5f5;
+  border-top: 1px solid rgba(148, 163, 184, 0.09);
+}
+
+.lp-corridor-note { margin: 0; font-size: 11px; color: #94a3b8; }
+.lp-corridor-warn { color: #fbbf24; }

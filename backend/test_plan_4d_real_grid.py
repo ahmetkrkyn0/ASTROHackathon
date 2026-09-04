@@ -26,6 +26,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from app.constants import get_rover
 from app.data_loader import _P1_PROCESSED_DIR, load_preprocessed_grids
 from app.main import app
 
@@ -148,3 +149,62 @@ def test_start_in_a_coarsening_disqualified_block_gets_a_specific_422(
     )
     assert response.status_code == 422
     assert "time horizon" not in response.json()["detail"]
+
+
+# ── A lunar-night epoch must plan on battery, not fail on the ground's skin ──
+#
+# Measured on this grid before the fix: at 2026-09-07 (the site is dark from
+# 4 to 17 September) every coarse cell was impassable 2.5 h into the horizon
+# because the cube gated on regolith skin temperature < -150 C, so the
+# endpoint answered "1 257 052 edges led into cells with no finite cost"
+# for a 5-hour route -- while the catalogue gives LPR-1 50 h of darkness.
+
+_NIGHT_EPOCH = "2026-09-07T00:00:00"
+_NIGHT_PAIR = ((228, 442), (465, 49))  # plans in 5 h on the static cube
+
+_needs_horizon_cache = pytest.mark.skipif(
+    not os.path.exists(os.path.join(_P1_PROCESSED_DIR, "horizon_map.npy")),
+    reason="horizon_map.npy not present -- run scripts/build_horizon_cache.py",
+)
+
+
+@_needs_horizon_cache
+def test_lunar_night_epoch_plans_on_battery(client):
+    start, goal = _NIGHT_PAIR
+    response = client.post(
+        "/api/plan-4d",
+        json={
+            "start": {"row": start[0], "col": start[1]},
+            "goal": {"row": goal[0], "col": goal[1]},
+            "rover_id": _ROVER,
+            "start_utc": _NIGHT_EPOCH,
+        },
+    )
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["shadow_model"]["model"] == "spice_horizon"
+    assert payload["metrics"]["move_steps"] > 0
+    rover = get_rover(_ROVER)
+    assert payload["metrics"]["min_battery_pct"] >= rover["soc_min_pct"] * 100.0
+    assert payload["metrics"]["max_continuous_shadow_h"] <= rover["h_max_shadow_h"]
+
+
+@_needs_horizon_cache
+def test_lunar_night_with_a_flat_battery_names_the_battery_not_the_terrain(client):
+    """Just above the reserve, a 5-hour drive in the dark cannot be paid for.
+    The refusal must say so instead of blaming slopes."""
+    start, goal = _NIGHT_PAIR
+    response = client.post(
+        "/api/plan-4d",
+        json={
+            "start": {"row": start[0], "col": start[1]},
+            "goal": {"row": goal[0], "col": goal[1]},
+            "rover_id": _ROVER,
+            "start_utc": _NIGHT_EPOCH,
+            "initial_soc_pct": 0.21,
+        },
+    )
+    assert response.status_code == 404, response.json()
+    detail = response.json()["detail"].lower()
+    assert "battery" in detail
+    assert "dark" in detail or "shadow" in detail

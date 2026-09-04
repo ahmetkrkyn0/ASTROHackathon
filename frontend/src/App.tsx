@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import LandingPage from './LandingPage'
 import MapCanvas, {
@@ -8,6 +8,21 @@ import MapCanvas, {
   type MapViewMode,
 } from './MapCanvas'
 import TerrainCanvas3D from './TerrainCanvas3D'
+import { MissionProvider } from './mission/MissionProvider'
+import type { MissionValue } from './mission/MissionContext'
+import { OverlayProvider } from './overlay/OverlayProvider'
+import { useOverlays } from './overlay/useOverlays'
+import type { CellTelemetryResponse } from './net/types'
+import { LeftRailSlot, RightRailSlot, BottomDock, CanvasOverlaySlot } from './shell/slots'
+import { LayerProvenance } from './features/layer-provenance'
+import { CostExplain } from './features/cost-explain'
+import { CorridorFeature } from './features/corridor'
+import { Replan } from './features/replan'
+import { TimeAxis } from './features/time-axis'
+import { PoseLoop } from './features/pose-loop'
+import { ProfileCompare } from './features/profile-compare'
+import { MissionValidation } from './features/mission-validation'
+import { RosShowcase } from './features/ros-showcase'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -143,6 +158,10 @@ export default function App() {
   const [planning, setPlanning] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
   const [focusTelemetry, setFocusTelemetry] = useState<FocusTelemetry>(DEFAULT_FOCUS_TELEMETRY)
+  // The same response, kept whole. mapFocusTelemetryResponse trims it to the
+  // four fields the telemetry wells show; cost_breakdown and layer_validity
+  // were being fetched and dropped, and two upcoming modules need them.
+  const [rawCellTelemetry, setRawCellTelemetry] = useState<CellTelemetryResponse | null>(null)
   const [routePlaybackStep, setRoutePlaybackStep] = useState<number | null>(null)
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
@@ -171,8 +190,11 @@ export default function App() {
   )
 
   useEffect(() => {
+    // Dizinin kendisi hic yeniden atanmiyor, sadece push ediliyor -- bu yuzden
+    // referansi burada yakalamak, cleanup'ta okumakla ayni listeyi verir.
+    const timers = toastTimersRef.current
     return () => {
-      toastTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+      timers.forEach((timer) => window.clearTimeout(timer))
     }
   }, [])
 
@@ -412,7 +434,7 @@ export default function App() {
   )
   const focusPoint = goal ?? start ?? DEFAULT_POINT
   const telemetryPoint = hoverPoint ?? focusPoint
-  const waypoints = planResult?.waypoints ?? []
+  const waypoints = useMemo(() => planResult?.waypoints ?? [], [planResult])
   const activeMapView = MAP_VIEW_OPTIONS.find((option) => option.id === viewMode) ?? MAP_VIEW_OPTIONS[0]
   const selectedRover = rovers.find((entry) => entry.id === selectedRoverId) ?? null
 
@@ -438,6 +460,7 @@ export default function App() {
         }
 
         setFocusTelemetry(mapFocusTelemetryResponse(telemetry))
+        setRawCellTelemetry(telemetry)
       } catch {
         if (controller.signal.aborted) {
           return
@@ -535,8 +558,49 @@ export default function App() {
   const [leftOpen, setLeftOpen] = useState(true)
   const [rightOpen, setRightOpen] = useState(true)
 
+  // useMemo is not optional here. hoverPoint changes on every mouse move, and
+  // a fresh object literal each render would re-render all nine modules that
+  // read this -- including the ones that never look at hover. The dependency
+  // list is written field by field for the same reason.
+  const missionValue: MissionValue = useMemo(
+    () => ({
+      gridMeta: elevationLayer
+        ? {
+            rows: elevationLayer.shape[0],
+            cols: elevationLayer.shape[1],
+            resolutionM: focusTelemetry.resolutionM,
+          }
+        : null,
+      roverId: selectedRoverId,
+      weights,
+      start,
+      goal,
+      planResult,
+      hoverCell: hoverPoint,
+      cellTelemetry: rawCellTelemetry,
+      activeLayer: viewMode,
+      dimension,
+      setStart,
+      setGoal,
+    }),
+    [
+      dimension,
+      elevationLayer,
+      focusTelemetry.resolutionM,
+      goal,
+      hoverPoint,
+      planResult,
+      rawCellTelemetry,
+      selectedRoverId,
+      start,
+      viewMode,
+      weights,
+    ],
+  )
+
   return (
-    <>
+    <MissionProvider value={missionValue}>
+      <OverlayProvider>
       {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
 
       <div className={`loading-screen ${phase === 'loading' ? 'is-active' : ''}`}>
@@ -658,6 +722,12 @@ export default function App() {
                     ))}
                   </div>
                 </section>
+
+                <LeftRailSlot>
+                  <LayerProvenance />
+                  <Replan />
+                  <RosShowcase />
+                </LeftRailSlot>
               </div>
             </>
           )}
@@ -746,10 +816,13 @@ export default function App() {
               </div>
             </div>
 
-            <div className="map-canvas-shell">
+            {/* position: relative so CanvasOverlaySlot has a containing
+                block. Inline because App.css is off limits, and nothing
+                inside this div is absolutely positioned today. */}
+            <div className="map-canvas-shell" style={{ position: 'relative' }}>
               {dimension === '2d' ? (
-                <MapCanvas
-                  ref={mapRef}
+                <MapCanvasWithOverlays
+                  canvasRef={mapRef}
                   elevationGrid={elevationLayer?.data ?? null}
                   slopeGrid={slopeLayer?.data ?? null}
                   aspectGrid={aspectLayer?.data ?? null}
@@ -786,7 +859,13 @@ export default function App() {
                   }
                 />
               )}
+
+              <CanvasOverlaySlot />
             </div>
+
+            <BottomDock>
+              <TimeAxis />
+            </BottomDock>
 
             {dimension === '3d' && (
               <div className="map-overlay map-overlay-bottom-right terrain3d-time">
@@ -986,6 +1065,14 @@ export default function App() {
                 ))}
               </div>
             </section>
+
+            <RightRailSlot>
+              <CostExplain />
+              <CorridorFeature />
+              <PoseLoop />
+              <ProfileCompare />
+              <MissionValidation />
+            </RightRailSlot>
           </div>
             </>
           )}
@@ -1012,7 +1099,8 @@ export default function App() {
         ))}
       </div>
       </div>
-    </>
+      </OverlayProvider>
+    </MissionProvider>
   )
 }
 
@@ -1226,6 +1314,21 @@ function buildToastNotice(source: 'layer' | 'plan', detail: string): Omit<ToastI
       'Some terrain data could not be refreshed. The current view may be temporarily out of date.',
     detail: normalizedDetail,
   }
+}
+
+/**
+ * Reads the overlay registry and hands it to the canvas.
+ *
+ * A separate component because App renders OverlayProvider itself, so App's
+ * own body is outside that provider and useOverlays() there would always
+ * see the empty registry.
+ */
+function MapCanvasWithOverlays({
+  canvasRef,
+  ...rest
+}: React.ComponentProps<typeof MapCanvas> & { canvasRef: React.Ref<MapCanvasHandle> }) {
+  const { layers } = useOverlays()
+  return <MapCanvas ref={canvasRef} {...rest} overlays={layers} />
 }
 
 const LEGEND_ITEMS = [

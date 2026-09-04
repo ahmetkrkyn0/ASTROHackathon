@@ -254,62 +254,228 @@ def _real_cubes_shadowed_corridor(
     return cost_cube, wait_cube, traversable, slope, slice_hours, corridor_len
 
 
-def test_planner_chooses_to_wait_with_real_cost_cubes():
-    """A long-enough shadowed stretch makes waiting for real sunlight (real
-    build_cost_cube/build_wait_cost_cube numbers, real rover constants) the
-    cheaper choice -- not just in a hand-tuned toy cube."""
-    cost_cube, wait_cube, traversable, slope, slice_hours, corridor_len = (
+def test_move_and_wait_edges_are_priced_in_the_same_units_on_real_cubes():
+    """A slice of waiting and a slice of driving, both built by the
+    production cube builders with the real rover, must be the same order of
+    magnitude -- or the planner can never trade one for the other. They
+    were ~6500x apart before the unit fix (Faz 1-2-3 review, M2)."""
+    cost_cube, wait_cube, _traversable, _slope, slice_hours, _len = (
         _real_cubes_shadowed_corridor(shadow_len=10, n_shadow_slices=3, corridor_len=12)
     )
-    result = astar_4d(
-        cost_cube,
-        wait_cube,
-        traversable,
-        start=(0, 0),
-        goal=(0, corridor_len - 1),
-        resolution_m=80.0,
-        slice_hours=slice_hours,
-        rover=get_rover(),
-        slope_grid=slope,
-    )
-    assert result["error"] is None
-    assert result["metrics"]["wait_steps"] > 0
+    finite = cost_cube[np.isfinite(cost_cube)]
+    move_per_slice = slice_hours * (1.0 + float(np.mean(finite)))
+    wait_per_slice = float(np.mean(wait_cube))
+    assert 0.2 < wait_per_slice / move_per_slice < 5.0
 
 
-def test_real_cube_waiting_is_the_only_way_through_a_dark_stretch():
-    """Waiting is not merely cheaper than rushing -- rushing is impossible.
-
-    This used to compare two finite costs, because shadow only ever made a
-    cell MORE EXPENSIVE. Two changes turned that into a real decision:
-    a WAIT now costs the time it takes (round 3, M-2), so a free-wait
-    planner no longer wins by default; and the cost cube recomputes surface
-    temperature from each slice's own illumination (round 3, H-3), so a
-    cell in darkness is below the traversability threshold AT THAT SLICE
-    and passable once the Sun reaches it.
-
-    Priced fairly against a merely-expensive dark cell, waiting loses: a
-    slice of idling costs the same as a slice of driving, while the shadow
-    penalty differential is a fraction of that. It wins here because the
-    route does not exist yet -- which is the honest reason to wait.
-    """
-    cost_cube, wait_cube, traversable, slope, slice_hours, corridor_len = (
-        _real_cubes_shadowed_corridor(shadow_len=10, n_shadow_slices=3, corridor_len=12)
-    )
+def test_real_cubes_let_a_50h_rover_drive_through_a_short_dark_stretch():
+    """Round 4 made a cell impassable at any slice its regolith skin was
+    under -150 C, so waiting was the ONLY way through ten dark cells -- and
+    the same rule closed the whole production grid for the whole lunar
+    night. The envelope now lives in the planner's state: LPR-1 has 50 h of
+    shadow endurance and 5.4 kWh, so ten dark cells (~1.1 h) are a priced
+    crossing, not a wall. Waiting for the Sun is still available; it is no
+    longer compulsory. The compulsory case is
+    test_a_dark_stretch_longer_than_the_shadow_endurance_forces_a_wait."""
     rover = get_rover()
-    kwargs = dict(
-        traversable=traversable,
-        start=(0, 0),
-        goal=(0, corridor_len - 1),
-        resolution_m=80.0,
-        slice_hours=slice_hours,
-        rover=rover,
-        slope_grid=slope,
-    )
-    waited = astar_4d(cost_cube, wait_cube, **kwargs)
-    forbidden = astar_4d(cost_cube, np.full_like(wait_cube, np.inf), **kwargs)
+    c = _corridor(shadow_len=10, n_shadow_slices=3, corridor_len=12, rover=rover)
+    forbidden = astar_4d(c["cost_cube"], np.full_like(c["wait_cube"], np.inf), **c["kwargs"])
+    assert forbidden["error"] is None
+    assert forbidden["metrics"]["wait_steps"] == 0
+    assert forbidden["metrics"]["max_continuous_shadow_h"] < rover["h_max_shadow_h"]
+    assert forbidden["metrics"]["min_battery_pct"] > rover["soc_min_pct"] * 100.0
 
+
+# ── The rover's envelope lives in the state: battery and shadow endurance ────
+#
+# The cube used to close any cell whose regolith skin fell below -150 C, so
+# at a lunar-night epoch the entire production grid went impassable within
+# 2.5 h and /api/plan-4d answered "no finite cost" for every pair, although
+# the catalogue says LPR-1 survives 50 h of darkness. Darkness is now the
+# ROVER'S problem: each search label carries battery and continuous shadow
+# hours, the same physics wait_cost and the simulator use, and a transition
+# that drains below the reserve or outlasts h_max_shadow_h is refused.
+
+
+def _corridor(shadow_len, n_shadow_slices, corridor_len, rover):
+    """_real_cubes_shadowed_corridor, plus the shadow cube the planner now
+    reads and a caller-supplied rover so a test can shrink its envelope."""
+    from app.cost_cube import (
+        auto_slice_hours,
+        build_cost_cube,
+        build_wait_cost_cube,
+    )
+
+    shape = (1, corridor_len)
+    slope = np.full(shape, 3.0)
+    traversable = np.ones(shape, dtype=bool)
+    base_grids = {
+        "slope": slope,
+        "thermal": np.full(shape, -60.0),
+        "traversable": traversable,
+        "metadata": {
+            "resolution_m": 80.0,
+            "shape": list(shape),
+            "thermal_field": "sunlit_peak",
+        },
+    }
+    n_slices = n_shadow_slices + corridor_len + 2
+    shadow_series = []
+    for t in range(n_slices):
+        shadow = np.zeros(shape)
+        if t < n_shadow_slices:
+            shadow[0, 1 : 1 + shadow_len] = 1.0
+        shadow_series.append(shadow)
+    slice_hours = auto_slice_hours(slope, traversable, 80.0, rover)
+    cost_cube = build_cost_cube(
+        base_grids, shadow_series, rover, coarsen=1, slice_hours=slice_hours
+    )
+    wait_cube = build_wait_cost_cube(
+        [1.0 - s for s in shadow_series], rover, slice_hours, coarsen=1
+    )
+    return dict(
+        cost_cube=cost_cube,
+        wait_cube=wait_cube,
+        kwargs=dict(
+            traversable=traversable,
+            start=(0, 0),
+            goal=(0, corridor_len - 1),
+            resolution_m=80.0,
+            slice_hours=slice_hours,
+            rover=rover,
+            slope_grid=slope,
+            shadow_cube=np.stack(shadow_series, axis=0),
+        ),
+    )
+
+
+def test_planner_without_a_shadow_cube_reports_a_full_battery():
+    """Callers that predate the envelope (the toy cubes above) get the old
+    answer plus an honest profile: nothing drains, nothing is dark."""
+    result = _run(*_uniform_case(n_slices=8))
+    assert result["error"] is None
+    assert result["path_battery_pct"] == [100.0] * len(result["path_states"])
+    assert result["path_dark_hours"] == [0.0] * len(result["path_states"])
+    assert result["metrics"]["min_battery_pct"] == 100.0
+    assert result["metrics"]["max_continuous_shadow_h"] == 0.0
+
+
+def test_planner_reports_the_battery_and_shadow_profile_along_the_route():
+    rover = get_rover()
+    c = _corridor(shadow_len=10, n_shadow_slices=0, corridor_len=12, rover=rover)
+    result = astar_4d(c["cost_cube"], c["wait_cube"], **c["kwargs"])
+    assert result["error"] is None
+    states = result["path_states"]
+    assert len(result["path_battery_pct"]) == len(states)
+    assert len(result["path_dark_hours"]) == len(states)
+    assert result["path_battery_pct"][0] == pytest.approx(100.0)
+    # A lit corridor: the array outproduces the drive, so nothing is lost.
+    assert min(result["path_battery_pct"]) == pytest.approx(100.0)
+    assert result["metrics"]["max_continuous_shadow_h"] == 0.0
+    assert result["metrics"]["energy_charged_wh"] >= 0.0
+
+
+def _no_time_to_wait(c, n_slices):
+    """The same corridor with the horizon cut to *n_slices*: just enough to
+    drive straight through, none to wait (or to shuffle back and forth,
+    which an infinite wait cube would not prevent)."""
+    kwargs = dict(c["kwargs"])
+    kwargs["shadow_cube"] = kwargs["shadow_cube"][:n_slices]
+    return c["cost_cube"][:n_slices], c["wait_cube"][:n_slices], kwargs
+
+
+def test_a_dark_stretch_longer_than_the_shadow_endurance_forces_a_wait():
+    """Ten shadowed cells take ~1.1 h to cross and stay dark for 12 slices
+    (~1.3 h). A rover that survives only 0.5 h of continuous darkness cannot
+    rush them; it has to wait for the Sun -- and when there is no time to
+    wait, the refusal is named for what it is."""
+    rover = dict(get_rover())
+    rover["h_max_shadow_h"] = 0.5
+    c = _corridor(shadow_len=10, n_shadow_slices=12, corridor_len=12, rover=rover)
+
+    waited = astar_4d(c["cost_cube"], c["wait_cube"], **c["kwargs"])
     assert waited["error"] is None
     assert waited["metrics"]["wait_steps"] > 0
-    # A planner that cannot wait cannot get there at all.
+    assert waited["metrics"]["max_continuous_shadow_h"] <= 0.5
+
+    cost_cut, wait_cut, kwargs_cut = _no_time_to_wait(c, n_slices=13)
+    forbidden = astar_4d(cost_cut, wait_cut, **kwargs_cut)
     assert forbidden["error"] is not None
-    assert forbidden["metrics"]["wait_steps"] == 0
+    assert forbidden["metrics"]["edges_rejected"]["shadow_endurance"] > 0
+    assert "shadow" in forbidden["error"].lower()
+
+
+def test_planner_waits_for_sunlight_to_recharge_before_a_dark_crossing():
+    """Crossing ten dark cells draws ~330 Wh. With a 150 Wh battery and a
+    20 percent reserve that is impossible in the dark, while in sunlight the
+    array outproduces the drive -- so the plan is: wait for the Sun."""
+    rover = dict(get_rover())
+    rover["e_cap_wh"] = 150.0
+    c = _corridor(shadow_len=10, n_shadow_slices=12, corridor_len=12, rover=rover)
+
+    waited = astar_4d(c["cost_cube"], c["wait_cube"], **c["kwargs"])
+    assert waited["error"] is None
+    assert waited["metrics"]["wait_steps"] > 0
+    assert waited["metrics"]["min_battery_pct"] >= rover["soc_min_pct"] * 100.0 - 1e-6
+
+    cost_cut, wait_cut, kwargs_cut = _no_time_to_wait(c, n_slices=13)
+    forbidden = astar_4d(cost_cut, wait_cut, **kwargs_cut)
+    assert forbidden["error"] is not None
+    assert forbidden["metrics"]["edges_rejected"]["soc_floor"] > 0
+    assert "battery" in forbidden["error"].lower()
+
+
+def test_a_start_below_the_reserve_may_wait_in_sunlight_to_charge():
+    """Starting at 10 percent, under a 20 percent reserve, is not a dead
+    end when the start cell is lit: waiting charges, then the route runs."""
+    rover = get_rover()
+    c = _corridor(shadow_len=0, n_shadow_slices=0, corridor_len=6, rover=rover)
+    result = astar_4d(c["cost_cube"], c["wait_cube"], **c["kwargs"], initial_soc_frac=0.10)
+    assert result["error"] is None
+    assert result["path_battery_pct"][0] == pytest.approx(10.0)
+    assert result["path_battery_pct"][-1] > 10.0
+    assert result["metrics"]["wait_steps"] >= 0
+
+
+def test_battery_profile_matches_the_public_drain_functions():
+    """The planner integrates the battery with its own inlined arithmetic
+    for speed; it must agree exactly with cost_engine's reference functions
+    (the ones wait_cost and the simulator use), or the three would drift."""
+    from app.cost_engine import (
+        edge_travel_time_s,
+        move_battery_drain_wh,
+        wait_battery_drain_wh,
+    )
+
+    rover = dict(get_rover())
+    rover["e_cap_wh"] = 400.0  # small enough that the trace actually moves
+    c = _corridor(shadow_len=10, n_shadow_slices=12, corridor_len=12, rover=rover)
+    result = astar_4d(c["cost_cube"], c["wait_cube"], **c["kwargs"])
+    assert result["error"] is None
+    assert result["metrics"]["wait_steps"] > 0 or result["metrics"]["move_steps"] > 0
+
+    shadow = c["kwargs"]["shadow_cube"]
+    slope = c["kwargs"]["slope_grid"]
+    slice_h = c["kwargs"]["slice_hours"]
+    states = result["path_states"]
+    battery = rover["e_cap_wh"]
+    expected = [battery]
+    for (r0, c0, t0), (r1, c1, t1) in zip(states[:-1], states[1:]):
+        if (r0, c0) == (r1, c1):
+            drain = wait_battery_drain_wh(float(shadow[t0, r0, c0]), slice_h, rover)
+        else:
+            distance = 80.0 * (2 ** 0.5 if (r0 != r1 and c0 != c1) else 1.0)
+            edge_slope = 0.5 * (float(slope[r0, c0]) + float(slope[r1, c1]))
+            exposure = 0.5 * (float(shadow[t0, r0, c0]) + float(shadow[t1, r1, c1]))
+            drain = move_battery_drain_wh(edge_slope, distance, exposure, rover)
+            assert edge_travel_time_s(edge_slope, distance, rover) > 0
+        battery = min(rover["e_cap_wh"], battery - drain)
+        expected.append(battery)
+    expected_pct = [100.0 * b / rover["e_cap_wh"] for b in expected]
+    assert result["path_battery_pct"] == pytest.approx(expected_pct, abs=1e-3)
+
+
+def test_rejection_tally_always_carries_the_envelope_keys():
+    result = _run(*_uniform_case(n_slices=8))
+    tally = result["metrics"]["edges_rejected"]
+    assert "soc_floor" in tally and "shadow_endurance" in tally

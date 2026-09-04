@@ -12,6 +12,7 @@ range [0, 360).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +23,43 @@ import numpy as np
 # which a CWD-relative "kernels/lunapath.tm" never resolves (fetch_kernels.py
 # writes to the REPO ROOT's kernels/). Same pattern fetch_kernels.py uses.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-DEFAULT_META_KERNEL = str(_REPO_ROOT / "kernels" / "lunapath.tm")
+
+
+def ascii_safe_path(path: Path | str) -> str:
+    """Return *path* in a form CSPICE can actually open.
+
+    CSPICE is a C library: ``furnsh_c`` takes the path as a narrow byte
+    string, so a checkout living under a non-ASCII path -- a Windows user
+    profile like ``C:/Users/Oguzhan`` with a real "g-breve" in it, say --
+    reaches it mangled and fails with SPICE(NOSUCHFILE) on a file that is
+    demonstrably on disk. The failure is doubly confusing because the error
+    text prints the mangled path, so it looks like the file is missing
+    rather than unreachable.
+
+    On Windows the fix is the 8.3 short name, which is ASCII by
+    construction. Everything else (already-ASCII paths, non-Windows, or a
+    volume with 8.3 name generation disabled) falls through unchanged --
+    the caller is no worse off than before.
+    """
+    text = str(path)
+    if text.isascii() or os.name != "nt":
+        return text
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        get_short = ctypes.windll.kernel32.GetShortPathNameW
+        get_short.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+        get_short.restype = wintypes.DWORD
+        buf = ctypes.create_unicode_buffer(32768)
+        if get_short(text, buf, len(buf)) and buf.value.isascii():
+            return buf.value
+    except Exception:  # pragma: no cover - defensive, platform dependent
+        pass
+    return text
+
+
+DEFAULT_META_KERNEL = ascii_safe_path(_REPO_ROOT / "kernels" / "lunapath.tm")
 _MOON_BODY_FRAME = "MOON_ME"
 
 

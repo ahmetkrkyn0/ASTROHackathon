@@ -185,12 +185,19 @@ def _coupled(thermal, shadow):
 
 
 def _passable(traversable, coupled_thermal):
-    """The slice's own traversable mask: the base mask AND warm enough now."""
-    from app.constants import THERMAL_MIN_TRAVERSABLE_C
+    """The slice's own traversable mask.
 
-    return np.asarray(traversable, dtype=bool) & (
-        np.asarray(coupled_thermal) >= THERMAL_MIN_TRAVERSABLE_C
-    )
+    This used to AND the base mask with ``coupled_thermal >= -150 C`` -- the
+    regolith skin temperature at that instant. On the production grid that
+    gate closed every cell within ~1.3 h of darkness and made the whole map
+    impassable for the entire lunar night, although the rover catalogue says
+    LPR-1 survives 50 h of shadow. Whether the rover can be in a dark cell
+    is now decided by the ROVER'S envelope (battery and shadow endurance,
+    carried in the planner's state), not by the ground's skin temperature;
+    the static cold-trap gate lives in the base ``traversable`` mask.
+    """
+    del coupled_thermal
+    return np.asarray(traversable, dtype=bool)
 
 
 def test_cost_cube_matches_a_per_slice_reference():
@@ -374,17 +381,67 @@ def test_cost_cube_honours_shadow_reading_layers_regardless_of_name():
 
     assert cube[1, 0, 0] > cube[0, 0, 0], "cube must vary with shadow"
     assert cube[1, 0, 0] == pytest.approx(1.0)
-    # With the dynamics on, SUSTAINED shadow is not merely expensive but
-    # impassable -- while a cell that has only just entered shadow is not.
-    # Round 3 made the transition instantaneous, which condemned a cell for
-    # a shadow it had been in for one slice; the regolith lag is what
-    # separates a passing shadow from a cold trap. (Round 4 review, H-3.)
+    # With the dynamics on, sustained shadow makes a cell steadily MORE
+    # EXPENSIVE as the surface cools -- but never impassable on its own.
+    # Round 4 closed the cell once the skin fell below -150 C, which on the
+    # production grid closed the entire map for the whole lunar night
+    # (measured: 0 percent passable 2.5 h into 2026-09-07). Whether the
+    # rover may be there is the rover's envelope to decide, in the planner's
+    # state; the ground's skin temperature is a cost, not a veto.
     assert np.isfinite(coupled[0, 0, 0])
     assert np.isfinite(coupled[1, 0, 0]), "one slice of shadow is not a cold trap"
-    assert np.isinf(coupled[-1, 0, 0]), "sustained shadow must close the cell"
+    assert np.isfinite(coupled[-1, 0, 0]), "sustained shadow must not close the cell"
+    # (This test swaps the cost map for a single shadow-reading layer, so
+    # the cooling itself is invisible here; the real map's rise is asserted
+    # in test_lunar_night_leaves_statically_passable_cells_finite.)
     dark = [coupled[i, 0, 0] for i in range(1, len(coupled))]
-    finite = [v for v in dark if np.isfinite(v)]
-    assert finite == sorted(finite), "cost must rise as the surface cools"
+    assert dark == sorted(dark), "cost must never fall as the surface cools"
+
+
+def test_lunar_night_leaves_statically_passable_cells_finite():
+    """The user-facing failure: a 4-D plan at a night epoch found the whole
+    cube infinite. A cell the static mask calls passable must stay finite
+    however long it sits in full shadow; darkness is priced, not banned."""
+    grids = _base_grids()
+    hours_of_night = 48
+    series = [np.ones(SHAPE)] * hours_of_night
+    cube = build_cost_cube(grids, series, get_rover(), slice_hours=1.0)
+    assert np.isfinite(cube).all()
+    assert cube[-1, 0, 0] > cube[0, 0, 0]
+
+
+# ── Battery physics shared by the planner and the simulator ──────────────────
+
+
+def test_wait_battery_drain_charges_in_sun_and_drains_in_shadow():
+    from app.cost_engine import wait_battery_drain_wh
+
+    rover = get_rover()
+    in_sun = wait_battery_drain_wh(0.0, 1.0, rover)
+    in_shadow = wait_battery_drain_wh(1.0, 1.0, rover)
+    assert in_sun == pytest.approx(rover["p_idle_w"] - rover["p_solar_w"])
+    assert in_sun < 0.0, "sunlight charges: a negative drain"
+    assert in_shadow == pytest.approx(rover["p_shadow_w"])
+
+
+def test_move_battery_drain_is_gross_draw_minus_solar_income():
+    from app.cost_engine import (
+        edge_travel_time_s,
+        gross_energy_per_metre_wh,
+        move_battery_drain_wh,
+    )
+
+    rover = get_rover()
+    theta, distance = 3.0, 80.0
+    hours = edge_travel_time_s(theta, distance, rover) / 3600.0
+    dark = move_battery_drain_wh(theta, distance, 1.0, rover)
+    lit = move_battery_drain_wh(theta, distance, 0.0, rover)
+    assert dark == pytest.approx(gross_energy_per_metre_wh(theta, 1.0, rover) * distance)
+    assert lit == pytest.approx(
+        gross_energy_per_metre_wh(theta, 0.0, rover) * distance
+        - rover["p_solar_w"] * hours
+    )
+    assert lit < dark
 
 
 
