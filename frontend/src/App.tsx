@@ -36,6 +36,18 @@ import PlaybackBar from './components/Analysis/PlaybackBar'
 import MissionAssistant from './components/Assistant/MissionAssistant'
 import FleetSelectionView from './components/Fleet/FleetSelectionView'
 
+// Modular shell: App knows the slots, never the features.
+import { MissionProvider } from './mission/MissionProvider'
+import type { MissionValue } from './mission/types'
+import { OverlayProvider } from './overlay/OverlayProvider'
+import {
+  BottomDock,
+  CanvasOverlaySlot,
+  GlobalOverlaySlot,
+  LeftRailSlot,
+  RightRailSlot,
+} from './shell/slots'
+
 const DEFAULT_WEIGHTS: PlanWeights = {
   w_slope: 0.409,
   w_energy: 0.259,
@@ -435,8 +447,50 @@ export default function App() {
   const missionStatus = layerError ? 'ATTN' : isSolving ? 'SOLVING' : planResult ? 'LOCKED' : 'NOMINAL'
   const appIsVisible = phase === 'app'
 
+  // Exactly the fields MissionValue declares and no more: an extra one is a
+  // compile error, which is what keeps this object honest as the contract
+  // grows. Nine of the ten already existed under these names -- this branch
+  // and the feature branch both grew from berke-3d.
+  const missionValue: MissionValue = useMemo(
+    () => ({
+      gridMeta: elevationLayer
+        ? {
+            rows: elevationLayer.shape[0],
+            cols: elevationLayer.shape[1],
+            resolutionM: focusTelemetry.resolutionM,
+          }
+        : null,
+      roverId: selectedRoverId,
+      weights,
+      start,
+      goal,
+      planResult,
+      // Always null, and deliberately: this cockpit has no "select a cell"
+      // control. Start and goal are placed by mode-scoped clicks and mean
+      // "route from here" / "route to here". A feature that wants today's
+      // analysis focus calls selectStableAnalysisCell by name.
+      selectedCell: null,
+      activeViewMode: viewMode,
+      dimension,
+      missionMode,
+    }),
+    [
+      dimension,
+      elevationLayer,
+      focusTelemetry.resolutionM,
+      goal,
+      missionMode,
+      planResult,
+      selectedRoverId,
+      start,
+      viewMode,
+      weights,
+    ],
+  )
+
   return (
-    <>
+    <MissionProvider value={missionValue} focusTelemetry={focusTelemetry}>
+      <OverlayProvider>
       <SpaceBackdrop
         stage={phase === 'landing' ? 'ambient' : 'deck'}
         frozen={planningEngaged}
@@ -518,6 +572,8 @@ export default function App() {
                 )}
               </>
             )}
+
+            <LeftRailSlot />
           </aside>
 
           {/* ── CENTER STAGE: 2D/3D TERRAIN WORKBENCH ───────────────────────── */}
@@ -617,8 +673,11 @@ export default function App() {
                 roverName={selectedRover?.name}
               />
 
-              {/* Primary Map Viewport (2D or 3D) */}
+              {/* Primary Map Viewport (2D or 3D). .map-canvas-shell already
+                  carries position: relative (App.css:1208), which is what
+                  CanvasOverlaySlot sizes itself against. */}
               <div className="map-canvas-shell">
+                <CanvasOverlaySlot />
                 {dimension === '2d' ? (
                   <MapCanvas
                     ref={mapRef}
@@ -722,6 +781,8 @@ export default function App() {
                 ))}
               </div>
             </div>
+
+            <BottomDock />
           </section>
 
           {/* ── RIGHT RAIL: MISSION CONTEXT (PLAN) vs ROUTE ANALYSIS (ANALYZE) ── */}
@@ -767,6 +828,8 @@ export default function App() {
                 )}
               </>
             )}
+
+            <RightRailSlot />
           </aside>
         </main>
       )}
@@ -780,6 +843,11 @@ export default function App() {
           goal={goal}
           planResult={planResult}
         />
+
+        {/* Application-level floating utilities. Sits immediately before the
+            toast stack and shares its parent: shell.css moves the toasts clear
+            of an open assistant with a sibling combinator, which needs both. */}
+        <GlobalOverlaySlot />
 
         {/* Floating System Toasts */}
         {toasts.length > 0 && (
@@ -804,7 +872,8 @@ export default function App() {
           </aside>
         )}
       </div>
-    </>
+      </OverlayProvider>
+    </MissionProvider>
   )
 }
 
