@@ -781,7 +781,7 @@ export default function App() {
 
         {/* Floating System Toasts */}
         {toasts.length > 0 && (
-          <aside className="toast-rack" aria-live="polite" aria-label="System notifications">
+          <aside className="toast-stack" aria-live="polite" aria-label="System notifications">
             {toasts.map((toast) => (
               <div key={toast.id} className={`toast-card toast-card--${toast.tone}`} role="status">
                 <div className="toast-body">
