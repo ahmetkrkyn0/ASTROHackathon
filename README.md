@@ -142,6 +142,7 @@ Backend açılışta işlenmiş grid’leri bulursa yükler; bulamazsa API üzer
 - API ile doğrudan DEM yüklerken dosya `backend/data/dem/` altına konur (klasör yoksa oluşturulur).
 - Belirsizlik katmanları (B3) için NASA PGDA'nın Site11 DEM klonları: `python scripts/build_dem_clone_cache.py` (varsayılan 20 klon, 1 km yakın-alan dolgusu; `--n-clones 100` ile genişletilir; `horizon_map.npy` varsa klon ufuk küplerini de üretir). Ürün: https://pgda.gsfc.nasa.gov/products/78
 - Formal güvenlik monitörü (D3): gereksinimler `docs/requirements/lunapath.fret.json` (FRETISH + STL), robustness `rtamt==0.3.5` ile (requirements.txt'te; kurulu değilse yerleşik değerlendirici aynı sonucu verir ve yanıt `monitor.engine` ile söyler). Rapor: `python scripts/safety_monitor_report.py`.
+- Sürekli-aydınlık koridoru (A2, CMU'nun sun-synchronous x-y-t budaması): `/api/plan-4d` `require_continuous_illumination` + `lit_rule`, yanıtta `illumination_corridor` bloğu ve `metrics.max_dwell_hours`; küp `GET /api/illumination-corridor?...&format=f32`. Rapor: `python scripts/illumination_corridor_report.py` (ufuk küpü + çekirdek gerekir).
 
 ---
 

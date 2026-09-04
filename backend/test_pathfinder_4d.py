@@ -777,3 +777,139 @@ def test_no_path_reason_names_the_haven_rule():
     tally["safe_haven_deadline"] = 4
     reason = no_path_reason_4d(tally, get_rover(), 6, 1.0)
     assert "4 transitions" in reason and "safe haven" in reason
+
+
+
+# ── The continuous-illumination corridor (A2) ────────────────────────────────
+
+
+def _corridor_case(n_slices=8, goal_lit_from=4):
+    """1x4 row; cells 0..2 lit throughout, the goal cell lit from a slice."""
+    from app.illumination_corridor import lit_run
+
+    cost_cube, wait_cube, traversable = _uniform_case(n_slices=n_slices)
+    corridor = np.ones((n_slices, 1, 4), dtype=bool)
+    corridor[:, 0, 3] = False
+    if goal_lit_from is not None:
+        corridor[goal_lit_from:, 0, 3] = True
+    return cost_cube, wait_cube, traversable, corridor, lit_run(corridor)
+
+
+def _run_corridor(case, enforce=True, shadow_cube=None, slice_hours=SLICE_H):
+    cost_cube, wait_cube, traversable, corridor, run = case
+    return astar_4d(
+        cost_cube,
+        wait_cube,
+        traversable,
+        start=(0, 0),
+        goal=(0, 3),
+        resolution_m=RES_M,
+        slice_hours=slice_hours,
+        rover=get_rover(),
+        shadow_cube=shadow_cube,
+        corridor_cube=corridor,
+        corridor_lit_run_cube=run,
+        require_continuous_illumination=enforce,
+    )
+
+
+def test_continuous_illumination_is_a_declared_rejection_reason():
+    from app.pathfinder_4d import REJECTION_KEYS, no_path_reason_4d
+
+    assert "continuous_illumination" in REJECTION_KEYS
+    tally = {key: 0 for key in REJECTION_KEYS}
+    tally["continuous_illumination"] = 3
+    message = no_path_reason_4d(tally, get_rover(), 8, 1.0)
+    assert "corridor" in message and "3" in message
+
+
+def test_enforced_corridor_keeps_every_state_inside_and_waits_for_the_goal_to_light():
+    case = _corridor_case()
+    result = _run_corridor(case)
+    assert result["error"] is None, result["error"]
+    corridor = case[3]
+    for r, c, t in result["path_states"]:
+        assert corridor[t, r, c], (r, c, t)
+    # The goal is lit from t=4; a one-slice move needs it lit at t-1 and t,
+    # so the earliest arrival is t=5, after waiting.
+    assert result["metrics"]["arrival_slice"] == 5
+    assert result["metrics"]["wait_steps"] >= 1
+    assert result["metrics"]["continuous_illumination_enforced"] is True
+    assert result["metrics"]["states_outside_corridor"] == 0
+    assert result["metrics"]["moves_outside_corridor"] == 0
+    assert result["metrics"]["edges_rejected"]["continuous_illumination"] > 0
+
+
+def test_a_goal_the_corridor_never_opens_is_refused_with_the_corridor_named():
+    result = _run_corridor(_corridor_case(goal_lit_from=None))
+    assert result["error"] is not None
+    assert "corridor" in result["error"]
+    assert result["metrics"]["edges_rejected"]["continuous_illumination"] > 0
+    assert result["metrics"]["continuous_illumination_enforced"] is True
+
+
+def test_a_start_outside_the_corridor_at_the_first_slice_is_refused():
+    cost_cube, wait_cube, traversable, corridor, run = _corridor_case()
+    corridor = corridor.copy()
+    corridor[0, 0, 0] = False
+    result = _run_corridor((cost_cube, wait_cube, traversable, corridor, run))
+    assert result["error"] is not None
+    assert "first slice" in result["error"] and "corridor" in result["error"]
+
+
+def test_requiring_the_corridor_without_cubes_is_an_error():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    result = astar_4d(
+        cost_cube, wait_cube, traversable, start=(0, 0), goal=(0, 3),
+        resolution_m=RES_M, slice_hours=SLICE_H, rover=get_rover(),
+        require_continuous_illumination=True,
+    )
+    assert result["error"] is not None and "corridor_cube" in result["error"]
+    half = astar_4d(
+        cost_cube, wait_cube, traversable, start=(0, 0), goal=(0, 3),
+        resolution_m=RES_M, slice_hours=SLICE_H, rover=get_rover(),
+        corridor_cube=np.ones((6, 1, 4), dtype=bool),
+    )
+    assert half["error"] is not None and "corridor_lit_run_cube" in half["error"]
+
+
+def test_an_unenforced_corridor_only_reports_where_the_route_leaves_it():
+    case = _corridor_case(goal_lit_from=None)
+    free = _run_corridor(case, enforce=False)
+    plain = _run(*_uniform_case(n_slices=8))
+    assert free["error"] is None
+    assert free["path_states"] == plain["path_states"]
+    assert free["metrics"]["continuous_illumination_enforced"] is False
+    # Only the arrival at the never-lit goal lies outside.
+    assert free["metrics"]["states_outside_corridor"] == 1
+    assert free["metrics"]["moves_outside_corridor"] == 1
+    assert free["metrics"]["edges_rejected"]["continuous_illumination"] == 0
+    assert plain["metrics"]["states_outside_corridor"] is None
+
+
+def test_inside_the_corridor_the_planner_accrues_no_shadow_hours():
+    case = _corridor_case()
+    shadow = np.where(case[3], 0.0, 1.0)  # the cube the corridor was cut from
+    enforced = _run_corridor(case, enforce=True, shadow_cube=shadow)
+    assert enforced["error"] is None
+    assert all(d == 0.0 for d in enforced["path_dark_hours"])
+    assert enforced["metrics"]["max_continuous_shadow_h"] == 0.0
+    free = _run_corridor(case, enforce=False, shadow_cube=shadow)
+    assert free["error"] is None
+    assert max(free["path_dark_hours"]) > 0.0  # arrives in the dark goal early
+
+
+def test_a_two_slice_move_is_refused_until_both_blocks_stay_lit_throughout():
+    from app.cost_engine import edge_travel_time_s
+
+    travel_h = edge_travel_time_s(0.0, RES_M, get_rover()) / 3600.0
+    slice_hours = travel_h * 0.6  # ceil(1/0.6) = 2 slices per move
+    case = _corridor_case(n_slices=12, goal_lit_from=4)
+    result = _run_corridor(case, slice_hours=slice_hours)
+    assert result["error"] is None, result["error"]
+    # Departure at t needs the goal lit over t..t+2: lit from 4 -> depart 4,
+    # arrive 6. Arriving at 5 (depart 3) would need it lit at 3.
+    assert result["metrics"]["arrival_slice"] == 6
+    corridor = case[3]
+    for r, c, t in result["path_states"]:
+        assert corridor[t, r, c]

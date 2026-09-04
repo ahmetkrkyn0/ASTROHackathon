@@ -50,6 +50,12 @@ REJECTION_KEYS: tuple[str, ...] = (
     # reach a safe haven before the Earth sets on it, refused only under
     # VIPER's leg rule (require_safe_haven).
     "safe_haven_deadline",
+    # Continuous illumination (A2): a transition that would take the rover
+    # out of the lit corridor -- a wait into a dark voxel, or a move whose
+    # arrival voxel is outside the corridor or whose two blocks are not lit
+    # for every slice of the move -- refused only under
+    # require_continuous_illumination.
+    "continuous_illumination",
 )
 
 
@@ -83,6 +89,7 @@ def no_path_reason_4d(
     endurance = rejections.get("shadow_endurance", 0)
     dte = rejections.get("earth_visibility", 0)
     haven = rejections.get("safe_haven_deadline", 0)
+    corridor = rejections.get("continuous_illumination", 0)
 
     parts: list[str] = []
     # The envelope first: when the battery or the darkness closed the route,
@@ -109,6 +116,13 @@ def no_path_reason_4d(
             f"{haven} transitions would have left the rover unable to reach a "
             "safe haven before the Earth sets (require_safe_haven: "
             f"{float(rover['h_max_shadow_h']):g} h shadow endurance)"
+        )
+    if corridor:
+        parts.append(
+            f"{corridor} transitions would have taken the rover out of the "
+            "continuous-illumination corridor (require_continuous_illumination: "
+            "every block the rover occupies, for every slice of a move, must be "
+            "lit in the shadow series)"
         )
     if lateral:
         parts.append(
@@ -138,6 +152,7 @@ def no_path_reason_4d(
     lead = "No path found"
     if horizon and not (
         lateral or along or blocked or unknown or soc or endurance or dte or haven
+        or corridor
     ):
         lead = "No path found within the time horizon"
     return (
@@ -298,6 +313,7 @@ def _empty(
     rejections: dict[str, int] | None = None,
     nodes_expanded: int = 0,
     safe_haven_enforced: bool = False,
+    continuous_illumination_enforced: bool = False,
 ) -> dict[str, Any]:
     """A failed plan.
 
@@ -336,6 +352,10 @@ def _empty(
             # Whether the rule was in force when the search failed: a caller
             # reading a refusal needs to know which rules produced it.
             "safe_haven_enforced": bool(safe_haven_enforced),
+            # The lit corridor (A2): None without a corridor cube.
+            "states_outside_corridor": None,
+            "moves_outside_corridor": None,
+            "continuous_illumination_enforced": bool(continuous_illumination_enforced),
         },
         "error": error,
     }
@@ -441,8 +461,27 @@ def astar_4d(
     time_to_haven_hours: np.ndarray | None = None,
     hours_until_earthset_cube: np.ndarray | None = None,
     require_safe_haven: bool = False,
+    corridor_cube: np.ndarray | None = None,
+    corridor_lit_run_cube: np.ndarray | None = None,
+    require_continuous_illumination: bool = False,
 ) -> dict[str, Any]:
     """Plan through space and time. Returns path_states, path_pixels, metrics.
+
+    The continuous-illumination corridor (A2)
+    -----------------------------------------
+    *corridor_cube* is the (T, H, W) boolean corridor
+    ``illumination_corridor.build_corridor`` prunes from the shadow series
+    (CMU's sun-synchronous volume: every voxel on some lit path from the
+    first slice to the last); *corridor_lit_run_cube* the (T, H, W) count of
+    consecutive lit slices ending at each voxel, on the lit volume the
+    corridor was cut from. Given together they are always REPORTED --
+    ``metrics.states_outside_corridor``, ``metrics.moves_outside_corridor``
+    -- and with *require_continuous_illumination* ENFORCED: the start must
+    be inside at slice 0, a WAIT may only step into a corridor voxel, and a
+    MOVE of ``d`` slices may only arrive in a corridor voxel with both its
+    blocks lit for the ``d + 1`` slices from departure to arrival. Inside
+    the corridor the shadow clock never starts, so ``path_dark_hours`` is
+    zero throughout. Refusals are tallied as ``continuous_illumination``.
 
     The safe-haven deadline (A1)
     ----------------------------
@@ -555,6 +594,26 @@ def astar_4d(
         return _empty("time_to_haven_hours shape must match cost_cube slices")
     if deadline is not None and deadline.shape != cost.shape:
         return _empty("hours_until_earthset_cube shape must match cost_cube")
+    corridor = None if corridor_cube is None else np.asarray(corridor_cube, dtype=bool)
+    lit_run = (
+        None if corridor_lit_run_cube is None else np.asarray(corridor_lit_run_cube)
+    )
+    if (corridor is None) != (lit_run is None):
+        return _empty(
+            "corridor_cube and corridor_lit_run_cube go together: give both or "
+            "neither"
+        )
+    if corridor is not None and corridor.shape != cost.shape:
+        return _empty("corridor_cube shape must match cost_cube")
+    if lit_run is not None and lit_run.shape != cost.shape:
+        return _empty("corridor_lit_run_cube shape must match cost_cube")
+    enforce_corridor = bool(require_continuous_illumination)
+    if enforce_corridor and corridor is None:
+        return _empty(
+            "corridor_cube and corridor_lit_run_cube are required to enforce "
+            "continuous illumination (require_continuous_illumination=True "
+            "without a corridor to check against)"
+        )
     haven_fields = tts is not None
     enforce_haven = bool(require_safe_haven)
     if enforce_haven and not haven_fields:
@@ -592,6 +651,14 @@ def astar_4d(
             f"Start {start} cannot reach a safe haven before the Earth sets: "
             f"{start_tts:.2f} h to the nearest haven against "
             f"{start_deadline:.2f} h of link left"
+        )
+
+    if enforce_corridor and not corridor[0][start]:
+        return _empty(
+            f"Start {start} is not inside the continuous-illumination corridor "
+            "at the first slice: under require_continuous_illumination the "
+            "rover must begin in a block that is lit and can stay lit",
+            continuous_illumination_enforced=True,
         )
 
     # The goal's own deadline bounds the whole search. Arrival time only
@@ -836,6 +903,9 @@ def astar_4d(
                     # And past the goal's last admissible slice no wait can
                     # lead to a plan that ends there.
                     rejections["safe_haven_deadline"] += 1
+                elif enforce_corridor and not corridor[slice_index + 1, row, col]:
+                    # Waiting into a dark voxel is leaving the corridor. (A2.)
+                    rejections["continuous_illumination"] += 1
                 else:
                     push(
                         row, col, slice_index + 1,
@@ -915,6 +985,16 @@ def astar_4d(
                 rejections["safe_haven_deadline"] += 1
                 continue
 
+            # CMU's corridor (A2): arrive in a corridor voxel, with both
+            # blocks lit for every slice of the move.
+            if enforce_corridor and not (
+                corridor[arrival, nr, nc]
+                and lit_run[arrival, row, col] >= d_slices + 1
+                and lit_run[arrival, nr, nc] >= d_slices + 1
+            ):
+                rejections["continuous_illumination"] += 1
+                continue
+
             from_cost = cost[slice_index, row, col]
             to_cost = cost[arrival, nr, nc]
             if not (math.isfinite(from_cost) and math.isfinite(to_cost)):
@@ -960,6 +1040,7 @@ def astar_4d(
             rejections,
             nodes_expanded,
             safe_haven_enforced=enforce_haven,
+            continuous_illumination_enforced=enforce_corridor,
         )
 
     labels: list[tuple] = [goal_label]
@@ -1022,6 +1103,18 @@ def astar_4d(
         states_past_haven_deadline = None
         ends_at_safe_haven = None
 
+    if corridor is None:
+        states_outside_corridor = None
+        moves_outside_corridor = None
+    else:
+        outside = [not corridor[t, r, c] for r, c, t in states]
+        states_outside_corridor = int(sum(outside))
+        moves_outside_corridor = sum(
+            1
+            for previous, current, is_out in zip(states[:-1], states[1:], outside[1:])
+            if is_out and previous[:2] != current[:2]
+        )
+
     return {
         "path_states": states,
         "path_pixels": [(r, c) for r, c, _ in states],
@@ -1073,6 +1166,11 @@ def astar_4d(
             "states_past_haven_deadline": states_past_haven_deadline,
             "ends_at_safe_haven": ends_at_safe_haven,
             "safe_haven_enforced": enforce_haven,
+            # The lit corridor along the route (A2): states and moves that
+            # fall outside it (0 whenever enforced), None without a cube.
+            "states_outside_corridor": states_outside_corridor,
+            "moves_outside_corridor": moves_outside_corridor,
+            "continuous_illumination_enforced": enforce_corridor,
         },
         "error": None,
     }

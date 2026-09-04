@@ -9,7 +9,7 @@ import os
 import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 from urllib.parse import urlencode
 from uuid import uuid4
 
@@ -47,6 +47,10 @@ from .earth_visibility import (
     earth_track_for_series,
 )
 from .grid_frame import map_xy_to_pixel
+from .illumination_corridor import (
+    build_corridor as build_illumination_corridor,
+    corridor_summary as illumination_corridor_summary,
+)
 from .illumination_series import (
     _parse_start_utc,
     body_track_for_series,
@@ -518,6 +522,30 @@ class Plan4DRequest(BaseModel):
             "link. Needs start_utc, the horizon cube and the kernels; without "
             "them the request is a 422 rather than a silently unconstrained "
             "plan."
+        ),
+    )
+    # CMU's sun-synchronous corridor (A2): the (x, y, t) volume of blocks
+    # that are lit and passable and lie on some lit path from the first
+    # slice to the last. Always reported in `illumination_corridor`; this
+    # makes it a constraint, so the route never enters shadow in the model.
+    require_continuous_illumination: bool = Field(
+        default=False,
+        description=(
+            "Refuse any state outside the continuous-illumination corridor: "
+            "the start must be lit at the first slice, a wait may only step "
+            "into a lit voxel, and a move must keep both blocks lit for its "
+            "whole duration. Needs start_utc and the horizon cube (a "
+            "time-varying shadow series); with a static series the request "
+            "is a 422 rather than a meaningless guarantee."
+        ),
+    )
+    lit_rule: Literal["all", "majority"] = Field(
+        default="all",
+        description=(
+            "What makes a coarse block 'lit' at a slice: 'all' (every fine "
+            "cell in the block lit -- conservative, the default) or "
+            "'majority' (block mean shadow under 0.5, the planner's own dark "
+            "threshold)."
         ),
     )
 
@@ -1367,6 +1395,48 @@ def _coarse_time_to_haven(
     }
 
 
+def _corridor_refusal_sentence(block: dict[str, Any]) -> str:
+    """One sentence for a 404 under require_continuous_illumination: the
+    corridor's size and where the start and goal stand with respect to it,
+    which is what a caller needs to pick another epoch, start or goal."""
+    voxels = block["voxels"]
+    start = block["start"]
+    goal = block["goal"]
+    n_slices = int(block["n_slices"])
+    slice_hours = float(block["slice_hours"])
+    total = int(voxels["traversable"])
+    lit = int(voxels["lit_safe"])
+    kept = int(voxels["corridor"])
+    parts = [
+        f"Continuous-illumination corridor (lit_rule={block['lit_rule']}): "
+        f"{kept} of {lit} lit-and-passable voxels survive the two-pass pruning"
+        + (f" ({100.0 * kept / total:.1f} percent of the {total}-voxel traversable volume)" if total else "")
+    ]
+    if lit == 0:
+        parts.append(
+            f"no block is lit at any of the {n_slices} slices "
+            f"({n_slices * slice_hours:.1f} h) from start_utc"
+        )
+    if start["in_corridor_t0"]:
+        parts.append("the start block is inside the corridor at the first slice")
+    elif start["first_corridor_slice"] is not None:
+        first = int(start["first_corridor_slice"])
+        parts.append(
+            "the start block is outside the corridor at the first slice and "
+            f"first enters it at slice {first} ({first * slice_hours:.1f} h): "
+            "start later, or from a lit block"
+        )
+    else:
+        parts.append("the start block is never inside the corridor")
+    parts.append(
+        f"the goal block is inside the corridor for {int(goal['corridor_slices'])} "
+        f"of {n_slices} slices and "
+        + ("is" if goal["reachable_in_corridor"] else "is not")
+        + " reachable from the start inside it"
+    )
+    return "; ".join(parts) + "."
+
+
 @app.post("/api/plan-4d")
 def plan_4d(req: Plan4DRequest, request: Request):
     """Plan through space AND time, with an explicit WAIT decision.
@@ -1592,6 +1662,33 @@ def plan_4d(req: Plan4DRequest, request: Request):
         [coarsen_grid(snapshot, req.coarsen) for snapshot in shadow_series], axis=0
     )
 
+    # CMU's continuous-illumination corridor (A2) on the planner's grid: the
+    # lit-and-passable volume, pruned forward from the first slice and
+    # backward from the last over the planner's own edges. Always reported;
+    # enforced on request -- and only when the series actually varies with
+    # time, because a "corridor" cut from the long-run shadow fraction would
+    # promise something the model cannot know.
+    corridor = build_illumination_corridor(
+        shadow_series,
+        coarse_traversable,
+        coarse_elevation,
+        coarse_slope,
+        effective_resolution_m,
+        rover,
+        req.coarsen,
+        slice_hours,
+        req.lit_rule,
+    )
+    if req.require_continuous_illumination and not shadow_provenance.get("time_varying"):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "require_continuous_illumination needs a time-varying shadow "
+                f"series and the shadow model is {shadow_provenance.get('model')}: "
+                f"{shadow_provenance.get('reason', 'no reason given')}"
+            ),
+        )
+
     # Direct-to-Earth visibility per slice, on the planner's grid. Always
     # reported when it can be computed; enforced on request. Coarsened the
     # way traversability is -- a coarse cell has a link only if every fine
@@ -1682,6 +1779,9 @@ def plan_4d(req: Plan4DRequest, request: Request):
         time_to_haven_hours=coarse_tts,
         hours_until_earthset_cube=deadline_cube,
         require_safe_haven=req.require_safe_haven,
+        corridor_cube=corridor.corridor,
+        corridor_lit_run_cube=corridor.run,
+        require_continuous_illumination=req.require_continuous_illumination,
     )
     if result["error"]:
         # move_count already accounted for the edge gates, so a failure here
@@ -1750,6 +1850,15 @@ def plan_4d(req: Plan4DRequest, request: Request):
                    else f"{start_deadline:.1f} h of Earth link left")
                 + "."
             )
+        # And for the corridor: how much of the lit volume survives pruning,
+        # and where the start and the goal stand with respect to it.
+        if req.require_continuous_illumination:
+            detail += " " + _corridor_refusal_sentence(
+                illumination_corridor_summary(
+                    corridor, coarse_start, coarse_goal,
+                    provenance=shadow_provenance, enforced=True,
+                )
+            )
         raise HTTPException(status_code=404, detail=detail)
 
     # The planner solves on the coarse grid, but the caller asked in fine
@@ -1785,6 +1894,19 @@ def plan_4d(req: Plan4DRequest, request: Request):
         )
     )
 
+    # The corridor along the route (A2): where the route sits with respect
+    # to it, and CMU's dwell -- how long each visited block stays inside.
+    corridor_block = illumination_corridor_summary(
+        corridor,
+        coarse_start,
+        coarse_goal,
+        path_states=result["path_states"],
+        path_dark_hours=result["path_dark_hours"],
+        provenance=shadow_provenance,
+        enforced=req.require_continuous_illumination,
+    )
+    metrics["max_dwell_hours"] = corridor_block["route"]["max_dwell_hours"]
+
     # The formal safety catalogue on the planner's own per-state arrays (D3).
     safety_block = _safety_margins_4d(result, geometry, grids_for_plan, rover, slice_hours, req.coarsen)
 
@@ -1819,6 +1941,9 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # (D3): rho per requirement in hours / degC / pct / deg, the smallest
         # normalised margin, and the verdict of a runtime monitor.
         **({"safety_margins": safety_block} if safety_block is not None else {}),
+        # CMU's continuous-illumination corridor (A2): volume, pruning,
+        # components, where the start/goal/route stand, dwell, provenance.
+        "illumination_corridor": corridor_block,
         "n_slices": n_slices,
         "slice_hours": slice_hours,
         "slice_hours_source": slice_hours_source,
@@ -2931,6 +3056,141 @@ def illumination_series(
             "validity": REGOLITH_LAG_VALIDITY,
         },
         "sun": sun,
+        "fields": fields,
+        "binary_format": {
+            "dtype": "float32",
+            "endian": "little",
+            "order": "slice-major, then row-major",
+            "shape": [int(n_slices), rows, cols],
+            "nodata": "NaN",
+        },
+    }
+
+
+_CORRIDOR_FIELD_UNITS = {"corridor": "0/1", "lit_safe": "0/1", "dwell_hours": "h"}
+
+
+@app.get("/api/illumination-corridor")
+def illumination_corridor_endpoint(
+    start_utc: Optional[str] = None,
+    rover_id: str = DEFAULT_ROVER_ID,
+    n_slices: int = Query(24, ge=2, le=MAX_PLAN_4D_SLICES),
+    slice_hours: Optional[float] = Query(None, gt=0.0, le=24.0),
+    coarsen: int = Query(4, ge=1, le=16),
+    lit_rule: str = Query("all", pattern="^(all|majority)$"),
+    format: str = Query("json", pattern="^(json|f32)$"),
+    field: str = Query("corridor", pattern="^(corridor|lit_safe|dwell_hours)$"),
+):
+    """CMU's continuous-illumination corridor (A2) as a ``(T, h, w)`` cube on
+    the planner's coarse grid, for a 3-D scene that wants to draw the
+    sun-synchronous volume /api/plan-4d prunes its search to.
+
+    Three binary fields share ``/api/illumination-series``'s wire format
+    (float32, slice-major): ``corridor`` (1 inside), ``lit_safe`` (1 where
+    the block is lit and passable before pruning) and ``dwell_hours`` (how
+    long the block stays inside the corridor from that slice on). The JSON
+    manifest carries the same ``illumination_corridor`` block the planner
+    reports, minus the start/goal/route sections, and the shadow model's
+    provenance: without an epoch and the horizon cube the series is static
+    and the block says so -- a corridor cut from a long-run average
+    promises nothing, and is labelled accordingly rather than withheld.
+    """
+    grids = _get_grids()
+    rover = get_rover(rover_id)
+    grids_for_plan = grids_for_rover(grids, rover_id, PlanWeights().model_dump())
+    metadata = grids_for_plan["metadata"]
+    geometry = _coarse_geometry(grids_for_plan, coarsen)
+    if slice_hours is None:
+        slice_hours_value = auto_slice_hours(
+            grids_for_plan["slope"],
+            grids_for_plan["traversable"],
+            resolution_m=geometry.resolution_m,
+            rover=rover,
+        )
+        slice_hours_source = "auto"
+    else:
+        slice_hours_value = float(slice_hours)
+        slice_hours_source = "request"
+    _check_cube_budget(int(n_slices), geometry.traversable.shape)
+
+    base_shadow = np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64)
+    shadow_series, provenance = build_shadow_series(
+        base_shadow, metadata, int(n_slices), slice_hours_value, start_utc
+    )
+    corridor = build_illumination_corridor(
+        shadow_series,
+        geometry.traversable,
+        geometry.elevation,
+        geometry.slope,
+        geometry.resolution_m,
+        rover,
+        coarsen,
+        slice_hours_value,
+        lit_rule,
+    )
+    rows, cols = corridor.shape
+    cubes = {
+        "corridor": corridor.corridor.astype(np.float32),
+        "lit_safe": corridor.lit_safe.astype(np.float32),
+        "dwell_hours": (corridor.dwell_slices * slice_hours_value).astype(np.float32),
+    }
+
+    if format == "f32":
+        cube = cubes[field]
+        return Response(
+            content=encode_layer_f32(cube.reshape(-1, cols)),
+            media_type=BINARY_MEDIA_TYPE,
+            headers={
+                "X-Series-Field": field,
+                "X-Series-Slices": str(int(n_slices)),
+                "X-Series-Rows": str(rows),
+                "X-Series-Cols": str(cols),
+                "X-Series-Coarsen": str(int(coarsen)),
+                "X-Series-Lit-Rule": lit_rule,
+                "X-Series-Resolution-M": repr(float(geometry.resolution_m)),
+                "X-Series-Dtype": "float32",
+                "X-Series-Endian": "little",
+                "X-Series-Order": "slice-major, then row-major",
+            },
+        )
+
+    query_params: dict[str, Any] = {
+        "rover_id": rover_id,
+        "n_slices": int(n_slices),
+        "slice_hours": slice_hours_value,
+        "coarsen": int(coarsen),
+        "lit_rule": lit_rule,
+        "format": "f32",
+    }
+    if start_utc:
+        query_params["start_utc"] = start_utc
+    query_base = urlencode(query_params)
+    fields: dict[str, Any] = {}
+    for name, cube in cubes.items():
+        fields[name] = {
+            "units": _CORRIDOR_FIELD_UNITS[name],
+            "min": float(cube.min()) if cube.size else None,
+            "max": float(cube.max()) if cube.size else None,
+            "binary_url": f"/api/illumination-corridor?{query_base}&field={name}",
+        }
+
+    return {
+        "start_utc": start_utc,
+        "rover_id": rover_id,
+        "n_slices": int(n_slices),
+        "slice_hours": slice_hours_value,
+        "slice_hours_source": slice_hours_source,
+        "horizon_hours": int(n_slices) * slice_hours_value,
+        "coarsen": int(coarsen),
+        "lit_rule": lit_rule,
+        "grid": {
+            "rows": rows,
+            "cols": cols,
+            "resolution_m": float(geometry.resolution_m),
+            "coarsen": int(coarsen),
+        },
+        "shadow_model": provenance,
+        "corridor": illumination_corridor_summary(corridor, None, None, provenance=provenance),
         "fields": fields,
         "binary_format": {
             "dtype": "float32",

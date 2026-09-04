@@ -812,6 +812,107 @@ ofset modeli). LPR-1 28 Eyl 2026'da LP-R09 sınırsız ihlal (haven yok, bağlan
 184,6 h sonra biter). `/api/compare` 4 profil 0,8–1,0 s; `/api/safety-check`
 500 örnek 12–15 ms yerleşik, 28–48 ms RTAMT; iki motor farkı 0.
 
+## Sürekli-aydınlık koridoru — CMU'nun x-y-t bağlı-bileşen budaması (4 Eylül 2026 eki, A2)
+
+CMU'nun Güneş-eşzamanlı (sun-synchronous) rota yaklaşımı (Otten, Jones,
+Wettergreen, Whittaker; ICRA 2015 / FSR 2017) 4-B planlayıcının ön-filtresi
+olarak uygulandı: aydınlanma serisi + kaba geçilebilirlik `(t, satır, sütun)`
+ikili hacmine dönüştürülür, planlayıcının kendi kenarları (aynı kapılar, aynı
+hamle süresi `d = ceil(kenar süresi / dilim)`) üzerinde ileri (ilk dilimden
+erişilemeyen kökler) ve geri (son dilime ulaşamayan çıkmazlar) budanır; kalan
+hacim **koridor**dur. `require_continuous_illumination` ile bulunan rotanın her
+durumu koridorun içindedir ve `path_dark_hours` tanım gereği sıfırdır. **İddia
+sınırı:** "koridor içinde modelin gölge serisi hiç karanlık göstermez" —
+SPICE + ufuk küpü, 320 m bloklar, örneklenmiş dilimler; gerçek yüzey hakkında
+değil (B3: 30 Mayıs 2027'de hücrelerin %10,8'i DEM klonları arasında
+kararsız). Mevcut alanlar değişmedi; aşağıdakiler yalnızca eklendi.
+
+### `POST /api/plan-4d` — iki yeni istek alanı
+
+| Alan | Varsayılan | Anlam |
+|---|---|---|
+| `require_continuous_illumination` | `false` | Koridor kuralını uygula: başlangıç ilk dilimde koridorda olmalı, bekleme yalnızca koridor vokseline, hamle boyunca iki blok da aydınlık kalmalı. `start_utc` + ufuk küpü gerekir; gölge modeli `static` ise **422**. |
+| `lit_rule` | `"all"` | `"all"`: bloktaki 16 ince hücrenin hepsi aydınlık (muhafazakâr). `"majority"`: blok ortalaması `< 0,5` (planlayıcının karanlık eşiği). |
+
+### `POST /api/plan-4d` — `illumination_corridor` bloğu (her zaman) ve metrikler
+
+```json
+"illumination_corridor": {
+  "enforced": false, "lit_rule": "all", "lit_rule_definition": "...", "edge_rule": "...", "pruning": "...",
+  "n_slices": 100, "slice_hours": 0.0956, "grid": { "rows": 125, "cols": 125, "resolution_m": 320.0 },
+  "voxels": { "traversable": 1031400, "lit_safe": 417294, "corridor": 416646,
+              "corridor_fraction_of_lit_safe": 0.998, "pruned_fraction": 0.002 },
+  "slices": { "first_lit": 0, "last_lit": 99, "lit_safe_cells_t0": 4160, "corridor_cells_t0": 4154, "corridor_cells_last": 4170 },
+  "components": { "method": "scipy.ndimage.label, 26-neighbourhood (CMU's flood fill)",
+                  "count": 50, "largest_voxels": 379720, "largest_fraction": 0.91, "spanning_count": 44 },
+  "start": { "cell": [89, 123], "in_corridor_t0": false, "first_corridor_slice": null },
+  "goal": { "cell": [51, 106], "corridor_slices": 0, "reachable_in_corridor": false, "first_reachable_slice": null },
+  "route": { "inside": false, "states_inside": 0, "states_total": 41, "moves_outside": 40, "waits_outside": 0,
+             "path_dark_hours_max": 4.546, "max_dwell_hours": 0.0, "dwell_horizon_limited": false,
+             "dwell_opportunities": [] },
+  "provenance": { "shadow_model": "spice_horizon", "time_varying": true, "start_utc": "2027-05-30T00:00:00",
+                  "claim": "Inside the corridor the model's shadow series never shows a dark block ...",
+                  "uncertainty_note": "B3: on 2027-05-30, 10.8 percent of cells are undecided ...", "reference": "Otten ... ICRA 2015; FSR 2017" },
+  "timings_ms": { "lit_volume": 69, "edges": 6, "prune": 56, "dwell": 4, "total": 135, "components_ms": 39, "reach_ms": 0 }
+}
+```
+
+| Alan | Anlam |
+|---|---|
+| `voxels` | Kaba hücre × dilim sayıları: geçilebilir hacim, aydınlık-ve-geçilebilir hacim, koridor; `pruned_fraction` = iki geçişin sildiği oran |
+| `slices` | İlk/son aydınlık dilim; t0'daki aydınlık ve koridor hücre sayısı; son dilimdeki koridor hücreleri |
+| `components` | CMU'nun 26-komşuluk flood-fill'i (`ndimage.label`) — kıyas için: bileşen sayısı, en büyüğü, ilk ve son dilime dokunan ("iki ucu tutan") sayısı |
+| `start` / `goal` | Kaba hücre; başlangıç t0'da koridorda mı, ilk koridor dilimi; hedef kaç dilim koridorda, başlangıçtan koridor içinde ulaşılabilir mi, ilk varış dilimi |
+| `route` | Rota koridorda mı, içerideki durum sayısı, dışarıdaki hamle/bekleme sayısı, `path_dark_hours` maksimumu, **dwell** (CMU metriği: hücrenin o durumdan itibaren kesintisiz koridorda kaldığı saat), `horizon_limited` = ufuk kesti; en iyi 3 fırsat |
+| `provenance` | Gölge modeli (`spice_horizon` / `static` + `reason`), iddia sınırı, B3 uyarısı, kaynak |
+| `metrics.max_dwell_hours` | = `route.max_dwell_hours` (koridor yoksa `null`) |
+| `metrics.states_outside_corridor`, `metrics.moves_outside_corridor` | Rotanın koridor dışında kalan durum/hamle sayısı (uygulanınca 0) |
+| `metrics.continuous_illumination_enforced`, `metrics.edges_rejected.continuous_illumination` | Kural uygulandı mı; kuralın reddettiği geçiş sayısı |
+
+Kural uygulanıp koridor kapalıysa (başlangıç karanlık, hedef koridor içinde
+ulaşılamaz, hiç aydınlık yok) **404** ve `detail` koridor sayılarını söyler
+("Continuous-illumination corridor (lit_rule=all): 416646 of 417294 ...; the
+start block is never inside the corridor; the goal block is inside the corridor
+for 0 of 100 slices and is not reachable from the start inside it.").
+
+### `GET /api/illumination-corridor?start_utc=&rover_id=&n_slices=&slice_hours=&coarsen=4&lit_rule=all&format=json|f32&field=corridor|lit_safe|dwell_hours`
+
+Koridor küpü, `/api/illumination-series` tel biçimiyle: `float32`, little
+endian, **dilim-major sonra satır-major**, şekil `[T, satır, sütun]` ama
+**kaba grid** (`resolution_m` = ince × `coarsen`, 320 m). Üç alan: `corridor`
+(1 içeride), `lit_safe` (budama öncesi aydınlık-ve-geçilebilir), `dwell_hours`
+(o dilimden itibaren koridorda kalınan saat). Başlıklar: `X-Series-Field`,
+`X-Series-Slices`, `X-Series-Rows`, `X-Series-Cols`, `X-Series-Coarsen`,
+`X-Series-Lit-Rule`, `X-Series-Resolution-M`, `X-Series-Dtype`,
+`X-Series-Endian`, `X-Series-Order`. JSON manifest: `n_slices`, `slice_hours`
+(+ `slice_hours_source`: `auto` / `request`), `horizon_hours`, `coarsen`,
+`lit_rule`, `grid`, `shadow_model`, `corridor` (yukarıdaki blok, `start`/`goal`
+`null`), `fields{}.binary_url`, `binary_format`. `start_utc` yoksa seri
+`static` etiketiyle üretilir (küp yine gelir; garanti anlamı yoktur).
+
+Frontend'in çizebileceği: koridor küpünü `(t, satır, sütun)` voksel bulutu ya da
+dilim başına maske olarak sahneye, planlayıcı rotasının `path_states`'ini
+(kaba `(satır, sütun, dilim)`) aynı eksenlerde üstüne; `dwell_hours` ile
+"burada X saat aydınlıkta beklenebilir" ısı haritası; `route.dwell_opportunities`
+ile rota üzerinde bekleme noktaları; `start`/`goal` bloklarındaki
+`first_corridor_slice` / `first_reachable_slice` ile "ne zaman başlanmalı"
+göstergesi. Sahne zamanı `t × slice_hours` saattir.
+
+Ölçülen (Site11, 4 Eylül 2026,
+[illumination_corridor_report.md](../research/illumination_corridor_report.md)):
+VIPER'ın 30 Mayıs 2027 gününde varsayılan 9,6 h ufukta kaba hacmin %40,5'i
+aydınlık-güvenli (`all`; `majority` %45,8), iki geçişli budama yalnızca
+%0,2'sini siliyor (10 saatte kutup aydınlanması neredeyse durağan); CMU label
+50 bileşen, en büyüğü %91. Standart haven→haven çifti koridor dışında
+(başlangıç t0'da karanlık, hedef hiç aydınlık değil, rota 4,55 h gölge) →
+`require` 404. Koridor-içi çift (kaba (105,89)→(94,27), 62 blok ≈ 19,8 km,
+7,9 h, 62 hamle): `path_dark_hours` tümü 0, LP-R01 ρ = 96 h, en düşük SOC
+%93,6, dwell 8 h (ufka dayalı); planlama budamasız 7 233 düğüm, koridorla
+6 467 (×1,12). LPR-1 28 Eylül 2026'da 8 saatlik koridor yok (aydınlık ada
+büzülüyor); Ay gecesi 13 Eylül 2026'da hiçbir voksel aydınlık değil. Koridor
+kurulumu 100 dilimde ~0,14 s (`all`) / ~0,29 s (`majority`), 246 dilimde
+~0,3 s.
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,

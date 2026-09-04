@@ -502,3 +502,238 @@ def test_plan_4d_reports_the_haven_margin_without_enforcing_it(client, monkeypat
     assert metrics["min_haven_margin_h"] < 0.0
     assert metrics["time_to_dsn_shadow_min_h"] == 0.0
     assert payload["path_hours_until_earthset"][0] == pytest.approx(3.0)
+
+
+
+# ── The continuous-illumination corridor (A2) ────────────────────────────────
+
+
+def _shadow_series_lit_until(lit_until: int | None):
+    """Every fine cell lit (shadow 0) for slices before *lit_until*, dark from
+    then on (never dark when None); labelled as the real SPICE series."""
+
+    def _fake(base, metadata, n_slices, slice_hours, start_utc=None):
+        series = []
+        for index in range(int(n_slices)):
+            value = 0.0 if (lit_until is None or index < lit_until) else 1.0
+            series.append(np.full(SHAPE, value))
+        return series, {"model": "spice_horizon", "time_varying": True, "start_utc": start_utc}
+
+    return _fake
+
+
+def _shadow_series_with_a_dark_goal_block():
+    """Lit everywhere except the coarse block holding the default goal."""
+
+    def _fake(base, metadata, n_slices, slice_hours, start_utc=None):
+        series = []
+        for _ in range(int(n_slices)):
+            snap = np.zeros(SHAPE)
+            snap[12:16, 12:16] = 1.0
+            series.append(snap)
+        return series, {"model": "spice_horizon", "time_varying": True}
+
+    return _fake
+
+
+def test_plan_4d_always_reports_the_illumination_corridor(client):
+    payload = client.post("/api/plan-4d", json=_body()).json()
+    block = payload["illumination_corridor"]
+    assert block["enforced"] is False and block["lit_rule"] == "all"
+    assert block["provenance"]["shadow_model"] == "static"
+    assert block["provenance"]["time_varying"] is False
+    assert "model" in block["provenance"]["claim"]
+    assert "10.8" in block["provenance"]["uncertainty_note"]
+    assert block["n_slices"] == 24
+    assert block["grid"] == {"rows": 4, "cols": 4, "resolution_m": 320.0}
+    metrics = payload["metrics"]
+    assert "max_dwell_hours" in metrics
+    assert "continuous_illumination" in metrics["edges_rejected"]
+    assert metrics["continuous_illumination_enforced"] is False
+    assert metrics["states_outside_corridor"] is not None
+
+
+def test_requiring_continuous_illumination_on_a_static_series_is_a_422(client):
+    response = client.post("/api/plan-4d", json=_body(require_continuous_illumination=True))
+    assert response.status_code == 422
+    assert "static" in response.json()["detail"].lower()
+
+
+def test_plan_4d_refuses_when_the_corridor_closes_before_the_window_ends(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _shadow_series_lit_until(3))
+    response = client.post(
+        "/api/plan-4d",
+        json=_body(require_continuous_illumination=True, start_utc="2026-09-01T00:00:00"),
+    )
+    assert response.status_code == 404, response.text
+    detail = response.json()["detail"].lower()
+    assert "corridor" in detail
+    assert "start" in detail
+
+
+def test_plan_4d_inside_the_corridor_never_enters_shadow(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _shadow_series_lit_until(None))
+    response = client.post(
+        "/api/plan-4d",
+        json=_body(require_continuous_illumination=True, start_utc="2026-09-01T00:00:00"),
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    block = payload["illumination_corridor"]
+    assert block["enforced"] is True
+    assert block["provenance"]["shadow_model"] == "spice_horizon"
+    assert block["route"]["inside"] is True
+    assert block["route"]["states_inside"] == len(payload["path_states"])
+    # Everything lit and connected: nothing to prune.
+    assert block["voxels"]["corridor"] == block["voxels"]["lit_safe"] > 0
+    assert block["start"]["in_corridor_t0"] is True
+    assert block["goal"]["reachable_in_corridor"] is True
+    assert all(d == 0.0 for d in payload["path_dark_hours"])
+    metrics = payload["metrics"]
+    assert metrics["max_dwell_hours"] > 0.0
+    assert metrics["max_dwell_hours"] == block["route"]["max_dwell_hours"]
+    assert metrics["continuous_illumination_enforced"] is True
+    assert metrics["edges_rejected"]["continuous_illumination"] == 0
+    assert metrics["states_outside_corridor"] == 0
+
+
+def test_plan_4d_names_a_goal_the_corridor_never_reaches(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _shadow_series_with_a_dark_goal_block())
+    refused = client.post(
+        "/api/plan-4d",
+        json=_body(require_continuous_illumination=True, start_utc="2026-09-01T00:00:00"),
+    )
+    assert refused.status_code == 404, refused.text
+    detail = refused.json()["detail"].lower()
+    assert "corridor" in detail and "goal" in detail
+    # Unenforced, the same request succeeds and the block says where it leaves.
+    free = client.post("/api/plan-4d", json=_body(start_utc="2026-09-01T00:00:00"))
+    assert free.status_code == 200, free.text
+    payload = free.json()
+    block = payload["illumination_corridor"]
+    assert block["goal"]["corridor_slices"] == 0
+    assert block["goal"]["reachable_in_corridor"] is False
+    assert block["route"]["inside"] is False
+    assert payload["metrics"]["states_outside_corridor"] >= 1
+    assert payload["metrics"]["continuous_illumination_enforced"] is False
+
+
+def test_plan_4d_accepts_the_majority_lit_rule_and_rejects_others(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _shadow_series_lit_until(None))
+    payload = client.post(
+        "/api/plan-4d", json=_body(lit_rule="majority", start_utc="2026-09-01T00:00:00")
+    ).json()
+    assert payload["illumination_corridor"]["lit_rule"] == "majority"
+    assert client.post("/api/plan-4d", json=_body(lit_rule="mostly")).status_code == 422
+
+
+def test_plan_4d_combines_the_corridor_with_the_safe_haven_rule(client, monkeypatch):
+    import app.main as main_module
+
+    _fake_safe_haven_map(monkeypatch)
+    monkeypatch.setattr(
+        main_module, "build_earth_visibility_series", _earth_series_closing_at(None)
+    )
+    monkeypatch.setattr(main_module, "build_shadow_series", _shadow_series_lit_until(None))
+    response = client.post(
+        "/api/plan-4d",
+        json=_body(
+            require_safe_haven=True,
+            require_continuous_illumination=True,
+            start_utc="2026-09-01T00:00:00",
+        ),
+    )
+    assert response.status_code == 200, response.text
+    metrics = response.json()["metrics"]
+    assert metrics["safe_haven_enforced"] is True
+    assert metrics["continuous_illumination_enforced"] is True
+    assert metrics["states_past_haven_deadline"] == 0
+
+
+
+# ── GET /api/illumination-corridor ───────────────────────────────────────────
+
+_CORRIDOR_QUERY = "/api/illumination-corridor?start_utc=2026-09-01T00:00:00&n_slices=6&slice_hours=1.0&coarsen=4"
+
+
+def test_illumination_corridor_manifest_describes_the_cube(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _shadow_series_lit_until(None))
+    response = client.get(_CORRIDOR_QUERY)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["n_slices"] == 6 and payload["slice_hours"] == 1.0
+    assert payload["slice_hours_source"] == "request"
+    assert payload["lit_rule"] == "all" and payload["coarsen"] == 4
+    assert payload["grid"] == {"rows": 4, "cols": 4, "resolution_m": 320.0, "coarsen": 4}
+    assert payload["shadow_model"]["model"] == "spice_horizon"
+    assert payload["binary_format"]["shape"] == [6, 4, 4]
+    assert payload["binary_format"]["order"] == "slice-major, then row-major"
+    assert set(payload["fields"]) == {"corridor", "lit_safe", "dwell_hours"}
+    for name, entry in payload["fields"].items():
+        assert "format=f32" in entry["binary_url"] and f"field={name}" in entry["binary_url"]
+    block = payload["corridor"]
+    assert block["voxels"]["corridor"] == block["voxels"]["lit_safe"] == 6 * 16
+    assert block["start"] is None and block["goal"] is None and block["route"]["inside"] is None
+    assert "claim" in block["provenance"]
+
+
+def test_illumination_corridor_binary_is_the_cube_as_float32(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _shadow_series_lit_until(3))
+    manifest = client.get(_CORRIDOR_QUERY).json()
+    response = client.get(_CORRIDOR_QUERY + "&format=f32&field=corridor")
+    assert response.status_code == 200, response.text
+    assert len(response.content) == 6 * 4 * 4 * 4
+    assert response.headers["X-Series-Field"] == "corridor"
+    assert response.headers["X-Series-Slices"] == "6"
+    assert response.headers["X-Series-Rows"] == "4" and response.headers["X-Series-Cols"] == "4"
+    assert float(response.headers["X-Series-Resolution-M"]) == 320.0
+    assert response.headers["X-Series-Coarsen"] == "4"
+    assert response.headers["X-Series-Lit-Rule"] == "all"
+    cube = np.frombuffer(response.content, dtype="<f4").reshape(6, 4, 4)
+    assert set(np.unique(cube).tolist()) <= {0.0, 1.0}
+    # Lit until slice 3 and dark after: nothing survives the backward pass.
+    assert cube.sum() == manifest["corridor"]["voxels"]["corridor"] == 0
+    lit = client.get(_CORRIDOR_QUERY + "&format=f32&field=lit_safe")
+    assert np.frombuffer(lit.content, dtype="<f4").sum() == 3 * 16
+
+
+def test_illumination_corridor_dwell_field_is_in_hours(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _shadow_series_lit_until(None))
+    response = client.get(_CORRIDOR_QUERY + "&format=f32&field=dwell_hours")
+    assert response.status_code == 200, response.text
+    cube = np.frombuffer(response.content, dtype="<f4").reshape(6, 4, 4)
+    assert cube[0].max() == pytest.approx(6.0)  # six 1 h slices inside from t=0
+    assert cube[5].max() == pytest.approx(1.0)
+
+
+def test_illumination_corridor_validates_its_query(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "build_shadow_series", _shadow_series_lit_until(None))
+    assert client.get(_CORRIDOR_QUERY + "&format=f32&field=nope").status_code == 422
+    assert client.get(_CORRIDOR_QUERY + "&lit_rule=mostly").status_code == 422
+    assert client.get(_CORRIDOR_QUERY + "&lit_rule=majority").json()["lit_rule"] == "majority"
+    assert client.get("/api/illumination-corridor?start_utc=2026-09-01T00:00:00&coarsen=5").status_code == 422
+
+
+def test_illumination_corridor_without_an_epoch_is_labelled_static(client):
+    response = client.get("/api/illumination-corridor?n_slices=6&coarsen=4")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["shadow_model"]["model"] == "static"
+    assert payload["slice_hours_source"] == "auto" and payload["slice_hours"] > 0.0
+    assert payload["corridor"]["provenance"]["time_varying"] is False
