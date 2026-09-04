@@ -49,6 +49,7 @@ from .earth_visibility import (
 from .grid_frame import map_xy_to_pixel
 from .illumination_series import (
     _parse_start_utc,
+    body_track_for_series,
     build_shadow_series,
     horizon_cache_path,
     sun_track_for_series,
@@ -88,6 +89,18 @@ from .route_analysis import route_statistics as compute_route_statistics
 from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
 from .mission_reference import reference_summary
 from .simulation import simulate_path, summarize_simulation
+from .uncertainty import (
+    CLONE_HORIZONS_FILENAME,
+    N_PGDA_CLONES,
+    UNCERTAINTY_LAYERS,
+    illuminated_probability_series,
+    load_clone_horizons,
+    route_band,
+    route_traversable_probability,
+    uncertain_fraction,
+    uncertainty_layers_for_grids,
+    with_uncertainty_layers,
+)
 from .stress_test import (
     SHERPA_DEFAULTS,
     Perturbations,
@@ -95,6 +108,7 @@ from .stress_test import (
     route_legs,
     route_sky_columns,
     stress_test_route,
+    wilson_interval,
 )
 from .terrain import (
     BINARY_LAYER_HEADERS,
@@ -568,6 +582,42 @@ class StressTestRequest(BaseModel):
     n_bins: int = Field(default=20, ge=5, le=100)
 
 
+class DemUncertaintyRequest(BaseModel):
+    """The DEM-clone band of a /api/plan-4d route (B3).
+
+    The route is priced once per NASA DEM clone -- the clone's slopes, the
+    clone's horizon -- with every SHERPA uncertainty at its nominal value,
+    so the band is the DEM's alone; ``with_sherpa`` adds ``n_runs``
+    SHERPA-perturbed runs per clone on top. The environment fields are the
+    plan's, as for /api/stress-test.
+    """
+
+    path_states: list[PlannerState] = Field(
+        ...,
+        min_length=2,
+        description="path_states from the /api/plan-4d response: [row, col, slice] on the coarse grid.",
+    )
+    rover_id: str = DEFAULT_ROVER_ID
+    coarsen: int = Field(default=4, ge=1, le=16)
+    slice_hours: float = Field(..., gt=0.0, le=24.0)
+    start_utc: Optional[str] = Field(
+        default=None,
+        description="The plan's epoch. Without it the sky is static and the response says so.",
+    )
+    initial_soc_pct: float = Field(default=1.0, gt=0.0, le=1.0)
+    n_clones: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=N_PGDA_CLONES,
+        description="How many cached clones to use (the first n); default all.",
+    )
+    with_sherpa: bool = False
+    n_runs: int = Field(default=200, ge=1, le=5000, description="SHERPA runs per clone when with_sherpa.")
+    seed: int = Field(default=0, ge=0)
+    perturbations: Optional[PerturbationOverrides] = None
+    label: Optional[str] = Field(default=None, max_length=80)
+
+
 class LoadDEMRequest(BaseModel):
     dem_file: str
     target_resolution_m: float = 80
@@ -880,6 +930,12 @@ def plan(req: PlanRequest, request: Request):
     except Exception:
         logger.error("Response serialization failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal serialization error.")
+
+    # NASA's DEM clones, when cached: the route's passability across them
+    # (B3). Absent, not null, without the cache.
+    uncertainty_block = _route_uncertainty_block(grids_for_plan, req.rover_id, planned_pixels, 1)
+    if uncertainty_block is not None:
+        response["uncertainty"] = uncertainty_block
 
     # Published only once the response the caller receives is fully built.
     # Assigning mid-request meant a plan whose serialisation then failed
@@ -1716,6 +1772,18 @@ def plan_4d(req: Plan4DRequest, request: Request):
         "coarsen": req.coarsen,
         "effective_resolution_m": effective_resolution_m,
         "rover_id": req.rover_id,
+        # NASA's DEM clones, when cached: the route's passability across
+        # them on the planner's own grid (B3). Absent without the cache.
+        **(
+            {"uncertainty": block}
+            if (
+                block := _route_uncertainty_block(
+                    grids_for_plan, req.rover_id, result["path_pixels"], req.coarsen
+                )
+            )
+            is not None
+            else {}
+        ),
     }
 
 
@@ -1911,6 +1979,273 @@ def stress_test(req: StressTestRequest, request: Request):
     }
 
 
+def _route_uncertainty_block(
+    grids_for_plan: dict, rover_id: str, cells: Any, coarsen: int
+) -> dict[str, Any] | None:
+    """The cheap ``uncertainty`` block a plan response carries when NASA's
+    DEM clones are cached (B3): how many clones keep every route cell
+    passable, and the route's lowest and mean per-cell passability. No
+    simulation -- the per-clone masks are read at the route. ``None``
+    without the cache, so the field is absent rather than null."""
+    layers, info = uncertainty_layers_for_grids(grids_for_plan, rover_id)
+    if layers is None:
+        return None
+    route_cells = [(int(cell[0]), int(cell[1])) for cell in cells]
+    per_state, feasible = route_traversable_probability(
+        layers["clone_traversable"], route_cells, coarsen
+    )
+    return {
+        "model": info["model"],
+        "n_clones": int(feasible.shape[0]),
+        "coarsen": int(coarsen),
+        "p_traversable_min": round(float(per_state.min()), 4) if per_state.size else None,
+        "p_traversable_mean": round(float(per_state.mean()), 4) if per_state.size else None,
+        "route_feasible_fraction": round(float(feasible.mean()), 4) if feasible.size else None,
+        "band_url": "/api/dem-uncertainty",
+        "product_url": info.get("product_url"),
+    }
+
+
+def _dem_uncertainty_sky(
+    grids_for_plan: dict,
+    req: "DemUncertaintyRequest",
+    legs,
+    n_use: int,
+    info: dict[str, Any],
+    perturbations: Perturbations | None,
+) -> tuple[list, Any, dict[str, Any], float]:
+    """``(skies, nominal_sky, sky_model, sky_ms)`` for the band: one route-
+    local sky per clone from the clone horizon cubes, the surface DEM's own
+    from the production cube at the same block centres, or -- without an
+    epoch, the cubes, a matching stride or the kernels -- one static sky for
+    all, labelled with the reason."""
+    import time as _time
+
+    from .illumination import illuminated_mask
+
+    t0 = _time.perf_counter()
+    metadata = grids_for_plan["metadata"]
+    cells = [(int(r), int(c)) for r, c in legs.cells]
+    rows = np.asarray([r for r, _ in cells])
+    cols = np.asarray([c for _, c in cells])
+    if perturbations is not None:
+        longest_h = (
+            legs.planned_duration_h / max(perturbations.speed_multiplier_floor, 1e-3)
+            + perturbations.z_max * perturbations.start_delay_sigma_h
+        )
+    else:
+        longest_h = legs.planned_duration_h + 2.0 * req.slice_hours
+    n_slices = min(MAX_STRESS_TEST_SLICES, int(math.ceil(longest_h / req.slice_hours)) + 2)
+    common = {
+        "n_slices": n_slices,
+        "horizon_hours": round(n_slices * req.slice_hours, 4),
+        "far_field_held_fixed": True,
+        "near_range_m": info.get("near_range_m"),
+        "earth_visibility_cloned": False,
+    }
+
+    def _static(reason: str):
+        base = coarsen_grid(np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64), req.coarsen)
+        shadow = np.tile(base[rows, cols], (n_slices, 1))
+        sky = RouteSky(shadow, None, None, None, req.slice_hours, time_varying=False)
+        model = {"model": "static", "time_varying": False, "reason": reason, **common}
+        return [sky] * n_use, sky, model, (_time.perf_counter() - t0) * 1000.0
+
+    if req.start_utc is None:
+        return _static(
+            "no start epoch given; illumination is a function of time and cannot "
+            "vary without one"
+        )
+    processed_dir = metadata.get("processed_dir")
+    try:
+        cubes, cube_meta = load_clone_horizons(str(processed_dir)) if processed_dir else (None, None)
+    except ValueError as exc:
+        return _static(f"clone horizon cache unusable ({exc})")
+    if cubes is None:
+        return _static(
+            f"no {CLONE_HORIZONS_FILENAME} beside the processed grids; run "
+            "scripts/build_dem_clone_cache.py with horizon_map.npy present"
+        )
+    stride = int(cube_meta.get("stride", 1))
+    if stride != req.coarsen:
+        return _static(
+            f"the clone horizon cubes are at stride {stride}; the clone sky needs "
+            f"coarsen={stride} (got {req.coarsen})"
+        )
+    cache_path = horizon_cache_path(metadata)
+    if cache_path is None:
+        return _static("no horizon_map.npy beside the processed grids for the surface DEM's own sky")
+    if int(cubes.shape[0]) < n_use:
+        return _static(
+            f"only {int(cubes.shape[0])} clone horizon cubes are cached for {n_use} clones"
+        )
+    if rows.max() >= cubes.shape[2] or cols.max() >= cubes.shape[3]:
+        return _static("a route cell lies outside the clone horizon cubes")
+    try:
+        sun = body_track_for_series(metadata, n_slices, req.slice_hours, req.start_utc, body="SUN")
+    except Exception as exc:
+        return _static(f"real illumination unavailable ({exc})")
+
+    offset = stride // 2
+    surface = np.load(cache_path, mmap_mode="r")
+    n_azimuth = int(cubes.shape[1])
+    if surface.shape[0] != n_azimuth:
+        return _static("horizon_map.npy and the clone cubes disagree on the azimuth count")
+    # (A, N+1, S): the route's profiles in every clone, the surface's last.
+    clone_profiles = np.asarray(cubes[:n_use][:, :, rows, cols])            # (N, A, S)
+    surface_profiles = np.asarray(surface[:, offset::stride, offset::stride][:, rows, cols])  # (A, S)
+    profiles = np.concatenate(
+        [clone_profiles.transpose(1, 0, 2), surface_profiles[:, None, :]], axis=1
+    )
+    shadow = np.empty((n_slices, n_use + 1, rows.size), dtype=np.float64)
+    for index in range(n_slices):
+        lit = illuminated_mask(profiles, sun[index]["azimuth_grid_deg"], sun[index]["elevation_deg"])
+        shadow[index] = 1.0 - lit
+    skies = [
+        RouteSky(shadow[:, k, :], None, None, None, req.slice_hours, time_varying=True)
+        for k in range(n_use)
+    ]
+    nominal_sky = RouteSky(shadow[:, n_use, :], None, None, None, req.slice_hours, time_varying=True)
+    model = {
+        "model": "clone_horizon",
+        "time_varying": True,
+        "reason": None,
+        "start_utc": req.start_utc,
+        "stride": stride,
+        "columns": (
+            "the block-centre cell of each coarse route cell, lit or not per "
+            "slice (the plan's cube is the block mean of the fine cells)"
+        ),
+        "neglected_horizon_shift_deg_max": cube_meta.get("neglected_horizon_shift_deg_max"),
+        **common,
+    }
+    return skies, nominal_sky, model, (_time.perf_counter() - t0) * 1000.0
+
+
+@app.post("/api/dem-uncertainty")
+def dem_uncertainty(req: DemUncertaintyRequest, request: Request):
+    """The DEM-clone band of a /api/plan-4d route (B3).
+
+    NASA's statistical DEM clones each give the route different slopes and
+    a different horizon. The route is priced and driven once per clone with
+    the planner's own arithmetic (B5's legs and runs, SHERPA's sigmas at
+    zero), and the band -- duration, drive hours, drive energy, battery,
+    continuous shadow -- is reported as p5/p50/p95 across clones, with the
+    surface DEM's own numbers beside it. Also: in how many clones the route
+    stays passable at all, and the route's per-cell passability. With
+    ``with_sherpa`` the SHERPA protocol runs on every clone and the pooled
+    completion rate is added. 404 without the clone cache.
+    """
+    import time as _time
+
+    t0 = _time.perf_counter()
+    grids = _active_grids(request)
+    rover = get_rover(req.rover_id)
+    grids_for_plan = grids_for_rover(grids, req.rover_id, PlanWeights().model_dump())
+    layers, info = uncertainty_layers_for_grids(grids_for_plan, req.rover_id)
+    if layers is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"the DEM clone ensemble is not available: {info.get('reason')}",
+        )
+    n_available = int(layers["clone_traversable"].shape[0])
+    n_use = n_available if req.n_clones is None else int(req.n_clones)
+    if n_use > n_available:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"n_clones={req.n_clones} but only {n_available} clones are cached; "
+                "run scripts/build_dem_clone_cache.py --n-clones to fetch more."
+            ),
+        )
+    geometry = _coarse_geometry(grids_for_plan, req.coarsen)
+    try:
+        legs = route_legs(
+            req.path_states,
+            geometry.slope,
+            geometry.resolution_m,
+            rover,
+            req.slice_hours,
+            traversable=geometry.traversable,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"path_states: {exc}") from exc
+
+    cells = [(int(r), int(c)) for r, c in legs.cells]
+    per_state, feasible = route_traversable_probability(
+        layers["clone_traversable"][:n_use], cells, req.coarsen
+    )
+    clone_slopes = np.stack(
+        [coarsen_grid(layers["clone_slopes"][k], req.coarsen, how="max") for k in range(n_use)]
+    )
+
+    sherpa = None
+    perturbations = None
+    if req.with_sherpa:
+        overrides = {} if req.perturbations is None else {
+            key: value
+            for key, value in req.perturbations.model_dump().items()
+            if value is not None
+        }
+        perturbations = dataclass_replace(SHERPA_DEFAULTS, **overrides)
+        sherpa = {"n_runs": req.n_runs, "seed": req.seed, "perturbations": perturbations}
+
+    skies, nominal_sky, sky_model, sky_ms = _dem_uncertainty_sky(
+        grids_for_plan, req, legs, n_use, info, perturbations
+    )
+    t_runs = _time.perf_counter()
+    band = route_band(
+        req.path_states,
+        clone_slopes,
+        geometry.resolution_m,
+        rover,
+        req.slice_hours,
+        skies,
+        initial_soc_frac=req.initial_soc_pct,
+        nominal_slope=geometry.slope,
+        nominal_sky=nominal_sky,
+        sherpa=sherpa,
+    )
+    runs_ms = (_time.perf_counter() - t_runs) * 1000.0
+    feasible_count = int(feasible.sum())
+    low, high = wilson_interval(feasible_count, n_use)
+    return {
+        "label": req.label,
+        "rover_id": req.rover_id,
+        "coarsen": req.coarsen,
+        "slice_hours": req.slice_hours,
+        "start_utc": req.start_utc,
+        "initial_soc_pct": req.initial_soc_pct,
+        **band,
+        "route_feasible": {
+            "count": feasible_count,
+            "fraction": round(feasible_count / n_use, 4),
+            "ci95": [round(low, 4), round(high, 4)],
+        },
+        "p_traversable": {
+            "min": round(float(per_state.min()), 4),
+            "mean": round(float(per_state.mean()), 4),
+            "per_state": [round(float(v), 4) for v in per_state],
+        },
+        "sky_model": sky_model,
+        "provenance": {
+            "model": info["model"],
+            "product_url": info.get("product_url"),
+            "reference": info.get("reference"),
+            "n_clones_available": n_available,
+            "clone_indices": (info.get("clone_indices") or [])[:n_use],
+            "thermal_field_held_fixed": True,
+            "far_field_held_fixed": True,
+            "earth_visibility_cloned": False,
+        },
+        "timing_ms": {
+            "sky": round(sky_ms, 3),
+            "runs": round(runs_ms, 3),
+            "total": round((_time.perf_counter() - t0) * 1000.0, 3),
+        },
+    }
+
+
 def _attach_constraint_check(
     result: dict, profile: dict, grids: dict, rover: dict
 ) -> None:
@@ -2069,6 +2404,7 @@ def get_layer(
         "cost",
         "traversable",
         "earth_visibility",
+        *UNCERTAINTY_LAYERS,
     )
     if layer_name not in valid_layers:
         raise HTTPException(status_code=400, detail=f"Layer must be one of {valid_layers}")
@@ -2090,12 +2426,23 @@ def get_layer(
         if layer_name in ("cost", "traversable") or rover_id != DEFAULT_ROVER_ID or weight_overrides
         else base_grids
     )
+    if layer_name in UNCERTAINTY_LAYERS:
+        # The ensemble layers depend on the rover's slope limit and live in a
+        # cache beside the processed grids; absent cache, absent layer (B3).
+        grids = with_uncertainty_layers(grids, rover_id)
     metadata = dict(grids["metadata"])
     metadata["rover_id"] = rover_id
     metadata["rover_name"] = rover["name"]
 
     if layer_name not in grids:
-        if layer_name == "earth_visibility":
+        if layer_name in UNCERTAINTY_LAYERS:
+            detail = (
+                f"{layer_name} is not present in the loaded grids. It comes from "
+                "NASA's DEM-clone ensemble: run scripts/build_dem_clone_cache.py "
+                "(fetches PGDA product 78 for the planning window), then reload "
+                "with POST /api/load-preprocessed."
+            )
+        elif layer_name == "earth_visibility":
             detail = (
                 "earth_visibility is not present in the loaded grids. It is "
                 "an optional cache: run scripts/build_earth_visibility_cache.py "
@@ -2189,7 +2536,9 @@ def terrain(
         if value is not None
     }
     rover = get_rover(rover_id)
-    grids = grids_for_rover(base_grids, rover_id, weight_overrides or None)
+    grids = with_uncertainty_layers(
+        grids_for_rover(base_grids, rover_id, weight_overrides or None), rover_id
+    )
 
     # Echoed into every binary_url so the caller can fetch them verbatim.
     # cost and traversable are rover- and weight-dependent; a URL that
@@ -2423,6 +2772,166 @@ def illumination_series(
         },
         "sun": sun,
         "fields": fields,
+        "binary_format": {
+            "dtype": "float32",
+            "endian": "little",
+            "order": "slice-major, then row-major",
+            "shape": [int(n_slices), rows, cols],
+            "nodata": "NaN",
+        },
+    }
+
+
+@app.get("/api/uncertainty-series")
+def uncertainty_series(
+    start_utc: Optional[str] = None,
+    n_slices: int = Query(24, ge=1, le=MAX_PLAN_4D_SLICES),
+    slice_hours: float = Query(1.0, gt=0.0, le=24.0),
+    format: str = Query("json", pattern="^(json|f32)$"),
+    n_clones: Optional[int] = Query(
+        None, ge=1, le=N_PGDA_CLONES, description="Use the first n cached clones; default all."
+    ),
+):
+    """P(lit, t) across NASA's DEM clones, on the 4-D planner's block
+    centres (B3).
+
+    ``/api/illumination-series`` says whether a cell is lit under the one
+    shipped DEM. This says in what fraction of NASA's statistical clones it
+    is lit -- the same horizon geometry, one cube per clone, built by
+    ``scripts/build_dem_clone_cache.py`` at the planner's coarsen stride.
+    The far field beyond the clones' near range is the surface DEM's own
+    and is held fixed; the response says so, with the horizon shift that
+    could hide. Without the clone cubes, an epoch or the kernels the answer
+    is ``unavailable`` with the reason (404 for the binary form).
+    """
+    grids = _get_grids()
+    metadata = grids["metadata"]
+
+    def _unavailable(reason: str):
+        if format == "f32":
+            raise HTTPException(status_code=404, detail=reason)
+        return {
+            "model": "unavailable",
+            "reason": reason,
+            "slices": int(n_slices),
+            "slice_hours": float(slice_hours),
+            "start_utc": start_utc,
+        }
+
+    processed_dir = metadata.get("processed_dir")
+    if not processed_dir:
+        return _unavailable(
+            "the loaded grids carry no processed_dir; the clone horizon cubes live "
+            "beside the processed grids (scripts/build_dem_clone_cache.py)"
+        )
+    try:
+        cubes, cube_meta = load_clone_horizons(str(processed_dir))
+    except ValueError as exc:
+        return _unavailable(
+            f"clone horizon cache unusable ({exc}); rebuild it with scripts/build_dem_clone_cache.py"
+        )
+    if cubes is None:
+        return _unavailable(
+            f"no {CLONE_HORIZONS_FILENAME} beside the processed grids; run "
+            "scripts/build_dem_clone_cache.py (with horizon_map.npy present) to "
+            "build one horizon cube per DEM clone"
+        )
+    if not start_utc:
+        return _unavailable(
+            "no start epoch given; illumination is a function of time and cannot "
+            "vary without one"
+        )
+    n_available, _n_azimuth, rows, cols = (int(v) for v in cubes.shape)
+    n_use = n_available if n_clones is None else int(n_clones)
+    if n_use > n_available:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"n_clones={n_clones} but only {n_available} clone horizon cubes are "
+                "cached; run scripts/build_dem_clone_cache.py --n-clones to build more."
+            ),
+        )
+    stride = int(cube_meta.get("stride", 1))
+    needed = int(n_slices) * rows * cols * 4
+    if needed > MAX_SERIES_BYTES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{n_slices} slices of {rows}x{cols} is {needed / 2**20:.0f} MiB, over "
+                f"the {MAX_SERIES_BYTES // 2**20} MiB series budget; ask for fewer slices."
+            ),
+        )
+    try:
+        sun = body_track_for_series(metadata, int(n_slices), float(slice_hours), start_utc, body="SUN")
+    except Exception as exc:
+        # As build_shadow_series: a missing kernel degrades to an honest
+        # answer, not a 500. spiceypy raises assorted builtin types.
+        return _unavailable(f"Sun track unavailable ({exc})")
+    series = illuminated_probability_series(np.asarray(cubes[:n_use]), sun)
+    resolution_m = float(metadata["resolution_m"]) * stride
+
+    if format == "f32":
+        return Response(
+            content=encode_layer_f32(series.reshape(-1, cols)),
+            media_type=BINARY_MEDIA_TYPE,
+            headers={
+                "X-Series-Field": "p_illuminated",
+                "X-Series-Slices": str(int(n_slices)),
+                "X-Series-Rows": str(rows),
+                "X-Series-Cols": str(cols),
+                "X-Series-Downsample": str(stride),
+                "X-Series-Resolution-M": repr(resolution_m),
+                "X-Series-Dtype": "float32",
+                "X-Series-Endian": "little",
+                "X-Series-Order": "slice-major, then row-major",
+            },
+        )
+
+    query_params: dict[str, Any] = {
+        "start_utc": start_utc,
+        "n_slices": n_slices,
+        "slice_hours": slice_hours,
+        "format": "f32",
+    }
+    if n_clones is not None:
+        query_params["n_clones"] = n_use
+    return {
+        "model": "clone_horizon",
+        "n_clones": n_use,
+        "clone_indices": (cube_meta.get("clone_indices") or [])[:n_use],
+        "slices": int(n_slices),
+        "slice_hours": float(slice_hours),
+        "start_utc": start_utc,
+        "grid": {
+            "rows": rows,
+            "cols": cols,
+            "resolution_m": resolution_m,
+            "stride": stride,
+            # Fine-grid row/col of the first cube cell: the planner's block
+            # centre, so the series aligns with path_pixels_coarse.
+            "row_offset": int(cube_meta.get("row_offset", 0)),
+            "col_offset": int(cube_meta.get("col_offset", 0)),
+        },
+        "near_range_m": cube_meta.get("near_range_m"),
+        "far_field_held_fixed": bool(cube_meta.get("far_field_held_fixed", True)),
+        "neglected_horizon_shift_deg_max": cube_meta.get("neglected_horizon_shift_deg_max"),
+        "sun": sun,
+        "per_slice": {
+            "mean": [round(float(frame.mean()), 6) for frame in series],
+            "uncertain_fraction": [round(uncertain_fraction(frame), 6) for frame in series],
+        },
+        "fields": {
+            "p_illuminated": {
+                "units": "fraction",
+                "description": (
+                    "Fraction of NASA's DEM clones in which the cell sees the Sun "
+                    "at the slice; 0.05-0.95 is the band the ensemble cannot call."
+                ),
+                "min": float(series.min()) if series.size else None,
+                "max": float(series.max()) if series.size else None,
+                "binary_url": f"/api/uncertainty-series?{urlencode(query_params)}",
+            }
+        },
         "binary_format": {
             "dtype": "float32",
             "endian": "little",

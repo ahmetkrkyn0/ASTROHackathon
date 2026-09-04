@@ -95,8 +95,26 @@ def horizon_map(
     roi: tuple[int, int, int, int] | None = None,
     dense_range_m: float = DEFAULT_DENSE_RANGE_M,
     min_range_m: float = 0.0,
+    stride: int = 1,
+    steps_cells: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return (n_azimuth, H, W) float32 horizon elevation angles in degrees.
+
+    stride:
+        Compute every *stride*-th row and column of the ROI only, starting
+        at its first cell -- the output is the full ROI's cube sampled at
+        ``[::stride, ::stride]``, and the rays are still marched over the
+        whole *elevation* array. The DEM-clone ensemble (B3) uses this to
+        price the 4-D planner's block centres for twenty clones at a
+        sixteenth of the full cost.
+
+    steps_cells:
+        An explicit, strictly increasing array of ray-sample distances in
+        CELLS, replacing :func:`march_distances_cells`. The clone ensemble
+        splits the full march into a near set (re-marched on every clone)
+        and a far set (marched once on the surface DEM); with the two sets
+        partitioning the same samples, the maximum of the two passes IS the
+        single-pass cube.
 
     min_range_m:
         Ignore terrain closer than this. Used by the far-field pass of the
@@ -140,14 +158,22 @@ def horizon_map(
                 f"roi {roi} is not inside the {height}x{width} elevation grid"
             )
 
-    steps = march_distances_cells(
-        resolution_m, max_range_m, max_steps, dense_range_m, min_range_m
-    )
-    rows = np.arange(row0, row1, dtype=np.float64)[:, None]
-    cols = np.arange(col0, col1, dtype=np.float64)[None, :]
-    base = elev[row0:row1, col0:col1]
+    if steps_cells is None:
+        steps = march_distances_cells(
+            resolution_m, max_range_m, max_steps, dense_range_m, min_range_m
+        )
+    else:
+        steps = np.asarray(steps_cells, dtype=np.float64)
+        if steps.ndim != 1 or steps.size == 0 or np.any(np.diff(steps) <= 0.0):
+            raise ValueError("steps_cells must be a non-empty, strictly increasing 1-D array")
+    stride = int(stride)
+    if stride < 1:
+        raise ValueError("stride must be a positive integer")
+    rows = np.arange(row0, row1, stride, dtype=np.float64)[:, None]
+    cols = np.arange(col0, col1, stride, dtype=np.float64)[None, :]
+    base = elev[row0:row1:stride, col0:col1:stride]
 
-    out = np.empty((n_azimuth, row1 - row0, col1 - col0), dtype=np.float32)
+    out = np.empty((n_azimuth, base.shape[0], base.shape[1]), dtype=np.float32)
 
     for a_i in range(n_azimuth):
         az_rad = 2.0 * np.pi * a_i / n_azimuth

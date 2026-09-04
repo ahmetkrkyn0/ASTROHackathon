@@ -50,5 +50,8 @@ bags/
 # they carry absolute local paths and are rebuilt with the caches.
 lunapath/data/processed/horizon_map_meta.json
 lunapath/data/processed/earth_visibility_meta.json
+# B3: NASA DEM-clone cache provenance (scripts/build_dem_clone_cache.py)
+lunapath/data/processed/dem_clones_meta.json
+lunapath/data/processed/dem_clone_horizons_meta.json
 # PDS3 labels fetched next to LOLA .img products
 *.lbl

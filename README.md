@@ -140,6 +140,7 @@ Backend açılışta işlenmiş grid’leri bulursa yükler; bulamazsa API üzer
 
 - P1 hattı için DEM dosyası script’in beklediği isim ve klasörlerde olmalıdır (`lunapath/src/process_lunar_data.py` ve README üstündeki `data/raw` mantığı).
 - API ile doğrudan DEM yüklerken dosya `backend/data/dem/` altına konur (klasör yoksa oluşturulur).
+- Belirsizlik katmanları (B3) için NASA PGDA'nın Site11 DEM klonları: `python scripts/build_dem_clone_cache.py` (varsayılan 20 klon, 1 km yakın-alan dolgusu; `--n-clones 100` ile genişletilir; `horizon_map.npy` varsa klon ufuk küplerini de üretir). Ürün: https://pgda.gsfc.nasa.gov/products/78
 
 ---
 

@@ -66,6 +66,18 @@ _VALIDITY_LAYERS: tuple[str, ...] = (
 THERMAL_FIELD_SUNLIT_PEAK: str = "sunlit_peak"
 
 
+def slope_deg_from_elevation(elevation: np.ndarray, resolution_m: float) -> np.ndarray:
+    """Slope magnitude in degrees from an elevation grid: the gradient formula
+    the P1 pipeline (``make_slope_grid``) and :func:`load_and_preprocess_dem`
+    share. Exposed so the DEM-clone ensemble (B3) slopes every clone with
+    exactly the operator that produced the shipped ``slope_grid`` -- a
+    probability of passability computed with a different stencil would be
+    a statement about a different planner.
+    """
+    dy, dx = np.gradient(np.asarray(elevation, dtype=np.float64), float(resolution_m))
+    return np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
+
+
 def derive_thermal_fields(
     sunlit_peak: np.ndarray, shadow_ratio: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -332,10 +344,10 @@ def load_and_preprocess_dem(
         actual_resolution = native_resolution
 
     # Slope (degrees)
-    dy, dx = np.gradient(elevation, actual_resolution)
-    slope = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
+    slope = slope_deg_from_elevation(elevation, actual_resolution)
 
     # Aspect (degrees, 0°=North clockwise)
+    dy, dx = np.gradient(elevation, actual_resolution)
     aspect = np.degrees(np.arctan2(-dx, dy))
     aspect = (aspect + 360) % 360
 

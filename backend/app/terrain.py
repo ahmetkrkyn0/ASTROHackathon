@@ -96,6 +96,11 @@ LAYER_UNITS: dict[str, str] = {
     "cost": "dimensionless",
     "traversable": "boolean",
     "earth_visibility": "fraction",
+    # The DEM-clone ensemble (B3): present only with the clone cache.
+    "p_traversable": "fraction",
+    "slope_sigma": "deg",
+    "elevation_sigma": "m",
+    "slope_sigma_nasa": "deg",
 }
 
 #: What each layer means to someone building the scene, in one line.
@@ -112,6 +117,16 @@ LAYER_DESCRIPTIONS: dict[str, str] = {
         "Fraction of the sampled span in which the Earth is above the local "
         "horizon: where a direct-to-Earth radio link is geometrically possible."
     ),
+    "p_traversable": (
+        "Fraction of NASA's DEM clones in which the cell passes this rover's "
+        "slope and cold-end gates: 1 certainly passable, 0 certainly not."
+    ),
+    "slope_sigma": "Standard deviation of the slope across the DEM-clone ensemble.",
+    "elevation_sigma": (
+        "NASA PGDA's total elevation uncertainty (toterr) for the DEM: the "
+        "adjustment's error model, not a measurement."
+    ),
+    "slope_sigma_nasa": "NASA PGDA's slope uncertainty (slperr) for the DEM.",
 }
 
 #: Layers both representations serve, in the order the manifest lists them.
@@ -127,6 +142,12 @@ TERRAIN_LAYERS: tuple[str, ...] = (
     # Optional: present only when scripts/build_earth_visibility_cache.py
     # has run. terrain_manifest skips layers the grids do not carry.
     "earth_visibility",
+    # Optional: present only when scripts/build_dem_clone_cache.py has run
+    # (B3). Same rule: absent from the manifest, not published as unknown.
+    "p_traversable",
+    "slope_sigma",
+    "elevation_sigma",
+    "slope_sigma_nasa",
 )
 
 
@@ -292,7 +313,7 @@ def terrain_manifest(
     span_row = rows * resolution_m
     span_col = cols * resolution_m
 
-    return {
+    manifest: dict[str, Any] = {
         "grid": {
             "rows": rows,
             "cols": cols,
@@ -330,3 +351,8 @@ def terrain_manifest(
         "weights": weights,
         "layers": layers,
     }
+    # The DEM-clone ensemble's pedigree (B3): NASA's product, the clone
+    # count, what was held fixed. Present exactly when the p_* layers are.
+    if metadata.get("dem_uncertainty") is not None:
+        manifest["dem_uncertainty"] = metadata["dem_uncertainty"]
+    return manifest

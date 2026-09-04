@@ -600,6 +600,115 @@ Süre: gökyüzü 0,8–2,1 s + koşumlar 0,06–0,6 s; plan-4d ayrıca 8–10 s
 İki rotayı kıyaslamak: iki çağrı, `label` ile; `rates.full_success.ci95`
 ve `verdict` kıyas anahtarıdır ("hangisi %95 güvenle varıyor").
 
+## DEM belirsizliği — NASA'nın DEM klonlarıyla olasılık katmanları (4 Eylül 2026 eki, B3)
+
+NASA GSFC (PGDA ürün 78) her 5 m/px güney kutbu DEM'i için Z-belirsizlik
+(`toterr`), eğim-belirsizlik (`slperr`) haritaları ve 100 istatistiksel klon
+yayınlıyor. `scripts/build_dem_clone_cache.py` Site11 klonlarını planlama
+penceresi için (1 km yakın-alan dolgusuyla) indirir, plan-4d'nin blok
+merkezlerinde klon başına ufuk küpü üretir; backend bunlardan hücre başına
+**P(geçilebilir)**, dilim başına **P(aydınlık)** ve rota başına **DEM bandı**
+türetir. Klon önbelleği yoksa aşağıdakilerin hiçbiri görünmez; mevcut
+alanlar değişmez.
+
+### `GET /api/terrain` ve `GET /api/layers/{ad}?format=f32&rover_id=`
+
+Manifestte dört yeni katman (yalnızca önbellek varken) ve üst düzey
+`dem_uncertainty` pedigree bloğu:
+
+| Katman | Birim | `validity` | Anlam |
+|---|---|---|---|
+| `p_traversable` | fraction | DERIVED (sentetik önbellekte SYNTHETIC) | Klonların bu rover için hücreyi geçilebilir saydığı oran; 1 kesin geçilebilir, 0 kesin değil, 0,05–0,95 belirsiz |
+| `slope_sigma` | deg | DERIVED | Klon eğimlerinin std'si (bizim topluluk, `np.gradient`) |
+| `elevation_sigma` | m | MODEL | NASA `toterr` — ölçüm değil, NASA'nın hata modeli |
+| `slope_sigma_nasa` | deg | MODEL | NASA `slperr` |
+
+`p_traversable` rover'a bağlıdır (`rover_id` eğim sınırını seçer);
+`binary_url` bunu taşır. `dem_uncertainty`: `model`
+(`nasa_pgda_clones` | `synthetic`), `site`, `product_url`, `reference`,
+`n_clones`, `clone_indices`, `window_offset`, `near_range_m`, `sigma`
+(toterr/slperr istatistikleri), `error_across_clones`,
+`thermal_field_held_fixed: true`, `far_field_held_fixed: true`,
+`earth_visibility_cloned: false`, `clone_horizons` (stride, ihmal edilen
+ufuk kayması sınırı, yüzey kontrolü). Önbellek yokken `/api/layers/<yeni>`
+404 + betik adı.
+
+### `GET /api/uncertainty-series?start_utc=&n_slices=&slice_hours=&n_clones=&format=`
+
+Klon ufuk küplerinin gridinde (stride 4 → 125×125, 20 m) dilim başına
+`p_illuminated`:
+
+| Alan | Anlam |
+|---|---|
+| `model` | `clone_horizon` veya `unavailable` + `reason` (küp/epoch/çekirdek yok; f32 için 404) |
+| `n_clones`, `clone_indices` | Kullanılan klonlar (`n_clones` ile ilk n; varsayılan hepsi) |
+| `grid` | `rows`, `cols`, `resolution_m`, `stride`, `row_offset`, `col_offset` — ince gridde ilk hücrenin yeri (blok merkezi) |
+| `per_slice.mean`, `per_slice.uncertain_fraction` | Dilim başına ortalama P ve 0,05 < P < 0,95 hücre oranı |
+| `sun` | Güneş izi (`/api/illumination-series` ile aynı biçim) |
+| `fields.p_illuminated.binary_url` | f32: `X-Series-*` başlıkları, `[T, rows, cols]` slice-major |
+| `far_field_held_fixed`, `near_range_m`, `neglected_horizon_shift_deg_max` | Ne klonlanmadı ve bunun üst sınırı |
+
+### `POST /api/dem-uncertainty`
+
+İstek — `/api/stress-test` çekirdeği + klon alanları:
+
+```json
+{ "path_states": [[89,123,0],[88,122,2], ...],
+  "rover_id": "nasa_viper", "coarsen": 4, "slice_hours": 0.0956,
+  "start_utc": "2027-05-30T00:00:00", "initial_soc_pct": 1.0,
+  "n_clones": 100, "with_sherpa": false, "n_runs": 200, "seed": 0,
+  "perturbations": null, "label": "haven to haven" }
+```
+
+`n_clones` ≤ önbellekteki sayı (aşarsa 422); `with_sherpa` verilirse her
+klonda `n_runs` SHERPA koşumu havuzlanır (`perturbations` B5'teki gibi).
+
+Yanıt:
+
+| Alan | Anlam |
+|---|---|
+| `n_clones`, `clones_priced`, `unpriceable` | Kullanılan klon; fiyatlanan (≥ 90° kenar → düşer, indeksleri listede) |
+| `route` | `n_states`, `move_steps`, `wait_steps`, `planned_duration_h`, `odometry_m` |
+| `route_feasible` | `{count, fraction, ci95}` — rotanın **her** kaba hücresinin (16 ince hücrenin VE'si) geçilebilir kaldığı klon oranı, Wilson %95 |
+| `reached` | Nominal (σ = 0) koşumda hedefe varan klon oranı |
+| `p_traversable` | `min`, `mean`, `per_state[]` — rota hücrelerinde P |
+| `metrics.<ad>` | `{p5,p50,p95,mean,std,min,max,n}`: `duration_h`, `drive_hours`, `gross_drive_wh`, `battery_used_wh`, `min_battery_pct`, `final_battery_pct`, `max_continuous_shadow_h` — klonlar arası band |
+| `per_clone` | Aynı metriklerin klon başına listeleri + `reached`, `clone_index` |
+| `nominal` | Yüzey DEM'iyle aynı hesap (aynı anahtarlar + `reached`) |
+| `failures` | Nominal koşumda ilk arıza sayıları |
+| `sky_model` | `clone_horizon` (klon küpleri, `columns` açıklaması) veya `static` + `reason`; `n_slices`, `far_field_held_fixed`, `near_range_m` |
+| `sherpa` | `null` veya `{n_runs_per_clone, n_runs_total, seed, completion{count,rate,ci95}, failures, metrics, perturbations}` |
+| `provenance` | `model`, `product_url`, `reference`, `n_clones_available`, `clone_indices`, neyin sabit tutulduğu |
+| `timing_ms` | `sky`, `runs`, `total` |
+
+`duration_h` B5 politikasını izler (önde iken planlanan kalkışa kadar bekle):
+eğim hatası süreye ancak dilim boşluğunu aşınca yansır; DEM'e duyarlı
+metrikler `drive_hours` ve `gross_drive_wh`'dir.
+
+### `POST /api/plan` ve `POST /api/plan-4d` — `uncertainty` bloğu
+
+Yalnızca klon önbelleği varken (yoksa alan **yok**):
+
+```json
+"uncertainty": { "model": "nasa_pgda_clones", "n_clones": 100, "coarsen": 4,
+                 "p_traversable_min": 0.2, "p_traversable_mean": 0.92,
+                 "route_feasible_fraction": 0.0,
+                 "band_url": "/api/dem-uncertainty", "product_url": "..." }
+```
+
+`/api/plan`'da ince hücrelerde (`coarsen` 1), `/api/plan-4d`'de kaba
+hücrelerde (blok VE'si). Simülasyon yok; maliyet milisaniye.
+
+Ölçülen (Site11, 100 NASA klonu, 4 Eylül 2026): `p_traversable` VIPER için
+hücrelerin %68,6'sında 1, %16,9'unda 0, **%8,2'sinde belirsiz** (LPR-1
+%2,8); `slope_sigma` medyanı 1,52° (NASA `slperr` 1,73°). 30 Mayıs 2027
+epoch'unda `p_illuminated` 48 dilimde hücrelerin p50 %10,8'ini kararsız
+bırakıyor. VIPER haven→haven rotası: `gross_drive_wh` p5/p50/p95
+2.258 / 2.293 / 2.334 Wh, `nominal` 2.127 Wh (klon eğimleri yüzeyden
+sistematik yüksek: gürültü gradyanı şişirir); `route_feasible` 1/100;
+`with_sherpa` tamamlanma 0,178 (B5'te 0,296). Süre: seri 0,2–0,4 s, bant
+1–4 s (100 klon), plan bloğu milisaniye.
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,
