@@ -3,10 +3,10 @@ import { LayerProvenancePanel } from './LayerProvenancePanel'
 import { LAYER_FOR_VIEW, useLayerProvenance } from './useLayerProvenance'
 
 export function LayerProvenance() {
-  const { activeLayer } = useMission()
+  const { activeViewMode } = useMission()
   const { manifest, loading, error } = useLayerProvenance()
 
-  const layerName = LAYER_FOR_VIEW[activeLayer]
+  const layerName = LAYER_FOR_VIEW[activeViewMode]
   const entry = manifest?.layers[layerName] ?? null
 
   return (

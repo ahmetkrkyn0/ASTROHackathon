@@ -1,5 +1,7 @@
-import { useMemo } from 'react'
-import { useMission } from '../../mission/MissionContext'
+import { useEffect, useMemo, useState } from 'react'
+import { fetchCellTelemetry } from '../../api'
+import { useFocusTelemetry, useMission } from '../../mission/MissionContext'
+import type { CellTelemetryResponse } from '../../net/types'
 
 export type CostKey = 'slope' | 'energy' | 'shadow' | 'thermal'
 
@@ -32,7 +34,34 @@ const WEIGHT_KEY: Record<CostKey, 'w_slope' | 'w_energy' | 'w_shadow' | 'w_therm
 const KEYS: CostKey[] = ['slope', 'energy', 'shadow', 'thermal']
 
 export function useCostExplain() {
-  const { cellTelemetry, hoverCell, weights } = useMission()
+  const { weights } = useMission()
+  // The cell under the pointer, which is what this panel explains. The
+  // canonical mission value publishes no hoverCell and no cellTelemetry, on
+  // purpose: focus telemetry already follows hoverPoint ?? goal ?? start, and
+  // a feature that wants one cell's numbers fetches that cell. selectedCell
+  // is deliberately NOT used -- it is always null in this cockpit, and
+  // binding to it would make the panel update on click instead of on hover,
+  // which is a different feature.
+  const focus = useFocusTelemetry()
+  const [cellTelemetry, setCellTelemetry] = useState<CellTelemetryResponse | null>(null)
+
+  // One request per cell, not per pointer event: the effect keys on the two
+  // coordinates, and the in-flight request is aborted when they change, so
+  // dragging across the grid leaves one live request rather than a queue of
+  // answers arriving out of order.
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchCellTelemetry(focus.row, focus.col, controller.signal)
+      .then(setCellTelemetry)
+      .catch((cause: unknown) => {
+        // An abort is this effect's own cleanup, not a failure to report.
+        if ((cause as { name?: string }).name === 'AbortError') return
+        setCellTelemetry(null)
+      })
+    return () => controller.abort()
+  }, [focus.row, focus.col])
+
+  const hoverCell: [number, number] = [focus.row, focus.col]
 
   return useMemo(() => {
     const breakdown = cellTelemetry?.cost_breakdown ?? null
@@ -79,5 +108,8 @@ export function useCostExplain() {
     }))
 
     return { rows, total, impassable, impassableBy, cell: hoverCell }
-  }, [cellTelemetry, hoverCell, weights])
+    // hoverCell is rebuilt from focus.row/focus.col on every render, so the
+    // two coordinates are the dependencies rather than the array they go in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cellTelemetry, focus.row, focus.col, weights])
 }

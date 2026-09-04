@@ -19,6 +19,26 @@
   --font-body: 'Manrope', 'Segoe UI', sans-serif;
   --font-display: 'Outfit', 'Segoe UI', sans-serif;
   --font-data: 'IBM Plex Mono', 'Cascadia Code', monospace;
+
+  /* ── Mission deck ─────────────────────────────────────────────────────────
+     The console now floats over a moving lunar backdrop, so the panel fills
+     below are translucent where they used to be near-opaque. Anything above
+     encodes data (the risk ramp, --safe through --critical) and is left
+     alone: those are readings, not decoration.
+
+     The two accents are an axis rather than a brand pair. At this latitude
+     the sun grazes the horizon, so every cell is either lit or in permanent
+     shadow -- the same split the shadow_ratio and thermal layers carry.
+       --terminator  sunlit: energy, and the action you take
+       --umbra       shadowed: cold, and the data you read */
+  --terminator: #ffb84d;
+  --terminator-dim: rgba(255, 184, 77, 0.16);
+  --umbra: #5ad2ff;
+  --umbra-dim: rgba(90, 210, 255, 0.16);
+  --void: #05070d;
+  --glass: rgba(9, 13, 22, 0.62);
+  --glass-strong: rgba(9, 13, 22, 0.78);
+  --hairline: rgba(148, 163, 184, 0.22);
 }
 
 * {
@@ -34,13 +54,110 @@ body,
 
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at top, rgba(160, 160, 255, 0.08), transparent 30%),
-    linear-gradient(180deg, #151520 0%, #0f1017 100%);
+  /* Flat void rather than a gradient: the backdrop video supplies the
+     luminance now, and a gradient underneath it only showed through as a
+     colour cast on the vignette. */
+  background: var(--void);
   color: var(--text);
   font-family: var(--font-body);
   line-height: 1.5;
   overflow: hidden;
+}
+
+/* ── Backdrop ───────────────────────────────────────────────────────────────
+   Fixed behind everything, and inert: the console owns every interaction.
+
+   z-index 130 clears the landing screen (120) so the clip is visible from the
+   first frame of the session; the landing's own content sits above it again
+   at 131. Everywhere else the shell (1) is the only thing above 0, so no
+   panel needs its own stacking context. */
+.space-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--void);
+}
+
+.space-backdrop--ambient {
+  z-index: 130;
+}
+
+.space-backdrop--feature {
+  z-index: 130;
+}
+
+.space-backdrop-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: var(--backdrop-opacity, 1);
+  transform: scale(var(--backdrop-scale, 1));
+  transform-origin: center;
+  /* Long enough to read as a deliberate change of scene rather than a flicker,
+     and matched to the landing screen's own 0.75s exit. */
+  transition: opacity 0.75s ease, transform 1.2s ease;
+}
+
+/* Barely inside 1:1. The landing page's own moon is gone, so the clip's disc
+   is the hero and wants to be whole -- the fraction of a percent is only
+   there so the slow settle to `feature` has somewhere to travel, and reads
+   as the scene pushing in when you enter. */
+.space-backdrop--ambient .space-backdrop-media {
+  --backdrop-scale: 1.06;
+}
+
+.space-backdrop-vignette {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.75s ease;
+}
+
+/* During the transition beat the clip is the subject, so the vignette that
+   exists to protect UI legibility gets out of the way. */
+.space-backdrop--feature .space-backdrop-vignette {
+  opacity: 0.45;
+}
+
+/* The landing page reads left-to-right: a column of type on the left, the
+   moon on the right. A flat vertical vignette dims both equally and crushes
+   the disc, so here the scrim leans left -- heavy enough to hold the
+   headline, gone by the time it reaches the subject. Higher specificity than
+   the Tailwind utility on the element, which is what lets it take over. */
+.space-backdrop--ambient .space-backdrop-vignette {
+  background-image:
+    linear-gradient(
+      100deg,
+      rgba(3, 4, 10, 0.94) 0%,
+      rgba(3, 4, 10, 0.82) 26%,
+      rgba(3, 4, 10, 0.32) 52%,
+      rgba(3, 4, 10, 0.08) 72%,
+      rgba(3, 4, 10, 0.28) 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(3, 4, 10, 0.55) 0%,
+      transparent 22%,
+      transparent 74%,
+      rgba(3, 4, 10, 0.7) 100%
+    );
+}
+
+/* The sun, just under the horizon. Kept far dimmer than it wants to be --
+   it is atmosphere, and the amber that carries actual meaning is the rule
+   under the topbar and the primary action. */
+.space-backdrop-terminator {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 38vh;
+  background: radial-gradient(
+    120% 100% at 50% 100%,
+    rgba(255, 184, 77, 0.14),
+    transparent 70%
+  );
 }
 
 button,
@@ -50,14 +167,15 @@ select {
 }
 
 .app-shell {
+  position: relative;
+  z-index: 1;
   height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at top left, rgba(160, 160, 255, 0.06), transparent 24%),
-    radial-gradient(circle at top right, rgba(173, 198, 255, 0.05), transparent 22%),
-    linear-gradient(180deg, rgba(10, 10, 18, 0.96) 0%, rgba(19, 19, 27, 0.98) 100%);
+  /* Transparent: the backdrop is the background now. The old opaque gradient
+     stack is what the video would have been hidden behind. */
+  background: transparent;
   transition: opacity 0.6s ease, transform 0.6s ease, filter 0.6s ease;
   overflow: hidden;
 }
@@ -77,35 +195,23 @@ select {
   filter: blur(0);
 }
 
+/* Above the backdrop clip (130) so the pitch stays readable, but transparent
+   so the clip is what you see behind it -- the sequence starts here. */
 .landing-screen {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 131;
   overflow: hidden;
-  background: #03040a;
+  background: transparent;
   transition: opacity 0.75s ease, transform 0.75s ease, filter 0.75s ease;
 }
 
+/* Pushes into the clip on the way out and hands off to the cinematic beat,
+   which is already running the same footage. */
 .landing-screen.is-exiting {
   opacity: 0;
   transform: scale(1.03);
   filter: blur(10px);
-}
-
-.landing-star-bg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.landing-canvas {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
 }
 
 .landing-content {
@@ -123,10 +229,97 @@ select {
 }
 
 .landing-brand {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
   flex-shrink: 0;
+  padding-bottom: 18px;
+}
+
+/* The same horizon rule that divides the deck's topbar, introduced here so
+   the amber means the same thing on both screens before you have seen the
+   console. Stops short of the full width: it is a horizon, and horizons
+   recede. */
+.landing-brand::after {
+  content: '';
+  position: absolute;
+  inset: auto auto 0 0;
+  width: min(320px, 38vw);
+  height: 1px;
+  background: linear-gradient(90deg, var(--terminator), transparent);
+  box-shadow: 0 0 12px 1px rgba(255, 184, 77, 0.28);
+  transform-origin: left center;
+  animation: landing-horizon 1.1s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* One orchestrated entrance rather than effects scattered over the page: the
+   horizon draws, then the type settles in under it. */
+@keyframes landing-horizon {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+@keyframes landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.landing-brand,
+.landing-copy > *,
+.landing-actions > * {
+  animation: landing-rise 0.72s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.landing-brand {
+  animation-delay: 0.05s;
+}
+
+.landing-copy > .landing-kicker {
+  animation-delay: 0.24s;
+}
+
+.landing-copy > h1 {
+  animation-delay: 0.34s;
+}
+
+.landing-copy > .landing-description {
+  animation-delay: 0.46s;
+}
+
+.landing-copy > .landing-feature-list {
+  animation-delay: 0.56s;
+}
+
+.landing-actions > .landing-explore-button {
+  animation-delay: 0.66s;
+}
+
+.landing-actions > .landing-hint {
+  animation-delay: 0.76s;
+}
+
+/* The entrance is decoration; nobody should have to sit through it twice, and
+   for a viewer who asked for less motion it is just latency. */
+@media (prefers-reduced-motion: reduce) {
+  .landing-brand,
+  .landing-brand::after,
+  .landing-copy > *,
+  .landing-actions > * {
+    animation: none;
+  }
 }
 
 .landing-main {
@@ -266,30 +459,64 @@ select {
   cursor: default;
 }
 
-.loading-screen {
+/* The transition beat. Above the backdrop (130) rather than opaque over it:
+   the clip is the screen here, and this is only the text on top of it. */
+.cinematic-screen {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  z-index: 131;
   display: grid;
-  place-items: center;
-  background: rgba(2, 3, 8, 0.94);
+  place-items: end center;
+  padding-bottom: 12vh;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition: opacity 0.45s ease, visibility 0.45s ease;
 }
 
-.loading-screen.is-active {
+.cinematic-screen.is-active {
   opacity: 1;
   visibility: visible;
-  pointer-events: all;
+  pointer-events: auto;
 }
 
-.loading-frame {
+.cinematic-frame {
   width: min(420px, calc(100vw - 40px));
   display: grid;
   gap: 18px;
+  padding: 22px 24px;
+  background: var(--glass-strong);
+  border: 1px solid var(--hairline);
+  border-radius: 20px;
+  backdrop-filter: blur(18px);
 }
+
+.cinematic-cta {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 184, 77, 0.45);
+  background: linear-gradient(135deg, rgba(255, 184, 77, 0.96), rgba(224, 142, 42, 0.92));
+  color: #2a1806;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.cinematic-cta:disabled {
+  background: rgba(9, 13, 22, 0.6);
+  border-color: var(--hairline);
+  color: var(--text-muted);
+  cursor: progress;
+}
+
+.cinematic-cta:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(255, 197, 106, 0.98), rgba(236, 154, 52, 0.95));
+}
+
 
 .loading-bar-track {
   height: 3px;
@@ -312,14 +539,34 @@ select {
 }
 
 .topbar {
+  position: relative;
   height: 54px;
   padding: 0 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(70, 70, 81, 0.3);
-  background: rgba(10, 10, 26, 0.92);
-  backdrop-filter: blur(14px);
+  /* No grey rule here: the terminator below IS the divider. Two lines
+     stacked read as a mistake. */
+  background: var(--glass-strong);
+  backdrop-filter: blur(18px);
+}
+
+/* The horizon the sun grazes -- the one thing on this deck allowed to be
+   bold. Full bleed, and the only place amber runs at strength besides the
+   primary action. */
+.topbar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--terminator) 12%,
+    var(--terminator) 88%,
+    transparent
+  );
+  box-shadow: 0 0 12px 1px rgba(255, 184, 77, 0.35);
 }
 
 .brand-lockup {
@@ -377,7 +624,7 @@ select {
 .left-rail,
 .right-rail {
   min-height: 0;
-  background: rgba(19, 19, 27, 0.92);
+  background: var(--glass-strong);
   backdrop-filter: blur(18px);
 }
 
@@ -448,11 +695,13 @@ select {
 .rail-section,
 .battery-card,
 .risk-card,
-.waypoint-card {
-  background: linear-gradient(180deg, rgba(31, 31, 40, 0.92), rgba(17, 18, 27, 0.98));
-  border: 1px solid rgba(70, 70, 81, 0.24);
+.waypoint-card,
+.payload-card {
+  background: var(--glass);
+  border: 1px solid var(--hairline);
   border-radius: 16px;
-  box-shadow: 0 16px 30px rgba(2, 3, 8, 0.18);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 16px 30px rgba(2, 3, 8, 0.35);
 }
 
 .rail-section {
@@ -604,8 +853,8 @@ select {
 }
 
 .rover-card.is-active {
-  background: rgba(160, 160, 255, 0.1);
-  border-color: rgba(160, 160, 255, 0.36);
+  background: var(--umbra-dim);
+  border-color: rgba(90, 210, 255, 0.4);
 }
 
 .rover-card-head,
@@ -800,7 +1049,8 @@ select {
 .toast-stack {
   position: fixed;
   right: 22px;
-  bottom: 22px;
+  /* Clears the assistant launcher, which owns this corner. */
+  bottom: 78px;
   z-index: 150;
   width: min(360px, calc(100vw - 32px));
   display: flex;
@@ -895,11 +1145,16 @@ select {
   font-weight: 600;
 }
 
+/* The one action that spends energy, in the colour that means energy. */
 .primary-btn {
-  background: linear-gradient(135deg, rgba(160, 160, 255, 0.95), rgba(123, 123, 231, 0.9));
-  border: 1px solid rgba(160, 160, 255, 0.4);
-  color: #110d3d;
+  background: linear-gradient(135deg, rgba(255, 184, 77, 0.96), rgba(224, 142, 42, 0.92));
+  border: 1px solid rgba(255, 184, 77, 0.45);
+  color: #2a1806;
   font-weight: 700;
+}
+
+.primary-btn:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(255, 197, 106, 0.98), rgba(236, 154, 52, 0.95));
 }
 
 .primary-btn:disabled {
@@ -912,10 +1167,16 @@ select {
   min-height: 0;
   min-width: 0;
   display: flex;
+  /* Column, so BottomDock is the strip UNDER the map that slots.tsx calls
+     it. In a row it would sit beside .map-stage and take width from the
+     map; the playback bar never showed this because it positions itself
+     absolutely and leaves the flow entirely. */
+  flex-direction: column;
   overflow: hidden;
-  background:
-    radial-gradient(circle at center, rgba(255, 255, 255, 0.03), transparent 60%),
-    linear-gradient(180deg, #090910 0%, #05060b 100%);
+  /* Left open so the backdrop reads through the margins around the canvas --
+     the console frames a viewport rather than covering one. The canvas itself
+     paints its own ground, so the terrain is unaffected. */
+  background: rgba(5, 7, 13, 0.35);
 }
 
 .center-stage::before {
@@ -933,20 +1194,34 @@ select {
   z-index: 1;
   flex: 1;
   min-height: 0;
-  padding: 20px 22px 24px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-}
-
-.map-canvas-shell {
-  width: min(100%, calc(100vh - 196px));
-  max-width: 100%;
-  max-height: calc(100% - 28px);
-  aspect-ratio: 1 / 1;
+  padding: 8px 12px 14px;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+
+.map-canvas-shell {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  overflow: hidden;
+  position: relative;
+}
+
+.map-canvas {
+  width: min(100%, calc(100vh - 130px));
+  height: min(100%, calc(100vh - 130px));
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(56, 189, 248, 0.2);
 }
 
 .map-overlay {
@@ -1090,9 +1365,10 @@ select {
   font-weight: 700;
 }
 
+/* Choosing a layer or a dimension is reading, not spending -- cyan. */
 .map-switch button.is-active {
-  background: var(--primary-container);
-  color: #0f0f39;
+  background: var(--umbra);
+  color: #04222e;
   font-weight: 700;
 }
 
@@ -1658,7 +1934,40 @@ select {
   }
 }
 
-/* ── 3-D terrain view ────────────────────────────────────────────────────── */
+/* ── 3-D terrain view ─────────────────────────────────────────────────────── */
+
+/* Unwired for now (goktug/ai-scene uses TerrainCanvas3D as the active 3D
+   view) but kept styled in case TerrainView3D is re-enabled.
+
+   The 2-D canvas is a fixed 500x500 element, so the shell's
+   `align-items: center` can size it from its own intrinsic dimensions. A
+   WebGL canvas has none: as a centred flex item it resolves height against
+   an auto line box, not the shell, and comes out a short strip with a wrong
+   camera aspect. align-self: stretch opts this child back into the shell's
+   full square. */
+.terrain3d-shell {
+  position: relative;
+  align-self: stretch;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  border-radius: 20px;
+  overflow: hidden;
+  background: #05060a;
+  border: 1px solid rgba(70, 70, 81, 0.4);
+}
+
+.terrain3d-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.terrain3d-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
 
 /* The canvas fills the same square shell MapCanvas uses, so switching
    dimension does not reflow the page around it. */
@@ -1689,6 +1998,40 @@ select {
   pointer-events: none;
 }
 
+/* Unwired for now (goktug/ai-scene uses TerrainCanvas3D as the active 3D
+   view) but kept styled in case TerrainView3D is re-enabled. */
+.terrain3d-controls {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(340px, calc(100% - 28px));
+  padding: 12px 14px;
+  background: rgba(13, 13, 22, 0.72);
+  border: 1px solid rgba(70, 70, 81, 0.4);
+  border-radius: 16px;
+  backdrop-filter: blur(18px);
+}
+
+.terrain3d-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: rgba(199, 197, 211, 0.82);
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.terrain3d-controls input[type='range'] {
+  width: 100%;
+  accent-color: var(--primary-container);
+}
+
 /* Sits beside the existing view-mode switch and inherits its button styling. */
 .map-switch--dimension {
   margin-top: 8px;
@@ -1697,6 +2040,10 @@ select {
 .map-overlay-bottom-right {
   right: 24px;
   bottom: 24px;
+  /* At narrower widths this sits in the same band as the centred
+     legend-ribbon; without this it wins the paint order and the photo-drape
+     checkbox underneath becomes unclickable. */
+  z-index: 3;
 }
 
 .terrain3d-time {
@@ -1731,3 +2078,2656 @@ select {
   line-height: 1.35;
   color: rgba(226, 232, 240, 0.6);
 }
+
+/* ── LiDAR payload budget ───────────────────────────────────────────────────
+   Cyan, not amber: this is a reading, and the amber is reserved for the two
+   places that mean "sunlit" -- the horizon rule and the primary action. */
+.payload-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.payload-note,
+.payload-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0.72;
+}
+
+.payload-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.payload-inputs label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.payload-inputs input {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 7px 9px;
+  background: rgba(5, 7, 13, 0.6);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.payload-inputs input:focus-visible {
+  outline: 2px solid var(--umbra);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.payload-unit {
+  grid-column: 2;
+  grid-row: 1;
+  color: var(--umbra);
+  font-family: var(--font-data);
+  opacity: 0.8;
+}
+
+.payload-readout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.payload-readout > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.payload-readout strong {
+  color: var(--umbra);
+  font-family: var(--font-data);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* ── LUNAPATH MISSION CONTROL WORKSTATION DESIGN SYSTEM ────────────── */
+
+:root {
+  --accent-lavender: #b4a8e8;
+  --accent-cyan: #00e5ff;
+  --accent-mint: #2ee59d;
+  --accent-coral: #ff5252;
+  --risk-low: #22c55e;
+  --risk-med: #eab308;
+  --risk-high: #f97316;
+  --risk-crit: #ef4444;
+  --bg-workstation: #06080e;
+  --bg-panel-trans: rgba(9, 13, 22, 0.92);
+  --bg-card: rgba(16, 22, 36, 0.7);
+  --border-line: rgba(160, 175, 210, 0.15);
+  --border-focus: rgba(180, 168, 232, 0.5);
+}
+
+/* TopBar */
+.lp-topbar {
+  height: 52px;
+  background: #070a12;
+  border-bottom: 1px solid var(--border-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 50;
+  position: relative;
+  user-select: none;
+}
+
+.lp-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.lp-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.lp-brand-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  color: #f1f3fd;
+}
+
+.lp-brand-tag {
+  font-family: var(--font-data);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--accent-lavender);
+  opacity: 0.75;
+}
+
+.lp-topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(14, 19, 32, 0.9);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-line);
+}
+
+.lp-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 18px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #94a3b8;
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: all 160ms ease;
+  position: relative;
+}
+
+.lp-mode-btn:hover:not(:disabled) {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lp-mode-btn.is-active {
+  color: #ffffff;
+  background: rgba(180, 168, 232, 0.16);
+  border: 1px solid rgba(180, 168, 232, 0.35);
+  box-shadow: 0 0 16px rgba(180, 168, 232, 0.15);
+}
+
+.lp-mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #64748b;
+}
+
+.lp-mode-btn.is-active .lp-mode-dot {
+  background: var(--accent-lavender);
+  box-shadow: 0 0 8px var(--accent-lavender);
+}
+
+.lp-mode-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lp-mode-lock-hint {
+  font-size: 9px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  margin-left: 4px;
+}
+
+.lp-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.lp-telemetry-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  background: rgba(12, 17, 28, 0.7);
+  border: 1px solid var(--border-line);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.lp-meta-label {
+  color: #64748b;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lp-meta-val {
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.lp-meta-val.is-nominal {
+  color: var(--accent-mint);
+}
+
+.lp-meta-val.is-solving {
+  color: var(--accent-cyan);
+  animation: lp-pulse 1.2s infinite;
+}
+
+.lp-status-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-mint);
+  box-shadow: 0 0 8px var(--accent-mint);
+  animation: lp-pulse 2s infinite;
+}
+
+.lp-status-pill.is-offline .lp-pulse-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+}
+
+.lp-clock-badge {
+  background: rgba(180, 168, 232, 0.06);
+  border-color: rgba(180, 168, 232, 0.2);
+}
+
+.lp-clock-readout {
+  color: var(--accent-lavender);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+/* Map Controls Dock (Layer + 2D/3D) */
+.lp-map-controls-dock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  z-index: 25;
+}
+
+.lp-dim-toggle {
+  display: flex;
+  background: rgba(9, 13, 22, 0.88);
+  border: 1px solid var(--border-line);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.lp-dim-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.lp-dim-btn.is-active {
+  background: rgba(180, 168, 232, 0.2);
+  color: #ffffff;
+  border: 1px solid rgba(180, 168, 232, 0.4);
+}
+
+.lp-layer-menu-wrapper {
+  position: relative;
+}
+
+.lp-layer-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(9, 13, 22, 0.88);
+  border: 1px solid var(--border-line);
+  border-radius: 8px;
+  padding: 6px 14px;
+  color: #f1f5f9;
+  cursor: pointer;
+  transition: border-color 160ms ease;
+}
+
+.lp-layer-trigger:hover,
+.lp-layer-trigger.is-open {
+  border-color: var(--border-focus);
+}
+
+.lp-layer-label-hint {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: #64748b;
+  letter-spacing: 0.1em;
+}
+
+.lp-layer-current-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.lp-dropdown-chevron {
+  color: var(--accent-lavender);
+  font-size: 12px;
+  margin-left: 2px;
+}
+
+.lp-layer-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 260px;
+  background: #0a0e1a;
+  border: 1px solid var(--border-line);
+  border-radius: 10px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
+  padding: 8px;
+  z-index: 100;
+}
+
+.lp-layer-group {
+  margin-bottom: 8px;
+}
+
+.lp-layer-group:last-child {
+  margin-bottom: 0;
+}
+
+.lp-layer-group-header {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--accent-lavender);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 4px;
+}
+
+.lp-layer-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.lp-layer-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lp-layer-item.is-selected {
+  background: rgba(180, 168, 232, 0.14);
+}
+
+.lp-layer-item-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.lp-layer-item-desc {
+  display: block;
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.lp-check-mark {
+  color: var(--accent-lavender);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Route Solving Overlay */
+.lp-solving-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lp-scan-sweep {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+  box-shadow: 0 0 18px var(--accent-cyan);
+  animation: lp-scan-motion 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.lp-solving-card {
+  pointer-events: auto;
+  background: rgba(7, 11, 20, 0.94);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  box-shadow: 0 0 40px rgba(0, 229, 255, 0.18), 0 20px 48px rgba(0, 0, 0, 0.8);
+  border-radius: 12px;
+  padding: 20px 24px;
+  max-width: 440px;
+  backdrop-filter: blur(14px);
+  text-align: left;
+}
+
+.lp-solving-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.lp-radar-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 229, 255, 0.2);
+  border-top-color: var(--accent-cyan);
+  animation: lp-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.lp-solving-kicker {
+  font-family: var(--font-data);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--accent-cyan);
+}
+
+.lp-solving-title {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.04em;
+}
+
+.lp-solving-detail {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #94a3b8;
+  margin: 0 0 14px;
+}
+
+.lp-solving-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lp-solving-tag {
+  font-family: var(--font-data);
+  font-size: 10px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-line);
+  border-radius: 4px;
+  color: #cbd5e1;
+}
+
+.lp-solving-tag--active {
+  background: rgba(0, 229, 255, 0.12);
+  border-color: rgba(0, 229, 255, 0.35);
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+/* Generic Panel Layouts */
+.lp-panel-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.lp-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lp-section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lp-section-explainer {
+  font-size: 11px;
+  line-height: 1.45;
+  color: #64748b;
+  margin: 0;
+}
+
+.lp-text-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent-lavender);
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 140ms ease;
+}
+
+.lp-text-action-btn:hover {
+  background: rgba(180, 168, 232, 0.12);
+}
+
+/* Selected Rover Card */
+.lp-selected-rover-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.lp-rover-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.lp-rover-avatar-box {
+  width: 32px;
+  height: 32px;
+  background: rgba(180, 168, 232, 0.14);
+  border: 1px solid rgba(180, 168, 232, 0.3);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-lavender);
+  font-size: 14px;
+}
+
+.lp-rover-card-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.lp-rover-model-code {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: #64748b;
+}
+
+.lp-rover-metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.lp-rover-metric {
+  background: rgba(5, 8, 15, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-metric-name {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.lp-metric-val {
+  font-family: var(--font-data);
+  font-size: 13px;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+/* Priority Sliders */
+.lp-priority-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lp-slider-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-slider-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.lp-slider-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.lp-slider-number {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--accent-lavender);
+  font-weight: 600;
+}
+
+.lp-range-input {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+}
+
+.lp-range-input::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-lavender);
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(180, 168, 232, 0.6);
+  transition: transform 120ms ease;
+}
+
+.lp-range-input::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+/* Mission Sequence */
+.lp-sequence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lp-sequence-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(9, 13, 22, 0.5);
+  border: 1px solid var(--border-line);
+  border-radius: 6px;
+  font-family: var(--font-data);
+  font-size: 11px;
+}
+
+.lp-seq-num {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.lp-seq-title {
+  color: #cbd5e1;
+  flex-grow: 1;
+}
+
+.lp-seq-status {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #64748b;
+}
+
+.lp-seq-status.is-ready {
+  background: rgba(46, 229, 157, 0.12);
+  color: var(--accent-mint);
+  font-weight: 600;
+}
+
+.lp-seq-status.is-pending {
+  color: #f59e0b;
+}
+
+/* Modal Drawer for Rover Selector */
+.lp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 12, 0.75);
+  backdrop-filter: blur(8px);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lp-modal-drawer {
+  background: #080c16;
+  border: 1px solid var(--border-line);
+  border-radius: 14px;
+  width: 90%;
+  max-width: 780px;
+  padding: 24px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.9);
+}
+
+.lp-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+
+.lp-modal-title {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.lp-modal-close {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.lp-modal-close:hover {
+  color: #ffffff;
+}
+
+.lp-modal-subtitle {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 0 0 20px;
+}
+
+.lp-rover-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+.lp-rover-select-card {
+  background: rgba(13, 19, 32, 0.6);
+  border: 1px solid var(--border-line);
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 160ms ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-rover-select-card:hover {
+  background: rgba(18, 25, 42, 0.85);
+  border-color: var(--border-focus);
+}
+
+.lp-rover-select-card.is-selected {
+  background: rgba(26, 33, 56, 0.9);
+  border-color: var(--accent-lavender);
+  box-shadow: 0 0 16px rgba(180, 168, 232, 0.15);
+}
+
+.lp-rover-card-badge-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.lp-agency-badge {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--accent-lavender);
+  background: rgba(180, 168, 232, 0.12);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.lp-active-pill {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: var(--accent-mint);
+  font-weight: 700;
+  background: rgba(46, 229, 157, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.lp-rover-card-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.lp-rover-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.lp-rover-id-code {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: #64748b;
+}
+
+.lp-rover-desc {
+  font-size: 11px;
+  line-height: 1.4;
+  color: #94a3b8;
+  margin: 0 0 12px;
+  flex-grow: 1;
+}
+
+.lp-rover-specs-table {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+  background: rgba(5, 8, 15, 0.6);
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.lp-spec-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-spec-label {
+  font-family: var(--font-data);
+  font-size: 8px;
+  color: #64748b;
+  letter-spacing: 0.04em;
+}
+
+.lp-spec-val {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.lp-select-btn {
+  width: 100%;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(180, 168, 232, 0.12);
+  border: 1px solid rgba(180, 168, 232, 0.25);
+  color: var(--accent-lavender);
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.lp-select-btn:hover {
+  background: var(--accent-lavender);
+  color: #06080e;
+}
+
+.lp-select-btn.is-current {
+  background: rgba(46, 229, 157, 0.15);
+  border-color: rgba(46, 229, 157, 0.35);
+  color: var(--accent-mint);
+}
+
+/* Mission Context (Right Rail Plan Mode) */
+.lp-live-badge {
+  font-family: var(--font-data);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(46, 229, 157, 0.15);
+  color: var(--accent-mint);
+  font-weight: 700;
+}
+
+.lp-panel-desc-text {
+  font-size: 11px;
+  line-height: 1.45;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.lp-context-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.lp-context-cell {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-active-layer-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.lp-layer-card-tag {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: var(--accent-lavender);
+  letter-spacing: 0.1em;
+  margin-bottom: 2px;
+}
+
+.lp-layer-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.lp-telemetry-mono-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.lp-telemetry-mono-cell {
+  background: rgba(6, 10, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lp-mono-label {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
+.lp-mono-val {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+/* No Route Empty State */
+.lp-no-route-card {
+  background: rgba(12, 17, 28, 0.65);
+  border: 1px dashed rgba(160, 175, 210, 0.25);
+  border-radius: 10px;
+  padding: 18px 14px;
+  text-align: center;
+}
+
+.lp-no-route-icon {
+  font-size: 24px;
+  color: var(--accent-lavender);
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
+
+.lp-no-route-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #e2e8f0;
+  letter-spacing: 0.06em;
+}
+
+.lp-no-route-text {
+  font-size: 11px;
+  line-height: 1.45;
+  color: #64748b;
+  margin: 0 0 14px;
+}
+
+.lp-no-route-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.lp-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #64748b;
+  background: rgba(5, 8, 15, 0.4);
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.lp-check-row.is-done {
+  color: #cbd5e1;
+}
+
+.lp-check-row.is-done .lp-check-icon {
+  color: var(--accent-mint);
+  font-weight: 700;
+}
+
+/* Analysis Mode Left Rail (Snapshot) */
+.lp-status-pill.is-locked {
+  background: rgba(180, 168, 232, 0.12);
+  color: var(--accent-lavender);
+  font-weight: 700;
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.lp-replan-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  background: rgba(180, 168, 232, 0.14);
+  border: 1px solid rgba(180, 168, 232, 0.35);
+  border-radius: 8px;
+  color: #ffffff;
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.lp-replan-btn:hover {
+  background: rgba(180, 168, 232, 0.25);
+  box-shadow: 0 0 18px rgba(180, 168, 232, 0.2);
+}
+
+.lp-snapshot-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.lp-snapshot-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.lp-code-tag {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: var(--accent-lavender);
+}
+
+.lp-snapshot-specs {
+  display: flex;
+  gap: 8px;
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: #64748b;
+}
+
+.lp-snapshot-points {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lp-point-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.lp-point-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.lp-dot-mint {
+  background: var(--accent-mint);
+  box-shadow: 0 0 8px var(--accent-mint);
+}
+
+.lp-dot-coral {
+  background: var(--accent-coral);
+  box-shadow: 0 0 8px var(--accent-coral);
+}
+
+.lp-point-info {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  align-items: baseline;
+}
+
+.lp-point-type {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: #64748b;
+}
+
+.lp-point-coord {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.lp-readonly-weights {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.lp-readonly-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.lp-readonly-name {
+  color: #94a3b8;
+}
+
+.lp-readonly-val {
+  font-family: var(--font-data);
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+/* Tier 1 / 2 / 3 Analysis Hierarchy */
+.lp-tier-1-section {
+  background: rgba(14, 20, 34, 0.7);
+  border: 1px solid rgba(180, 168, 232, 0.25);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.lp-overall-risk-badge {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid;
+  letter-spacing: 0.08em;
+}
+
+.lp-decision-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.lp-decision-kpi {
+  background: rgba(5, 8, 15, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-kpi-label {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
+.lp-kpi-val {
+  font-family: var(--font-data);
+  font-size: 14px;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.lp-kpi-sub {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: #64748b;
+}
+
+.lp-eng-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.lp-eng-stat-cell {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-risk-bar-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.lp-risk-segmented-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lp-risk-legend-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: #64748b;
+}
+
+.lp-risk-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lp-legend-swatch {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.lp-payload-calculator {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.lp-payload-input-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.lp-payload-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+  position: relative;
+}
+
+.lp-payload-field input {
+  background: rgba(5, 8, 15, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: 6px;
+  padding: 6px 24px 6px 8px;
+  color: #ffffff;
+  font-family: var(--font-data);
+  font-size: 12px;
+}
+
+.lp-unit-tag {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: #64748b;
+}
+
+.lp-payload-result-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-line);
+}
+
+/* Tier 3 Milestones */
+.lp-milestones-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.lp-milestone-entry {
+  display: flex;
+  gap: 10px;
+  position: relative;
+}
+
+.lp-milestone-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 12px;
+  padding-top: 4px;
+}
+
+.lp-milestone-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.lp-milestone-stem {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  flex-grow: 1;
+  margin-top: 4px;
+}
+
+.lp-milestone-body {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  flex-grow: 1;
+}
+
+.lp-milestone-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+
+.lp-milestone-title {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: #ffffff;
+}
+
+.lp-milestone-coord {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: #64748b;
+}
+
+.lp-milestone-sub {
+  display: flex;
+  gap: 8px;
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+/* Playback Dock */
+.lp-playback-dock {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  background: rgba(7, 11, 20, 0.92);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.75);
+  border-radius: 12px;
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  backdrop-filter: blur(12px);
+  min-width: 540px;
+}
+
+.lp-playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lp-play-btn {
+  background: rgba(0, 229, 255, 0.15);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  border-radius: 6px;
+  color: var(--accent-cyan);
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.lp-play-btn:hover {
+  background: var(--accent-cyan);
+  color: #06080e;
+}
+
+.lp-playback-meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-playback-slider-block {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+}
+
+.lp-playback-range {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  outline: none;
+}
+
+.lp-playback-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  cursor: pointer;
+  box-shadow: 0 0 8px var(--accent-cyan);
+}
+
+.lp-playback-readouts {
+  display: flex;
+  gap: 14px;
+}
+
+.lp-playback-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-stat-name {
+  font-family: var(--font-data);
+  font-size: 8px;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
+.lp-stat-val {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+/* Common Animations */
+@keyframes lp-pulse {
+  0% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+@keyframes lp-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes lp-scan-motion {
+  0% { top: 0%; opacity: 0.8; }
+  50% { opacity: 1; }
+  100% { top: 100%; opacity: 0.4; }
+}
+
+@keyframes lpSlideInLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes lpPulseBorderStart {
+  0%, 100% {
+    border-color: #2ee59d;
+    box-shadow: 0 0 0 0 rgba(46, 229, 157, 0.4);
+  }
+  50% {
+    border-color: #2ee59d;
+    box-shadow: 0 0 0 4px rgba(46, 229, 157, 0.15);
+  }
+}
+
+@keyframes lpPulseBorderGoal {
+  0%, 100% {
+    border-color: #ff5252;
+    box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.4);
+  }
+  50% {
+    border-color: #ff5252;
+    box-shadow: 0 0 0 4px rgba(255, 82, 82, 0.15);
+  }
+}
+
+/* ── TopBar Layout Toggles ── */
+.lp-layout-toggles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 14px;
+}
+
+.lp-layout-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.lp-layout-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.lp-layout-btn.is-active {
+  background: rgba(180, 168, 232, 0.15);
+  border-color: rgba(180, 168, 232, 0.35);
+  color: #ffffff;
+}
+
+.lp-layout-icon {
+  font-size: 12px;
+}
+
+/* ── Quick Rover Tabs ── */
+.lp-rover-segmented-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  background: rgba(8, 12, 22, 0.7);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-line);
+  margin-bottom: 12px;
+}
+
+.lp-rover-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 2px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.lp-rover-tab:hover {
+  color: #e4e1ed;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lp-rover-tab.is-active {
+  color: #ffffff;
+  background: rgba(180, 168, 232, 0.16);
+  border-color: rgba(180, 168, 232, 0.4);
+  box-shadow: 0 0 8px rgba(180, 168, 232, 0.2);
+}
+
+/* ── Sequence & Action Buttons in Planning Panel ── */
+.lp-seq-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.lp-seq-sub {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 1px;
+}
+
+.lp-seq-action-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-line);
+  color: #94a3b8;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.lp-seq-action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.lp-seq-action-btn.is-picking-start {
+  background: rgba(46, 229, 157, 0.15);
+  border-color: #2ee59d;
+  color: #2ee59d;
+  animation: lpPulseBorderStart 1.5s infinite;
+}
+
+.lp-seq-action-btn.is-set-start {
+  background: rgba(46, 229, 157, 0.1);
+  border-color: rgba(46, 229, 157, 0.4);
+  color: #2ee59d;
+}
+
+.lp-seq-action-btn.is-picking-goal {
+  background: rgba(255, 82, 82, 0.15);
+  border-color: #ff5252;
+  color: #ff5252;
+  animation: lpPulseBorderGoal 1.5s infinite;
+}
+
+.lp-seq-action-btn.is-set-goal {
+  background: rgba(255, 82, 82, 0.1);
+  border-color: rgba(255, 82, 82, 0.4);
+  color: #ff5252;
+}
+
+.lp-panel-action-row {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.lp-panel-clear-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-line);
+  color: #94a3b8;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 10px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lp-panel-clear-btn:hover:not(:disabled) {
+  color: #ff5252;
+  border-color: rgba(255, 82, 82, 0.4);
+  background: rgba(255, 82, 82, 0.08);
+}
+
+.lp-panel-clear-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.lp-panel-plan-btn {
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+  border: 1px solid rgba(180, 168, 232, 0.4);
+  color: #ffffff;
+  font-family: 'Outfit', 'Segoe UI', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lp-panel-plan-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5);
+}
+
+.lp-panel-plan-btn:disabled {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #64748b;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* ── Slide-Over Fleet Drawer (Left Docked) ── */
+.lp-slide-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 12, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 150;
+  display: flex;
+  justify-content: flex-start;
+  align-items: stretch;
+}
+
+.lp-slide-drawer {
+  background: #090d19;
+  border-right: 1px solid var(--border-line);
+  width: 480px;
+  max-width: 90vw;
+  height: 100vh;
+  padding: 24px;
+  box-shadow: 16px 0 48px rgba(0, 0, 0, 0.85);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  animation: lpSlideInLeft 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.lp-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+
+.lp-drawer-title {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.lp-drawer-close {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.lp-drawer-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.lp-drawer-subtitle {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #94a3b8;
+  margin: 0 0 16px;
+}
+
+.lp-drawer-rover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 30px;
+}
+
+.lp-drawer-rover-card {
+  background: rgba(13, 18, 32, 0.85);
+  border: 1px solid var(--border-line);
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lp-drawer-rover-card:hover {
+  border-color: rgba(180, 168, 232, 0.35);
+  background: rgba(17, 24, 42, 0.95);
+}
+
+.lp-drawer-rover-card.is-selected {
+  border-color: #b4a8e8;
+  background: rgba(180, 168, 232, 0.06);
+  box-shadow: 0 0 16px rgba(180, 168, 232, 0.12);
+}
+
+.lp-drawer-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.lp-drawer-card-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.lp-highlight-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: #7dd3fc;
+  background: rgba(14, 165, 233, 0.12);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.lp-drawer-card-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.lp-default-weights-note {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: #64748b;
+}
+
+.lp-assign-btn {
+  background: rgba(180, 168, 232, 0.14);
+  border: 1px solid rgba(180, 168, 232, 0.3);
+  color: #ffffff;
+  font-family: 'Outfit', 'Segoe UI', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: all 0.15s ease;
+}
+
+.lp-assign-btn:hover {
+  background: rgba(180, 168, 232, 0.25);
+}
+
+.lp-assign-btn.is-assigned {
+  background: rgba(46, 229, 157, 0.15);
+  border-color: rgba(46, 229, 157, 0.4);
+  color: #2ee59d;
+}
+
+/* ── Minimizable Telemetry HUD Overlay on Canvas ── */
+.lp-hud-card {
+  min-width: 220px;
+  max-width: 250px;
+  padding: 12px;
+}
+
+.lp-hud-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lp-hud-title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-hud-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+.lp-hud-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.lp-hud-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lp-hud-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.lp-hud-minimized {
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(13, 13, 22, 0.85);
+  border: 1px solid rgba(70, 70, 81, 0.4);
+  border-radius: 20px;
+  backdrop-filter: blur(12px);
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.lp-hud-minimized:hover {
+  border-color: rgba(180, 168, 232, 0.4);
+  transform: translateY(1px);
+}
+
+.lp-hud-min-dot {
+  font-size: 11px;
+}
+
+.lp-hud-min-coords,
+.lp-hud-min-alt {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.lp-hud-min-sep {
+  color: #475569;
+}
+
+.lp-hud-min-expand-icon {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.lp-hud-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lp-hud-pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.lp-hud-pill.is-start {
+  background: rgba(46, 229, 157, 0.15);
+  border: 1px solid rgba(46, 229, 157, 0.3);
+  color: #2ee59d;
+}
+
+.lp-hud-pill.is-goal {
+  background: rgba(255, 82, 82, 0.15);
+  border: 1px solid rgba(255, 82, 82, 0.3);
+  color: #ff5252;
+}
+
+.lp-hud-dock-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.lp-hud-dock-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.lp-hud-dock-btn.is-active {
+  background: rgba(180, 168, 232, 0.15);
+  border-color: rgba(180, 168, 232, 0.35);
+  color: #ffffff;
+}
+
+.lp-dock-icon {
+  font-size: 10px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   STAGE 01: DEDICATED ROVER FLEET HANGAR STYLES
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.lp-fleet-view {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 64px);
+  padding: 28px 40px 48px;
+  background: radial-gradient(circle at 50% 10%, #111e40 0%, #080f24 60%, #040816 100%);
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.lp-fleet-header {
+  margin-bottom: 24px;
+}
+
+.lp-fleet-header-content {
+  max-width: 900px;
+}
+
+.lp-fleet-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.lp-fleet-phase-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.05em;
+}
+
+.lp-fleet-site-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #2ee59d;
+  background: rgba(46, 229, 157, 0.1);
+  border: 1px solid rgba(46, 229, 157, 0.25);
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+
+.lp-fleet-headline {
+  font-family: 'Outfit', 'Segoe UI', sans-serif;
+  font-size: 30px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+}
+
+.lp-fleet-subhead {
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #94a3b8;
+  margin: 0;
+}
+
+/* ── 4-Column Showcase Grid ── */
+.lp-fleet-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 22px;
+  margin-bottom: 28px;
+}
+
+@media (max-width: 1440px) {
+  .lp-fleet-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .lp-fleet-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Rover Showcase Card ── */
+.lp-fleet-card {
+  background: #0d1733;
+  border: 1px solid rgba(56, 189, 248, 0.16);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+
+.lp-fleet-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  background: #111e42;
+}
+
+.lp-fleet-card.is-selected {
+  border: 2px solid #38bdf8;
+  background: linear-gradient(180deg, #132450 0%, #0d1836 100%);
+  box-shadow: 0 0 24px rgba(56, 189, 248, 0.35), 0 14px 36px rgba(0, 0, 0, 0.8);
+}
+
+/* Photo Banner */
+.lp-card-photo-box {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  overflow: hidden;
+  background: #050a18;
+}
+
+.lp-card-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s ease;
+}
+
+.lp-fleet-card:hover .lp-card-photo {
+  transform: scale(1.04);
+}
+
+.lp-card-photo-gradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(8, 15, 36, 0.2) 0%, rgba(8, 15, 36, 0.1) 40%, #0d1733 100%);
+}
+
+.lp-fleet-card.is-selected .lp-card-photo-gradient {
+  background: linear-gradient(180deg, rgba(10, 20, 48, 0.2) 0%, rgba(10, 20, 48, 0.1) 40%, #132450 100%);
+}
+
+.lp-card-photo-badges {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 2;
+}
+
+.lp-card-agency {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(5, 10, 24, 0.85);
+  border: 1px solid currentColor;
+  backdrop-filter: blur(8px);
+}
+
+.lp-card-active-pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #2ee59d;
+  background: rgba(46, 229, 157, 0.2);
+  border: 1px solid #2ee59d;
+  padding: 3px 8px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: 0 0 10px rgba(46, 229, 157, 0.35);
+}
+
+.lp-card-photo-footer {
+  position: absolute;
+  bottom: 8px;
+  left: 14px;
+  right: 14px;
+  z-index: 2;
+}
+
+.lp-card-highlight {
+  font-family: 'Outfit', 'Segoe UI', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+/* Card Body */
+.lp-card-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.lp-card-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.lp-card-name {
+  font-family: 'Outfit', 'Segoe UI', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.lp-card-code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #7dd3fc;
+}
+
+.lp-card-description {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #94a3b8;
+  margin: 0 0 12px;
+  min-height: 54px;
+}
+
+/* Specifications Table */
+.lp-card-specs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  background: rgba(5, 10, 24, 0.6);
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 12px;
+}
+
+.lp-card-spec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-card-spec-k {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.04em;
+}
+
+.lp-card-spec-v {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+/* Payload Box */
+.lp-card-payload-box {
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  border-radius: 8px;
+  padding: 9px 10px;
+  margin-top: auto;
+}
+
+.lp-card-payload-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: #38bdf8;
+  letter-spacing: 0.06em;
+  display: block;
+  margin-bottom: 3px;
+}
+
+.lp-card-payload-text {
+  font-size: 11px;
+  line-height: 1.45;
+  color: #cbd5e1;
+  margin: 0;
+}
+
+/* Action Bar */
+.lp-card-action-bar {
+  padding: 12px 16px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.lp-card-select-btn {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  font-family: 'Outfit', 'Segoe UI', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lp-card-select-btn:hover {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #ffffff;
+}
+
+.lp-card-select-btn.is-selected {
+  background: rgba(46, 229, 157, 0.2);
+  border-color: #2ee59d;
+  color: #2ee59d;
+  font-weight: 700;
+}
+
+/* ── Bottom Configuration & Deployment Dock ── */
+.lp-fleet-bottom-dock {
+  display: flex;
+  gap: 32px;
+  background: #0d1733;
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 16px;
+  padding: 20px 28px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lp-dock-weights-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.lp-dock-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.lp-dock-hint {
+  font-size: 11px;
+  color: #64748b;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.lp-dock-sliders-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 1100px) {
+  .lp-dock-sliders-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .lp-fleet-bottom-dock {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.lp-dock-slider-cell {
+  background: rgba(5, 10, 24, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.lp-dock-slider-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.lp-dock-slider-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.lp-dock-slider-val {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+.lp-dock-action-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 320px;
+}
+
+.lp-dock-rover-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.lp-dock-rover-name {
+  font-family: 'Outfit', 'Segoe UI', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #2ee59d;
+}
+
+.lp-deploy-btn {
+  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  font-family: 'Outfit', 'Segoe UI', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 13px 26px;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(37, 99, 235, 0.45);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.lp-deploy-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 26px rgba(37, 99, 235, 0.65);
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+}
+
+.lp-deploy-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.lp-deploy-arrow {
+  font-size: 17px;
+  transition: transform 0.2s ease;
+}
+
+.lp-deploy-btn:hover:not(:disabled) .lp-deploy-arrow {
+  transform: translateX(4px);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   AEROSPACE BRIGHTNESS & CONTRAST ENHANCEMENTS
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.app-shell {
+  background: #080e22;
+}
+
+.left-rail,
+.right-rail {
+  background: rgba(11, 19, 42, 0.94);
+  border-color: rgba(56, 189, 248, 0.18);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.4);
+}
+
+.lp-panel-section {
+  background: rgba(15, 25, 52, 0.6);
+  border: 1px solid rgba(56, 189, 248, 0.14);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.lp-selected-rover-card {
+  background: #0d1733;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.lp-topbar {
+  background: rgba(9, 16, 36, 0.92);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   3D ROVER COCKPIT & CAMERA SWITCHER STYLING
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.terrain3d-camera-switch {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  gap: 6px;
+  background: rgba(7, 13, 30, 0.88);
+  padding: 4px;
+  border-radius: 24px;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 15px rgba(56, 189, 248, 0.15);
+  backdrop-filter: blur(14px);
+}
+
+.terrain3d-cam-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-family: 'Outfit', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.terrain3d-cam-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.terrain3d-cam-btn.is-active {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(46, 229, 157, 0.2));
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+}
+

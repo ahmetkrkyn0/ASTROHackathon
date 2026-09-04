@@ -1,0 +1,504 @@
+"""The fixed K2 -> K3 -> K1 -> K4 -> K5 pipeline behind POST /api/ai/chat.
+
+Not an agent loop. The model is asked exactly two questions per turn -- what
+should run, and how to say the result -- and everything between and after
+those two points is deterministic. That shape is what makes the guarantees
+checkable: the router cannot answer, the gate cannot interpret, the
+verbalizer cannot compute, and the validator cannot rewrite.
+
+Two defenses stack rather than replace each other. Sanitization decides what
+the model may see; grounding decides what the operator may be told. A field
+stripped upstream can never be quoted, and a number invented downstream can
+never survive.
+
+Contract: docs/ai/LunaPath_AI_Chatbot_Scope_v0.3.md sections 12, 14 and 15.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from typing import Any, Mapping, Optional
+
+from .ai_analysis import (
+    AnalysisEnvelope,
+    EnvelopeWarning,
+    GuideFact,
+    Provenance,
+    cell_registry,
+    compare_registry,
+    constraint_warnings,
+    plan_registry,
+    summary_section,
+)
+from .ai_contract import (
+    AiMissionSnapshot,
+    ChatMessage,
+    ChatResponse,
+    EvidenceItem,
+    ExplanationLevel,
+    LimitationItem,
+    RouterAnswerFromContext,
+    RouterClarify,
+    RouterFailure,
+    RouterInvoke,
+    RouterRefuse,
+    ToolUsage,
+    WarningItem,
+)
+from .ai_evidence import display_pedigree, weakest_validity
+from .ai_grounding import (
+    deterministic_fallback,
+    diagnostic,
+    validate_draft,
+    whitelist_tokens,
+)
+from .ai_prompt import VERBALIZER_PROMPT
+from .ai_guide import guide_facts, guide_lexicon, guide_registry
+from .ai_router import (
+    gate,
+    gate_message,
+    refusal_code,
+    refusal_message,
+    route,
+    tool_error_code,
+)
+from .ai_tools import (
+    CAPABILITIES,
+    COMPARE_BACKED,
+    AiToolError,
+    AnalysisProvider,
+    ToolBudget,
+)
+
+# Informational scope notes. Disjoint from warnings by meaning: these say what
+# the feature cannot establish, never that evidence validity is compromised.
+_CAPABILITY_LIMITATIONS: dict[str, tuple[tuple[str, str], ...]] = {
+    "C-COMPARE": (
+        (
+            "DISCRETE_SENSITIVITY_ONLY",
+            "Duyarlılık, önceden tanımlı dört profil üzerinden ayrıktır; tek "
+            "değişkenli bir perturbasyon değildir.",
+        ),
+        (
+            "NO_ROUTE_WIDE_DECOMPOSITION",
+            "Rota geneli maliyet ayrışması bu sürümde mevcut değil.",
+        ),
+    ),
+    "C-POINT": (
+        (
+            "CELL_SCOPED_DECOMPOSITION",
+            "Maliyet ayrışması yalnızca tek hücre için geçerlidir.",
+        ),
+    ),
+    "C-SUMMARY": (
+        (
+            "NO_CAUSAL_ATTRIBUTION",
+            "Bu özet, geometrik sapmaların kesin nedenini belirleyemez.",
+        ),
+    ),
+    "C-GUIDE": (
+        (
+            "PRODUCT_SCOPE_ONLY",
+            "Bu yanıt LunaPath'in ürün davranışını açıklar; arazi ya da rota "
+            "analizi değildir.",
+        ),
+        (
+            "READ_ONLY_GUIDANCE",
+            "Asistan hiçbir denetimi kendisi değiştirmez; anlatılan adımları "
+            "operatör uygular.",
+        ),
+    ),
+}
+
+logger = logging.getLogger(__name__)
+
+_CLARIFY_TEXT: dict[str, str] = {
+    "start": "başlangıç noktası",
+    "goal": "hedef noktası",
+    "cell": "haritada seçili bir hücre",
+    "rover": "seçili bir rover",
+    "plan": "hesaplanmış bir rota",
+}
+
+
+# What each partial capability's evidence actually covers. K4 is handed the
+# matching sentence so it cannot present predefined-profile evidence as a fact
+# about the operator's current custom-weight route.
+_SCOPE_STATEMENTS: dict[str, str] = {
+    "cell_only": (
+        "Bu ayrışma YALNIZCA seçili tek hücre içindir. Rota geneli bir maliyet "
+        "ayrışması mevcut değildir ve üretilemez."
+    ),
+    "compare_profile_constraints": (
+        "Bu kısıt marjları ÖNTANIMLI DÖRT PROFİLİN karşılaştırmasından gelir. "
+        "Kullanıcının ekrandaki özel ağırlıklı rotası için kısıt marjı "
+        "hesaplanmadı; bu sonuçları o rotaya ait gibi anlatma."
+    ),
+    "compare_profile_failures_only": (
+        "Bu kanıt YALNIZCA öntanımlı profil karşılaştırmasında bir profilin "
+        "çözülememesini açıklayabilir. Kullanıcının mevcut ya da özel planının "
+        "neden başarısız olduğunu açıklamaz."
+    ),
+    "discrete_predefined_profiles": (
+        "Bu AYRIK bir duyarlılıktır: dört sabit profil, ağırlık uzayında dört "
+        "örneklenmiş noktadır. Tek değişkenli bir perturbasyon değildir ve "
+        "serbest ağırlık değişimi hesaplanmamıştır."
+    ),
+}
+
+
+# Where guide evidence comes from. Not the loaded grids: a rover specification
+# is a configuration parameter of the model, and inheriting the terrain layers'
+# validity rung would attach a claim about the DEM to a claim about a rover.
+_GUIDE_PROVENANCE = Provenance(
+    source="MODEL",
+    layer="rover_catalog",
+    note="LunaPath rover kataloğu ve ürün davranışı kaydı",
+)
+
+
+def _provenance_for(grids: Mapping[str, Any]) -> Provenance:
+    """The weakest input rung across the loaded layers.
+
+    Computed on the raw four-rung ladder; the three-level badge is derived
+    from it for display and never replaces it.
+    """
+    metadata = grids.get("metadata") or {}
+    validity = metadata.get("layer_validity") or {}
+    weakest = weakest_validity(validity.values())
+    return Provenance(source=weakest or "SYNTHETIC")
+
+
+def _build_envelope(
+    capability: str,
+    params: Mapping[str, Any],
+    provider: AnalysisProvider,
+    grids: Mapping[str, Any],
+) -> AnalysisEnvelope:
+    """K1: run the deterministic analysis and register what may be said."""
+    started = time.perf_counter()
+    provenance = (
+        _GUIDE_PROVENANCE if capability == "C-GUIDE" else _provenance_for(grids)
+    )
+    payload = provider.invoke(capability, params)
+
+    spec = CAPABILITIES.get(capability) or {}
+    scope = spec.get("scope")
+
+    facts: list[GuideFact] = []
+    lexicon: list[str] = []
+
+    warnings: list[EnvelopeWarning] = []
+    if capability == "C-GUIDE":
+        registry = guide_registry(payload, provenance)
+        facts = guide_facts(payload)
+        lexicon = guide_lexicon(payload)
+    elif capability == "C-SUMMARY":
+        plan = payload.get("plan") or {}
+        registry = plan_registry(plan, provenance)
+    elif capability in ("C-POINT", "C-DECOMPOSE"):
+        registry = cell_registry(payload, provenance)
+        for item in payload.get("limitations") or []:
+            # The weight mismatch invalidates the decomposition as an
+            # explanation of this plan, so it is a validity fact, not a
+            # scope note -- it belongs in warnings.
+            warnings.append(
+                EnvelopeWarning(
+                    code=item["code"], severity="caution", message=item["message"]
+                )
+            )
+    else:
+        registry = compare_registry(payload, provenance)
+        warnings.extend(constraint_warnings(payload))
+
+    if scope and _SCOPE_STATEMENTS.get(scope):
+        # Not a warning: nothing is invalid. It is a statement of what the
+        # evidence covers, and K4 must repeat its substance rather than let
+        # the operator assume a broader claim.
+        warnings.append(
+            EnvelopeWarning(
+                code=f"SCOPE_{scope.upper()}",
+                severity="info",
+                message=_SCOPE_STATEMENTS[scope],
+            )
+        )
+
+    return AnalysisEnvelope(
+        # The SEMANTIC code, not the underlying operation: a discrete
+        # sensitivity question and a comparison question share one physical
+        # computation but are not the same question.
+        capability=capability,
+        request_echo={
+            **dict(params),
+            "semantic_intent": capability,
+            "scope": scope,
+        },
+        ok=True,
+        payload=dict(payload),
+        numeric_registry=registry,
+        facts=facts,
+        lexicon=lexicon,
+        warnings=warnings,
+        provenance_summary=[provenance],
+        compute_ms=round((time.perf_counter() - started) * 1000.0, 1),
+        backend_version=str((grids.get("metadata") or {}).get("cost_model") or ""),
+    )
+
+
+def _verbalizer_input(
+    envelope: AnalysisEnvelope, question: str, level: ExplanationLevel
+) -> list[dict[str, Any]]:
+    """What K4 sees: registered metrics and nothing raw."""
+    briefing: dict[str, Any] = {
+        "capability": envelope.capability,
+        "explanation_level": level,
+        "metrics": [
+            {
+                "key": metric.key,
+                "label": metric.label,
+                "display": metric.display,
+                "provenance": metric.provenance.source,
+                # Which part of a summary this belongs to. Present only where
+                # K1 knows; a metric with no section is secondary by omission
+                # rather than by the verbalizer guessing.
+                **(
+                    {"section": section}
+                    if (section := summary_section(metric.key))
+                    else {}
+                ),
+            }
+            for metric in envelope.numeric_registry
+        ],
+        "warnings": [
+            {"code": w.code, "severity": w.severity, "message": w.message}
+            for w in envelope.warnings
+        ],
+        "provenance_summary": [p.source for p in envelope.provenance_summary],
+    }
+    # Emitted only when K1 selected some, so an analysis briefing is byte-for-
+    # byte what it was. These are the ONLY product statements the model gets.
+    if envelope.facts:
+        briefing["facts"] = [
+            {"key": fact.key, "text": fact.text} for fact in envelope.facts
+        ]
+    return [
+        {
+            "role": "user",
+            "content": (
+                "Doğrulanmış analiz kaydı:\n"
+                + json.dumps(briefing, ensure_ascii=False, indent=2)
+            ),
+        },
+        {"role": "user", "content": question},
+    ]
+
+
+def _evidence_for(envelope: AnalysisEnvelope) -> list[EvidenceItem]:
+    source = {
+        "C-GUIDE": "planning-guide",
+        "C-SUMMARY": "current-plan",
+        "C-POINT": "cell-telemetry",
+        "C-DECOMPOSE": "cell-telemetry",
+        "C-COMPARE": "profile-comparison",
+        "C-BINDING": "profile-comparison",
+        "C-INFEASIBLE": "profile-comparison",
+        "C-SENSITIVITY": "profile-comparison",
+    }.get(envelope.capability, envelope.capability)
+    label = {
+        "C-GUIDE": "LunaPath planlama rehberi",
+        "C-SUMMARY": "Ekrandaki mevcut rota",
+        "C-POINT": "Seçili hücre telemetrisi",
+        "C-DECOMPOSE": "Seçili hücrenin maliyet ayrışması",
+        "C-COMPARE": "Dört görev profili, yan yana",
+        "C-BINDING": "Öntanımlı profillerin kısıt marjları",
+        "C-INFEASIBLE": "Öntanımlı profil karşılaştırmasının başarısızlıkları",
+        "C-SENSITIVITY": "Dört profil üzerinden ayrık duyarlılık",
+    }.get(envelope.capability, envelope.capability)
+    raw = envelope.provenance_summary[0].source if envelope.provenance_summary else None
+    return [
+        EvidenceItem(
+            source=source,
+            label=label,
+            rawValidity=raw,
+            displayPedigree=display_pedigree(raw),
+        )
+    ]
+
+
+def _limitations_for(capability: str) -> list[LimitationItem]:
+    return [
+        LimitationItem(code=code, message=message)
+        for code, message in _CAPABILITY_LIMITATIONS.get(capability, ())
+    ]
+
+
+def _refusal(
+    code: str,
+    budget: ToolBudget,
+    level: ExplanationLevel,
+    message: Optional[str] = None,
+) -> ChatResponse:
+    """A deterministic Turkish refusal. Never generated by a model."""
+    return ChatResponse(
+        answer=message or gate_message(code),
+        evidence=[],
+        limitations=[],
+        warnings=[],
+        toolUsage=ToolUsage(
+            comparisonUsed=budget.compare_calls > 0, readCalls=budget.read_calls
+        ),
+        errorCode=code,
+        groundingStatus="not_applicable",
+        explanationLevel=level,
+    )
+
+
+def run_chat(
+    provider: Any,
+    grids: Mapping[str, Any],
+    snapshot: AiMissionSnapshot,
+    messages: list[ChatMessage],
+    explanation_level: ExplanationLevel = "L2",
+) -> ChatResponse:
+    """One question, routed, gated, analysed, verbalized and validated."""
+    budget = ToolBudget()
+    analysis = AnalysisProvider(grids=dict(grids), snapshot=snapshot, budget=budget)
+    question = messages[-1].content
+
+    # ── K2 ───────────────────────────────────────────────────────────────
+    decision = route(
+        provider,
+        question=question,
+        history=messages[:-1],
+        capabilities=analysis.get_capabilities(),
+        context=analysis.get_context(),
+    )
+
+    if isinstance(decision, RouterFailure):
+        return _refusal("E-SCHEMA", budget, explanation_level)
+    if isinstance(decision, RouterRefuse):
+        return _refusal(
+            refusal_code(decision.code),
+            budget,
+            explanation_level,
+            message=refusal_message(decision.code),
+        )
+    if isinstance(decision, RouterClarify):
+        wanted = ", ".join(_CLARIFY_TEXT.get(m, m) for m in decision.missing)
+        return _refusal(
+            "E-CONTEXT",
+            budget,
+            explanation_level,
+            message=f"Bunu cevaplayabilmem için şu eksik: {wanted}.",
+        )
+
+    # ── K3 ───────────────────────────────────────────────────────────────
+    verdict = gate(decision, provider=analysis, budget=budget)
+    if not verdict.ok:
+        return _refusal(verdict.code or "E-SCHEMA", budget, explanation_level,
+                        verdict.message_tr)
+
+    if isinstance(decision, RouterAnswerFromContext):
+        capability, params = "C-SUMMARY", {}
+    else:
+        assert isinstance(decision, RouterInvoke)
+        capability, params = decision.capability, dict(decision.params)
+
+    # ── K1 ───────────────────────────────────────────────────────────────
+    try:
+        envelope = _build_envelope(capability, params, analysis, grids)
+    except AiToolError as exc:
+        return _refusal(tool_error_code(exc), budget, explanation_level)
+
+    # ── K4 ───────────────────────────────────────────────────────────────
+    reply = provider.respond(
+        VERBALIZER_PROMPT,
+        _verbalizer_input(envelope, question, explanation_level),
+        [],
+    )
+    draft = (reply.text or "").strip()
+
+    # ── K5 ───────────────────────────────────────────────────────────────
+    tokens = whitelist_tokens(
+        envelope,
+        rover_names=_rover_names(),
+        profile_names=_profile_names(),
+    )
+    ground = validate_draft(draft, envelope, tokens) if draft else None
+
+    if ground is not None and ground.ok:
+        answer, status, error_code = draft, "verified", None
+    else:
+        # Blocked, not repaired. A silent correction hides the failure.
+        answer = deterministic_fallback(envelope)
+        status, error_code = "blocked", "E-GROUNDING"
+        # Server-side only, and codes only: enough to tell a real rejection
+        # from a false positive later, without the rejected prose existing
+        # anywhere outside this function.
+        logger.warning(
+            "K5 blocked a draft: capability=%s level=%s reasons=%s",
+            envelope.capability,
+            explanation_level,
+            list(diagnostic(ground)) if ground is not None else [{"code": "EMPTY_DRAFT"}],
+        )
+
+    warnings = [
+        WarningItem(code=w.code, severity=w.severity, message=w.message)
+        for w in envelope.warnings
+    ]
+    if error_code == "E-GROUNDING":
+        warnings.append(
+            WarningItem(
+                code="E-GROUNDING",
+                severity="caution",
+                message=(
+                    "Modelin yanıtı doğrulanamadı; yalnızca kayıtlı analiz "
+                    "değerleri gösteriliyor."
+                ),
+            )
+        )
+
+    return ChatResponse(
+        answer=answer,
+        evidence=_evidence_for(envelope),
+        limitations=_limitations_for(capability),
+        warnings=warnings,
+        toolUsage=ToolUsage(
+            comparisonUsed=budget.compare_calls > 0, readCalls=budget.read_calls
+        ),
+        errorCode=error_code,
+        groundingStatus=status,
+        explanationLevel=explanation_level,
+    )
+
+
+def _rover_names() -> list[str]:
+    """Rover identifiers K5 may see a digit inside.
+
+    Both forms of the name travel. The catalogue publishes "LPR-1
+    (Varsayilan)", but a sentence contains "LPR-1" -- and without the bare form
+    its digit survives the mask and blocks an answer that named the rover
+    correctly.
+    """
+    from .ai_guide import short_name
+    from .constants import rover_catalog
+
+    names: list[str] = []
+    for entry in rover_catalog():
+        names.extend(str(entry[key]) for key in ("id", "name") if entry.get(key))
+        if entry.get("name"):
+            names.append(short_name(str(entry["name"])))
+    return names
+
+
+def _profile_names() -> list[str]:
+    from .scenarios import MISSION_PROFILES
+
+    names: list[str] = []
+    for profile_id, profile in MISSION_PROFILES.items():
+        names.append(profile_id)
+        if profile.get("name"):
+            names.append(str(profile["name"]))
+    return names

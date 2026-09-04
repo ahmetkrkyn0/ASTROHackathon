@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useOverlays } from '../../overlay/useOverlays'
 import { ProfileComparePanel } from './ProfileComparePanel'
 import { profileOverlays } from './overlays'
@@ -8,12 +8,13 @@ const OVERLAY_ID = 'profile-compare'
 
 export function ProfileCompare() {
   const { results, comparison, run, busy, error } = useProfileCompare()
-  const { register, unregister } = useOverlays()
+  const overlays = useOverlays()
 
-  useEffect(() => {
-    register(OVERLAY_ID, profileOverlays(results))
-    return () => unregister(OVERLAY_ID)
-  }, [register, results, unregister])
+  // MEMOISED: register keys off the array's identity, so a list rebuilt on
+  // every render would re-run the effect forever.
+  const commands = useMemo(() => profileOverlays(results), [results])
+
+  useEffect(() => overlays.register(OVERLAY_ID, commands), [overlays, commands])
 
   return (
     <section className="rail-section">

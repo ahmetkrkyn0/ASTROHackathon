@@ -1,43 +1,58 @@
-import React from 'react'
+import { FeatureHost } from './FeatureHost'
 
 /**
- * Mount points for feature modules.
+ * The five integration points App.tsx offers features.
  *
- * They are deliberately plain wrappers: adding a phase to the cockpit is
- * putting its <Module /> inside one of these, which is a one-line diff in
- * App.tsx and therefore a one-line merge conflict at worst.
+ * These are the stable names in the cockpit's composition. They take no
+ * children: what mounts where is decided in features/registry.ts, so adding a
+ * feature never edits this file or App.tsx.
  */
 
-export function LeftRailSlot({ children }: { children?: React.ReactNode }) {
-  if (!children) return null
-  return <div className="lp-slot lp-slot-left">{children}</div>
+/** Left rail, below the existing mission controls. */
+export function LeftRailSlot() {
+  return <FeatureHost slot="leftRail" />
 }
 
-export function RightRailSlot({ children }: { children?: React.ReactNode }) {
-  if (!children) return null
-  return <div className="lp-slot lp-slot-right">{children}</div>
+/** Right rail, below Mission Snapshot. */
+export function RightRailSlot() {
+  return <FeatureHost slot="rightRail" />
 }
 
-export function BottomDock({ children }: { children?: React.ReactNode }) {
-  if (!children) return null
-  return <div className="lp-slot lp-slot-dock">{children}</div>
+/** The strip under the map stage. */
+export function BottomDock() {
+  return <FeatureHost slot="bottomDock" />
 }
 
 /**
- * Absolutely positioned over the canvas, so its parent must be a containing
- * block. App.tsx gives .map-canvas-shell an inline `position: relative` for
- * exactly this -- App.css is off limits, and without a positioned ancestor
- * this would size itself against .map-stage and sit over the overlays
- * instead of over the map.
+ * Absolutely positioned over the map, so its parent must be a containing
+ * block. App.tsx gives the map shell an inline `position: relative` for
+ * exactly this: without a positioned ancestor this sizes itself against the
+ * stage and sits over the rails instead of over the map.
+ *
+ * The only slot that wraps. The other four emit a bare fragment, which is what
+ * keeps an unfilled slot invisible to layout -- but a HUD layer has to
+ * establish its own box, and `pointer-events: none` is what stops that box
+ * from swallowing clicks meant for the map underneath it.
  */
-export function CanvasOverlaySlot({ children }: { children?: React.ReactNode }) {
-  if (!children) return null
+export function CanvasOverlaySlot() {
   return (
     <div
       className="lp-slot lp-slot-canvas"
       style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
     >
-      {children}
+      <FeatureHost slot="canvasOverlay" />
     </div>
   )
+}
+
+/**
+ * Application-level floating utilities.
+ *
+ * Rendered as a direct child of `.app-shell`, immediately before the toast
+ * stack. Both facts are load-bearing: `shell.css` moves the toasts clear of an
+ * open assistant with a sibling combinator, which needs the assistant's markup
+ * to share a parent with the toast stack and to precede it.
+ */
+export function GlobalOverlaySlot() {
+  return <FeatureHost slot="globalOverlay" />
 }

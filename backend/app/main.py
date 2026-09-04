@@ -47,7 +47,11 @@ from .thermal_model import (
     relax_surface_c,
     shadowed_equilibrium_c,
 )
+from .ai_chat import run_chat
+from .ai_contract import ChatRequest, ChatResponse
+from .ai_provider import AiProviderError, resolve_provider
 from .pathfinder import astar
+from .profile_comparison import compare_all_profiles, solve_named_profiles
 from .localization import evaluate_pose
 from .pose import PoseEstimate
 from .replan_triggers import evaluate_triggers_detailed
@@ -1223,43 +1227,6 @@ def plan_4d(req: Plan4DRequest, request: Request):
     }
 
 
-def _attach_constraint_check(
-    result: dict, profile: dict, grids: dict, rover: dict
-) -> None:
-    """Simulate a profile's route and record which declared limits it met.
-
-    ``max_shadow_h``, ``max_energy_wh`` and ``min_soc`` are path-dependent,
-    so they cannot be enforced inside the search -- but they CAN be checked
-    against the route that came out, and until round 4 nothing did: three of
-    the four constraints every mission profile publishes appeared nowhere
-    outside scenarios.py. The simulation is the same one /api/plan runs and
-    costs well under a second on the production grid. (Round 4 review, M-4.)
-    """
-    summary = None
-    if not result.get("error") and result.get("path_pixels"):
-        try:
-            states = simulate_path(
-                result,
-                grids["cost"],
-                grids["slope"],
-                grids["thermal"],
-                grids["shadow_ratio"],
-                rover=rover,
-                pixel_size_m=float(grids["metadata"]["resolution_m"]),
-                elevation_grid=grids["elevation"],
-            )
-            summary = summarize_simulation(states, rover)
-        except Exception:
-            logger.warning(
-                "Constraint check skipped for %s: %s",
-                result.get("profile_id"),
-                traceback.format_exc(),
-            )
-            summary = None
-    result["constraint_check"] = check_profile_constraints(profile, summary)
-    result["simulation_summary"] = summary
-
-
 def _validate_pixel_endpoints(grids: dict, start, goal) -> None:
     """422 for an out-of-grid start/goal, matching /api/plan.
 
@@ -1283,35 +1250,9 @@ def plan_multi(req: PlanMultiRequest):
     base_grids = _get_grids()
     _validate_pixel_endpoints(base_grids, req.start, req.goal)
     rover = get_rover(req.rover_id)
-    results: list[dict[str, Any]] = []
-    for profile_id in req.profiles:
-        profile = get_profile(profile_id)
-        if profile is None:
-            results.append(
-                {
-                    "profile_id": profile_id,
-                    "profile_name": None,
-                    "color": "#64748B",
-                    "path_pixels": [],
-                    "metrics": {},
-                    "error": f"Unknown profile: {profile_id}",
-                }
-            )
-            continue
-        grids = grids_for_rover(base_grids, req.rover_id, profile["weights"])
-        result = astar(
-            grids,
-            tuple(req.start),
-            tuple(req.goal),
-            weights=profile["weights"],
-            constraints=profile["constraints"],
-            rover=rover,
-        )
-        result["profile_id"] = profile_id
-        result["profile_name"] = profile["name"]
-        result["color"] = profile["color"]
-        _attach_constraint_check(result, profile, grids, rover)
-        results.append(result)
+    results = solve_named_profiles(
+        base_grids, req.start, req.goal, req.rover_id, rover, req.profiles
+    )
     return {"results": results}
 
 
@@ -1320,22 +1261,9 @@ def compare(req: CompareRequest):
     base_grids = _get_grids()
     _validate_pixel_endpoints(base_grids, req.start, req.goal)
     rover = get_rover(req.rover_id)
-    results = []
-    for profile_id, profile in MISSION_PROFILES.items():
-        grids = grids_for_rover(base_grids, req.rover_id, profile["weights"])
-        result = astar(
-            grids,
-            tuple(req.start),
-            tuple(req.goal),
-            weights=profile["weights"],
-            constraints=profile["constraints"],
-            rover=rover,
-        )
-        result["profile_id"] = profile_id
-        result["profile_name"] = profile["name"]
-        result["color"] = profile["color"]
-        _attach_constraint_check(result, profile, grids, rover)
-        results.append(result)
+    results = compare_all_profiles(
+        base_grids, req.start, req.goal, req.rover_id, rover
+    )
     return {
         "start": req.start,
         "goal": req.goal,
@@ -1742,6 +1670,38 @@ def reference_missions():
 @app.get("/api/profiles")
 def profiles():
     return list_profiles()
+
+
+@app.post("/api/ai/chat", response_model=ChatResponse)
+def ai_chat(req: ChatRequest, request: Request):
+    """Answer one mission question from deterministic LunaPath evidence.
+
+    Read-only by construction: the registry handed to the model holds two
+    side-effect-free tools, so no sequence of model outputs can publish a
+    corridor, load a grid, or move the route the operator is looking at.
+    Orchestration lives in app.ai_chat; this stays a door.
+    """
+    grids = _active_grids(request)
+
+    # Tests inject a scripted provider here; production resolves from the
+    # environment on every call so a key added without a restart takes.
+    provider = getattr(request.app.state, "ai_provider", None)
+    if provider is None:
+        try:
+            provider = resolve_provider()
+        except AiProviderError as exc:
+            raise HTTPException(status_code=503, detail=exc.message) from exc
+
+    try:
+        return run_chat(
+            provider,
+            grids,
+            req.mission,
+            req.messages,
+            explanation_level=req.explanationLevel,
+        )
+    except AiProviderError as exc:
+        raise HTTPException(status_code=503, detail=exc.message) from exc
 
 
 @app.get("/api/scenarios")

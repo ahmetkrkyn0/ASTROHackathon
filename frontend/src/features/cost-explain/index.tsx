@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useOverlays } from '../../overlay/useOverlays'
 import { CostExplainPanel } from './CostExplainPanel'
 import { hoverCellOverlay } from './overlays'
@@ -8,12 +8,17 @@ const OVERLAY_ID = 'cost-explain'
 
 export function CostExplain() {
   const state = useCostExplain()
-  const { register, unregister } = useOverlays()
+  const overlays = useOverlays()
 
-  useEffect(() => {
-    register(OVERLAY_ID, hoverCellOverlay(state.cell))
-    return () => unregister(OVERLAY_ID)
-  }, [register, state.cell, unregister])
+  // MEMOISED on the coordinates, not on the array: state.cell is a fresh
+  // tuple every render, so keying the effect on it would re-register forever.
+  const commands = useMemo(
+    () => hoverCellOverlay(state.cell),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.cell?.[0], state.cell?.[1]],
+  )
+
+  useEffect(() => overlays.register(OVERLAY_ID, commands), [overlays, commands])
 
   return (
     <section className="rail-section">

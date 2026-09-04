@@ -1,5 +1,5 @@
 import { metresToPixel, type GridFrame } from '../../grid/geo'
-import type { OverlayLayer } from '../../overlay/types'
+import type { OverlayCommand } from '../../overlay/types'
 import type { Corridor, PoseResponse } from '../../net/types'
 
 /**
@@ -14,15 +14,17 @@ export function poseOverlays(
   result: PoseResponse | null,
   corridor: Corridor | null,
   frame: GridFrame | null,
-): OverlayLayer[] {
+): OverlayCommand[] {
   if (!pose || !frame) return []
 
-  const posePixel = metresToPixel(pose.x_m, pose.y_m, frame)
-  const layers: OverlayLayer[] = [
+  // Already a fine-grid cell: metresToPixel answers in row/col, which is the
+  // only space the overlay contract carries.
+  const poseCell = metresToPixel(pose.x_m, pose.y_m, frame)
+  const commands: OverlayCommand[] = [
     {
       kind: 'points',
       id: 'pose-current',
-      points: [posePixel],
+      points: [poseCell],
       style: {
         // Red when the pose broke the corridor, amber when localization is
         // too uncertain to trust it, white otherwise.
@@ -32,7 +34,7 @@ export function poseOverlays(
             : result && result.fired_triggers.length > 0
               ? '#f87171'
               : '#f8fafc',
-        radius: 5,
+        radiusPx: 5,
       },
     },
   ]
@@ -47,13 +49,13 @@ export function poseOverlays(
         nearest = [x, y]
       }
     }
-    layers.push({
+    commands.push({
       kind: 'polyline',
       id: 'pose-deviation',
-      points: [posePixel, metresToPixel(nearest[0], nearest[1], frame)],
-      style: { color: '#fbbf24', lineWidth: 1.5, dash: [4, 3], opacity: 0.9 },
+      points: [poseCell, metresToPixel(nearest[0], nearest[1], frame)],
+      style: { color: '#fbbf24', widthPx: 1.5, dash: [4, 3], opacity: 0.9 },
     })
   }
 
-  return layers
+  return commands
 }

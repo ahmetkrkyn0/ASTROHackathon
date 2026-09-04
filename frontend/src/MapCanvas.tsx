@@ -8,7 +8,8 @@ import React, {
 } from 'react'
 import type { Waypoint } from './api'
 import { drawOverlays } from './overlay/draw2d'
-import type { OverlayLayer } from './overlay/types'
+import type { OverlayCommand } from './overlay/types'
+import { useOverlayCommands } from './overlay/useOverlays'
 import {
   aspectToRgb,
   computeHillshade,
@@ -20,9 +21,18 @@ import {
   shadeRegolith,
   thermalToRgb,
   viridisToRgb,
+  START_MINT,
+  GOAL_CORAL,
+  ROUTE_CYAN,
 } from './colormap'
 
 const CANVAS_SIZE = 500
+// Full resolution. fetchLayer reads the binary float32 layer, which carries
+// the whole 500x500 grid in 1.00 MB and is exempt from the MAX_LAYER_CELLS
+// ceiling that caps the JSON representation at a 256x256 preview. Rendering
+// is resolution-agnostic anyway -- cellPx is CANVAS_SIZE / rows and the
+// hillshade reads effectiveResolution -- and the click mapping is in canvas
+// pixels, which equal full-resolution grid indices at CANVAS_SIZE 500.
 const DOWNSAMPLE = 1
 
 export type ClickMode = 'start' | 'goal' | 'idle'
@@ -52,8 +62,6 @@ interface Props {
   onCellClick: (row: number, col: number) => void
   onAnimationStepChange?: (step: number | null) => void
   onHoverCellChange?: (cell: [number, number] | null) => void
-  /** Feature-module marks, drawn above the base map. See overlay/types.ts. */
-  overlays?: OverlayLayer[]
 }
 
 export interface MapCanvasHandle {
@@ -78,10 +86,15 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     onCellClick,
     onAnimationStepChange,
     onHoverCellChange,
-    overlays,
   },
   ref,
 ) {
+  // The marks features registered, read here rather than passed down: App
+  // renders OverlayProvider and so cannot consume it, and the hook falls back
+  // to one shared empty list outside a provider, which keeps this canvas
+  // usable on its own.
+  const overlays = useOverlayCommands()
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const baseImageRef = useRef<ImageData | null>(null)
   const animationTimerRef = useRef<number | null>(null)
@@ -308,7 +321,7 @@ function redraw(
   currentStep: number | null,
   hoverCell: [number, number] | null,
   gridRows: number,
-  overlays?: OverlayLayer[],
+  overlays?: readonly OverlayCommand[],
 ) {
   if (baseImage) {
     ctx.putImageData(baseImage, 0, 0)
@@ -335,8 +348,10 @@ function redraw(
     for (let index = 1; index <= drawUpTo; index += 1) {
       const previous = waypoints[index - 1]
       const current = waypoints[index]
-      ctx.strokeStyle = riskToHex(current.risk_level)
-      ctx.lineWidth = 2.6
+      
+      // Base cyan trajectory with risk color accenting
+      ctx.strokeStyle = current.risk_level === 'LOW' ? ROUTE_CYAN : riskToHex(current.risk_level)
+      ctx.lineWidth = 2.8
       ctx.beginPath()
       ctx.moveTo(previous.col, previous.row)
       ctx.lineTo(current.col, current.row)
@@ -349,21 +364,21 @@ function redraw(
       const rover = waypoints[currentStep]
       ctx.save()
       ctx.fillStyle = '#f5f7ff'
-      ctx.shadowColor = 'rgba(255, 255, 255, 0.55)'
+      ctx.shadowColor = ROUTE_CYAN
       ctx.shadowBlur = 14
       ctx.beginPath()
-      ctx.arc(rover.col, rover.row, 4.4, 0, Math.PI * 2)
+      ctx.arc(rover.col, rover.row, 4.8, 0, Math.PI * 2)
       ctx.fill()
       ctx.shadowBlur = 0
-      ctx.strokeStyle = riskToHex(rover.risk_level)
-      ctx.lineWidth = 1.4
+      ctx.strokeStyle = ROUTE_CYAN
+      ctx.lineWidth = 1.6
       ctx.stroke()
       ctx.restore()
     }
   }
 
-  drawMarker(ctx, start, '#00e676', 'S')
-  drawMarker(ctx, goal, '#ff1744', 'G')
+  drawMarker(ctx, start, START_MINT, 'S')
+  drawMarker(ctx, goal, GOAL_CORAL, 'G')
   drawHoverCrosshair(ctx, hoverCell)
 }
 

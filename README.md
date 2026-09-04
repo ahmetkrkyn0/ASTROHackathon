@@ -98,6 +98,27 @@ cd frontend
 npm install
 ```
 
+**Analiz asistanı (isteğe bağlı)**
+
+Asistan olmadan da uygulamanın tamamı çalışır; yalnızca sohbet paneli
+yapılandırılmamış olduğunu bildirir.
+
+```bash
+cp .env.example .env      # Windows: copy .env.example .env
+```
+
+`.env` içinde `LUNAPATH_OPENAI_API_KEY` alanını kendi anahtarınızla doldurun.
+`LUNAPATH_OPENAI_MODEL` ve `LUNAPATH_AI_PROVIDER` örnekteki değerlerle bırakılabilir;
+sağlayıcı olarak `stub` seçilirse gerçek model hiç çağrılmaz.
+
+- `.env` sürüm kontrolüne **girmez** ve `.gitignore` tarafından yok sayılır;
+  yalnızca `.env.example` izlenir.
+- Anahtar yalnızca sunucu sürecinde okunur. Tarayıcıya gönderilen pakette ne
+  anahtar ne de OpenAI istemcisi bulunur; sayfa yalnızca LunaPath backend'i ile
+  konuşur.
+- Dosya kendiliğinden yüklenmez; backend başlatılırken aşağıdaki `--env-file`
+  bayrağı gerekir.
+
 ---
 
 ## Çalıştırma
@@ -106,10 +127,15 @@ npm install
 
    ```bash
    cd backend
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --env-file ../.env
    ```
 
    Açıklık: `http://127.0.0.1:8000/docs`
+
+   `--env-file` isteğe bağlı değildir: uygulama `.env` dosyasını **kendiliğinden
+   okumaz**, bu yüzden bayrak olmadan analiz asistanı yapılandırılmamış sayılır
+   ve `/api/ai/chat` yapılandırma hatası döner. Planlama, harita ve telemetri
+   bayraksız da normal çalışır.
 
 2. **Frontend** (geliştirme; projede port `3000`, `/api` → `localhost:8000`):
 
