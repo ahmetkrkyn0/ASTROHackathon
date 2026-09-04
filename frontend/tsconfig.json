@@ -16,10 +16,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
-  // GECICI. include tum src'yi kapsadigi icin, hicbir yerden import edilmeyen
-  // dosyalar da typecheck edilir. Henuz kanonik mission/overlay sozlesmesine
-  // tasinmamis feature'lar eski modulleri import ettiginden derlemeyi kirarlar;
-  // her biri kendi gorevinde disari cikar ve dizin bosalinca bu satir silinir.
-  "exclude": ["src/features/_pending"]
+  "include": ["src"]
 }

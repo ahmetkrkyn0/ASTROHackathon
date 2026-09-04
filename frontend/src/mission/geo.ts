@@ -7,13 +7,12 @@ import type { CellRef } from './types'
  * where that becomes something a canvas can draw, and the only place the
  * arithmetic is written down.
  *
- * Deliberately not here: the 3-D world transform. `cellToWorldXZ` in
- * TerrainView3D.tsx is already authoritative for the scene's own frame and
- * carries the row-axis reasoning next to the mesh it applies to. Re-exporting
- * it would make this module import a WebGL component; copying it would create
- * the second implementation this file exists to prevent. When the overlay
- * contract grows a 3-D renderer, that renderer calls the function where it
- * lives.
+ * Deliberately not here: the 3-D world transform. The scene's frame belongs
+ * to the renderer that draws the mesh, next to the row-axis reasoning it
+ * applies. Publishing it here would make this module import a WebGL
+ * component, and copying it would create the second implementation this file
+ * exists to prevent. When the overlay contract grows a 3-D renderer, that
+ * renderer owns its own transform.
  */
 export interface CanvasGeometry {
   /** Rows and columns of the fine grid the commands are expressed in. */
