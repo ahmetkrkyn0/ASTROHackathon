@@ -154,6 +154,16 @@ export interface MissionValue {
 }
 
 /**
+ * Volatile values needed by route-analysis, deliberately separate from the
+ * stable 15-field MissionValue snapshot.
+ */
+export interface MissionRuntime {
+  routePlaybackStep: number | null
+  payloadW: number
+  heaterW: number
+}
+
+/**
  * What a feature may ask the cockpit to do.
  *
  * A SEPARATE context from MissionValue, not extra fields on it, and the split

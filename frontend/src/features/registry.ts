@@ -3,6 +3,7 @@ import type { MissionMode } from '../mission/types'
 import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
 import { MissionSetup } from './mission-setup'
+import { RouteAnalysis } from './route-analysis'
 
 /**
  * Where a feature mounts.
@@ -63,6 +64,7 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // appeared in. Leaving modes off would put it beside the setup panel in
   // plan -- the exact quiet mistake the filter exists to make explicit.
   { id: 'mission-snapshot', slot: 'leftRail', Component: MissionSnapshot, modes: ['analyze'] },
+  { id: 'route-analysis', slot: 'rightRail', Component: RouteAnalysis, modes: ['analyze'] },
 ]
 
 /**

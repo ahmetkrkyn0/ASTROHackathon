@@ -28,14 +28,14 @@ import {
 import TopBar, { type MissionMode } from './components/TopBar/TopBar'
 import LayerDropdown from './components/Map/LayerDropdown'
 import RouteSolvingOverlay from './components/Map/RouteSolvingOverlay'
-import RouteAnalysisInspector from './components/Analysis/RouteAnalysisInspector'
 import PlaybackBar from './components/Analysis/PlaybackBar'
 import MissionAssistant from './components/Assistant/MissionAssistant'
 import FleetSelectionView from './components/Fleet/FleetSelectionView'
 
 // Modular shell: App knows the slots, never the features.
 import { MissionProvider } from './mission/MissionProvider'
-import type { MissionActions, MissionValue } from './mission/types'
+import { MissionRuntimeProvider } from './mission/MissionRuntimeProvider'
+import type { MissionActions, MissionRuntime, MissionValue } from './mission/types'
 import { OverlayProvider } from './overlay/OverlayProvider'
 import {
   BottomDock,
@@ -515,12 +515,18 @@ export default function App() {
     [handlePlan, handleReset, handleRoverSelect, toggleHud],
   )
 
+  const missionRuntimeValue: MissionRuntime = useMemo(
+    () => ({ routePlaybackStep, payloadW, heaterW }),
+    [heaterW, payloadW, routePlaybackStep],
+  )
+
   return (
     <MissionProvider
       value={missionValue}
       focusTelemetry={focusTelemetry}
       actions={missionActions}
     >
+      <MissionRuntimeProvider value={missionRuntimeValue}>
       <OverlayProvider>
       <SpaceBackdrop
         stage={phase === 'landing' ? 'ambient' : 'deck'}
@@ -796,21 +802,6 @@ export default function App() {
               {rightOpen ? '\u203A' : '\u2039'}
             </button>
 
-            {rightOpen && (
-              <>
-                {missionMode !== 'plan' && planResult && (
-                  <RouteAnalysisInspector
-                    planResult={planResult}
-                    playbackStep={routePlaybackStep}
-                    payloadW={payloadW}
-                    heaterW={heaterW}
-                    onPayloadWChange={setPayloadW}
-                    onHeaterWChange={setHeaterW}
-                  />
-                )}
-              </>
-            )}
-
             <RightRailSlot />
           </aside>
         </main>
@@ -855,6 +846,7 @@ export default function App() {
         )}
       </div>
       </OverlayProvider>
+      </MissionRuntimeProvider>
     </MissionProvider>
   )
 }

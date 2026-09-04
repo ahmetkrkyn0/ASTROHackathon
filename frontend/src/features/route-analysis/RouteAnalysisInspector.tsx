@@ -1,26 +1,17 @@
-import React from 'react'
-import type { PlanResponse, Waypoint } from '../../api'
+import type { Waypoint } from '../../api'
 import { batteryToHex, riskToHex } from '../../colormap'
-
-interface RouteAnalysisInspectorProps {
-  planResult: PlanResponse
-  playbackStep: number | null
-  payloadW: number
-  heaterW: number
-  onPayloadWChange: (val: number) => void
-  onHeaterWChange: (val: number) => void
-}
+import { useMission, useMissionActions } from '../../mission/MissionContext'
+import { useMissionRuntime } from '../../mission/MissionRuntimeContext'
 
 const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
 
-export const RouteAnalysisInspector: React.FC<RouteAnalysisInspectorProps> = ({
-  planResult,
-  playbackStep,
-  payloadW,
-  heaterW,
-  onPayloadWChange,
-  onHeaterWChange,
-}) => {
+export const RouteAnalysisInspector = () => {
+  const { planResult } = useMission()
+  const { routePlaybackStep: playbackStep, payloadW, heaterW } = useMissionRuntime()
+  const { setPayloadW, setHeaterW } = useMissionActions()
+
+  if (!planResult) return null
+
   const { summary, astar_metrics: metrics, waypoints } = planResult
 
   // Playback waypoint
@@ -236,7 +227,7 @@ export const RouteAnalysisInspector: React.FC<RouteAnalysisInspectorProps> = ({
                 max={300}
                 step={5}
                 value={payloadW}
-                onChange={(e) => onPayloadWChange(Math.max(0, parseInt(e.target.value) || 0))}
+                onChange={(e) => setPayloadW(Math.max(0, parseInt(e.target.value) || 0))}
               />
               <span className="lp-unit-tag">W</span>
             </label>
@@ -249,7 +240,7 @@ export const RouteAnalysisInspector: React.FC<RouteAnalysisInspectorProps> = ({
                 max={150}
                 step={5}
                 value={heaterW}
-                onChange={(e) => onHeaterWChange(Math.max(0, parseInt(e.target.value) || 0))}
+                onChange={(e) => setHeaterW(Math.max(0, parseInt(e.target.value) || 0))}
               />
               <span className="lp-unit-tag">W</span>
             </label>
