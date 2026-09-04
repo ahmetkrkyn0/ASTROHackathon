@@ -38,7 +38,7 @@ import FleetSelectionView from './components/Fleet/FleetSelectionView'
 
 // Modular shell: App knows the slots, never the features.
 import { MissionProvider } from './mission/MissionProvider'
-import type { MissionValue } from './mission/types'
+import type { MissionActions, MissionValue } from './mission/types'
 import { OverlayProvider } from './overlay/OverlayProvider'
 import {
   BottomDock,
@@ -337,7 +337,7 @@ export default function App() {
   )
 
   // Route calculation with authentic solving feedback
-  const handlePlan = async () => {
+  const handlePlan = useCallback(async () => {
     if (!start || !goal || isSolving) return
 
     setIsSolving(true)
@@ -361,15 +361,16 @@ export default function App() {
       setPlanning(false)
       setPlanError((error as Error).message)
     }
-  }
+  }, [goal, isSolving, selectedRoverId, start, weights])
 
   // Edit & Replan: preserves endpoints and smoothly transitions back to Plan mode
-  const handleEditReplan = () => {
+  const handleEditReplan = useCallback(() => {
     setMissionMode('plan')
-  }
+  }, [])
 
-  // Reset full mission setup
-  const handleReset = () => {
+  // Reset full mission setup. Every call here is a state setter, so this is
+  // stable for the life of the app.
+  const handleReset = useCallback(() => {
     setStart(null)
     setGoal(null)
     setPlanResult(null)
@@ -378,7 +379,9 @@ export default function App() {
     setHoverPoint(null)
     setRoutePlaybackStep(null)
     setMissionMode('plan')
-  }
+  }, [])
+
+  const toggleHud = useCallback(() => setHudOpen((open) => !open), [])
 
   const hasData = Boolean(
     elevationLayer &&
@@ -488,8 +491,34 @@ export default function App() {
     ],
   )
 
+  // Writing is a separate contract from reading, so a control panel can take
+  // an action without subscribing to the mission snapshot. Every entry is
+  // already memoised above; this object exists so the identity of the whole
+  // does not churn either.
+  const missionActions: MissionActions = useMemo(
+    () => ({
+      selectRover: handleRoverSelect,
+      setWeights,
+      setClickMode,
+      planRoute: handlePlan,
+      resetMission: handleReset,
+      setMissionMode,
+      setPlaybackStep: setRoutePlaybackStep,
+      setPayloadW,
+      setHeaterW,
+      setViewMode,
+      setDimension,
+      toggleHud,
+    }),
+    [handlePlan, handleReset, handleRoverSelect, toggleHud],
+  )
+
   return (
-    <MissionProvider value={missionValue} focusTelemetry={focusTelemetry}>
+    <MissionProvider
+      value={missionValue}
+      focusTelemetry={focusTelemetry}
+      actions={missionActions}
+    >
       <OverlayProvider>
       <SpaceBackdrop
         stage={phase === 'landing' ? 'ambient' : 'deck'}

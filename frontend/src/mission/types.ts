@@ -1,5 +1,5 @@
-import type { MapViewMode } from '../MapCanvas'
-import type { PlanResponse, PlanWeights } from '../api'
+import type { ClickMode, MapViewMode } from '../MapCanvas'
+import type { PlanResponse, PlanWeights, RoverEntry } from '../api'
 
 /**
  * A fine-grid cell index, as the cockpit has always carried one.
@@ -70,10 +70,13 @@ export interface FocusTelemetry {
 /**
  * Everything the cockpit publishes to features, values only.
  *
- * No setter crosses this boundary in this pass. `App.tsx` remains the owner of
- * every field here; the context republishes what it already has, so a feature
- * reads the same mission the operator is looking at without a second fetch and
- * without a second source of truth.
+ * No setter crosses THIS boundary. `App.tsx` remains the owner of every field
+ * here; the context republishes what it already has, so a feature reads the
+ * same mission the operator is looking at without a second fetch and without a
+ * second source of truth.
+ *
+ * Writing is a separate contract: see `MissionActions` below, published through
+ * its own context so a snapshot stays a snapshot.
  */
 export interface MissionValue {
   gridMeta: GridMeta | null
@@ -108,4 +111,45 @@ export interface MissionValue {
    * stage at all.
    */
   missionMode: MissionMode
+}
+
+/**
+ * What a feature may ask the cockpit to do.
+ *
+ * A SEPARATE context from MissionValue, not extra fields on it, and the split
+ * carries the same weight as the MissionValue/FocusTelemetry one. MissionValue
+ * is a snapshot: it changes when the mission changes, and a feature reading it
+ * re-renders with it. These never change. Putting them on the value would give
+ * every reader a dependency on a dozen function identities and make the memo
+ * that builds it responsible for keeping them all stable.
+ *
+ * The chatbot branch published no actions because its only feature reads and
+ * never writes. ai-scene's panels are the cockpit's controls -- pick a rover,
+ * move a weight, plan a route -- so registering them needs a way to write that
+ * does not go back through props.
+ *
+ * Every member is memoised, so none of them changes identity on a bare
+ * re-render and a feature may put one in an effect's dependency list without
+ * arming a loop. Most never change at all; the few that close over mission
+ * state -- `planRoute` reads the endpoints, the weights and the rover -- change
+ * when that state does, which is when a dependent effect should re-run anyway.
+ */
+export interface MissionActions {
+  /** Also adopts the rover's default weights, as the hangar does. */
+  selectRover: (rover: RoverEntry) => void
+  setWeights: (weights: PlanWeights) => void
+  /** Arms the next map click to place start, goal, or nothing. */
+  setClickMode: (mode: ClickMode) => void
+  /** No-op unless both endpoints are placed and no request is in flight. */
+  planRoute: () => void
+  /** Clears endpoints, route and error. Keeps the selected rover. */
+  resetMission: () => void
+  setMissionMode: (mode: MissionMode) => void
+  /** The playback cursor; null shows the route at rest. */
+  setPlaybackStep: (step: number | null) => void
+  setPayloadW: (watts: number) => void
+  setHeaterW: (watts: number) => void
+  setViewMode: (mode: ViewModeId) => void
+  setDimension: (dimension: MapDimension) => void
+  toggleHud: () => void
 }

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import { FocusTelemetryContext, MissionContext } from './MissionContext'
-import type { FocusTelemetry, MissionValue } from './types'
+import { FocusTelemetryContext, MissionActionsContext, MissionContext } from './MissionContext'
+import type { FocusTelemetry, MissionActions, MissionValue } from './types'
 
 /**
  * Publishes both halves of the mission to every feature below.
@@ -13,17 +13,21 @@ import type { FocusTelemetry, MissionValue } from './types'
 export function MissionProvider({
   value,
   focusTelemetry,
+  actions,
   children,
 }: {
   value: MissionValue
   focusTelemetry: FocusTelemetry
+  actions: MissionActions
   children: ReactNode
 }) {
   return (
     <MissionContext.Provider value={value}>
-      <FocusTelemetryContext.Provider value={focusTelemetry}>
-        {children}
-      </FocusTelemetryContext.Provider>
+      <MissionActionsContext.Provider value={actions}>
+        <FocusTelemetryContext.Provider value={focusTelemetry}>
+          {children}
+        </FocusTelemetryContext.Provider>
+      </MissionActionsContext.Provider>
     </MissionContext.Provider>
   )
 }

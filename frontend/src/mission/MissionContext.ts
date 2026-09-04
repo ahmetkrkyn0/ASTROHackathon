@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { FocusTelemetry, MissionValue } from './types'
+import type { FocusTelemetry, MissionActions, MissionValue } from './types'
 
 /**
  * The mission a feature may read.
@@ -18,6 +18,7 @@ import type { FocusTelemetry, MissionValue } from './types'
  */
 export const MissionContext = createContext<MissionValue | null>(null)
 export const FocusTelemetryContext = createContext<FocusTelemetry | null>(null)
+export const MissionActionsContext = createContext<MissionActions | null>(null)
 
 /**
  * The cockpit's current mission state, read-only.
@@ -52,4 +53,23 @@ export function useFocusTelemetry(): FocusTelemetry {
     throw new Error('useFocusTelemetry must be called inside <MissionProvider>')
   }
   return value
+}
+
+/**
+ * What a feature may ask the cockpit to do.
+ *
+ * A separate hook from useMission, so a panel that only writes -- a button, a
+ * slider -- does not subscribe to the mission snapshot and re-render every time
+ * a value it never reads changes.
+ *
+ * Throws outside a provider for the same reason useMission does: a control
+ * rendered outside the shell is a wiring mistake, and no-op actions would make
+ * it look alive while nothing happened.
+ */
+export function useMissionActions(): MissionActions {
+  const actions = useContext(MissionActionsContext)
+  if (!actions) {
+    throw new Error('useMissionActions must be called inside <MissionProvider>')
+  }
+  return actions
 }

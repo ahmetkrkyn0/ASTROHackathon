@@ -924,7 +924,51 @@ EOF
 
 ## Faz 2 — Göktuğ'un panelleri kayda geçer
 
-Her görev aynı biçimi izler: panel `features/` altına taşınır, prop'ları
+### Task 7b: Eylem sözleşmesi
+
+Planın ilk sürümünde yoktu; Task 8 açılınca ortaya çıktı ve Faz 2'nin
+tamamının önkoşulu.
+
+Kanonik `MissionValue` **salt okunur** ve bu kasıtlı: chatbot dalının tek
+feature'ı okur, yazmaz. Göktuğ'un panelleri ise kokpitin kontrol yüzeyleri.
+Ölçüm:
+
+| panel | prop | geri çağırma |
+|---|---|---|
+| `MissionSetupPanel` | 14 | 6 |
+| `LayerDropdown` | 6 | 3 |
+| `RouteAnalysisInspector` | 6 | 2 |
+| `PlaybackBar` | 4 | 2 |
+| `MissionSnapshotPanel` | 5 | 1 |
+| `MissionContextPanel` | 6 | 0 |
+| `RouteSolvingOverlay` | 4 | 0 |
+
+Yedinin beşi eylem istiyor. "Prop drilling'i context'e çevir" veri için
+çalışıyor, eylemler için çalışmıyor — sözleşmede eylem yok.
+
+**Karar: ayrı bir eylem context'i.** `MissionValue` salt okunur kalır;
+`MissionActions` kendi context'inde yaşar. Bu, dosyanın zaten kurduğu ayrımın
+aynısı (`MissionContext` / `FocusTelemetryContext`) ve sebebi de aynı: anlık
+görüntü anlık görüntü olarak kalsın, bir düğme mission snapshot'ına abone
+olmadan eylem alabilsin.
+
+On iki eylem: `selectRover`, `setWeights`, `setClickMode`, `planRoute`,
+`resetMission`, `setMissionMode`, `setPlaybackStep`, `setPayloadW`,
+`setHeaterW`, `setViewMode`, `setDimension`, `toggleHud`.
+
+Hepsi memoize; çoğu hiç değişmiyor, `planRoute` uç noktalara ve ağırlıklara
+kapandığı için onlarla değişiyor — ki bağımlı bir efektin zaten yeniden koşması
+gereken an o.
+
+**Veri alanları bu görevde eklenmez.** Her panel kendi görevinde ihtiyacı olan
+alanı `MissionValue`'ya gerekçesiyle ekler; sözleşmeyi peşin şişirmek, hangi
+alanın neden var olduğunu okunmaz hale getirir.
+
+**Kapı:** üç kontrol de geçer, uygulama değişmez — henüz eylemi tüketen yok.
+
+---
+
+Kalan görevler aynı biçimi izler: panel `features/` altına taşınır, prop'ları
 `useMission()` ile değiştirilir, kayda bir satır eklenir, `App.tsx`'ten JSX'i
 silinir. `SpaceBackdrop`, `TopBar`, `MapCanvas`, `TerrainCanvas3D` ve
 `FleetSelectionView` **kabukta kalır** ve prop almaya devam eder.
