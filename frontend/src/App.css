@@ -1166,6 +1166,11 @@ select {
   min-height: 0;
   min-width: 0;
   display: flex;
+  /* Column, so BottomDock is the strip UNDER the map that slots.tsx calls
+     it. In a row it would sit beside .map-stage and take width from the
+     map; the playback bar never showed this because it positions itself
+     absolutely and leaves the flow entirely. */
+  flex-direction: column;
   overflow: hidden;
   /* Left open so the backdrop reads through the margins around the canvas --
      the console frames a viewport rather than covering one. The canvas itself

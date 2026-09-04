@@ -1,6 +1,7 @@
 export type RGB = [number, number, number]
 
-const COOLWARM_STOPS: RGB[] = [
+/** Exported for the overlay contract, whose field command carries its stops. */
+export const COOLWARM_STOPS: RGB[] = [
   [59, 76, 192],
   [98, 130, 234],
   [141, 176, 254],

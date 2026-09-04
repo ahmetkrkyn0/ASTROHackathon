@@ -55,7 +55,9 @@ export const PlaybackBar: React.FC = () => {
   if (totalSteps === 0) return null
 
   return (
-    <div className="lp-playback-dock">
+    // pointerEvents: the canvas overlay slot turns them off so an empty
+    // layer cannot swallow clicks meant for the map; a control opts back in.
+    <div className="lp-playback-dock" style={{ pointerEvents: 'auto' }}>
       <div className="lp-playback-controls">
         <button
           type="button"

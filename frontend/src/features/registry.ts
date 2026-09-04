@@ -13,6 +13,7 @@ import { PoseLoop } from './pose-loop'
 import { Replan } from './replan'
 import { RosShowcase } from './ros-showcase'
 import { RouteAnalysis } from './route-analysis'
+import { TimeAxis } from './time-axis'
 import { SolvingIndicator } from './solving-indicator'
 
 /**
@@ -79,7 +80,14 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // guard. Only the mode half becomes a registration: the bar already
   // renders nothing without waypoints, so knowing what an empty route looks
   // like stays inside the feature.
-  { id: 'playback', slot: 'bottomDock', Component: Playback, modes: ['analyze'] },
+  //
+  // canvasOverlay rather than bottomDock, decided when time-axis arrived:
+  // the bar is absolutely positioned and floats over the map, so in the
+  // bottom strip it simply covered whatever in-flow feature was there.
+  { id: 'playback', slot: 'canvasOverlay', Component: Playback, modes: ['analyze'] },
+  // The bottom dock's first in-flow occupant, and the reason it had to
+  // become a real strip under the map.
+  { id: 'time-axis', slot: 'bottomDock', Component: TimeAxis, modes: ['analyze'] },
   // No modes: App.tsx rendered both of these inside the map stage, which the
   // fleet branch replaces wholesale, so plan and analyze are every stage they
   // could appear in. Registration order is paint order within a slot, and the
