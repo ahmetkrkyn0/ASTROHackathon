@@ -22,8 +22,8 @@ const CLIP_SRC = '/videos/moon-backdrop-1080.mp4'
 
 /** How much of the clip each phase lets through. */
 const STAGE_OPACITY = {
-  /** Behind the landing page, which has its own moon to stay legible over. */
-  ambient: 0.4,
+  /** The landing page's hero. Nothing competes with it there any more. */
+  ambient: 0.95,
   /** The transition beat: the clip IS the screen. */
   feature: 1,
   /** Behind the console, where panels and terrain are the subject. */
@@ -81,7 +81,10 @@ export default function SpaceBackdrop({ stage, frozen = false }: Props) {
           muted
           loop
           playsInline
-          preload="auto"
+          // Not "auto": that fetches all 3.8 MB before the page fires `load`,
+          // holding up first paint for a layer that is decoration. Metadata is
+          // enough to start, and the rest streams in behind the poster.
+          preload="metadata"
         />
       ) : (
         <img className="space-backdrop-media" src="/starimg.jpeg" alt="" />
@@ -90,7 +93,7 @@ export default function SpaceBackdrop({ stage, frozen = false }: Props) {
       {/* Vertical vignette: keeps the topbar and status strip legible without
           hiding the middle of the frame, where the terrain sits. Lifts during
           the transition beat, when the clip is meant to be the subject. */}
-      <div className="space-backdrop-vignette bg-gradient-to-t from-black/80 via-black/40 to-black/80" />
+      <div className="space-backdrop-vignette" />
 
       {/* Sun grazing the horizon. At this latitude it never gets far above
           it, which is the whole reason the shadow and thermal layers exist. */}

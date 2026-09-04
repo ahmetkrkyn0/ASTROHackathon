@@ -18,6 +18,9 @@ import {
   shadeRegolith,
   thermalToRgb,
   viridisToRgb,
+  START_MINT,
+  GOAL_CORAL,
+  ROUTE_CYAN,
 } from './colormap'
 
 const CANVAS_SIZE = 500
@@ -314,8 +317,10 @@ function redraw(
     for (let index = 1; index <= drawUpTo; index += 1) {
       const previous = waypoints[index - 1]
       const current = waypoints[index]
-      ctx.strokeStyle = riskToHex(current.risk_level)
-      ctx.lineWidth = 2.6
+      
+      // Base cyan trajectory with risk color accenting
+      ctx.strokeStyle = current.risk_level === 'LOW' ? ROUTE_CYAN : riskToHex(current.risk_level)
+      ctx.lineWidth = 2.8
       ctx.beginPath()
       ctx.moveTo(previous.col, previous.row)
       ctx.lineTo(current.col, current.row)
@@ -328,21 +333,21 @@ function redraw(
       const rover = waypoints[currentStep]
       ctx.save()
       ctx.fillStyle = '#f5f7ff'
-      ctx.shadowColor = 'rgba(255, 255, 255, 0.55)'
+      ctx.shadowColor = ROUTE_CYAN
       ctx.shadowBlur = 14
       ctx.beginPath()
-      ctx.arc(rover.col, rover.row, 4.4, 0, Math.PI * 2)
+      ctx.arc(rover.col, rover.row, 4.8, 0, Math.PI * 2)
       ctx.fill()
       ctx.shadowBlur = 0
-      ctx.strokeStyle = riskToHex(rover.risk_level)
-      ctx.lineWidth = 1.4
+      ctx.strokeStyle = ROUTE_CYAN
+      ctx.lineWidth = 1.6
       ctx.stroke()
       ctx.restore()
     }
   }
 
-  drawMarker(ctx, start, '#00e676', 'S')
-  drawMarker(ctx, goal, '#ff1744', 'G')
+  drawMarker(ctx, start, START_MINT, 'S')
+  drawMarker(ctx, goal, GOAL_CORAL, 'G')
   drawHoverCrosshair(ctx, hoverCell)
 }
 
