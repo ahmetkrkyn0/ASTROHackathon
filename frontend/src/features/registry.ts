@@ -8,6 +8,7 @@ import { LayerProvenance } from './layer-provenance'
 import { MissionSetup } from './mission-setup'
 import { MissionValidation } from './mission-validation'
 import { Playback } from './playback'
+import { ProfileCompare } from './profile-compare'
 import { PoseLoop } from './pose-loop'
 import { Replan } from './replan'
 import { RosShowcase } from './ros-showcase'
@@ -97,6 +98,9 @@ export const FEATURES: readonly FeatureRegistration[] = [
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation },
   { id: 'corridor', slot: 'rightRail', Component: CorridorFeature },
   { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop },
+  // Analyze only: it compares a route that already exists against alternative
+  // weightings, which is a question asked after one has been planned.
+  { id: 'profile-compare', slot: 'rightRail', Component: ProfileCompare, modes: ['analyze'] },
 ]
 
 /**
