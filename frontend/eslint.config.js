@@ -5,7 +5,10 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'public'] },
+  // src/features/_pending GECICI: tsconfig'in exclude'uyla ayni sebeple burada.
+  // Henuz tasinmamis feature'lar eski mission/overlay modullerini import
+  // ediyor; ikisi de kalkinca bu giris de silinir.
+  { ignores: ['dist', 'node_modules', 'public', 'src/features/_pending'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
