@@ -110,3 +110,61 @@ def test_response_body_is_strict_json(client):
         body,
         parse_constant=lambda c: pytest.fail(f"non-standard JSON constant: {c}"),
     )
+
+
+# ── A1: time-to-safe-haven in the cell tooltip ────────────────────────────────
+
+
+def test_cell_telemetry_has_no_safe_haven_without_an_epoch(client):
+    payload = client.get("/api/cell-telemetry", params={"row": 3, "col": 3}).json()
+    assert payload["safe_haven"] is None
+    assert payload["safe_haven_model"]["model"] == "unavailable"
+    assert "epoch" in payload["safe_haven_model"]["reason"]
+
+
+def test_cell_telemetry_says_when_the_map_cannot_be_built(client):
+    payload = client.get(
+        "/api/cell-telemetry",
+        params={"row": 3, "col": 3, "start_utc": "2026-09-07T00:00:00"},
+    ).json()
+    assert payload["safe_haven"] is None
+    assert "horizon_map.npy" in payload["safe_haven_model"]["reason"]
+
+
+def test_cell_telemetry_reports_the_haven_verdict_and_the_time_to_one(client, monkeypatch):
+    import app.main as main_module
+
+    def _fake(grids, rover_id, start_utc, span_hours=708.7, step_hours=2.0):
+        safe = np.zeros(SHAPE, dtype=bool)
+        safe[0, 0] = True
+        tts = np.full(SHAPE, 1.5)
+        tts[0, 0] = 0.0
+        tts[7, 7] = np.inf
+        layers = {
+            "safe_haven": safe,
+            "max_dark_hours_without_dte": np.where(safe, 20.0, 70.0),
+            "earth_below_hours": np.full(SHAPE, 310.0),
+            "ever_lit": np.ones(SHAPE, dtype=bool),
+        }
+        info = {"model": "spice_horizon", "h_max_shadow_h": 50.0, "rover_id": rover_id}
+        return layers, tts, info
+
+    monkeypatch.setattr(main_module, "safe_haven_for_grids", _fake)
+    params = {"start_utc": "2026-09-07T00:00:00"}
+
+    haven = client.get("/api/cell-telemetry", params={"row": 0, "col": 0, **params}).json()
+    assert haven["safe_haven_model"]["model"] == "spice_horizon"
+    assert haven["safe_haven"] == {
+        "is_safe_haven": True,
+        "max_dark_hours_without_dte_h": 20.0,
+        "earth_below_hours": 310.0,
+        "time_to_safe_haven_h": 0.0,
+        "h_max_shadow_h": 50.0,
+    }
+
+    plain = client.get("/api/cell-telemetry", params={"row": 3, "col": 3, **params}).json()
+    assert plain["safe_haven"]["is_safe_haven"] is False
+    assert plain["safe_haven"]["time_to_safe_haven_h"] == 1.5
+
+    cut_off = client.get("/api/cell-telemetry", params={"row": 7, "col": 7, **params}).json()
+    assert cut_off["safe_haven"]["time_to_safe_haven_h"] is None

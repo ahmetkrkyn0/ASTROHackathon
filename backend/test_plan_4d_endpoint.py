@@ -360,3 +360,145 @@ def test_plan_4d_reports_earth_view_along_an_unconstrained_route(client, monkeyp
     assert payload["metrics"]["earth_visibility_enforced"] is False
     assert payload["metrics"]["moves_out_of_earth_view"] >= 1
     assert False in payload["path_earth_visible"]
+
+
+# ── A1: the safe-haven rule through the endpoint ─────────────────────────────
+
+
+def test_plan_4d_says_when_the_safe_haven_map_could_not_be_computed(client):
+    """No epoch, no horizon cube: the plan is made, the haven fields are
+    None, and the SHERPA margins that CAN be computed still are (the
+    battery is always known; a static, never-dark shadow field gives no
+    time-to-shadow; no Earth series gives no time-to-DSN-shadow)."""
+    payload = client.post("/api/plan-4d", json=_body()).json()
+    assert payload["safe_haven_model"]["model"] == "unavailable"
+    assert payload["safe_haven_model"]["reason"]
+    assert payload["path_time_to_haven_h"] is None
+    assert payload["path_hours_until_earthset"] is None
+    assert payload["path_haven_margin_h"] is None
+    metrics = payload["metrics"]
+    assert metrics["safe_haven_enforced"] is False
+    assert metrics["min_haven_margin_h"] is None
+    assert metrics["ends_at_safe_haven"] is None
+    assert metrics["time_to_zero_soc_min_h"] > 0.0
+    assert metrics["time_to_sun_shadow_min_h"] is None
+    assert metrics["time_to_dsn_shadow_min_h"] is None
+
+
+def test_requiring_a_safe_haven_without_a_map_is_a_422(client):
+    response = client.post("/api/plan-4d", json=_body(require_safe_haven=True))
+    assert response.status_code == 422
+    assert "safe haven" in response.json()["detail"]
+
+
+def _fake_safe_haven_map(monkeypatch):
+    """Havens: the top-left coarse block only (fine rows/cols 0..3)."""
+    import app.main as main_module
+
+    def _fake(grids, rover_id, start_utc, span_hours=708.7, step_hours=2.0):
+        safe = np.zeros(SHAPE, dtype=bool)
+        safe[:4, :4] = True
+        layers = {
+            "safe_haven": safe,
+            "max_dark_hours_without_dte": np.where(safe, 10.0, 90.0),
+            "earth_below_hours": np.full(SHAPE, 300.0),
+            "ever_lit": np.ones(SHAPE, dtype=bool),
+        }
+        info = {
+            "model": "spice_horizon",
+            "start_utc": start_utc,
+            "span_hours": span_hours,
+            "step_hours": step_hours,
+            "n_steps": 355,
+            "rover_id": rover_id,
+            "h_max_shadow_h": 50.0,
+            "safe_haven_cells": 16,
+            "traversable_cells": 256,
+            "safe_haven_fraction": 16 / 256,
+            "earth_below_fraction": 0.42,
+        }
+        return layers, np.where(safe, 0.0, 1.0), info
+
+    monkeypatch.setattr(main_module, "safe_haven_for_grids", _fake)
+
+
+def _earth_series_closing_at(close_slice: int | None):
+    """Every cell linked until *close_slice*, unlinked from then on (never
+    unlinked when None)."""
+    import app.main as main_module
+
+    def _fake(base, metadata, n_slices, slice_hours, start_utc=None):
+        series = []
+        for index in range(int(n_slices)):
+            value = 1.0 if (close_slice is None or index < close_slice) else 0.0
+            series.append(np.full(SHAPE, value))
+        return series, {"model": "spice_horizon", "time_varying": True}
+
+    return _fake
+
+
+def test_plan_4d_enforces_the_safe_haven_rule_when_asked(client, monkeypatch):
+    """The link closes 3 h in; the goal block is three diagonal 320 m
+    steps (1.9 h of driving) from the only haven. Arriving there at 3 h
+    is arriving with no way back: refused, with the reason named."""
+    import app.main as main_module
+
+    _fake_safe_haven_map(monkeypatch)
+    monkeypatch.setattr(
+        main_module, "build_earth_visibility_series", _earth_series_closing_at(3)
+    )
+    response = client.post(
+        "/api/plan-4d",
+        json=_body(require_safe_haven=True, start_utc="2026-09-01T00:00:00"),
+    )
+    assert response.status_code == 404, response.text
+    detail = response.json()["detail"]
+    assert "safe haven" in detail
+
+
+def test_plan_4d_under_the_haven_rule_succeeds_when_the_link_holds(client, monkeypatch):
+    import app.main as main_module
+
+    _fake_safe_haven_map(monkeypatch)
+    monkeypatch.setattr(
+        main_module, "build_earth_visibility_series", _earth_series_closing_at(None)
+    )
+    response = client.post(
+        "/api/plan-4d",
+        json=_body(require_safe_haven=True, start_utc="2026-09-01T00:00:00"),
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["safe_haven_model"]["model"] == "spice_horizon"
+    assert payload["safe_haven_model"]["coarse_safe_haven_cells"] == 1
+    metrics = payload["metrics"]
+    assert metrics["safe_haven_enforced"] is True
+    assert metrics["states_past_haven_deadline"] == 0
+    assert metrics["ends_at_safe_haven"] is False
+    assert metrics["edges_rejected"]["safe_haven_deadline"] == 0
+    n_states = len(payload["path_states"])
+    assert len(payload["path_time_to_haven_h"]) == n_states
+    assert payload["path_time_to_haven_h"][0] == 0.0
+    assert payload["path_time_to_haven_h"][-1] > 0.0
+    # No Earthset within the horizon or the lookahead: open-ended.
+    assert all(value is None for value in payload["path_hours_until_earthset"])
+    assert metrics["min_haven_margin_h"] is None
+    assert metrics["time_to_dsn_shadow_min_h"] is None
+
+
+def test_plan_4d_reports_the_haven_margin_without_enforcing_it(client, monkeypatch):
+    import app.main as main_module
+
+    _fake_safe_haven_map(monkeypatch)
+    monkeypatch.setattr(
+        main_module, "build_earth_visibility_series", _earth_series_closing_at(3)
+    )
+    payload = client.post(
+        "/api/plan-4d", json=_body(start_utc="2026-09-01T00:00:00")
+    ).json()
+    metrics = payload["metrics"]
+    assert metrics["safe_haven_enforced"] is False
+    assert metrics["states_past_haven_deadline"] >= 1
+    assert metrics["min_haven_margin_h"] < 0.0
+    assert metrics["time_to_dsn_shadow_min_h"] == 0.0
+    assert payload["path_hours_until_earthset"][0] == pytest.approx(3.0)

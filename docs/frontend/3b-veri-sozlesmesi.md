@@ -433,6 +433,107 @@ alıyor. Bu **`shadow_ratio` serisini de etkiler** (Güneş ±2° yükseklikte a
 uzak ufka bağlıdır); yeniden kurulmuş küple aydınlanma döngüsü ölçümleri
 değişebilir.
 
+## Safe Haven — VIPER'ın leg kuralı (4 Eylül 2026 eki, A1)
+
+VIPER'ın traverse'i "leg"lerden oluşur ve her leg bir **Safe Haven**'da
+biter: Dünya ufkun altındayken (ayın ~2 haftası) rover komut alamaz, o
+dönemi tek başına atlatabileceği bir yerde park etmiş olmalıdır. NASA'nın
+tanımı birebir: *Dünya ufkun altındayken kesintisiz gölge süresi rover'ın
+dayanımını (`h_max_shadow_h`: LPR-1 50 h, VIPER 96 h, LUVMI-M 4 h, Yutu-2
+2 h) aşmayan ve hareketsiz beklerken güç üretebilen (pencerede en az bir kez
+aydınlanan), geçilebilir hücre.* Backend bunu bir sinodik ay (708,7 h, 2 h
+adım) boyunca Güneş + Dünya serilerinden hesaplar; katman **rover'a ve
+epoch'a bağlıdır**, bu yüzden manifestte değil ayrı bir uçta yayınlanır.
+
+**Ölçülen gerçek (Site11):** Dünya'nın olmadığı iki hafta, sitenin tamamının
+~6,5 gün karanlık kaldığı Ay gecesiyle çakışıyor; en kısa Dünya-yok karanlık
+Ay gününe göre 40–186 h. Safe haven **nadir**: LPR-1 için yalnızca Kasım
+2026'da ~40 hücre, VIPER için en iyi Ay günü (Mayıs sonu 2027) ~%11, LUVMI-M
+ve Yutu-2 için hiç. Sıfır hücreli bir yanıt hata değil, kuralın cevabıdır;
+`max_dark_hours_without_dte` katmanı "havene ne kadar yakın" gradyanını
+her zaman taşır. Ayrıntı: `docs/research/safe_haven_report.md`.
+
+### `GET /api/safe-haven?start_utc=&rover_id=` — harita ve dört ikili katman
+
+```
+/api/safe-haven?start_utc=2027-05-30T00:00:00&rover_id=nasa_viper
+```
+
+```jsonc
+{
+  "rover_id": "nasa_viper", "rover_name": "NASA VIPER", "h_max_shadow_h": 96.0,
+  "start_utc": "2027-05-30T00:00:00Z", "span_hours": 708.7, "step_hours": 2.0, "n_steps": 355,
+  "safe_haven_model": { "model": "spice_horizon", "rule": "...", "horizon_cache": "...",
+                        "time_to_haven_finite_fraction": 0.992 },
+  "safe_haven_fraction": 0.115, "safe_haven_cells": 22837, "traversable_cells": 198575,
+  "earth_below_fraction": 0.696,
+  "grid": { "rows": 500, "cols": 500, "resolution_m": 5.0, "downsample": 1 },
+  "fields": {
+    "safe_haven":                 { "units": "bool",  "min": 0, "max": 1,    "nodata": 0, "binary_url": "..." },
+    "max_dark_hours_without_dte": { "units": "hours", "min": 62, "max": 710, "nodata": 0, "binary_url": "..." },
+    "earth_below_hours":          { "units": "hours", "min": 298, "max": 710, "nodata": 0, "binary_url": "..." },
+    "time_to_safe_haven":         { "units": "hours", "min": 0, "max": 8.98, "nodata": 53071, "binary_url": "..." }
+  },
+  "binary_format": { "dtype": "float32", "endian": "little", "order": "row-major", "shape": [500, 500], "nodata": "NaN" }
+}
+```
+
+`format=f32&field=<ad>` ile her katman `/api/layers` ile aynı tel biçiminde
+gelir (`X-Layer-*` başlıkları, `downsample` desteklenir). `safe_haven` 1/0;
+`time_to_safe_haven` saat, geçilemez ya da hiçbir havene ulaşamayan hücrede
+**NaN** (`nodata` bu ikisinin toplamı; yukarıdaki örnekte 51 425 geçilemez +
+1 646 ulaşamayan).
+`start_utc` zorunlu (422). Ufuk küpü / çekirdek yoksa JSON
+`safe_haven_model.model = "unavailable"` + `reason`, `fields` boş; ikili istek
+**404** — sıfırlarla dolu grid asla gelmez. İlk hesap ~4 s, sonra önbellek
+(rover + epoch başına).
+
+### `GET /api/cell-telemetry?...&start_utc=` — hücre kartı
+
+`start_utc` verilince yanıt `safe_haven` nesnesi taşır:
+
+```jsonc
+{ "safe_haven": { "is_safe_haven": true, "max_dark_hours_without_dte_h": 64.0,
+                  "earth_below_hours": 300.0, "time_to_safe_haven_h": 0.0, "h_max_shadow_h": 96.0 },
+  "safe_haven_model": { "model": "spice_horizon", ... } }
+```
+
+`time_to_safe_haven_h` en yakın havene sürüş saati (`null`: ulaşılamaz).
+`start_utc` yoksa `safe_haven: null` ve `safe_haven_model.reason` söyler.
+
+### `POST /api/plan-4d` — kural ve marjlar
+
+İstek, yeni opsiyonel alan: `"require_safe_haven": true` (varsayılan `false`).
+Kural, her durumda (başlangıç, her MOVE varışı **ve her WAIT**):
+`time_to_safe_haven(hücre) ≤ Dünya batışına kalan saat(dilim, hücre)`.
+Dünya o hücrede zaten görünmüyorsa kalan saat 0'dır — yalnızca haven olan
+hücrelere izin verilir (bağlantısız rover park hâlinde olmalı). Batış, plan
+ufkunun içinde Dünya küpünden, dışında 14 günlük ön-bakıştan (1 h adım)
+bulunur; ön-bakışta batış yoksa süre açık uçludur (`null`) ve kural bağlamaz.
+
+Yanıt — eklenen alanlar:
+
+| Alan | Tip | Anlamı |
+|---|---|---|
+| `safe_haven_model` | nesne | `spice_horizon` (+ `coarse_safe_haven_cells`, `earthset_lookahead`) veya `unavailable` + `reason` |
+| `path_time_to_haven_h` | `(number\|null)[] \| null` | Her durumda en yakın havene sürüş saati (`null`: ulaşılamaz) |
+| `path_hours_until_earthset` | `(number\|null)[] \| null` | Her durumda Dünya bağlantısının kalan saati (`null`: ufuk + ön-bakışta batış yok) |
+| `path_haven_margin_h` | `(number\|null)[] \| null` | İkisinin farkı; negatifse rover o anda havene yetişemez |
+| `metrics.min_haven_margin_h` | `number \| null` | Rotadaki en dar sonlu marj |
+| `metrics.states_past_haven_deadline` | `number \| null` | Marjı negatif durum sayısı (kural açıkken her zaman 0) |
+| `metrics.ends_at_safe_haven` | `boolean \| null` | Hedef bir haven mi (leg kuralı) |
+| `metrics.safe_haven_enforced` | `boolean` | Kural uygulandı mı |
+| `metrics.edges_rejected.safe_haven_deadline` | `number` | Kural yüzünden reddedilen geçişler |
+| `metrics.time_to_sun_shadow_min_h`, `_mean_h` | `number \| null` | SHERPA: durumun hücresi bir sonraki karanlığa kaç saat sonra girer (min / ort; ufuk boyunca aydınlıksa sayılmaz) |
+| `metrics.time_to_dsn_shadow_min_h` | `number \| null` | SHERPA: rotadaki en kısa kalan Dünya bağlantısı |
+| `metrics.time_to_zero_soc_min_h` | `number` | SHERPA: rover o an tam gölgede dursa bataryanın sıfıra inme süresi (en küçüğü) |
+
+Kural istenip harita/batış küpü hesaplanamıyorsa 422. 404 mesajı kuralın
+kapattığı geçiş sayısını, kaba griddeki haven sayısını ve başlangıcın kendi
+marjını söyler ("… the start block is 2.10 h from the nearest with 61.0 h of
+Earth link left"). `require_earth_visibility` ile birlikte açılınca plan
+VIPER'ın iki kuralını da taşır.
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,

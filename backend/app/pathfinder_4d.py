@@ -46,6 +46,10 @@ REJECTION_KEYS: tuple[str, ...] = (
     # Earth at the arrival slice, refused only when the caller asked for the
     # VIPER teleoperation rule (require_earth_visibility). (A4.)
     "earth_visibility",
+    # Safe haven (A1): a transition after which the rover could no longer
+    # reach a safe haven before the Earth sets on it, refused only under
+    # VIPER's leg rule (require_safe_haven).
+    "safe_haven_deadline",
 )
 
 
@@ -78,6 +82,7 @@ def no_path_reason_4d(
     soc = rejections.get("soc_floor", 0)
     endurance = rejections.get("shadow_endurance", 0)
     dte = rejections.get("earth_visibility", 0)
+    haven = rejections.get("safe_haven_deadline", 0)
 
     parts: list[str] = []
     # The envelope first: when the battery or the darkness closed the route,
@@ -98,6 +103,12 @@ def no_path_reason_4d(
             f"{dte} edges would have driven the rover into a cell with no "
             "Earth visibility (require_earth_visibility: drive only with a "
             "direct-to-Earth link)"
+        )
+    if haven:
+        parts.append(
+            f"{haven} transitions would have left the rover unable to reach a "
+            "safe haven before the Earth sets (require_safe_haven: "
+            f"{float(rover['h_max_shadow_h']):g} h shadow endurance)"
         )
     if lateral:
         parts.append(
@@ -126,7 +137,7 @@ def no_path_reason_4d(
         )
     lead = "No path found"
     if horizon and not (
-        lateral or along or blocked or unknown or soc or endurance or dte
+        lateral or along or blocked or unknown or soc or endurance or dte or haven
     ):
         lead = "No path found within the time horizon"
     return (
@@ -286,6 +297,7 @@ def _empty(
     elapsed_ms: float = 0.0,
     rejections: dict[str, int] | None = None,
     nodes_expanded: int = 0,
+    safe_haven_enforced: bool = False,
 ) -> dict[str, Any]:
     """A failed plan.
 
@@ -300,6 +312,9 @@ def _empty(
         "path_states": [],
         "path_pixels": [],
         "path_earth_visible": None,
+        "path_time_to_haven_h": None,
+        "path_hours_until_earthset": None,
+        "path_haven_margin_h": None,
         "metrics": {
             "wait_steps": 0,
             "move_steps": 0,
@@ -315,6 +330,12 @@ def _empty(
             "horizon_truncated": tally.get("horizon", 0) > 0,
             "moves_out_of_earth_view": None,
             "earth_visibility_enforced": False,
+            "min_haven_margin_h": None,
+            "states_past_haven_deadline": None,
+            "ends_at_safe_haven": None,
+            # Whether the rule was in force when the search failed: a caller
+            # reading a refusal needs to know which rules produced it.
+            "safe_haven_enforced": bool(safe_haven_enforced),
         },
         "error": error,
     }
@@ -417,8 +438,27 @@ def astar_4d(
     initial_soc_frac: float = 1.0,
     earth_visible_cube: np.ndarray | None = None,
     require_earth_visibility: bool = False,
+    time_to_haven_hours: np.ndarray | None = None,
+    hours_until_earthset_cube: np.ndarray | None = None,
+    require_safe_haven: bool = False,
 ) -> dict[str, Any]:
     """Plan through space and time. Returns path_states, path_pixels, metrics.
+
+    The safe-haven deadline (A1)
+    ----------------------------
+    *time_to_haven_hours* is the (H, W) driving time from every cell to its
+    nearest safe haven (``safe_haven.time_to_safe_haven_hours``);
+    *hours_until_earthset_cube* the (T, H, W) hours each cell has left
+    before it loses its Earth link (``safe_haven.hours_until_earthset_cube``,
+    zero where there is no link now). Given together they are always
+    REPORTED per state -- ``path_time_to_haven_h``,
+    ``path_hours_until_earthset``, ``path_haven_margin_h`` -- and with
+    *require_safe_haven* ENFORCED as VIPER's leg rule: every state the plan
+    passes through, including the start and every wait, must satisfy
+    ``time_to_haven <= hours_until_earthset``. Where the Earth is already
+    down the deadline is zero, so only a haven itself is allowed: a rover
+    without a link is a parked rover. Refusals are tallied as
+    ``safe_haven_deadline``.
 
     Direct-to-Earth visibility (A4)
     -------------------------------
@@ -496,6 +536,33 @@ def astar_4d(
             "earth_visible_cube is required to enforce Earth visibility "
             "(require_earth_visibility=True without a field to check against)"
         )
+    tts = (
+        None
+        if time_to_haven_hours is None
+        else np.asarray(time_to_haven_hours, dtype=np.float64)
+    )
+    deadline = (
+        None
+        if hours_until_earthset_cube is None
+        else np.asarray(hours_until_earthset_cube, dtype=np.float64)
+    )
+    if (tts is None) != (deadline is None):
+        return _empty(
+            "time_to_haven_hours and hours_until_earthset_cube go together: "
+            "give both or neither"
+        )
+    if tts is not None and tts.shape != (height, width):
+        return _empty("time_to_haven_hours shape must match cost_cube slices")
+    if deadline is not None and deadline.shape != cost.shape:
+        return _empty("hours_until_earthset_cube shape must match cost_cube")
+    haven_fields = tts is not None
+    enforce_haven = bool(require_safe_haven)
+    if enforce_haven and not haven_fields:
+        return _empty(
+            "time_to_haven_hours and hours_until_earthset_cube are required to "
+            "enforce the safe-haven rule (require_safe_haven=True without the "
+            "fields to check against)"
+        )
 
     def in_bounds(r: int, c: int) -> bool:
         return 0 <= r < height and 0 <= c < width
@@ -508,6 +575,50 @@ def astar_4d(
         return _empty("Start is not traversable")
     if not passable[goal]:
         return _empty("Goal is not traversable")
+
+    def haven_ok(r: int, c: int, t: int) -> bool:
+        return bool(tts[r, c] <= deadline[t, r, c] + 1e-9)
+
+    if enforce_haven and not haven_ok(start[0], start[1], 0):
+        start_tts = float(tts[start])
+        start_deadline = float(deadline[0][start])
+        if start_deadline <= 0.0:
+            return _empty(
+                f"Start {start} has no Earth link at the first slice and is not "
+                "a safe haven: under the safe-haven rule the rover must already "
+                "be parked at a haven while the Earth is down"
+            )
+        return _empty(
+            f"Start {start} cannot reach a safe haven before the Earth sets: "
+            f"{start_tts:.2f} h to the nearest haven against "
+            f"{start_deadline:.2f} h of link left"
+        )
+
+    # The goal's own deadline bounds the whole search. Arrival time only
+    # ever grows, so once the goal can no longer satisfy the rule nothing
+    # later can end there, and without this bound a goal that never
+    # qualifies (its link already down, and it is not a haven) sent the
+    # label-setting search through every reachable state at every slice --
+    # measured on the production grid at 256 slices: not finished in ten
+    # minutes, against 8.6 s for the same pair unconstrained.
+    goal_last_ok = -1
+    if enforce_haven:
+        goal_ok = tts[goal] <= deadline[:, goal[0], goal[1]] + 1e-9
+        if not bool(goal_ok.any()):
+            goal_tts = float(tts[goal])
+            goal_link = float(np.max(deadline[:, goal[0], goal[1]]))
+            return _empty(
+                f"Goal {goal} can never satisfy the safe haven rule within the "
+                "horizon: "
+                + ("no haven is reachable from it" if not math.isfinite(goal_tts)
+                   else f"{goal_tts:.2f} h to the nearest haven")
+                + " against at most "
+                + ("no Earth link at all" if goal_link <= 0.0
+                   else f"{goal_link:.2f} h of Earth link")
+                + " at the goal (require_safe_haven)",
+                safe_haven_enforced=True,
+            )
+        goal_last_ok = int(np.flatnonzero(goal_ok)[-1])
 
     slopes = (
         np.zeros((height, width), dtype=np.float64)
@@ -716,6 +827,15 @@ def astar_4d(
                     new_battery, new_dark, refused = battery_wh, dark_h, None
                 if refused is not None:
                     rejections[refused] += 1
+                elif enforce_haven and (
+                    slice_index + 1 > goal_last_ok
+                    or not haven_ok(row, col, slice_index + 1)
+                ):
+                    # Waiting past the deadline is how a rover ends up parked
+                    # somewhere it cannot survive; the rule binds waits too.
+                    # And past the goal's last admissible slice no wait can
+                    # lead to a plan that ends there.
+                    rejections["safe_haven_deadline"] += 1
                 else:
                     push(
                         row, col, slice_index + 1,
@@ -787,6 +907,14 @@ def astar_4d(
                 rejections["earth_visibility"] += 1
                 continue
 
+            # VIPER's leg rule: from wherever you arrive, a haven must still
+            # be reachable before the Earth sets there. (A1.)
+            if enforce_haven and (
+                arrival > goal_last_ok or not haven_ok(nr, nc, arrival)
+            ):
+                rejections["safe_haven_deadline"] += 1
+                continue
+
             from_cost = cost[slice_index, row, col]
             to_cost = cost[arrival, nr, nc]
             if not (math.isfinite(from_cost) and math.isfinite(to_cost)):
@@ -831,6 +959,7 @@ def astar_4d(
             elapsed_ms,
             rejections,
             nodes_expanded,
+            safe_haven_enforced=enforce_haven,
         )
 
     labels: list[tuple] = [goal_label]
@@ -867,6 +996,32 @@ def astar_4d(
             and not earth[current[2], current[0], current[1]]
         )
 
+    if haven_fields:
+        def _finite_or_none(value: float) -> float | None:
+            return round(float(value), 4) if math.isfinite(value) else None
+
+        path_tts = [float(tts[r, c]) for r, c, _t in states]
+        path_deadline = [float(deadline[t, r, c]) for r, c, t in states]
+        margins = [d - x for x, d in zip(path_tts, path_deadline)]
+        finite_margins = [m for m in margins if math.isfinite(m)]
+        path_time_to_haven_h = [_finite_or_none(v) for v in path_tts]
+        path_hours_until_earthset = [_finite_or_none(v) for v in path_deadline]
+        path_haven_margin_h = [_finite_or_none(m) for m in margins]
+        min_haven_margin_h = (
+            round(min(finite_margins), 4) if finite_margins else None
+        )
+        states_past_haven_deadline = sum(
+            1 for x, d in zip(path_tts, path_deadline) if x > d + 1e-9
+        )
+        ends_at_safe_haven = bool(tts[goal] <= 1e-9)
+    else:
+        path_time_to_haven_h = None
+        path_hours_until_earthset = None
+        path_haven_margin_h = None
+        min_haven_margin_h = None
+        states_past_haven_deadline = None
+        ends_at_safe_haven = None
+
     return {
         "path_states": states,
         "path_pixels": [(r, c) for r, c, _ in states],
@@ -875,6 +1030,13 @@ def astar_4d(
         # One entry per state: whether that cell saw the Earth at that
         # slice. None when no field was supplied -- never a list of True.
         "path_earth_visible": path_earth_visible,
+        # One entry per state: driving hours to the nearest safe haven, the
+        # hours of Earth link left there, and their difference. None where
+        # a value is infinite (no haven reachable / no Earthset in sight),
+        # and None throughout when the fields were not supplied.
+        "path_time_to_haven_h": path_time_to_haven_h,
+        "path_hours_until_earthset": path_hours_until_earthset,
+        "path_haven_margin_h": path_haven_margin_h,
         "metrics": {
             "wait_steps": wait_steps,
             "move_steps": len(states) - 1 - wait_steps,
@@ -903,6 +1065,14 @@ def astar_4d(
             # (None without a field); whether such moves were refused.
             "moves_out_of_earth_view": moves_out_of_view,
             "earth_visibility_enforced": enforce_dte,
+            # The safe-haven margin along the route: the tightest finite
+            # margin, how many states sat past their deadline (0 whenever
+            # the rule was enforced), whether the route ends parked at a
+            # haven, and whether the rule was enforced.
+            "min_haven_margin_h": min_haven_margin_h,
+            "states_past_haven_deadline": states_past_haven_deadline,
+            "ends_at_safe_haven": ends_at_safe_haven,
+            "safe_haven_enforced": enforce_haven,
         },
         "error": None,
     }

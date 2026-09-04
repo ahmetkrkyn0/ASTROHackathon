@@ -578,3 +578,202 @@ def test_earth_cube_of_the_wrong_shape_is_refused():
     result = _run_with_earth(np.ones((6, 2, 2), dtype=bool), require=False)
     assert result["error"] is not None
     assert "earth_visible_cube" in result["error"]
+
+
+# ── A1: the safe-haven deadline ──────────────────────────────────────────────
+#
+# VIPER's rule: at every moment the rover must still be able to reach a
+# safe haven before the Earth sets on it. Fixtures are the 1x4 corridor at
+# 80 m and 1 h slices: one MOVE takes 80 m / 0.2 m/s = 0.111 h, one slice.
+
+
+def _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require, **kwargs):
+    return astar_4d(
+        cost_cube,
+        wait_cube,
+        traversable,
+        start=(0, 0),
+        goal=(0, 3),
+        resolution_m=RES_M,
+        slice_hours=SLICE_H,
+        rover=get_rover(),
+        time_to_haven_hours=None if tts is None else np.asarray(tts, dtype=np.float64),
+        hours_until_earthset_cube=(
+            None if deadline is None else np.asarray(deadline, dtype=np.float64)
+        ),
+        require_safe_haven=require,
+        **kwargs,
+    )
+
+
+def _deadline(n_slices, per_cell):
+    """(T, 1, 4) cube holding one deadline per cell at every slice."""
+    cube = np.empty((n_slices, 1, 4), dtype=np.float64)
+    cube[:] = np.asarray(per_cell, dtype=np.float64).reshape(1, 1, 4)
+    return cube
+
+
+def test_a_move_that_could_not_make_it_back_to_a_haven_is_refused():
+    """Haven at the start; the goal cell's link closes in 0.2 h and it is
+    0.333 h from the haven. Arriving there is arriving stranded."""
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[0.0, 0.111, 0.222, 0.333]]
+    deadline = _deadline(6, [np.inf, np.inf, np.inf, 0.2])
+
+    result = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=True)
+
+    assert result["error"] is not None
+    assert "safe haven" in result["error"]
+    # The goal can never qualify, so the refusal is immediate -- no search,
+    # no tally -- and says so about the goal itself.
+    assert "Goal" in result["error"]
+    assert result["metrics"]["safe_haven_enforced"] is True
+    assert result["path_pixels"] == []
+
+
+def test_a_goal_that_is_itself_a_haven_may_be_reached_as_its_link_closes():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[0.0, 0.111, 0.222, 0.0]]
+    deadline = _deadline(6, [np.inf, np.inf, np.inf, 0.2])
+
+    result = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=True)
+
+    assert result["error"] is None
+    assert result["metrics"]["ends_at_safe_haven"] is True
+    assert result["path_haven_margin_h"][-1] == pytest.approx(0.2)
+    assert result["metrics"]["states_past_haven_deadline"] == 0
+
+
+def test_waiting_is_checked_against_the_deadline_too():
+    """The shadow-then-Sun cube makes waiting at the start attractive, but
+    the start is 0.5 h from a haven and every cell's deadline shrinks by
+    0.3 h per slice. Unconstrained, the planner waits and ends up past the
+    deadline; constrained, it must leave at once, and every state it
+    reports satisfies the rule."""
+    cost_cube, wait_cube, traversable = _shadow_then_sun_case()
+    n_slices = cost_cube.shape[0]
+    tts = np.array([[0.5, 0.4, 0.3, 0.0]])
+    deadline = np.empty((n_slices, 1, 4))
+    for t in range(n_slices):
+        deadline[t] = max(0.0, 1.0 - 0.3 * t)
+
+    free = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=False)
+    assert free["error"] is None
+    assert free["metrics"]["wait_steps"] > 0
+    assert free["metrics"]["states_past_haven_deadline"] > 0
+    assert free["metrics"]["safe_haven_enforced"] is False
+
+    ruled = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=True)
+    assert ruled["error"] is None, ruled["error"]
+    assert ruled["metrics"]["wait_steps"] == 0
+    assert ruled["metrics"]["edges_rejected"]["safe_haven_deadline"] >= 1
+    assert ruled["metrics"]["states_past_haven_deadline"] == 0
+    for (r, c, t), margin in zip(ruled["path_states"], ruled["path_haven_margin_h"]):
+        assert margin is not None and margin >= -1e-9, (r, c, t, margin)
+        assert tts[r, c] <= deadline[t, r, c] + 1e-9
+    assert ruled["metrics"]["min_haven_margin_h"] == pytest.approx(
+        min(ruled["path_haven_margin_h"])
+    )
+
+
+def test_an_open_ended_link_never_constrains():
+    """No Earthset within the lookahead: the deadline is inf everywhere, the
+    rule cannot bite, and the margins are reported as None rather than as
+    a made-up number."""
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[0.0, 0.111, 0.222, 0.333]]
+    deadline = _deadline(6, [np.inf] * 4)
+
+    result = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=True)
+    plain = _run(cost_cube, wait_cube, traversable)
+
+    assert result["error"] is None
+    assert result["path_pixels"] == plain["path_pixels"]
+    assert result["metrics"]["edges_rejected"]["safe_haven_deadline"] == 0
+    assert all(value is None for value in result["path_hours_until_earthset"])
+    assert all(value is None for value in result["path_haven_margin_h"])
+    assert result["metrics"]["min_haven_margin_h"] is None
+    assert result["path_time_to_haven_h"] == pytest.approx([0.0, 0.111, 0.222, 0.333])
+
+
+def test_a_start_that_cannot_make_a_haven_is_refused_up_front():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[5.0, 0.111, 0.222, 0.0]]
+
+    late = _run_with_haven(
+        cost_cube, wait_cube, traversable, tts, _deadline(6, [1.0, 1.0, 1.0, 1.0]), require=True
+    )
+    assert late["error"] is not None
+    assert "Start" in late["error"] and "safe haven" in late["error"]
+    assert late["path_pixels"] == []
+
+    unlinked = _run_with_haven(
+        cost_cube, wait_cube, traversable, tts, _deadline(6, [0.0, 1.0, 1.0, 1.0]), require=True
+    )
+    assert unlinked["error"] is not None
+    assert "no Earth link" in unlinked["error"]
+
+
+def test_the_haven_fields_are_reported_without_being_enforced():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[0.0, 0.111, 0.222, np.inf]]
+    deadline = _deadline(6, [np.inf, 1.0, 1.0, 0.5])
+
+    result = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=False)
+
+    assert result["error"] is None
+    n_states = len(result["path_states"])
+    assert len(result["path_time_to_haven_h"]) == n_states
+    assert len(result["path_hours_until_earthset"]) == n_states
+    assert len(result["path_haven_margin_h"]) == n_states
+    # The goal is unreachable from any haven: its time is None (inf), its
+    # margin is None, and it counts as a state past the deadline.
+    assert result["path_time_to_haven_h"][-1] is None
+    assert result["path_haven_margin_h"][-1] is None
+    assert result["metrics"]["states_past_haven_deadline"] >= 1
+    assert result["metrics"]["ends_at_safe_haven"] is False
+    assert result["metrics"]["safe_haven_enforced"] is False
+    assert result["metrics"]["edges_rejected"]["safe_haven_deadline"] == 0
+
+
+def test_without_the_haven_fields_nothing_is_reported():
+    result = _run(*_uniform_case())
+    assert result["path_time_to_haven_h"] is None
+    assert result["path_hours_until_earthset"] is None
+    assert result["path_haven_margin_h"] is None
+    assert result["metrics"]["min_haven_margin_h"] is None
+    assert result["metrics"]["states_past_haven_deadline"] is None
+    assert result["metrics"]["ends_at_safe_haven"] is None
+    assert result["metrics"]["safe_haven_enforced"] is False
+    assert result["metrics"]["edges_rejected"]["safe_haven_deadline"] == 0
+
+
+def test_enforcing_the_haven_rule_without_its_fields_is_an_error():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    result = _run_with_haven(cost_cube, wait_cube, traversable, None, None, require=True)
+    assert result["error"] is not None
+    assert "time_to_haven_hours" in result["error"]
+
+
+def test_haven_fields_of_the_wrong_shape_are_refused():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    bad_tts = np.zeros((1, 5))
+    result = _run_with_haven(
+        cost_cube, wait_cube, traversable, bad_tts, _deadline(6, [np.inf] * 4), require=False
+    )
+    assert result["error"] is not None
+    bad_deadline = np.full((3, 1, 4), np.inf)
+    result = _run_with_haven(
+        cost_cube, wait_cube, traversable, np.zeros((1, 4)), bad_deadline, require=False
+    )
+    assert result["error"] is not None
+
+
+def test_no_path_reason_names_the_haven_rule():
+    from app.pathfinder_4d import REJECTION_KEYS, no_path_reason_4d
+
+    assert "safe_haven_deadline" in REJECTION_KEYS
+    tally = {key: 0 for key in REJECTION_KEYS}
+    tally["safe_haven_deadline"] = 4
+    reason = no_path_reason_4d(tally, get_rover(), 6, 1.0)
+    assert "4 transitions" in reason and "safe haven" in reason

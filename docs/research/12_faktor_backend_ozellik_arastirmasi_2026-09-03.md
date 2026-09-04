@@ -73,7 +73,9 @@ Aşağıdaki özellikler önerilirken hepsi mevcut kodun üzerine kurulur; tekra
 
 # BÖLÜM A — Zaman-uzay planlama ve görev güvenliği
 
-## A1. ⭐⭐⭐⭐⭐ Safe Haven haritası, "50 saat karanlık" kuralı ve *time-to-safe-haven* katmanı
+## A1. ✅ ⭐⭐⭐⭐⭐ Safe Haven haritası, "50 saat karanlık" kuralı ve *time-to-safe-haven* katmanı
+
+> **Yapıldı (4 Eylül 2026, `berke-3d-backendEnhance`):** `safe_haven.py` — VIPER tanımı birebir (Dünya ufkun altındayken kesintisiz gölge ≤ `h_max_shadow_h`, pencerede en az bir kez aydınlanma, geçilebilirlik; bir sinodik ay, 2 h adım), saat cinsinden `time_to_safe_haven` (kapılı sürüş grafında çok kaynaklı Dijkstra), `GET /api/safe-haven` (dört ikili katman), `/api/cell-telemetry?start_utc=` içinde `safe_haven`, `/api/plan-4d` `require_safe_haven` (her durumda, bekleme dahil, `tts ≤ Dünya batışına kalan saat`; batış ufuk dışında 14 günlük ön-bakışla) ve SHERPA marjları (`time_to_sun_shadow_min/mean_h`, `time_to_dsn_shadow_min_h`, `time_to_zero_soc_min_h`). **Ölçüm (Site11, 13 sinodik ay):** Dünya-yok iki hafta sitenin ~6,5 gün karanlık kaldığı Ay gecesiyle çakışıyor; en kısa Dünya-yok karanlık Ay gününe göre 40–186 h. Safe haven nadir — NASA'nın dediği gibi: LPR-1 (50 h) yalnızca Kasım 2026'da ~40 hücre (%0,02), VIPER (96 h) en iyi Ay günü 30 Mayıs 2027'de %10,7, LUVMI-M (4 h) ve Yutu-2 (2 h) hiç; sitenin %1 / %10 haven sunması için gerekli dayanım aya göre 64–232 h / 82–298 h. Rapor: [safe_haven_report.md](safe_haven_report.md). Tasarım: [../superpowers/specs/2026-09-04-a1-safe-haven-design.md](../superpowers/specs/2026-09-04-a1-safe-haven-design.md). Sapma: `time_to_safe_haven` maliyet küpü üzerinde değil, saat cinsinden ve uzamsal (kenar süresi bu modelde aydınlanmadan bağımsız); zaman bağımlılığı `hours_until_earthset[t, c]` tarafında.
 
 **Ne:** Rover'ın Dünya ufkun altındayken (her ayın ~2 haftası) park edip hayatta kalabileceği yerlerin haritası; rotanın her anında "buradan en yakın safe haven'a kaç saatte ve ne kadar enerjiyle varırım" bilgisi.
 

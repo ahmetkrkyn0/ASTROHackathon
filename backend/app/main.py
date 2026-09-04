@@ -46,7 +46,12 @@ from .earth_visibility import (
     earth_track_for_series,
 )
 from .grid_frame import map_xy_to_pixel
-from .illumination_series import build_shadow_series, sun_track_for_series
+from .illumination_series import (
+    _parse_start_utc,
+    build_shadow_series,
+    horizon_cache_path,
+    sun_track_for_series,
+)
 from .thermal_model import (
     REGOLITH_LAG_VALIDITY,
     REGOLITH_THERMAL_TAU_S,
@@ -58,6 +63,17 @@ from .localization import evaluate_pose
 from .pose import PoseEstimate
 from .replan_triggers import evaluate_triggers_detailed
 from .rover_grids import grids_for_rover
+from .safe_haven import (
+    DEFAULT_EARTHSET_LOOKAHEAD_HOURS,
+    DEFAULT_SAFE_HAVEN_SPAN_HOURS,
+    DEFAULT_SAFE_HAVEN_STEP_HOURS,
+    block_min,
+    earthset_after_horizon_hours,
+    hours_until_earthset_cube,
+    route_margins,
+    safe_haven_for_grids,
+    time_to_safe_haven_hours,
+)
 from .scenarios import (
     MISSION_PROFILES,
     check_profile_constraints,
@@ -78,6 +94,7 @@ from .terrain import (
     TERRAIN_LAYERS,
     binary_layer_headers,
     encode_layer_f32,
+    layer_stats,
     terrain_manifest,
 )
 
@@ -458,6 +475,19 @@ class Plan4DRequest(BaseModel):
             "422 rather than a silently unconstrained plan."
         ),
     )
+    # VIPER's leg rule: at every moment the rover must still be able to
+    # reach a safe haven before the Earth sets on it. The margin is always
+    # reported when it can be computed; this makes it a constraint. (A1.)
+    require_safe_haven: bool = Field(
+        default=False,
+        description=(
+            "Refuse any state (move or wait) from which the nearest safe "
+            "haven could no longer be reached before the cell loses its Earth "
+            "link. Needs start_utc, the horizon cube and the kernels; without "
+            "them the request is a 422 rather than a silently unconstrained "
+            "plan."
+        ),
+    )
 
 
 # A bare list[int] let a 3-element start reach astar and raise IndexError as
@@ -554,6 +584,13 @@ def get_cell_telemetry(
             "profile."
         ),
     ),
+    start_utc: Optional[str] = Query(
+        default=None,
+        description=(
+            "Epoch for the safe haven verdict (A1): the map is computed over "
+            "one synodic month from here. Without it `safe_haven` is null."
+        ),
+    ),
 ):
     grids = _active_grids(request)
     metadata = grids["metadata"]
@@ -596,6 +633,29 @@ def get_cell_telemetry(
     )
     breakdown = cost_map.explain(row, col, context)
 
+    # Safe haven (A1): is this cell one, and how far is the nearest? Cached
+    # per (grids, rover, epoch) so a hover does not rebuild the month.
+    haven_layers, haven_tts, haven_info = safe_haven_for_grids(
+        grids, rover["id"], start_utc
+    )
+    if haven_layers is None:
+        safe_haven = None
+    else:
+        tts_value = float(haven_tts[row, col])
+        safe_haven = {
+            "is_safe_haven": bool(haven_layers["safe_haven"][row, col]),
+            "max_dark_hours_without_dte_h": round(
+                float(haven_layers["max_dark_hours_without_dte"][row, col]), 4
+            ),
+            "earth_below_hours": round(
+                float(haven_layers["earth_below_hours"][row, col]), 4
+            ),
+            "time_to_safe_haven_h": (
+                round(tts_value, 4) if math.isfinite(tts_value) else None
+            ),
+            "h_max_shadow_h": float(haven_info["h_max_shadow_h"]),
+        }
+
     return {
         "row": row,
         "col": col,
@@ -615,6 +675,11 @@ def get_cell_telemetry(
         "span_km": round((rows * resolution_m) / 1000.0, 4),
         "cost_breakdown": breakdown,
         "layer_validity": metadata.get("layer_validity", {}),
+        # The safe haven verdict for this cell and the driving hours to the
+        # nearest one (None: unreachable). null with the reason in
+        # safe_haven_model when no epoch, horizon cube or kernels.
+        "safe_haven": safe_haven,
+        "safe_haven_model": haven_info,
     }
 
 
@@ -1020,6 +1085,54 @@ def comm_window_endpoint(
     return window
 
 
+def _earthset_lookahead(
+    metadata: dict,
+    start_utc: str,
+    n_slices: int,
+    slice_hours: float,
+    coarsen: int,
+) -> tuple[np.ndarray | None, dict[str, Any]]:
+    """Hours past the plan's last slice until each coarse cell loses its
+    Earth link, or ``None`` (open-ended) with the reason.
+
+    The Earth sets on a scale of days and a plan spans hours, so the
+    deadline that matters usually lies BEYOND the horizon; without this the
+    rule would only ever bind in the last hours before an Earthset that
+    happened to fall inside the window. (A1.)
+    """
+    from datetime import timedelta
+
+    cache_path = horizon_cache_path(metadata)
+    if cache_path is None:
+        return None, {
+            "model": "unavailable",
+            "reason": "no horizon cube; the link is treated as open-ended past the horizon",
+        }
+    try:
+        end = _parse_start_utc(start_utc) + timedelta(
+            hours=float(slice_hours) * (int(n_slices) - 1)
+        )
+        fine = earthset_after_horizon_hours(
+            np.load(cache_path, mmap_mode="r"),
+            metadata,
+            end.strftime("%Y-%m-%dT%H:%M:%S"),
+            lookahead_hours=DEFAULT_EARTHSET_LOOKAHEAD_HOURS,
+            step_hours=1.0,
+        )
+    except Exception as exc:
+        logger.warning("Earthset lookahead unavailable: %s", exc)
+        return None, {
+            "model": "unavailable",
+            "reason": f"Earthset lookahead unavailable ({exc}); the link is treated as open-ended past the horizon",
+        }
+    return block_min(fine, coarsen), {
+        "model": "spice_horizon",
+        "from_utc": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "lookahead_hours": DEFAULT_EARTHSET_LOOKAHEAD_HOURS,
+        "step_hours": 1.0,
+    }
+
+
 @app.post("/api/plan-4d")
 def plan_4d(req: Plan4DRequest, request: Request):
     """Plan through space AND time, with an explicit WAIT decision.
@@ -1283,6 +1396,57 @@ def plan_4d(req: Plan4DRequest, request: Request):
             ),
         )
 
+    # Safe haven (A1): the month's map on the fine grid (cached), coarsened
+    # like traversability (a block is a haven only if every fine cell is),
+    # the driving time to the nearest haven on the planner's own grid, and
+    # the hours of Earth link left per (slice, cell) -- inside the horizon
+    # from the Earth cube, beyond it from a 14-day lookahead.
+    coarse_tts = None
+    deadline_cube = None
+    coarse_safe = None
+    haven_layers, _fine_tts, haven_info = safe_haven_for_grids(
+        grids_for_plan, req.rover_id, req.start_utc
+    )
+    if haven_layers is None:
+        haven_provenance: dict[str, Any] = dict(haven_info)
+    elif earth_cube is None or not earth_provenance.get("time_varying"):
+        haven_provenance = {
+            "model": "unavailable",
+            "reason": (
+                "the Earthset deadline needs the time-varying Earth visibility "
+                f"series and it is {earth_provenance.get('model')}: "
+                f"{earth_provenance.get('reason', 'no reason given')}"
+            ),
+        }
+    else:
+        coarse_safe = coarsen_traversable(haven_layers["safe_haven"], req.coarsen)
+        coarse_tts = time_to_safe_haven_hours(
+            coarse_safe,
+            coarse_traversable,
+            coarse_elevation,
+            coarse_slope,
+            effective_resolution_m,
+            rover,
+        )
+        after_end, lookahead = _earthset_lookahead(
+            metadata, req.start_utc, n_slices, slice_hours, req.coarsen
+        )
+        deadline_cube = hours_until_earthset_cube(earth_cube, slice_hours, after_end)
+        haven_provenance = {
+            **haven_info,
+            "coarse_safe_haven_cells": int(coarse_safe.sum()),
+            "earthset_lookahead": lookahead,
+        }
+    if req.require_safe_haven and deadline_cube is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "require_safe_haven needs a safe haven map and an Earthset "
+                f"deadline and they could not be computed: "
+                f"{haven_provenance.get('reason')}"
+            ),
+        )
+
     result = astar_4d(
         cost_cube,
         wait_cube,
@@ -1302,6 +1466,9 @@ def plan_4d(req: Plan4DRequest, request: Request):
         initial_soc_frac=req.initial_soc_pct,
         earth_visible_cube=earth_cube,
         require_earth_visibility=req.require_earth_visibility,
+        time_to_haven_hours=coarse_tts,
+        hours_until_earthset_cube=deadline_cube,
+        require_safe_haven=req.require_safe_haven,
     )
     if result["error"]:
         # move_count already accounted for the edge gates, so a failure here
@@ -1353,6 +1520,23 @@ def plan_4d(req: Plan4DRequest, request: Request):
                     f" Earth visibility opens {first_linked * slice_hours:.1f} h "
                     f"into the {horizon_h:.1f} h horizon."
                 )
+        # And for the haven rule: how many havens the coarse grid has, and
+        # the start's own margin, which is the number a caller needs to pick
+        # an earlier epoch or a closer goal.
+        if req.require_safe_haven and deadline_cube is not None:
+            start_tts = float(coarse_tts[coarse_start])
+            start_deadline = float(deadline_cube[0][coarse_start])
+            detail += (
+                f" Safe-haven rule: {int(coarse_safe.sum())} coarse cells are "
+                f"havens for {rover['name']} ({float(rover['h_max_shadow_h']):g} h "
+                "endurance); the start block is "
+                + ("unreachable from any haven" if not math.isfinite(start_tts)
+                   else f"{start_tts:.2f} h from the nearest")
+                + " with "
+                + ("no Earthset in sight" if not math.isfinite(start_deadline)
+                   else f"{start_deadline:.1f} h of Earth link left")
+                + "."
+            )
         raise HTTPException(status_code=404, detail=detail)
 
     # The planner solves on the coarse grid, but the caller asked in fine
@@ -1373,6 +1557,19 @@ def plan_4d(req: Plan4DRequest, request: Request):
     arrival = metrics.get("arrival_slice")
     metrics["arrival_hours"] = (
         None if arrival is None else float(arrival) * slice_hours
+    )
+    # SHERPA's margins along the route (A1): time-to-sun-shadow,
+    # time-to-DSN-shadow, time-to-0-SOC. None where open-ended or unknown.
+    e_cap_wh = float(rover["e_cap_wh"])
+    metrics.update(
+        route_margins(
+            result["path_states"],
+            [pct / 100.0 * e_cap_wh for pct in result["path_battery_pct"]],
+            shadow_cube,
+            deadline_cube,
+            slice_hours,
+            rover,
+        )
     )
 
     return {
@@ -1395,6 +1592,13 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # Same three-way honesty for the Earth field: spice_horizon, static
         # (the long-run layer) or unavailable, with the reason. (A4.)
         "earth_model": earth_provenance,
+        # The safe haven map's provenance (spice_horizon / unavailable +
+        # reason) and, per state, the driving hours to the nearest haven,
+        # the Earth link left and their difference. (A1.)
+        "safe_haven_model": haven_provenance,
+        "path_time_to_haven_h": result["path_time_to_haven_h"],
+        "path_hours_until_earthset": result["path_hours_until_earthset"],
+        "path_haven_margin_h": result["path_haven_margin_h"],
         "n_slices": n_slices,
         "slice_hours": slice_hours,
         "slice_hours_source": slice_hours_source,
@@ -2051,6 +2255,163 @@ def earth_series(
             "endian": "little",
             "order": "slice-major, then row-major",
             "shape": [int(n_slices), rows, cols],
+            "nodata": "NaN",
+        },
+    }
+
+
+_SAFE_HAVEN_FIELDS: tuple[str, ...] = (
+    "safe_haven",
+    "max_dark_hours_without_dte",
+    "earth_below_hours",
+    "time_to_safe_haven",
+)
+_SAFE_HAVEN_UNITS: dict[str, str] = {
+    "safe_haven": "bool",
+    "max_dark_hours_without_dte": "hours",
+    "earth_below_hours": "hours",
+    "time_to_safe_haven": "hours",
+}
+
+
+@app.get("/api/safe-haven")
+def safe_haven_endpoint(
+    start_utc: str = Query(
+        ...,
+        description=(
+            "UTC instant the map's window begins, e.g. '2026-09-07T00:00:00'. "
+            "The window spans one synodic month by default, so every cell "
+            "sees at least one full period without an Earth link."
+        ),
+    ),
+    rover_id: str = DEFAULT_ROVER_ID,
+    span_hours: float = Query(DEFAULT_SAFE_HAVEN_SPAN_HOURS, gt=0.0, le=2000.0),
+    step_hours: float = Query(DEFAULT_SAFE_HAVEN_STEP_HOURS, gt=0.0, le=24.0),
+    downsample: int = Query(1, ge=1, le=50),
+    format: str = Query("json", pattern="^(json|f32)$"),
+    field: str = Query(
+        "safe_haven",
+        pattern="^(safe_haven|max_dark_hours_without_dte|earth_below_hours|time_to_safe_haven)$",
+    ),
+):
+    """VIPER's Safe Haven map for a rover and a month (A1).
+
+    A cell is a safe haven when, while the Earth is below its horizon, its
+    continuous shadow never exceeds the rover's ``h_max_shadow_h`` and it is
+    lit at least once (Shirley & Balaban 2022). Four binary fields share
+    the ``/api/layers`` wire format: the mask (1/0), the longest unlinked
+    darkness (h), the hours without a link in the window (h), and the
+    driving hours to the nearest haven (NaN where none is reachable).
+
+    Two honest outcomes in ``safe_haven_model``: ``spice_horizon``, or
+    ``unavailable`` with the reason -- ``fields`` is then empty and a
+    binary request is a 404, never a grid of zeros.
+    """
+    grids = _get_grids()
+    rover = get_rover(rover_id)
+    metadata = grids["metadata"]
+    resolution_m = float(metadata["resolution_m"])
+    step = int(downsample)
+
+    layers, tts, info = safe_haven_for_grids(
+        grids, rover_id, start_utc, span_hours=float(span_hours), step_hours=float(step_hours)
+    )
+    if layers is None:
+        if format == "f32":
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "The safe haven map is unavailable for these grids: "
+                    f"{info.get('reason', 'it could not be computed')}"
+                ),
+            )
+        shape = tuple(int(v) for v in np.asarray(grids["elevation"]).shape)
+        return {
+            "rover_id": rover_id,
+            "rover_name": rover["name"],
+            "h_max_shadow_h": float(rover["h_max_shadow_h"]),
+            "start_utc": start_utc,
+            "span_hours": float(span_hours),
+            "step_hours": float(step_hours),
+            "n_steps": None,
+            "safe_haven_model": info,
+            "safe_haven_fraction": None,
+            "safe_haven_cells": None,
+            "traversable_cells": None,
+            "earth_below_fraction": None,
+            "grid": {
+                "rows": len(range(0, shape[0], step)),
+                "cols": len(range(0, shape[1], step)),
+                "resolution_m": resolution_m * step,
+                "downsample": step,
+            },
+            "fields": {},
+            "binary_format": None,
+        }
+
+    data = {
+        "safe_haven": layers["safe_haven"],
+        "max_dark_hours_without_dte": layers["max_dark_hours_without_dte"],
+        "earth_below_hours": layers["earth_below_hours"],
+        "time_to_safe_haven": tts,
+    }
+
+    if format == "f32":
+        layer = np.asarray(data[field])[::step, ::step]
+        return Response(
+            content=encode_layer_f32(layer),
+            media_type=BINARY_MEDIA_TYPE,
+            headers=binary_layer_headers(field, layer, step, resolution_m, "DERIVED"),
+        )
+
+    rows = cols = None
+    fields: dict[str, Any] = {}
+    for name in _SAFE_HAVEN_FIELDS:
+        layer = np.asarray(data[name])[::step, ::step]
+        rows, cols = int(layer.shape[0]), int(layer.shape[1])
+        stats = layer_stats(layer)
+        query = {
+            "start_utc": start_utc,
+            "rover_id": rover_id,
+            "span_hours": span_hours,
+            "step_hours": step_hours,
+            "downsample": step,
+            "format": "f32",
+            "field": name,
+        }
+        fields[name] = {
+            "units": _SAFE_HAVEN_UNITS[name],
+            "min": stats["min"],
+            "max": stats["max"],
+            "nodata": stats["nodata"],
+            "binary_url": f"/api/safe-haven?{urlencode(query)}",
+        }
+
+    return {
+        "rover_id": rover_id,
+        "rover_name": rover["name"],
+        "h_max_shadow_h": float(info["h_max_shadow_h"]),
+        "start_utc": info.get("start_utc", start_utc),
+        "span_hours": float(info["span_hours"]),
+        "step_hours": float(info["step_hours"]),
+        "n_steps": int(info["n_steps"]),
+        "safe_haven_model": info,
+        "safe_haven_fraction": info["safe_haven_fraction"],
+        "safe_haven_cells": info["safe_haven_cells"],
+        "traversable_cells": info["traversable_cells"],
+        "earth_below_fraction": info["earth_below_fraction"],
+        "grid": {
+            "rows": rows,
+            "cols": cols,
+            "resolution_m": resolution_m * step,
+            "downsample": step,
+        },
+        "fields": fields,
+        "binary_format": {
+            "dtype": "float32",
+            "endian": "little",
+            "order": "row-major",
+            "shape": [rows, cols],
             "nodata": "NaN",
         },
     }
