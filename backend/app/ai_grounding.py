@@ -304,6 +304,13 @@ def _p(pattern: str) -> re.Pattern:
     return re.compile(pattern)
 
 
+# What a whitelisted identifier looks like by the time a claim rule sees it.
+# Rover names are in the K5 whitelist -- that is what makes "LPR-1" sayable at
+# all -- so by the time _scan_claims runs, "LPR-1 guvenlidir" has already
+# become "<masked> guvenlidir". A rule that matched the catalogue name would
+# match nothing; the sentinel IS the known-identifier vocabulary here.
+_MASKED = re.escape(_SENTINEL)
+
 # Patterns run over the folded, MASKED text, so a registered value or a
 # whitelisted name can never trip one lexically.
 FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
@@ -340,6 +347,27 @@ FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
             r"\brota\w*\s+(?:\w+\s+){0,2}güvenli(?!k)"
             r"|\bgüvenli(?!k)\s+(?:bir\s+)?(rota|güzergah|yol)\b"
             r"|\brover['’]?\w*\s*(?:\w+\s+)?(korur|koruyor|koruyacak)"
+            # The rover as the SUBJECT of a safety claim. Harmless until
+            # C-GUIDE, which answers "which rover" and "LPR-1 vs NASA VIPER" --
+            # so "Bu rover guvenlidir" became a sentence the assistant could
+            # actually produce, and nothing stopped it.
+            #
+            # Two narrowings keep this from firing on honest prose:
+            #
+            # (?![kğ]) rather than (?!k). The existing lookahead excludes the
+            # noun "güvenlik" but not its possessive "güvenliği", so without
+            # the ğ this would fire on "rover güvenliğini sertifikalandırmaz"
+            # -- a sentence that DENIES the claim.
+            #
+            # The predicate must carry a copula. The sentinel's subject is
+            # unknown by construction, so only an assertion counts:
+            # "<masked> güvenlidir" is a claim, "<masked> güvenli sınırın
+            # altında" is a measurement. The same requirement is applied to
+            # the rover branch, which would otherwise fire on "Rover için
+            # güvenli sınır aşılmadı."
+            r"|\brover\w*\s+(?:\w+\s+){0,2}güvenli(?![kğ])(?:dir|ydi|ymiş|dirler)\b"
+            rf"|{_MASKED}\s+(?:\w+\s+){{0,2}}güvenli(?![kğ])(?:dir|ydi|ymiş|dirler)\b"
+            r"|\bgüvenli(?![kğ])\s+(?:bir\s+)?rover\w*"
             # \w* rather than \b: "risksizdir" is the same claim as
             # "risksiz", and Turkish attaches the copula to the stem.
             r"|\b(risksiz|tehlikesiz|zarar\s+görmez)\w*\b"
@@ -350,6 +378,12 @@ FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
             r"|\bkısıt\w*\s+(ihlal|aşıl|karşıla)"
             r"|\btanımlı\s+kısıt"
             r"|\b(değil\w*|garanti\s+edilemez|anlamına\s+gelmez)"
+            # A denial in the same clause. The copula requirement above already
+            # lets the cautious phrasings through on its own; these cover a
+            # hedge that shares a clause with the assertion, because a comma
+            # does not split one -- _CLAUSE_SPLIT is [.!?;:\n].
+            r"|\b(doğrulanmam\w*|kanıtlamaz|kanıtlanmam\w*|göstermez)"
+            r"|\bsertifika\w*(maz|mam\w*)"
         ),
     ),
     ClaimRule(

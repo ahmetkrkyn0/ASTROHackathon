@@ -387,6 +387,48 @@ def test_each_forbidden_claim_reports_its_contract_rule(draft, rule):
     assert {"code": "FORBIDDEN_CLAIM", "rule": rule} in _diagnose(draft)
 
 
+@pytest.mark.parametrize(
+    "draft",
+    [
+        "Bu rover güvenlidir.",
+        "Güvenli bir roverdır.",
+        "Seçili rover tamamen güvenlidir.",
+    ],
+)
+def test_a_rover_safety_claim_is_refused_like_a_route_one(draft):
+    """N-8 gained a subject when C-GUIDE gained rovers.
+
+    The rule protected rota/güzergah/yol and admitted "rover" only with
+    korur/koruyor/koruyacak, which was enough while the assistant never made a
+    rover the subject of a sentence. C-GUIDE answers "which rover" and
+    "LPR-1 vs NASA VIPER", so it does now.
+    """
+    assert {"code": "FORBIDDEN_CLAIM", "rule": "N-8"} in _diagnose(draft)
+
+
+@pytest.mark.parametrize(
+    "draft",
+    [
+        "Bu rover güvenli değildir.",
+        "Bu roverın güvenli olduğu doğrulanmamıştır.",
+        "Mevcut veriler roverın güvenli olduğunu kanıtlamaz.",
+        "Bu analiz rover güvenliğini sertifikalandırmaz.",
+        # The narrowing the copula requirement buys: a measurement about a
+        # limit is not a claim about the rover.
+        "Rover için güvenli sınır aşılmadı.",
+        "Rover güvenliği bu analizin kapsamı dışındadır.",
+    ],
+)
+def test_cautious_language_about_a_rover_is_not_a_claim(draft):
+    """Denying, hedging and measuring all have to survive.
+
+    A rule that blocked "bu rover güvenli değildir" would push the verbalizer
+    towards saying nothing about safety at all, which is the opposite of what
+    N-8 is for.
+    """
+    assert _diagnose(draft) == ()
+
+
 def test_a_safety_margin_is_not_a_safety_claim():
     """N-8's exemption: "güvenlik marjı" is a different word."""
     assert _diagnose("Güvenlik marjı korunuyor; kısıtlar ihlal edilmiyor.") == ()

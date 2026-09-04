@@ -677,6 +677,41 @@ def test_a_prose_only_fallback_does_not_claim_to_be_showing_values():
         assert fact.text in fallback
 
 
+@pytest.mark.parametrize(
+    "rover_id", [entry["id"] for entry in rover_catalog()]
+)
+def test_a_named_rover_cannot_be_declared_safe(rover_id):
+    """The claim rules run AFTER masking, which is the whole difficulty.
+
+    Every rover name is in the K5 whitelist -- that is what makes "LPR-1"
+    sayable -- so by the time the claim scanner runs, "LPR-1 güvenlidir" has
+    already become "<masked> güvenlidir". A rule written against the catalogue
+    name would match nothing at all.
+    """
+    entry = next(item for item in rover_catalog() if item["id"] == rover_id)
+    name = short_name(str(entry["name"]))
+    envelope = _guide_envelope(topic="rover", rover_ids=[rover_id])
+    codes = diagnostic(
+        validate_draft(f"{name} güvenlidir.", envelope, _tokens(envelope))
+    )
+    assert {"code": "FORBIDDEN_CLAIM", "rule": "N-8"} in codes, (name, codes)
+    # The name itself still masks: the predicate is what blocks, not the digit.
+    assert {"code": "UNREGISTERED_NUMBER"} not in codes
+
+
+@pytest.mark.parametrize(
+    "rover_id", [entry["id"] for entry in rover_catalog()]
+)
+def test_a_named_rover_may_still_be_described_cautiously(rover_id):
+    entry = next(item for item in rover_catalog() if item["id"] == rover_id)
+    name = short_name(str(entry["name"]))
+    envelope = _guide_envelope(topic="rover", rover_ids=[rover_id])
+    verdict = validate_draft(
+        f"{name} için güvenli olduğu doğrulanmamıştır.", envelope, _tokens(envelope)
+    )
+    assert verdict.ok, (name, diagnostic(verdict))
+
+
 # ── read-only: a mutation is refused, and never faked ────────────────────────
 
 def test_a_mutation_request_is_refused_with_the_manual_instruction():
