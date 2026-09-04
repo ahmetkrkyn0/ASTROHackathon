@@ -9,6 +9,7 @@ import { MissionSetup } from './mission-setup'
 import { MissionValidation } from './mission-validation'
 import { Playback } from './playback'
 import { PoseLoop } from './pose-loop'
+import { Replan } from './replan'
 import { RosShowcase } from './ros-showcase'
 import { RouteAnalysis } from './route-analysis'
 import { SolvingIndicator } from './solving-indicator'
@@ -90,6 +91,9 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // mission field that changed name.
   { id: 'ros-showcase', slot: 'leftRail', Component: RosShowcase },
   { id: 'layer-provenance', slot: 'leftRail', Component: LayerProvenance },
+  // Plan only: it asks what would force a new route from where the rover is,
+  // which is a question about a route still being decided.
+  { id: 'replan', slot: 'leftRail', Component: Replan, modes: ['plan'] },
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation },
   { id: 'corridor', slot: 'rightRail', Component: CorridorFeature },
   { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop },
