@@ -81,6 +81,16 @@ export interface FocusTelemetry {
 export interface MissionValue {
   gridMeta: GridMeta | null
   roverId: string
+  /**
+   * The selected rover's catalogue entry, or null before it has loaded.
+   *
+   * Not a duplicate of `roverId`, and the difference matters at startup:
+   * `roverId` is set from the first render and is what a request carries,
+   * while this stays null until /api/rovers answers. A feature that sends the
+   * rover somewhere uses the id; one that shows its mass, capacity or slope
+   * limit needs this and has to handle the null.
+   */
+  rover: RoverEntry | null
   weights: PlanWeights
   start: Cell | null
   goal: Cell | null

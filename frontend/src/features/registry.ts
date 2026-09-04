@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react'
 import type { MissionMode } from '../mission/types'
+import { MissionSnapshot } from './mission-snapshot'
 
 /**
  * Where a feature mounts.
@@ -46,10 +47,17 @@ export interface FeatureRegistration {
  * here, which is the whole point -- App.tsx knows the slots, not the features,
  * so two people adding two unrelated features touch this line and nothing else.
  *
- * Empty while the shell is being assembled. Each feature's own task adds its
- * entry, which is also what makes those tasks independently reviewable.
+ * Filled one task at a time as the shell is assembled, which is what makes
+ * those tasks independently reviewable.
  */
-export const FEATURES: readonly FeatureRegistration[] = []
+export const FEATURES: readonly FeatureRegistration[] = [
+  // analyze only. App.tsx rendered this as the else-branch of
+  // `missionMode === 'plan' ? MissionSetupPanel : MissionSnapshotPanel`, and
+  // fleet replaces the whole cockpit, so analyze was the only stage it ever
+  // appeared in. Leaving modes off would put it beside the setup panel in
+  // plan -- the exact quiet mistake the filter exists to make explicit.
+  { id: 'mission-snapshot', slot: 'leftRail', Component: MissionSnapshot, modes: ['analyze'] },
+]
 
 /**
  * The features one slot shows in one mode, in registration order.

@@ -30,7 +30,6 @@ import LayerDropdown from './components/Map/LayerDropdown'
 import RouteSolvingOverlay from './components/Map/RouteSolvingOverlay'
 import MissionSetupPanel from './components/Planning/MissionSetupPanel'
 import MissionContextPanel from './components/Planning/MissionContextPanel'
-import MissionSnapshotPanel from './components/Analysis/MissionSnapshotPanel'
 import RouteAnalysisInspector from './components/Analysis/RouteAnalysisInspector'
 import PlaybackBar from './components/Analysis/PlaybackBar'
 import MissionAssistant from './components/Assistant/MissionAssistant'
@@ -363,11 +362,6 @@ export default function App() {
     }
   }, [goal, isSolving, selectedRoverId, start, weights])
 
-  // Edit & Replan: preserves endpoints and smoothly transitions back to Plan mode
-  const handleEditReplan = useCallback(() => {
-    setMissionMode('plan')
-  }, [])
-
   // Reset full mission setup. Every call here is a state setter, so this is
   // stable for the life of the app.
   const handleReset = useCallback(() => {
@@ -464,6 +458,7 @@ export default function App() {
           }
         : null,
       roverId: selectedRoverId,
+      rover: selectedRover,
       weights,
       start,
       goal,
@@ -484,6 +479,7 @@ export default function App() {
       goal,
       missionMode,
       planResult,
+      selectedRover,
       selectedRoverId,
       start,
       viewMode,
@@ -590,15 +586,7 @@ export default function App() {
                       isSolving={isSolving}
                       onOpenFleetHangar={() => setMissionMode('fleet')}
                     />
-                ) : (
-                  <MissionSnapshotPanel
-                    rover={selectedRover}
-                    start={start}
-                    goal={goal}
-                    weights={weights}
-                    onEditReplan={handleEditReplan}
-                  />
-                )}
+                ) : null}
               </>
             )}
 
