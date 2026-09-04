@@ -3,6 +3,7 @@ import type { MissionMode } from '../mission/types'
 import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
 import { CorridorFeature } from './corridor'
+import { CostExplain } from './cost-explain'
 import { LayerPicker } from './layer-picker'
 import { LayerProvenance } from './layer-provenance'
 import { MissionSetup } from './mission-setup'
@@ -106,6 +107,9 @@ export const FEATURES: readonly FeatureRegistration[] = [
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation },
   { id: 'corridor', slot: 'rightRail', Component: CorridorFeature },
   { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop },
+  // No modes: the cost of the cell under the pointer is worth reading while a
+  // route is being placed and while one is being reviewed.
+  { id: 'cost-explain', slot: 'rightRail', Component: CostExplain },
   // Analyze only: it compares a route that already exists against alternative
   // weightings, which is a question asked after one has been planned.
   { id: 'profile-compare', slot: 'rightRail', Component: ProfileCompare, modes: ['analyze'] },
