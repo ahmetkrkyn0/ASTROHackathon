@@ -7,6 +7,7 @@ import { LayerPicker } from './layer-picker'
 import { MissionSetup } from './mission-setup'
 import { MissionValidation } from './mission-validation'
 import { Playback } from './playback'
+import { PoseLoop } from './pose-loop'
 import { RosShowcase } from './ros-showcase'
 import { RouteAnalysis } from './route-analysis'
 import { SolvingIndicator } from './solving-indicator'
@@ -89,6 +90,7 @@ export const FEATURES: readonly FeatureRegistration[] = [
   { id: 'ros-showcase', slot: 'leftRail', Component: RosShowcase },
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation },
   { id: 'corridor', slot: 'rightRail', Component: CorridorFeature },
+  { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop },
 ]
 
 /**
