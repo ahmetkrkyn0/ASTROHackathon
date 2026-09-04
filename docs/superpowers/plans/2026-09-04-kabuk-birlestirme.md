@@ -1676,7 +1676,7 @@ git add -A
 git commit -m "feat(layer-provenance): read activeViewMode from the canonical mission value"
 ```
 
-### Task 18: `replan` — `start`/`goal`'ü `CellRef`'e çevir
+### Task 18: `replan` — kayda taşı
 
 **Dosyalar:**
 - Taşı: `frontend/src/features/_pending/replan` → `frontend/src/features/replan`
@@ -1745,7 +1745,7 @@ EOF
 )"
 ```
 
-### Task 19: `profile-compare` — `start`/`goal` ve overlay
+### Task 19: `profile-compare` — overlay tiplerine uyarla
 
 **Dosyalar:**
 - Taşı: `frontend/src/features/_pending/profile-compare` → `frontend/src/features/profile-compare`
@@ -1807,7 +1807,7 @@ git add -A
 git commit -m "feat(profile-compare): retype cells and overlay commands for analyze mode"
 ```
 
-### Task 20: `time-axis` — `start`/`goal` ve overlay
+### Task 20: `time-axis` — `field` komutuna uyarla
 
 **Dosyalar:**
 - Taşı: `frontend/src/features/_pending/time-axis` → `frontend/src/features/time-axis`
