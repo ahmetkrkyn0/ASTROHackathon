@@ -159,8 +159,19 @@ Her faz tek başına test edilebilir ve kendi kapısı vardır.
 
 - `App.tsx` çakışmasında **bilinçli olarak ai-scene'inki alınır** — bu bir
   çözüm değil, karardır.
-- `package.json` elle birleştirilir: tailwind/postcss **ve** vitest/eslint
-  ikisi de kalır.
+- `package.json`'da **`scripts` bloğu `berke-3d`'den aynen alınır.** ai-scene'in
+  `lint` script'i `--ext ts,tsx` içeriyor; `berke-3d-frontend` ESLint 9 flat
+  config'e (`eslint.config.js`) geçerken bu bayrağı bilerek atmıştı ve flat
+  config'de `--ext` kaldırılmıştır. ai-scene'in satırı alınırsa `npm run lint`
+  ilk çalıştırmada hata verir. ai-scene'de `test` script'i de yoktur.
+- `dependencies`: ai-scene'in getirdiği `tailwindcss`, `postcss` ve
+  `autoprefixer` **alınmaz.** Ölçüldü: `postcss.config.*` dosyası yok,
+  `App.css`'te `@tailwind` direktifi yok, `vite.config.ts`'de postcss
+  yapılandırması yok ve bileşenler tek bir Tailwind utility sınıfı bile
+  kullanmıyor — yerleşimin tamamı `App.css`'teki 286 özel `lp-*` sınıfıyla
+  yazılmış. Tailwind o dalda kurulu ama devre dışı; taşınacak bir altyapı yok.
+  Bu bir varsayım değil, karar: Göktuğ yarım kalmış bir geçişin ortasındaysa
+  bunu söylemeli, o hâlde ayrıca ele alınır.
 - `package-lock.json` silinir, `npm install` ile yeniden üretilir.
 
 **Kapı:** uygulama açılıyor; `fleet → plan → analyze` akışı çalışıyor.
@@ -188,8 +199,14 @@ App seviyesindeki state isimleri neredeyse aynı:
 
 `missionValue`'nun on girdisinden dokuzu ai-scene'de aynı isimle mevcut.
 Taşınması gereken tek state `rawCellTelemetry` (`/api/cell-telemetry`
-yanıtı). `focusTelemetry`'nin her ikisinde de bulunması, chatbot'un
-`FocusTelemetry` tipinin karşılığının hazır olduğu anlamına gelir.
+yanıtı).
+
+`focusTelemetry` ayrıca doğrulandı: **`FocusTelemetry` tipi üç dalda da birebir
+aynı** — `row, col, lat, lon, altitudeM, thermalC, resolutionM, spanKm`, aynı
+tipler ve aynı sırayla. `berke-3d-frontend` ve `ai-scene` onu `App.tsx` içinde
+yerel olarak tanımlamış, chatbot ise `mission/types.ts`'e çıkarmış. Yani
+kanonik tip, üçünün de zaten yazdığı tipin taşınmış hâli; bu alanda uyarlama
+gerekmiyor.
 
 **Kapı:** uygulama görünüş olarak Faz 0'daki gibi; artık `MissionProvider` ve
 `OverlayProvider` sarıyor, kayıt boş çalışıyor.
