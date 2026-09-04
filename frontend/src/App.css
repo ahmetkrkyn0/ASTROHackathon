@@ -4953,54 +4953,6 @@ select {
   padding: 14px;
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
-   3D ROVER COCKPIT & CAMERA SWITCHER STYLING
-   ════════════════════════════════════════════════════════════════════════════ */
-
-.terrain3d-camera-switch {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 25;
-  display: flex;
-  gap: 6px;
-  background: rgba(7, 13, 30, 0.88);
-  padding: 4px;
-  border-radius: var(--radius);
-  border: 1px solid rgba(79, 216, 240, 0.32);
-  box-shadow: var(--shadow-pop);
-}
-
-.terrain3d-cam-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-muted);
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 14px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.15s ease;
-}
-
-.terrain3d-cam-btn:hover {
-  color: var(--text);
-  background: rgba(199, 205, 219, 0.08);
-}
-
-.terrain3d-cam-btn.is-active {
-  background: linear-gradient(135deg, rgba(79, 216, 240, 0.25), rgba(95, 227, 176, 0.2));
-  border-color: rgba(79, 216, 240, 0.55);
-  color: var(--text);
-  font-weight: 700;
-}
-
-
 /* ── Status strip ─────────────────────────────────────────────────────────
    44px, in flow under the cockpit, on the same hairline the rails use. The
    scale and the risk legend used to float over the terrain they describe,

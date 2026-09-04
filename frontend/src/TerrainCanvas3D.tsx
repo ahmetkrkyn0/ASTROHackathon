@@ -24,6 +24,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { GOAL_CORAL, ROUTE_CYAN, START_MINT } from './colormap'
 import type { MapViewMode } from './MapCanvas'
 import type { Waypoint } from './api'
 
@@ -146,250 +147,6 @@ async function fetchF32(url: string): Promise<Float32Array> {
   return new Float32Array(await response.arrayBuffer())
 }
 
-// ── 3D Deep Space Environment Generators ──────────────────────────────────────
-
-function createStarfieldTexture(): THREE.Texture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return new THREE.Texture()
-  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-  grad.addColorStop(0, 'rgba(231, 234, 241, 1.0)')
-  grad.addColorStop(0.15, 'rgba(240, 245, 255, 0.9)')
-  grad.addColorStop(0.4, 'rgba(180, 220, 255, 0.35)')
-  grad.addColorStop(0.7, 'rgba(120, 170, 255, 0.08)')
-  grad.addColorStop(1, 'rgba(0, 0, 0, 0)')
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 64, 64)
-  return new THREE.CanvasTexture(canvas)
-}
-
-function createStarfield(count = 3500, radius = 70000): THREE.Points {
-  const geometry = new THREE.BufferGeometry()
-  const positions = new Float32Array(count * 3)
-  const colors = new Float32Array(count * 3)
-  const colorObj = new THREE.Color()
-
-  const starPalettes = [
-    new THREE.Color(0xffffff), // Pure white
-    new THREE.Color(0xdbeafe), // O/B blue-white
-    new THREE.Color(0x93c5fd), // High-temp electric blue
-    new THREE.Color(0xfef08a), // Solar yellow
-    new THREE.Color(0xfdcba8), // K-type orange
-    new THREE.Color(0xfca5a5), // Red giant
-  ]
-
-  for (let i = 0; i < count; i++) {
-    const u = Math.random()
-    const v = Math.random()
-    const theta = u * 2.0 * Math.PI
-    const phi = Math.acos(2.0 * v - 1.0)
-    const r = radius * (0.95 + Math.random() * 0.1)
-
-    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta)
-    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
-    positions[i * 3 + 2] = r * Math.cos(phi)
-
-    const pick = Math.random()
-    if (pick < 0.55) colorObj.copy(starPalettes[0])
-    else if (pick < 0.75) colorObj.copy(starPalettes[1])
-    else if (pick < 0.88) colorObj.copy(starPalettes[2])
-    else if (pick < 0.95) colorObj.copy(starPalettes[3])
-    else if (pick < 0.98) colorObj.copy(starPalettes[4])
-    else colorObj.copy(starPalettes[5])
-
-    const brightness = 0.5 + Math.random() * 0.5
-    colors[i * 3] = colorObj.r * brightness
-    colors[i * 3 + 1] = colorObj.g * brightness
-    colors[i * 3 + 2] = colorObj.b * brightness
-  }
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-
-  const material = new THREE.PointsMaterial({
-    size: 26,
-    map: createStarfieldTexture(),
-    transparent: true,
-    vertexColors: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  })
-
-  return new THREE.Points(geometry, material)
-}
-
-function createMilkyWayDust(count = 2000, radius = 68000): THREE.Points {
-  const geometry = new THREE.BufferGeometry()
-  const positions = new Float32Array(count * 3)
-  const colors = new Float32Array(count * 3)
-
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2
-    const spread = (Math.random() - 0.5) * 0.28
-    const r = radius * (0.92 + Math.random() * 0.16)
-
-    const bx = Math.cos(angle) * r
-    const by = spread * r
-    const bz = Math.sin(angle) * r
-
-    const cosInc = Math.cos(0.6)
-    const sinInc = Math.sin(0.6)
-    const x = bx
-    const y = by * cosInc - bz * sinInc
-    const z = by * sinInc + bz * cosInc
-
-    positions[i * 3] = x
-    positions[i * 3 + 1] = y
-    positions[i * 3 + 2] = z
-
-    const t = Math.random()
-    colors[i * 3] = 0.35 * t + 0.15
-    colors[i * 3 + 1] = 0.45 * t + 0.25
-    colors[i * 3 + 2] = 0.85 * t + 0.35
-  }
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-
-  const material = new THREE.PointsMaterial({
-    size: 40,
-    map: createStarfieldTexture(),
-    transparent: true,
-    vertexColors: true,
-    blending: THREE.AdditiveBlending,
-    opacity: 0.35,
-    depthWrite: false,
-  })
-
-  return new THREE.Points(geometry, material)
-}
-
-function createEarth(span: number): { group: THREE.Group; mesh: THREE.Mesh } {
-  const group = new THREE.Group()
-
-  const canvas = document.createElement('canvas')
-  canvas.width = 1024
-  canvas.height = 512
-  const ctx = canvas.getContext('2d')!
-
-  const oceanGrad = ctx.createLinearGradient(0, 0, 0, 512)
-  oceanGrad.addColorStop(0, '#0c1018')
-  oceanGrad.addColorStop(0.5, '#0e131d')
-  oceanGrad.addColorStop(1, '#0c1018')
-  ctx.fillStyle = oceanGrad
-  ctx.fillRect(0, 0, 1024, 512)
-
-  ctx.fillStyle = '#12251c'
-  ctx.beginPath()
-  ctx.ellipse(560, 220, 160, 100, 0.2, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(530, 310, 80, 90, -0.1, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(280, 200, 90, 110, -0.25, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(330, 340, 70, 100, 0.2, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.fillStyle = '#3a2f16'
-  ctx.beginPath()
-  ctx.ellipse(520, 250, 70, 35, 0.05, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(750, 360, 60, 45, 0.1, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.fillStyle = '#e7eaf1'
-  ctx.beginPath()
-  ctx.ellipse(512, 18, 480, 26, 0, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(512, 496, 440, 30, 0, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.fillStyle = 'rgba(231, 234, 241, 0.72)'
-  ctx.beginPath()
-  ctx.ellipse(340, 180, 120, 35, 0.3, 0, Math.PI * 2)
-  ctx.ellipse(600, 260, 180, 40, -0.2, 0, Math.PI * 2)
-  ctx.ellipse(260, 310, 100, 25, 0.15, 0, Math.PI * 2)
-  ctx.ellipse(720, 170, 140, 30, 0.25, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.strokeStyle = 'rgba(231, 234, 241, 0.65)'
-  ctx.lineWidth = 10
-  ctx.beginPath()
-  ctx.arc(380, 210, 40, 0, Math.PI * 1.5)
-  ctx.stroke()
-  ctx.beginPath()
-  ctx.arc(680, 230, 45, Math.PI * 0.5, Math.PI * 2)
-  ctx.stroke()
-
-  const textureLoader = new THREE.TextureLoader()
-  const earthTexture = textureLoader.load('/textures/earth_disc.jpg')
-  earthTexture.colorSpace = THREE.SRGBColorSpace
-
-  const earthRadius = span * 0.18
-  const earthGeo = new THREE.SphereGeometry(earthRadius, 48, 48)
-  const earthMat = new THREE.MeshStandardMaterial({
-    map: earthTexture,
-    roughness: 0.55,
-    metalness: 0.05,
-    emissive: new THREE.Color(0x112244),
-    emissiveIntensity: 0.12,
-  })
-  const mesh = new THREE.Mesh(earthGeo, earthMat)
-  group.add(mesh)
-
-  const atmoGeo = new THREE.SphereGeometry(earthRadius * 1.06, 48, 48)
-  const atmoMat = new THREE.MeshBasicMaterial({
-    color: 0x38bdf8,
-    transparent: true,
-    opacity: 0.45,
-    blending: THREE.AdditiveBlending,
-    side: THREE.BackSide,
-  })
-  const atmoMesh = new THREE.Mesh(atmoGeo, atmoMat)
-  group.add(atmoMesh)
-
-  // Position Earth high in the upper-right sky above the lunar horizon (matching user screenshot)
-  group.position.set(span * 1.5, span * 1.05, -span * 2.4)
-  mesh.rotation.z = THREE.MathUtils.degToRad(23.4)
-
-  return { group, mesh }
-}
-
-function createSunFlareSprite(): THREE.Sprite {
-  const canvas = document.createElement('canvas')
-  canvas.width = 128
-  canvas.height = 128
-  const ctx = canvas.getContext('2d')!
-
-  const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
-  grad.addColorStop(0, 'rgba(231, 234, 241, 1.0)')
-  grad.addColorStop(0.12, 'rgba(254, 240, 138, 0.95)')
-  grad.addColorStop(0.35, 'rgba(251, 146, 60, 0.4)')
-  grad.addColorStop(0.65, 'rgba(244, 63, 94, 0.1)')
-  grad.addColorStop(1, 'rgba(0, 0, 0, 0)')
-
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 128, 128)
-
-  const texture = new THREE.CanvasTexture(canvas)
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    blending: THREE.AdditiveBlending,
-    transparent: true,
-  })
-
-  const sprite = new THREE.Sprite(material)
-  sprite.scale.set(6500, 6500, 1)
-  return sprite
-}
-
 interface Props {
   viewMode: MapViewMode
   waypoints: Waypoint[] | null
@@ -418,8 +175,16 @@ export default function TerrainCanvas3D({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('fps')
 
+  // Everything the imperative scene needs to reach from React updates.
+  //
+  // baseColors holds the layer ramp on its own; the shadow mask is multiplied
+  // into a copy of it. Keeping them apart means changing the time slice does
+  // not require re-fetching the layer, and changing the layer does not lose
+  // the shadow. (The alternative, material.aoMap, binds to a second UV set
+  // whose channel numbering changed in three r152 -- vertex colours avoid the
+  // version question entirely and PlaneGeometry gives us one vertex per grid
+  // cell anyway.)
   const sceneRef = useRef<{
     mesh: THREE.Mesh
     material: THREE.MeshStandardMaterial
@@ -432,11 +197,6 @@ export default function TerrainCanvas3D({
     photoTexture: THREE.Texture | null
     detailTexture: THREE.Texture | null
     routeGroup: THREE.Group
-    earthMesh?: THREE.Mesh
-    sunSprite?: THREE.Sprite
-    camera?: THREE.PerspectiveCamera
-    controls?: OrbitControls
-    heights?: Float32Array
     dispose: () => void
   } | null>(null)
 
@@ -447,14 +207,7 @@ export default function TerrainCanvas3D({
 
     let disposed = false
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x020308)
-
-    // Deep space celestial environment: Starfield & Milky Way
-    const starfield = createStarfield(3500, 70000)
-    scene.add(starfield)
-
-    const milkyWay = createMilkyWayDust(2000, 68000)
-    scene.add(milkyWay)
+    scene.background = new THREE.Color(0x05060a)
 
     const camera = new THREE.PerspectiveCamera(45, 1, 1, 100000)
     const renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -550,30 +303,11 @@ export default function TerrainCanvas3D({
       } catch {
         series = null
       }
+      if (disposed) return
+
       const span = Math.max(rows, cols) * res
-
-      // Solid lunar bedrock pedestal underneath the terrain mesh
-      const baseBox = new THREE.Mesh(
-        new THREE.BoxGeometry(cols * res * 0.996, 350, rows * res * 0.996),
-        new THREE.MeshStandardMaterial({ color: 0x080b14, roughness: 0.98, metalness: 0.0 }),
-      )
-      baseBox.position.set(0, -175, 0)
-      scene.add(baseBox)
-
-      // The Earth in deep space hovering above the lunar horizon
-      const earth = createEarth(span)
-      scene.add(earth.group)
-
-      // Blazing distant solar flare sprite
-      const sunFlare = createSunFlareSprite()
-      scene.add(sunFlare)
-      sunFlare.position.copy(sun.position).normalize().multiplyScalar(55000)
-
-      // Frame the camera closer so the 3D Moon fills the screen prominently
-      camera.position.set(span * 0.35, span * 0.28, span * 0.45)
+      camera.position.set(span * 0.55, span * 0.42, span * 0.75)
       controls.target.set(0, 0, 0)
-      controls.minDistance = 150
-      controls.maxDistance = span * 4.0
       controls.update()
 
       sceneRef.current = {
@@ -588,18 +322,9 @@ export default function TerrainCanvas3D({
         photoTexture: null,
         detailTexture: null,
         routeGroup,
-        earthMesh: earth.mesh,
-        sunSprite: sunFlare,
-        camera,
-        controls,
-        heights,
         dispose: () => {
           geometry.dispose()
           material.dispose()
-          starfield.geometry.dispose()
-          milkyWay.geometry.dispose()
-          baseBox.geometry.dispose()
-          earth.mesh.geometry.dispose()
           sceneRef.current?.photoTexture?.dispose()
           sceneRef.current?.detailTexture?.dispose()
         },
@@ -643,9 +368,6 @@ export default function TerrainCanvas3D({
     const animate = () => {
       frame = requestAnimationFrame(animate)
       controls.update()
-      if (sceneRef.current?.earthMesh) {
-        sceneRef.current.earthMesh.rotation.y += 0.0004
-      }
       renderer.render(scene, camera)
     }
     animate()
@@ -867,9 +589,6 @@ export default function TerrainCanvas3D({
     if (!series || !series.sun.length) {
       // No ephemeris: a fixed grazing light, so the scene still reads as polar.
       state.sun.position.set(0.6, 0.09, -0.8).multiplyScalar(span * 4)
-      if (state.sunSprite) {
-        state.sunSprite.position.copy(state.sun.position).normalize().multiplyScalar(55000)
-      }
       return
     }
 
@@ -892,10 +611,6 @@ export default function TerrainCanvas3D({
     state.sun.position
       .set(Math.sin(a) * Math.cos(e), Math.sin(e), -Math.cos(a) * Math.cos(e))
       .multiplyScalar(span * 4)
-
-    if (state.sunSprite) {
-      state.sunSprite.position.copy(state.sun.position).normalize().multiplyScalar(55000)
-    }
 
     // In photographic mode the drape already carries the 2010 acquisition's
     // own shadows. Applying the simulated mask on top would darken the same
@@ -929,15 +644,13 @@ export default function TerrainCanvas3D({
     applyColors()
   }, [sliceIndex, status, photo])
 
-  // ── Vertical exaggeration (flat 1.0 in FPS mode for natural level ground) ──
+  // ── Vertical exaggeration. ─────────────────────────────────────────────────
   useEffect(() => {
     const state = sceneRef.current
     if (!state || status !== 'ready') return
     state.mesh.scale.z =
-      cameraMode === 'fps'
-        ? 1.0
-        : (exaggeration ?? state.manifest.elevation.vertical_exaggeration_suggested)
-  }, [exaggeration, cameraMode, status])
+      exaggeration ?? state.manifest.elevation.vertical_exaggeration_suggested
+  }, [exaggeration, status])
 
   // ── Planned route, drawn in the same metric frame as the mesh. ─────────────
   useEffect(() => {
@@ -970,178 +683,23 @@ export default function TerrainCanvas3D({
     routeGroup.add(
       new THREE.Line(
         new THREE.BufferGeometry().setFromPoints(points),
-        new THREE.LineBasicMaterial({ color: 0x00e5ff }),
+        new THREE.LineBasicMaterial({ color: new THREE.Color(ROUTE_CYAN) }),
       ),
     )
-    const marker = (p: THREE.Vector3, color: number) =>
+    const marker = (p: THREE.Vector3, color: THREE.Color) =>
       new THREE.Mesh(
         new THREE.SphereGeometry(res * 2.5, 12, 12),
         new THREE.MeshBasicMaterial({ color }),
       ).translateX(p.x).translateY(p.y).translateZ(p.z)
-    routeGroup.add(marker(points[0], 0x2ee59d))
-    routeGroup.add(marker(points[points.length - 1], 0xff5252))
+    routeGroup.add(marker(points[0], new THREE.Color(START_MINT)))
+    routeGroup.add(marker(points[points.length - 1], new THREE.Color(GOAL_CORAL)))
   }, [waypoints, exaggeration, status])
-
-  // ── 3D Camera Mode (FPS Surface View vs Orbit Overview) ─────────────────────
-  const fpsAngles = useRef({ yaw: 0.35, pitch: 0.02 })
-
-  useEffect(() => {
-    const state = sceneRef.current
-    if (!state || status !== 'ready' || !state.camera || !state.controls) return
-    const { camera, controls, manifest, heights } = state
-    const { rows, cols, resolution_m: res } = manifest.grid
-    const { min_m: minM } = manifest.elevation
-    const span = Math.max(rows, cols) * res
-
-    const stepX = (cols * res) / (cols - 1)
-    const stepZ = (rows * res) / (rows - 1)
-    const halfX = (cols * res) / 2
-    const halfZ = (rows * res) / 2
-
-    if (cameraMode === 'fps') {
-      controls.enabled = false
-
-      // Spawn on a level, flat surface patch (row 248, col 248 has ~2.0° slope)
-      const r = waypoints && waypoints.length > 0 ? waypoints[0].row : 248
-      const c = waypoints && waypoints.length > 0 ? waypoints[0].col : 248
-      const idx = r * cols + c
-      const altM = heights && idx < heights.length && !Number.isNaN(heights[idx]) ? heights[idx] : minM + 325
-
-      const rx = c * stepX - halfX
-      const rz = r * stepZ - halfZ
-      const ry = altM - minM + 2.0 // eye height above surface
-
-      camera.position.set(rx, ry, rz)
-      camera.up.set(0, 1, 0)
-
-      // Look across the lunar plain towards the horizon and the Earth in the sky
-      const yaw = 0.35
-      const pitch = 0.02
-      fpsAngles.current = { yaw, pitch }
-
-      const dir = new THREE.Vector3(
-        Math.sin(yaw) * Math.cos(pitch),
-        Math.sin(pitch),
-        -Math.cos(yaw) * Math.cos(pitch),
-      )
-      camera.lookAt(camera.position.clone().add(dir))
-      camera.updateProjectionMatrix()
-    } else {
-      controls.enabled = true
-      camera.fov = 45
-      camera.updateProjectionMatrix()
-      camera.position.set(span * 0.35, span * 0.28, span * 0.45)
-      controls.target.set(0, 0, 0)
-      controls.minDistance = 150
-      controls.maxDistance = span * 4.0
-      controls.maxPolarAngle = Math.PI / 2 - 0.02
-      controls.update()
-    }
-  }, [cameraMode, waypoints, status])
-
-  // ── FPS Mouse Drag Look Handler ─────────────────────────────────────────────
-  useEffect(() => {
-    const container = containerRef.current
-    const state = sceneRef.current
-    if (!container || !state || status !== 'ready' || cameraMode !== 'fps') return
-
-    const { camera } = state
-    if (!camera) return
-
-    let isDown = false
-    let startX = 0
-    let startY = 0
-
-    const updateLook = () => {
-      const { yaw, pitch } = fpsAngles.current
-      const dir = new THREE.Vector3(
-        Math.sin(yaw) * Math.cos(pitch),
-        Math.sin(pitch),
-        -Math.cos(yaw) * Math.cos(pitch),
-      )
-      camera.lookAt(camera.position.clone().add(dir))
-      camera.up.set(0, 1, 0)
-    }
-
-    const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 0) return
-      isDown = true
-      startX = e.clientX
-      startY = e.clientY
-      container.setPointerCapture?.(e.pointerId)
-    }
-
-    const onPointerMove = (e: PointerEvent) => {
-      if (!isDown) return
-      const dx = e.clientX - startX
-      const dy = e.clientY - startY
-      startX = e.clientX
-      startY = e.clientY
-
-      fpsAngles.current.yaw -= dx * 0.003
-      fpsAngles.current.pitch = THREE.MathUtils.clamp(
-        fpsAngles.current.pitch - dy * 0.003,
-        -0.45,
-        0.65,
-      )
-      updateLook()
-    }
-
-    const onPointerUp = (e: PointerEvent) => {
-      isDown = false
-      container.releasePointerCapture?.(e.pointerId)
-    }
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.03, 28, 65)
-      camera.updateProjectionMatrix()
-    }
-
-    container.addEventListener('pointerdown', onPointerDown)
-    container.addEventListener('pointermove', onPointerMove)
-    container.addEventListener('pointerup', onPointerUp)
-    container.addEventListener('pointercancel', onPointerUp)
-    container.addEventListener('wheel', onWheel, { passive: false })
-
-    return () => {
-      container.removeEventListener('pointerdown', onPointerDown)
-      container.removeEventListener('pointermove', onPointerMove)
-      container.removeEventListener('pointerup', onPointerUp)
-      container.removeEventListener('pointercancel', onPointerUp)
-      container.removeEventListener('wheel', onWheel)
-    }
-  }, [cameraMode, status])
 
   return (
     <div className="terrain3d-root" ref={containerRef}>
       {status === 'loading' && <div className="terrain3d-status">Arazi yükleniyor…</div>}
       {status === 'error' && (
         <div className="terrain3d-status">3B arazi yüklenemedi — API çalışıyor mu?</div>
-      )}
-
-      {/* 3D Camera Mode Switcher (FPS vs Kuşbakışı Orbit) */}
-      {status === 'ready' && (
-        <div className="terrain3d-camera-switch">
-          <button
-            type="button"
-            className={`terrain3d-cam-btn ${cameraMode === 'fps' ? 'is-active' : ''}`}
-            onClick={() => setCameraMode('fps')}
-            title="Birinci Şahıs (FPS) Yüzey Bakış Açısı - Düz Zemin"
-          >
-            <span className="cam-icon">🎯</span>
-            <span>FPS Bakış Açısı</span>
-          </button>
-          <button
-            type="button"
-            className={`terrain3d-cam-btn ${cameraMode === 'orbit' ? 'is-active' : ''}`}
-            onClick={() => setCameraMode('orbit')}
-            title="Kuşbakışı Yörünge İnceleme Görünümü"
-          >
-            <span className="cam-icon">🛰️</span>
-            <span>Kuşbakışı (Orbit)</span>
-          </button>
-        </div>
       )}
     </div>
   )
