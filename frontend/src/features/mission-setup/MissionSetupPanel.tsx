@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import type { PlanWeights } from '../../api'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
+import type { ProfileConstraints } from '../../net/types'
+import { useMissionProfiles } from './useMissionProfiles'
 import RoverSelectDrawer from './RoverSelectDrawer'
 
 const WEIGHT_CONTROLS: Array<{
@@ -14,6 +16,18 @@ const WEIGHT_CONTROLS: Array<{
   { key: 'w_thermal', label: 'Thermal Risk', desc: 'Steers clear of extreme cryogenic zones' },
 ]
 
+/** Display order + formatting for the four constraints a profile carries. */
+const CONSTRAINT_CONTROLS: Array<{
+  key: keyof ProfileConstraints
+  label: string
+  format: (v: number) => string
+}> = [
+  { key: 'max_slope_deg', label: 'Max Slope', format: (v) => `${v.toFixed(0)}°` },
+  { key: 'max_shadow_h', label: 'Max Shadow', format: (v) => `${v.toFixed(0)} h` },
+  { key: 'max_energy_wh', label: 'Energy Budget', format: (v) => `${v.toFixed(0)} Wh` },
+  { key: 'min_soc', label: 'Min SoC', format: (v) => `${(v * 100).toFixed(0)}%` },
+]
+
 export const MissionSetupPanel: React.FC = () => {
   const { rover: selectedRover, rovers, weights, start, goal, planResult, clickMode, isSolving } =
     useMission()
@@ -23,10 +37,11 @@ export const MissionSetupPanel: React.FC = () => {
     setClickMode: onSetClickMode,
     planRoute: onPlanRoute,
     resetMission: onReset,
-    setMissionMode,
   } = useMissionActions()
   const hasRoute = Boolean(planResult)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const { profiles, activeId, applyProfile, loading: profilesLoading } = useMissionProfiles()
+  const activeProfile = activeId && profiles ? profiles[activeId] : null
 
   const handleWeightChange = (key: keyof PlanWeights, val: number) => {
     onWeightsChange({
@@ -48,37 +63,16 @@ export const MissionSetupPanel: React.FC = () => {
       {/* ── 1. VEHICLE ASSIGNMENT & QUICK SELECTOR TABS ── */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">VEHICLE ASSIGNMENT</span>
+          <span className="lp-meta-label">MISSION SETUP</span>
           <button
             type="button"
             className="lp-text-action-btn"
-            onClick={() => setMissionMode('fleet')}
-            title="Open comprehensive full-screen fleet hangar"
+            onClick={() => setDrawerOpen(true)}
+            title="Browse the fleet and pick a different rover"
           >
-            Fleet Hangar ⤢
+            Change Rover
           </button>
         </div>
-
-        {/* Quick Rover Switcher Tabs */}
-        {rovers.length > 0 && (
-          <div className="lp-rover-segmented-tabs" role="tablist" aria-label="Select Rover Profile">
-            {rovers.map((rover) => {
-              const isSelected = rover.id === selectedRover?.id
-              return (
-                <button
-                  key={rover.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isSelected}
-                  className={`lp-rover-tab ${isSelected ? 'is-active' : ''}`}
-                  onClick={() => onSelectRover(rover)}
-                >
-                  {rover.name.split(' ')[0]}
-                </button>
-              )
-            })}
-          </div>
-        )}
 
         {/* Selected Rover Specs Card */}
         {selectedRover ? (
@@ -120,77 +114,74 @@ export const MissionSetupPanel: React.FC = () => {
       {/* ── 2. MISSION SEQUENCE & TARGET PICKERS ── */}
       <section className="lp-panel-section lp-mission-sequence-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">MISSION SEQUENCE & TARGETS</span>
+          <span className="lp-meta-label">MISSION SEQUENCE</span>
         </div>
 
         <div className="lp-sequence-list">
           {/* Step 01: Rover */}
           <div className="lp-sequence-item is-complete">
             <span className="lp-seq-num">01</span>
-            <div className="lp-seq-info">
-              <span className="lp-seq-title">Rover Profile</span>
-              <span className="lp-seq-sub">{selectedRover?.name ?? 'Assigned'}</span>
-            </div>
-            <span className="lp-seq-status is-ready">{selectedRover?.id.toUpperCase() ?? 'SET'}</span>
+            <span className="lp-seq-title">Rover</span>
+            <span className="lp-seq-status is-ready">
+              {selectedRover?.id.toUpperCase() ?? 'SET'}
+            </span>
           </div>
 
-          {/* Step 02: Start Point Button */}
+          {/* Step 02: Start Point */}
           <div className={`lp-sequence-item ${start ? 'is-complete' : 'is-active'}`}>
             <span className="lp-seq-num">02</span>
-            <div className="lp-seq-info">
-              <span className="lp-seq-title">Start Point</span>
-              <span className="lp-seq-sub">
-                {start ? `Grid: ${start[0]}, ${start[1]}` : 'Click button to place on map'}
-              </span>
-            </div>
-            <button
-              type="button"
-              className={`lp-seq-action-btn ${clickMode === 'start' ? 'is-picking-start' : ''} ${start ? 'is-set-start' : ''}`}
-              onClick={() => onSetClickMode(clickMode === 'start' ? 'idle' : 'start')}
-            >
-              {start
-                ? `START [${start[0]}, ${start[1]}]`
-                : clickMode === 'start'
-                  ? 'Pick on Map...'
-                  : 'Select Start'}
-            </button>
+            <span className="lp-seq-title">Start</span>
+            <span className={`lp-seq-status ${start ? 'is-ready' : ''}`}>
+              {start ? `${start[0]}, ${start[1]}` : clickMode === 'start' ? 'PICKING' : 'SELECT'}
+            </span>
           </div>
 
-          {/* Step 03: Goal Target Button */}
+          {/* Step 03: Goal Target */}
           <div className={`lp-sequence-item ${goal ? 'is-complete' : start ? 'is-active' : ''}`}>
             <span className="lp-seq-num">03</span>
-            <div className="lp-seq-info">
-              <span className="lp-seq-title">Goal Target</span>
-              <span className="lp-seq-sub">
-                {goal ? `Grid: ${goal[0]}, ${goal[1]}` : 'Click button to place on map'}
-              </span>
-            </div>
-            <button
-              type="button"
-              className={`lp-seq-action-btn ${clickMode === 'goal' ? 'is-picking-goal' : ''} ${goal ? 'is-set-goal' : ''}`}
-              onClick={() => onSetClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
-            >
-              {goal
-                ? `GOAL [${goal[0]}, ${goal[1]}]`
-                : clickMode === 'goal'
-                  ? 'Pick on Map...'
-                  : 'Select Goal'}
-            </button>
+            <span className="lp-seq-title">Goal</span>
+            <span className={`lp-seq-status ${goal ? 'is-ready' : ''}`}>
+              {goal ? `${goal[0]}, ${goal[1]}` : clickMode === 'goal' ? 'PICKING' : 'WAITING'}
+            </span>
           </div>
 
           {/* Step 04: Path Solution Status */}
           <div className={`lp-sequence-item ${hasRoute ? 'is-complete' : ''}`}>
             <span className="lp-seq-num">04</span>
-            <div className="lp-seq-info">
-              <span className="lp-seq-title">Path Solution</span>
-              <span className="lp-seq-sub">
-                {hasRoute ? 'Ready for engineering review' : 'Kinematic A* solver'}
-              </span>
-            </div>
+            <span className="lp-seq-title">Route</span>
             <span className={`lp-seq-status ${hasRoute ? 'is-ready' : ''}`}>
-              {hasRoute ? 'LOCKED' : 'WAITING'}
+              {hasRoute ? 'LOCKED' : 'NOT GENERATED'}
             </span>
           </div>
+        </div>
+
+        {/* The pickers, full width under the list they report on. Cramming a
+            button into each row squeezed the sub-line to one word per line at
+            the 264px the design actually asks for. */}
+        <div className="lp-pick-actions">
+          <button
+            type="button"
+            className={`lp-pick-btn ${clickMode === 'start' ? 'is-picking' : ''} ${start ? 'is-set-start' : ''}`}
+            onClick={() => onSetClickMode(clickMode === 'start' ? 'idle' : 'start')}
+          >
+            {start
+              ? `START ${start[0]}, ${start[1]}`
+              : clickMode === 'start'
+                ? 'Pick on map…'
+                : 'Select Start'}
+          </button>
+          <button
+            type="button"
+            className={`lp-pick-btn ${clickMode === 'goal' ? 'is-picking' : ''} ${goal ? 'is-set-goal' : ''}`}
+            onClick={() => onSetClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
+            disabled={!start}
+          >
+            {goal
+              ? `GOAL ${goal[0]}, ${goal[1]}`
+              : clickMode === 'goal'
+                ? 'Pick on map…'
+                : 'Select Goal'}
+          </button>
         </div>
 
         {/* Action Controls directly in the Left Dashboard */}
@@ -221,6 +212,70 @@ export const MissionSetupPanel: React.FC = () => {
         <div className="lp-section-header-row">
           <span className="lp-meta-label">ROUTE PRIORITIES</span>
         </div>
+
+        {/* Mission profile presets (GET /api/profiles). Selecting one writes
+            its four weights into the sliders below; its constraints ride along
+            as read-only context. */}
+        {profiles && Object.keys(profiles).length > 0 && (
+          <div className="lp-profile-block">
+            <div className="lp-profile-head">
+              <span className="lp-profile-caption">MISSION PROFILE</span>
+              <span className={`lp-profile-active-tag ${activeProfile ? '' : 'is-custom'}`}>
+                {activeProfile ? activeProfile.name : 'Custom'}
+              </span>
+            </div>
+
+            <div className="lp-profile-chips" role="group" aria-label="Mission profile presets">
+              {Object.entries(profiles).map(([id, profile]) => {
+                const isActive = id === activeId
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`lp-profile-chip ${isActive ? 'is-active' : ''}`}
+                    style={{ '--profile-color': profile.color } as React.CSSProperties}
+                    onClick={() => applyProfile(id)}
+                    title={profile.description}
+                    aria-pressed={isActive}
+                  >
+                    <span className="lp-profile-dot" />
+                    {profile.name}
+                  </button>
+                )
+              })}
+            </div>
+
+            {activeProfile && (
+              <div className="lp-profile-constraints">
+                {CONSTRAINT_CONTROLS.map(({ key, label, format }) => {
+                  const enforced = activeProfile.constraint_handling[key] === 'enforced_in_search'
+                  return (
+                    <div key={key} className="lp-profile-constraint">
+                      <span className="lp-constraint-label">{label}</span>
+                      <strong className="lp-constraint-value">
+                        {format(activeProfile.constraints[key])}
+                      </strong>
+                      <span
+                        className={`lp-constraint-badge ${enforced ? 'is-enforced' : 'is-verified'}`}
+                        title={
+                          enforced
+                            ? 'Enforced in search: the A* solver refuses cells that violate this limit.'
+                            : 'Verified after simulation: checked against the simulated route; a plan can exceed it.'
+                        }
+                      >
+                        {enforced ? 'IN SEARCH' : 'POST-SIM'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        {profilesLoading && !profiles && (
+          <p className="lp-section-explainer">Loading mission profiles…</p>
+        )}
+
         <p className="lp-section-explainer">
           Higher priority weights force the A* solver to penalize and circumvent that hazard more aggressively.
         </p>

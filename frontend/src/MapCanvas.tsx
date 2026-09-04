@@ -278,8 +278,8 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
         style={{
           width: '100%',
           height: '100%',
-          border: '1px solid rgba(160, 160, 255, 0.2)',
-          background: '#030408',
+          border: '1px solid rgba(179, 165, 255, 0.2)',
+          background: '#05070d',
           boxShadow: '0 24px 64px rgba(0, 0, 0, 0.45)',
           cursor: clickMode === 'idle' ? 'default' : 'crosshair',
           imageRendering: viewMode === 'traversability' || viewMode === 'cost' ? 'pixelated' : 'auto',
@@ -294,8 +294,8 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(3, 4, 8, 0.86)',
-            color: '#c7c5d3',
+            background: 'rgba(5, 7, 13, 0.86)',
+            color: '#c8cddb',
             fontFamily: "'IBM Plex Mono', monospace",
             fontSize: 12,
             letterSpacing: '0.14em',
@@ -326,7 +326,7 @@ function redraw(
   if (baseImage) {
     ctx.putImageData(baseImage, 0, 0)
   } else {
-    ctx.fillStyle = '#030408'
+    ctx.fillStyle = '#05070d'
     ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE)
   }
 
@@ -363,7 +363,7 @@ function redraw(
     if (currentStep !== null && currentStep < waypoints.length) {
       const rover = waypoints[currentStep]
       ctx.save()
-      ctx.fillStyle = '#f5f7ff'
+      ctx.fillStyle = '#e7eaf1'
       ctx.shadowColor = ROUTE_CYAN
       ctx.shadowBlur = 14
       ctx.beginPath()
@@ -413,7 +413,7 @@ function drawHoverCrosshair(
   const y = row + 0.5
 
   ctx.save()
-  ctx.strokeStyle = 'rgba(196, 203, 255, 0.18)'
+  ctx.strokeStyle = 'rgba(179, 165, 255, 0.18)'
   ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(x, 0)
@@ -422,7 +422,7 @@ function drawHoverCrosshair(
   ctx.lineTo(CANVAS_SIZE, y)
   ctx.stroke()
 
-  ctx.strokeStyle = 'rgba(245, 247, 255, 0.92)'
+  ctx.strokeStyle = 'rgba(231, 234, 241, 0.92)'
   ctx.lineWidth = 1.2
   ctx.beginPath()
   ctx.moveTo(x - 8, y)
@@ -431,7 +431,7 @@ function drawHoverCrosshair(
   ctx.lineTo(x, y + 8)
   ctx.stroke()
 
-  ctx.fillStyle = '#f5f7ff'
+  ctx.fillStyle = '#e7eaf1'
   ctx.beginPath()
   ctx.arc(x, y, 1.8, 0, Math.PI * 2)
   ctx.fill()
@@ -632,7 +632,7 @@ function drawMarker(
   ctx.fill()
 
   ctx.shadowBlur = 0
-  ctx.fillStyle = '#050507'
+  ctx.fillStyle = '#05070d'
   ctx.font = 'bold 8px IBM Plex Mono, monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'

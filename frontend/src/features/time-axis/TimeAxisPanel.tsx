@@ -1,4 +1,5 @@
 import type { Plan4DResponse, SeriesManifest } from '../../net/types'
+import { cleanShadowReason } from './reason'
 import type { SeriesField } from './useTimeAxis'
 import './time-axis.css'
 
@@ -31,6 +32,7 @@ export function TimeAxisPanel({
 }) {
   const sun = manifest?.sun[sliceIndex] ?? null
   const hours = manifest ? sliceIndex * manifest.slice_hours : 0
+  const shadowReason = cleanShadowReason(manifest?.shadow_model.reason)
 
   return (
     <div className="lp-time-card">
@@ -68,12 +70,16 @@ export function TimeAxisPanel({
 
       {/* The honesty gate. A static cube gets said out loud, not animated.
           The reason comes from the response rather than being guessed at:
-          the usual cause is a request with no epoch, not a missing cache. */}
+          the usual cause is a request with no epoch, not a missing cache. It
+          goes through cleanShadowReason first -- when the backend has no SPICE
+          kernels loaded the field arrives carrying the whole CSPICE error
+          banner, and a toolkit dump in the dock is an environment error shown
+          to an operator, which section 29 rules out. */}
       {manifest && !timeVarying ? (
         <p className="lp-time-note lp-time-warn">
           No time series — this cube does not vary with time, so it is not
           animated.
-          {manifest.shadow_model.reason ? ` ${manifest.shadow_model.reason}` : ''}
+          {shadowReason ? ` ${shadowReason}` : ''}
         </p>
       ) : null}
 
@@ -104,7 +110,9 @@ export function TimeAxisPanel({
         </p>
       ) : null}
 
-      {error ? <p className="lp-time-note lp-time-warn">{error}</p> : null}
+      {error ? (
+        <p className="lp-time-note lp-time-warn">{cleanShadowReason(error) ?? error}</p>
+      ) : null}
     </div>
   )
 }

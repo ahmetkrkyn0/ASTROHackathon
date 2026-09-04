@@ -1,8 +1,8 @@
 .lp-provenance-card {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 10px;
+  border: 1px solid rgba(139, 148, 166, 0.22);
+  border-radius: var(--radius);
   padding: 12px 14px;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(12, 16, 24, 0.45);
 }
 
 .lp-provenance-head {
@@ -16,7 +16,7 @@
 .lp-provenance-name {
   font-size: 12px;
   letter-spacing: 0.04em;
-  color: #cbd5f5;
+  color: var(--text-2);
 }
 
 .lp-provenance-badge {
@@ -25,24 +25,24 @@
   letter-spacing: 0.09em;
   text-transform: uppercase;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   border: 1px solid currentColor;
 }
 
 /* Ranked weakest to strongest, and coloured that way on purpose: a
    synthetic layer should be the one that catches the eye. */
-.lp-provenance-synthetic { color: #fbbf24; }
-.lp-provenance-derived   { color: #60a5fa; }
-.lp-provenance-model     { color: #a78bfa; }
-.lp-provenance-measured  { color: #34d399; }
-.lp-provenance-unknown   { color: #94a3b8; }
+.lp-provenance-synthetic { color: var(--risk-med); }
+.lp-provenance-derived   { color: var(--cyan); }
+.lp-provenance-model     { color: var(--lavender); }
+.lp-provenance-measured  { color: var(--risk-low); }
+.lp-provenance-unknown   { color: var(--text-muted); }
 
 .lp-provenance-why,
 .lp-provenance-desc {
   margin: 0 0 8px;
   font-size: 11px;
   line-height: 1.5;
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .lp-provenance-facts {
@@ -57,15 +57,15 @@
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--text-dim-2);
 }
 
 .lp-provenance-facts dd {
   margin: 0;
   font-size: 12px;
-  color: #e2e8f0;
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
-.lp-provenance-note { margin: 0; font-size: 11px; color: #94a3b8; }
-.lp-provenance-warn { color: #fbbf24; }
+.lp-provenance-note { margin: 0; font-size: 11px; color: var(--text-muted); }
+.lp-provenance-warn { color: var(--risk-med); }

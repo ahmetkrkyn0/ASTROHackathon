@@ -45,10 +45,11 @@ export type MapDimension = '2d' | '3d'
  * onu yalnizca degistirir; tanimi orada tutmak, bir feature'in "hangi modda
  * gorunurum" sorusunu cevaplamak icin bir bilesene bagimli olmasi demekti.
  *
- * `fleet` bir slot degil: o modda kokpitin tamami `FleetSelectionView` ile yer
- * degistiriyor. Kabuk hangar/kokpit karari verir, slot'lar kokpitin icindedir.
+ * Iki calisma modu var, bir pipeline degil: ayni mission context korunur,
+ * degisen sey kullanicinin hedefi ve bilgi hiyerarsisi. Rover secimi kendi
+ * ekrani degil, sol raildeki karttan acilan bir drawer.
  */
-export type MissionMode = 'fleet' | 'plan' | 'analyze'
+export type MissionMode = 'plan' | 'analyze'
 
 /**
  * The readout under the map's coordinate block.

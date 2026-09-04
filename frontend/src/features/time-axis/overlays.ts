@@ -63,7 +63,7 @@ export function timeAxisOverlays(
       kind: 'polyline',
       id: 'time-axis-route',
       points: plan4d.path_pixels.map(([row, col]) => ({ row, col })),
-      style: { color: '#facc15', widthPx: 2.5, opacity: 0.95 },
+      style: { color: '#e8c85a', widthPx: 2.5, opacity: 0.95 },
     })
   }
 

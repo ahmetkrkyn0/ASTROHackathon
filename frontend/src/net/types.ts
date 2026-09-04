@@ -306,3 +306,37 @@ export interface ReferenceMissions {
     [key: string]: unknown
   }>
 }
+
+// ── GET /api/profiles ──────────────────────────────────────────────────────
+
+/** The four constraints every mission profile declares (scenarios.py). */
+export interface ProfileConstraints {
+  max_shadow_h: number
+  max_slope_deg: number
+  max_energy_wh: number
+  min_soc: number
+}
+
+/**
+ * Where each constraint is checked. `enforced_in_search` means the A* solver
+ * already refuses cells that violate it, so the returned route cannot break it;
+ * `verified_after_simulation` means it is only reported against the simulated
+ * route, and a plan CAN come back marked as exceeding it. The backend computes
+ * this per constraint and the panel surfaces it -- an enforced limit and a
+ * checked-afterward limit are not the same promise.
+ */
+export type ConstraintHandling = 'enforced_in_search' | 'verified_after_simulation'
+
+export interface MissionProfile {
+  /** Turkish display name, e.g. "Enerji Tasarrufu". */
+  name: string
+  description: string
+  weights: PlanWeights
+  constraints: ProfileConstraints
+  /** Hex accent the backend assigns the profile, reused for the chip. */
+  color: string
+  constraint_handling: Record<keyof ProfileConstraints, ConstraintHandling>
+}
+
+/** Keyed by profile id: balanced, energy_saver, fast_recon, shadow_traverse. */
+export type MissionProfiles = Record<string, MissionProfile>

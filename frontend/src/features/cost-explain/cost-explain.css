@@ -1,8 +1,8 @@
 .lp-cost-card {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 10px;
+  border: 1px solid rgba(139, 148, 166, 0.22);
+  border-radius: var(--radius);
   padding: 12px 14px;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(12, 16, 24, 0.45);
 }
 
 .lp-cost-head {
@@ -14,14 +14,14 @@
 
 .lp-cost-cell {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .lp-cost-verdict {
   font-size: 15px;
   font-weight: 700;
-  color: #e2e8f0;
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
@@ -29,14 +29,14 @@
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #f87171;
+  color: var(--risk-crit);
 }
 
 .lp-cost-reason {
   margin: 0 0 10px;
   font-size: 11px;
   line-height: 1.5;
-  color: #fca5a5;
+  color: var(--risk-crit);
 }
 
 .lp-cost-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
@@ -50,29 +50,29 @@
 
 .lp-cost-label {
   font-size: 11px;
-  color: #cbd5f5;
+  color: var(--text-2);
   display: flex;
   flex-direction: column;
 }
 
-.lp-cost-weight { font-size: 9px; color: #64748b; font-style: normal; }
+.lp-cost-weight { font-size: 9px; color: var(--text-dim-2); font-style: normal; }
 
 .lp-cost-track {
   height: 7px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.16);
+  border-radius: var(--radius);
+  background: rgba(139, 148, 166, 0.16);
   overflow: hidden;
 }
 
-.lp-cost-fill { display: block; height: 100%; background: #60a5fa; }
+.lp-cost-fill { display: block; height: 100%; background: var(--cyan); }
 .lp-cost-fill-inf { background: repeating-linear-gradient(
-  45deg, #f87171 0 5px, rgba(248, 113, 113, 0.45) 5px 10px); }
+  45deg, var(--risk-crit) 0 5px, rgba(248, 113, 113, 0.45) 5px 10px); }
 
 .lp-cost-value {
   font-size: 11px;
   text-align: right;
-  color: #e2e8f0;
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
-.lp-cost-note { margin: 0; font-size: 11px; color: #94a3b8; }
+.lp-cost-note { margin: 0; font-size: 11px; color: var(--text-muted); }

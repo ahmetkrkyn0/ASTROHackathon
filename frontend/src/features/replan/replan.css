@@ -1,15 +1,15 @@
 .lp-replan-card {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 10px;
+  border: 1px solid rgba(139, 148, 166, 0.22);
+  border-radius: var(--radius);
   padding: 12px 14px;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(12, 16, 24, 0.45);
 }
 
 .lp-replan-hint {
   margin: 0 0 10px;
   font-size: 10px;
   line-height: 1.5;
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .lp-replan-form { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
@@ -20,29 +20,29 @@
   font-size: 9px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--text-dim-2);
 }
 
 .lp-replan-field input {
-  background: rgba(2, 6, 23, 0.65);
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 6px;
+  background: rgba(12, 16, 24, 0.65);
+  border: 1px solid rgba(139, 148, 166, 0.24);
+  border-radius: var(--radius);
   padding: 4px 7px;
-  color: #e2e8f0;
+  color: var(--text-2);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-.lp-replan-field input::placeholder { color: #475569; font-size: 10px; }
+.lp-replan-field input::placeholder { color: var(--text-dimmest); font-size: 10px; }
 
 .lp-replan-actions { display: flex; gap: 7px; margin: 11px 0 9px; }
 
 .lp-replan-actions button {
   flex: 1;
-  border-radius: 7px;
-  border: 1px solid rgba(56, 189, 248, 0.4);
-  background: rgba(56, 189, 248, 0.12);
-  color: #bae6fd;
+  border-radius: var(--radius);
+  border: 1px solid rgba(79, 216, 240, 0.4);
+  background: rgba(79, 216, 240, 0.12);
+  color: var(--cyan-text);
   font-size: 11px;
   padding: 6px 8px;
   cursor: pointer;
@@ -50,7 +50,7 @@
 
 .lp-replan-actions button:disabled { opacity: 0.5; cursor: default; }
 
-.lp-replan-verdict { margin: 0 0 8px; font-size: 12px; color: #e2e8f0; }
+.lp-replan-verdict { margin: 0 0 8px; font-size: 12px; color: var(--text-2); }
 
 .lp-replan-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
 
@@ -59,27 +59,27 @@
   grid-template-columns: 1fr auto;
   gap: 4px 9px;
   padding: 5px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   border-left: 3px solid transparent;
-  background: rgba(148, 163, 184, 0.07);
+  background: rgba(139, 148, 166, 0.07);
   font-size: 11px;
 }
 
-.lp-replan-fired     { border-left-color: #f87171; }
-.lp-replan-clear     { border-left-color: #34d399; }
+.lp-replan-fired     { border-left-color: var(--risk-crit); }
+.lp-replan-clear     { border-left-color: var(--risk-low); }
 /* Amber, not green: a trigger that could not be evaluated is an open
    question, not an all-clear. */
-.lp-replan-unchecked { border-left-color: #fbbf24; }
+.lp-replan-unchecked { border-left-color: var(--risk-med); }
 
-.lp-replan-name { color: #cbd5f5; }
-.lp-replan-status { color: #94a3b8; font-size: 10px; }
+.lp-replan-name { color: var(--text-2); }
+.lp-replan-status { color: var(--text-muted); font-size: 10px; }
 
 .lp-replan-detail {
   grid-column: 1 / -1;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 10px;
   line-height: 1.45;
 }
 
-.lp-replan-note { margin: 8px 0 0; font-size: 11px; color: #94a3b8; }
-.lp-replan-warn { color: #fbbf24; }
+.lp-replan-note { margin: 8px 0 0; font-size: 11px; color: var(--text-muted); }
+.lp-replan-warn { color: var(--risk-med); }
