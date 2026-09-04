@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import type { PlanWeights } from '../../api'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
+import type { ProfileConstraints } from '../../net/types'
+import { useMissionProfiles } from './useMissionProfiles'
 import RoverSelectDrawer from './RoverSelectDrawer'
 
 const WEIGHT_CONTROLS: Array<{
@@ -12,6 +14,18 @@ const WEIGHT_CONTROLS: Array<{
   { key: 'w_energy', label: 'Energy Use', desc: 'Minimizes battery kWh draw during transit' },
   { key: 'w_shadow', label: 'Shadow Exposure', desc: 'Avoids permanently shadowed cold traps' },
   { key: 'w_thermal', label: 'Thermal Risk', desc: 'Steers clear of extreme cryogenic zones' },
+]
+
+/** Display order + formatting for the four constraints a profile carries. */
+const CONSTRAINT_CONTROLS: Array<{
+  key: keyof ProfileConstraints
+  label: string
+  format: (v: number) => string
+}> = [
+  { key: 'max_slope_deg', label: 'Max Slope', format: (v) => `${v.toFixed(0)}°` },
+  { key: 'max_shadow_h', label: 'Max Shadow', format: (v) => `${v.toFixed(0)} h` },
+  { key: 'max_energy_wh', label: 'Energy Budget', format: (v) => `${v.toFixed(0)} Wh` },
+  { key: 'min_soc', label: 'Min SoC', format: (v) => `${(v * 100).toFixed(0)}%` },
 ]
 
 export const MissionSetupPanel: React.FC = () => {
@@ -27,6 +41,8 @@ export const MissionSetupPanel: React.FC = () => {
   } = useMissionActions()
   const hasRoute = Boolean(planResult)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const { profiles, activeId, applyProfile, loading: profilesLoading } = useMissionProfiles()
+  const activeProfile = activeId && profiles ? profiles[activeId] : null
 
   const handleWeightChange = (key: keyof PlanWeights, val: number) => {
     onWeightsChange({
@@ -221,6 +237,70 @@ export const MissionSetupPanel: React.FC = () => {
         <div className="lp-section-header-row">
           <span className="lp-meta-label">ROUTE PRIORITIES</span>
         </div>
+
+        {/* Mission profile presets (GET /api/profiles). Selecting one writes
+            its four weights into the sliders below; its constraints ride along
+            as read-only context. */}
+        {profiles && Object.keys(profiles).length > 0 && (
+          <div className="lp-profile-block">
+            <div className="lp-profile-head">
+              <span className="lp-profile-caption">MISSION PROFILE</span>
+              <span className={`lp-profile-active-tag ${activeProfile ? '' : 'is-custom'}`}>
+                {activeProfile ? activeProfile.name : 'Custom'}
+              </span>
+            </div>
+
+            <div className="lp-profile-chips" role="group" aria-label="Mission profile presets">
+              {Object.entries(profiles).map(([id, profile]) => {
+                const isActive = id === activeId
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`lp-profile-chip ${isActive ? 'is-active' : ''}`}
+                    style={{ '--profile-color': profile.color } as React.CSSProperties}
+                    onClick={() => applyProfile(id)}
+                    title={profile.description}
+                    aria-pressed={isActive}
+                  >
+                    <span className="lp-profile-dot" />
+                    {profile.name}
+                  </button>
+                )
+              })}
+            </div>
+
+            {activeProfile && (
+              <div className="lp-profile-constraints">
+                {CONSTRAINT_CONTROLS.map(({ key, label, format }) => {
+                  const enforced = activeProfile.constraint_handling[key] === 'enforced_in_search'
+                  return (
+                    <div key={key} className="lp-profile-constraint">
+                      <span className="lp-constraint-label">{label}</span>
+                      <strong className="lp-constraint-value">
+                        {format(activeProfile.constraints[key])}
+                      </strong>
+                      <span
+                        className={`lp-constraint-badge ${enforced ? 'is-enforced' : 'is-verified'}`}
+                        title={
+                          enforced
+                            ? 'Enforced in search: the A* solver refuses cells that violate this limit.'
+                            : 'Verified after simulation: checked against the simulated route; a plan can exceed it.'
+                        }
+                      >
+                        {enforced ? 'IN SEARCH' : 'POST-SIM'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        {profilesLoading && !profiles && (
+          <p className="lp-section-explainer">Loading mission profiles…</p>
+        )}
+
         <p className="lp-section-explainer">
           Higher priority weights force the A* solver to penalize and circumvent that hazard more aggressively.
         </p>

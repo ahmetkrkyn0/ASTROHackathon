@@ -633,7 +633,11 @@ select {
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
-  overflow: hidden;
+  /* Scroll the rail as one column. Was overflow:hidden, which clipped every
+     stacked feature past the fold once the registry put more than one panel
+     here; the panels no longer scroll individually (see .lp-panel-content). */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .right-rail {
@@ -641,7 +645,8 @@ select {
   display: flex;
   flex-direction: column;
   transition: width 0.3s ease;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .left-rail.is-collapsed,
@@ -2616,8 +2621,14 @@ select {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  height: 100%;
-  overflow-y: auto;
+  /* Natural height, not height:100%. The rail stacks this beside rail-section
+     siblings (registry.ts), and height:100% + the flex column's shrink made
+     this panel collapse to ~32px while a tall sibling took the rest -- the
+     whole mission-setup panel then lived in a clipped sliver. The rail itself
+     scrolls now (see .left-rail/.right-rail), so each panel just takes the
+     room its content needs. */
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 .lp-panel-section {
@@ -2726,6 +2737,139 @@ select {
   font-size: 13px;
   color: #e2e8f0;
   font-weight: 600;
+}
+
+/* Mission Profile Presets */
+.lp-profile-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(5, 8, 15, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+}
+
+.lp-profile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lp-profile-caption {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.lp-profile-active-tag {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.lp-profile-active-tag.is-custom {
+  color: #64748b;
+}
+
+.lp-profile-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lp-profile-chip {
+  --profile-color: var(--accent-lavender);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-line);
+  background: rgba(16, 22, 36, 0.7);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.lp-profile-chip:hover {
+  border-color: var(--profile-color);
+  color: #f1f5f9;
+}
+
+.lp-profile-chip.is-active {
+  border-color: var(--profile-color);
+  background: color-mix(in srgb, var(--profile-color) 16%, transparent);
+  color: #f8fafc;
+}
+
+.lp-profile-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--profile-color);
+  flex-shrink: 0;
+}
+
+.lp-profile-constraints {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.lp-profile-constraint {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 8px;
+  background: rgba(16, 22, 36, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+}
+
+.lp-constraint-label {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.lp-constraint-value {
+  font-family: var(--font-data);
+  font-size: 13px;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.lp-constraint-badge {
+  font-family: var(--font-data);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  width: fit-content;
+  cursor: help;
+}
+
+/* Enforced during the A* search: the returned route cannot break it. */
+.lp-constraint-badge.is-enforced {
+  color: var(--accent-mint);
+  background: rgba(46, 229, 157, 0.12);
+  border: 1px solid rgba(46, 229, 157, 0.3);
+}
+
+/* Verified only after simulation: a returned plan can exceed it. */
+.lp-constraint-badge.is-verified {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.28);
 }
 
 /* Priority Sliders */
