@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react'
 import type { MissionMode } from '../mission/types'
+import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
 import { MissionSetup } from './mission-setup'
 
@@ -52,6 +53,8 @@ export interface FeatureRegistration {
  * those tasks independently reviewable.
  */
 export const FEATURES: readonly FeatureRegistration[] = [
+  // No modes: App.tsx used to render this panel in both plan and analyze branches.
+  { id: 'mission-context', slot: 'rightRail', Component: MissionContextFeature },
   // Plan only: meaningful after the hangar's rover selection is complete.
   { id: 'mission-setup', slot: 'leftRail', Component: MissionSetup, modes: ['plan'] },
   // analyze only. App.tsx rendered this as the else-branch of

@@ -69,6 +69,22 @@ describe('selectFeatures', () => {
 })
 
 describe('FEATURES', () => {
+  it('shows mission context in the right rail during both cockpit modes', () => {
+    // Removing this registration, giving it a mode list, or putting it in a
+    // different rail silently takes the operator's context away from one of
+    // the two modes that need it.
+    const missionContext = FEATURES.find((feature) => feature.id === 'mission-context')
+
+    expect(missionContext?.slot).toBe('rightRail')
+    expect(Object.prototype.hasOwnProperty.call(missionContext ?? {}, 'modes')).toBe(false)
+    expect(selectFeatures(FEATURES, 'rightRail', 'plan').map((feature) => feature.id)).toContain(
+      'mission-context',
+    )
+    expect(selectFeatures(FEATURES, 'rightRail', 'analyze').map((feature) => feature.id)).toContain(
+      'mission-context',
+    )
+  })
+
   it('shows mission setup in the left rail only during plan mode', () => {
     expect(selectFeatures(FEATURES, 'leftRail', 'plan').map((feature) => feature.id)).toContain(
       'mission-setup',

@@ -28,7 +28,6 @@ import {
 import TopBar, { type MissionMode } from './components/TopBar/TopBar'
 import LayerDropdown from './components/Map/LayerDropdown'
 import RouteSolvingOverlay from './components/Map/RouteSolvingOverlay'
-import MissionContextPanel from './components/Planning/MissionContextPanel'
 import RouteAnalysisInspector from './components/Analysis/RouteAnalysisInspector'
 import PlaybackBar from './components/Analysis/PlaybackBar'
 import MissionAssistant from './components/Assistant/MissionAssistant'
@@ -799,16 +798,7 @@ export default function App() {
 
             {rightOpen && (
               <>
-                {missionMode === 'plan' ? (
-                  <MissionContextPanel
-                    dataLinkActive={hasData}
-                    missionStatus={missionStatus}
-                    activeLayer={viewMode}
-                    telemetry={focusTelemetry}
-                    start={start}
-                    goal={goal}
-                  />
-                ) : planResult ? (
+                {missionMode !== 'plan' && planResult && (
                   <RouteAnalysisInspector
                     planResult={planResult}
                     playbackStep={routePlaybackStep}
@@ -816,15 +806,6 @@ export default function App() {
                     heaterW={heaterW}
                     onPayloadWChange={setPayloadW}
                     onHeaterWChange={setHeaterW}
-                  />
-                ) : (
-                  <MissionContextPanel
-                    dataLinkActive={hasData}
-                    missionStatus={missionStatus}
-                    activeLayer={viewMode}
-                    telemetry={focusTelemetry}
-                    start={start}
-                    goal={goal}
                   />
                 )}
               </>

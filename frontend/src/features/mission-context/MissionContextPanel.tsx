@@ -1,25 +1,5 @@
-import React from 'react'
 import type { MapViewMode } from '../../MapCanvas'
-
-interface FocusTelemetry {
-  row: number
-  col: number
-  lat: number
-  lon: number
-  altitudeM: number | null
-  thermalC: number | null
-  resolutionM: number
-  spanKm: number
-}
-
-interface MissionContextPanelProps {
-  dataLinkActive: boolean
-  missionStatus: string
-  activeLayer: MapViewMode
-  telemetry: FocusTelemetry
-  start: [number, number] | null
-  goal: [number, number] | null
-}
+import { useFocusTelemetry, useMission } from '../../mission/MissionContext'
 
 const LAYER_TITLES: Record<MapViewMode, string> = {
   surface: 'Lunar Surface DEM (Digital Elevation Model)',
@@ -31,14 +11,12 @@ const LAYER_TITLES: Record<MapViewMode, string> = {
   aspect: 'Topographic Aspect Orientation Grid',
 }
 
-export const MissionContextPanel: React.FC<MissionContextPanelProps> = ({
-  dataLinkActive,
-  missionStatus,
-  activeLayer,
-  telemetry,
-  start,
-  goal,
-}) => {
+export default function MissionContextPanel() {
+  const { gridMeta, layerError, isSolving, planResult, activeViewMode, start, goal } = useMission()
+  const focus = useFocusTelemetry()
+  const dataLinkActive = Boolean(gridMeta)
+  const missionStatus = layerError ? 'ATTN' : isSolving ? 'SOLVING' : planResult ? 'LOCKED' : 'NOMINAL'
+  const activeLayer = activeViewMode
   return (
     <div className="lp-panel-content">
       {/* Telemetry Header */}
@@ -60,11 +38,11 @@ export const MissionContextPanel: React.FC<MissionContextPanelProps> = ({
           </div>
           <div className="lp-context-cell">
             <span className="lp-spec-label">RESOLUTION</span>
-            <strong className="lp-spec-val">{telemetry.resolutionM} m/px</strong>
+            <strong className="lp-spec-val">{focus.resolutionM} m/px</strong>
           </div>
           <div className="lp-context-cell">
             <span className="lp-spec-label">EXTENT</span>
-            <strong className="lp-spec-val">{telemetry.spanKm.toFixed(1)} × {telemetry.spanKm.toFixed(1)} km</strong>
+            <strong className="lp-spec-val">{focus.spanKm.toFixed(1)} × {focus.spanKm.toFixed(1)} km</strong>
           </div>
           <div className="lp-context-cell">
             <span className="lp-spec-label">SYSTEM STATE</span>
@@ -93,30 +71,30 @@ export const MissionContextPanel: React.FC<MissionContextPanelProps> = ({
         <div className="lp-telemetry-mono-grid">
           <div className="lp-telemetry-mono-cell">
             <span className="lp-mono-label">PIXEL [R, C]</span>
-            <span className="lp-mono-val">{telemetry.row}, {telemetry.col}</span>
+            <span className="lp-mono-val">{focus.row}, {focus.col}</span>
           </div>
           <div className="lp-telemetry-mono-cell">
             <span className="lp-mono-label">LATITUDE</span>
             <span className="lp-mono-val">
-              {Number.isFinite(telemetry.lat) ? `${telemetry.lat.toFixed(4)}°` : '--'}
+              {Number.isFinite(focus.lat) ? `${focus.lat.toFixed(4)}°` : '--'}
             </span>
           </div>
           <div className="lp-telemetry-mono-cell">
             <span className="lp-mono-label">LONGITUDE</span>
             <span className="lp-mono-val">
-              {Number.isFinite(telemetry.lon) ? `${telemetry.lon.toFixed(4)}°` : '--'}
+              {Number.isFinite(focus.lon) ? `${focus.lon.toFixed(4)}°` : '--'}
             </span>
           </div>
           <div className="lp-telemetry-mono-cell">
             <span className="lp-mono-label">ELEVATION</span>
             <span className="lp-mono-val">
-              {telemetry.altitudeM !== null ? `${telemetry.altitudeM.toFixed(1)} m` : '--'}
+              {focus.altitudeM !== null ? `${focus.altitudeM.toFixed(1)} m` : '--'}
             </span>
           </div>
           <div className="lp-telemetry-mono-cell">
             <span className="lp-mono-label">SURFACE TEMP</span>
             <span className="lp-mono-val">
-              {telemetry.thermalC !== null ? `${telemetry.thermalC.toFixed(1)} °C` : '--'}
+              {focus.thermalC !== null ? `${focus.thermalC.toFixed(1)} °C` : '--'}
             </span>
           </div>
         </div>
@@ -145,6 +123,3 @@ export const MissionContextPanel: React.FC<MissionContextPanelProps> = ({
     </div>
   )
 }
-
-export default MissionContextPanel
-
