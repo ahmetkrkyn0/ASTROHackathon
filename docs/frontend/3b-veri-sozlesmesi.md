@@ -709,6 +709,109 @@ sistematik yüksek: gürültü gradyanı şişirir); `route_feasible` 1/100;
 `with_sherpa` tamamlanma 0,178 (B5'te 0,296). Süre: seri 0,2–0,4 s, bant
 1–4 s (100 klon), plan bloğu milisaniye.
 
+## Formal güvenlik marjları — FRETISH + STL robustness (4 Eylül 2026 eki, D3)
+
+Güvenlik gereksinimleri NASA FRET'in yapılandırılmış doğal dili FRETISH
+kalıbında elle yazıldı ([docs/requirements/lunapath.fret.json](../requirements/lunapath.fret.json),
+[README](../requirements/README.md)), STL'e elle çevrildi ve her planlanan rota
+bu formüllere karşı **robustness** (ρ) ile denetleniyor: ρ ≥ 0 sağlandı,
+ρ < 0 ihlal, |ρ| gereksinimin biriminde marj (saat / °C / yüzde puanı /
+derece / metre). Motor RTAMT 0.3.5 (kuruluysa) + yerleşik değerlendirici,
+her istekte çapraz kontrol. İddia sınırı her yanıtta: **çalışma-zamanı
+izleme, model checking ile ispat değil** (`monitor.claim`). Mevcut alanlar
+değişmedi; aşağıdakiler yalnızca eklendi.
+
+### `POST /api/plan`, `POST /api/plan-4d`, `POST /api/compare`, `POST /api/plan-multi` — `safety_margins` bloğu
+
+Plan yanıtının üst düzeyinde; compare/plan-multi'de her sonucun içinde
+(simülasyonu düşen sonuçta alan yok).
+
+```json
+"safety_margins": {
+  "monitor": { "engine": "rtamt", "rtamt_version": "0.3.5",
+               "cross_check": { "engine": "builtin", "max_abs_diff": 0.0 },
+               "semantics": "discrete-time offline STL, space robustness ...",
+               "trace": { "kind": "4d", "n_samples": 41, "duration_h": 7.36, "complete": true,
+                          "stranded": false, "extended_h": null, "thermal_source": "static_layer", "..." : "..." },
+               "recharge_deadline_h": 6.0,
+               "claim": "checked by runtime monitoring of the planned trace ...; not proven by model checking ...",
+               "requirements_file": "docs/requirements/lunapath.fret.json" },
+  "requirements": [
+    { "id": "LP-R01", "name": "shadow_endurance", "class": "safety", "applicable": true, "reason": null,
+      "engine": "rtamt", "rho": 91.45, "unit": "h", "rho_normalized": 0.953, "satisfied": true,
+      "boundary": false, "open_ended": false, "pending": false,
+      "threshold": 96.0, "rover_parameter": "h_max_shadow_h", "threshold_source": "rover",
+      "signal": "shadow_continuous_h", "scope": null,
+      "worst_at": { "index": 40, "hours": 7.36, "row": 51, "col": 106 },
+      "fretish": "The rover shall always satisfy shadow_continuous_h <= h_max_shadow_h",
+      "stl": "always (shadow_continuous_h <= 96)" }, "..."
+  ],
+  "min_margin": { "id": "LP-R06", "rho": 0.48, "unit": "deg", "rho_normalized": 0.024 },
+  "n_applicable": 11, "n_violated": 2, "violated": ["LP-R04", "LP-R05"], "verdict": "violated"
+}
+```
+
+| Alan | Anlam |
+|---|---|
+| `monitor.engine` | `rtamt` ya da `builtin`; `cross_check.max_abs_diff` iki motorun en büyük farkı (rtamt yokken `null`) |
+| `monitor.trace` | `kind` (`2d` / `4d` / `telemetry`), örnek sayısı, süre, `complete` (çevrimiçi prefikste false), `stranded`, `extended_h` (mahsur kalan 2-B izin bir Ay günü uzatması), kaynak notları |
+| `requirements[].rho`, `unit` | Robustness ve birimi; `null` + `open_ended: true` = +∞ (Dünya batışı ön-bakışta yok); `null` + `satisfied: false` + `reason: "unbounded violation"` = −∞ (sonlu batış, ulaşılabilir haven yok) |
+| `rho_normalized` | ρ / ölçek (eşik, yarı genişlik, 24 h ya da rota uzunluğu) — yalnızca kıyas anahtarı |
+| `satisfied` | `true` / `false` / `null` (uygulanamaz ya da `pending`: hedefe varış çevrimiçi izde henüz karar yok); `boundary: true` ρ = 0 |
+| `applicable`, `reason` | Sinyal izde yok (2-B'de Dünya/haven), kapsam hiç tutmuyor (hedefe varılmadı → LP-R11) ya da rover zarfı yok (LUVMI-M `elec_op_*`) |
+| `threshold`, `rover_parameter`, `threshold_source` | Rover kataloğundan (`rover`), katalog sabiti (`catalogue`, LP-R03'ün 6 h'i) ya da `fixed` (0) |
+| `worst_at` | Marjın en küçük olduğu örnek: durum/adım indeksi, saat, hücre |
+| `engine` (gereksinim) | Tek örnekli kapsamda (varış) RTAMT çalışmaz → `builtin` |
+| `min_margin` | `safety` sınıfı, sonlu ρ'lu gereksinimler arasında en küçük `rho_normalized` |
+| `verdict` | `satisfied` / `violated` / `pending` / `not_evaluated` |
+
+Gereksinimler (eşikler rover'dan): LP-R01 gölge dayanımı (h), LP-R02 SOC ≥
+rezerv (pp), LP-R03 rezerv altında ≤ 6 h şarjsız (h), LP-R04 elektronik
+termal zarfı (°C), LP-R05 batarya termal zarfı (°C), LP-R06 adım eğimi (°),
+LP-R07 yanal eğim (°), LP-R08 hareket halindeyken Dünya bağlantısı (h;
+yalnızca 4-B/telemetri), LP-R09 haven leg kuralı (h; 4-B/telemetri), LP-R10
+hedefe varış (m, sınıf `mission`), LP-R11 varışta SOC (pp). 2-B izlerde R08/R09
+`applicable: false`.
+
+### `comparison.safety_margin_ranking` (`/api/compare`)
+
+```json
+"safety_margin_ranking": [ { "label": "balanced", "verdict": "violated", "n_violated": 1,
+                             "min_margin": { "id": "LP-R05", "rho": -46.04, "unit": "degC", "rho_normalized": -2.631 } }, "..." ],
+"largest_min_margin_profile": "balanced"
+```
+
+Sıra: sağlananlar en büyük min-marjla önce, sonra `pending`, sonra
+ihlalliler (az ihlal, az negatif), en sonda değerlendirilemeyenler. Mevcut
+`shortest_profile` / `safest_profile` / `most_efficient_profile` /
+`recommendation` aynen.
+
+### `POST /api/safety-check` — telemetri izi
+
+```json
+{ "rover_id": "nasa_viper",
+  "samples": [ { "t_h": 0.0, "soc_pct": 100, "inner_temp_c": 10, "in_shadow": false, "slope_deg": 5,
+                 "lateral_slope_deg": 3, "moving": false, "earth_link_h": 30, "haven_margin_h": 12,
+                 "dist_to_goal_m": 400 }, "..." ],
+  "complete": true, "stranded": false, "engine": "auto", "recharge_deadline_h": 6.0 }
+```
+
+`t_h` zorunlu ve artmayan olamaz; `surface_temp_c` verilirse iç sıcaklığa
+çevrilir, `shadow_ratio` (> 0,2) ya da `in_shadow`; sayısal sinyaller ya
+her örnekte ya hiçbirinde; booleanlar eksikse false; bilinmeyen anahtarlar
+`ignored_keys`'te. Yanıt: `rover_id`, `n_samples`, `signals_present`,
+`ignored_keys`, `safety_margins`. 422: boş liste, geri giden zaman,
+`NaN`, bilinmeyen `engine`, `engine: "rtamt"` kurulu değilken (sessiz düşme
+yok). `complete: false` → LP-R10 `pending`.
+
+Ölçülen (Site11, 4 Eylül 2026, [safety_monitor_report.md](../research/safety_monitor_report.md)):
+VIPER haven→haven 30 May 2027 planında gölge marjı 91,45 h, SOC 12,06 pp,
+adım eğimi 0,48°, yanal 1,19°, Dünya bağlantısı 199,93 h, haven 199,80 h;
+LP-R04/R05 ihlal (iç sıcaklık −7,96 / −27,96 °C, statik termal katman +
+ofset modeli). LPR-1 28 Eyl 2026'da LP-R09 sınırsız ihlal (haven yok, bağlantı
+184,6 h sonra biter). `/api/compare` 4 profil 0,8–1,0 s; `/api/safety-check`
+500 örnek 12–15 ms yerleşik, 28–48 ms RTAMT; iki motor farkı 0.
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,

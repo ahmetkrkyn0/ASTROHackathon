@@ -89,6 +89,15 @@ from .route_analysis import route_statistics as compute_route_statistics
 from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
 from .mission_reference import reference_summary
 from .simulation import simulate_path, summarize_simulation
+from .safety_monitor import (
+    ENGINES as SAFETY_ENGINES,
+    RECHARGE_DEADLINE_H,
+    evaluate_catalogue,
+    rank_by_margin,
+    trace_from_plan4d,
+    trace_from_samples,
+    trace_from_states,
+)
 from .uncertainty import (
     CLONE_HORIZONS_FILENAME,
     N_PGDA_CLONES,
@@ -618,6 +627,37 @@ class DemUncertaintyRequest(BaseModel):
     label: Optional[str] = Field(default=None, max_length=80)
 
 
+class SafetyCheckRequest(BaseModel):
+    """A telemetry trace to check against the formal safety catalogue (D3).
+
+    Each sample needs ``t_h`` (hours, non-decreasing) and any of the signal
+    keys ``app.safety_monitor.SAMPLE_KEYS`` understands; a requirement whose
+    signal is absent is reported as not applicable, never as satisfied.
+    """
+
+    rover_id: str = DEFAULT_ROVER_ID
+    samples: list[dict[str, Any]] = Field(
+        ...,
+        min_length=1,
+        max_length=100_000,
+        description=(
+            "Telemetry samples: {t_h, soc_pct?, surface_temp_c?|inner_temp_c?, "
+            "shadow_ratio?|in_shadow?, slope_deg?, lateral_slope_deg?, moving?, "
+            "charging?, earth_link_h?, haven_margin_h?, dist_to_goal_m?, at_goal?, row?, col?}"
+        ),
+    )
+    complete: bool = Field(
+        default=True,
+        description="False for a prefix still being flown: liveness (goal reached) is then 'pending', not violated.",
+    )
+    stranded: bool = Field(
+        default=False,
+        description="True when the rover cannot recover where it stopped: the trace is extended by one lunar day parked.",
+    )
+    engine: str = Field(default="auto", description="auto | builtin | rtamt")
+    recharge_deadline_h: float = Field(default=RECHARGE_DEADLINE_H, gt=0.0, le=1000.0)
+
+
 class LoadDEMRequest(BaseModel):
     dem_file: str
     target_resolution_m: float = 80
@@ -936,6 +976,13 @@ def plan(req: PlanRequest, request: Request):
     uncertainty_block = _route_uncertainty_block(grids_for_plan, req.rover_id, planned_pixels, 1)
     if uncertainty_block is not None:
         response["uncertainty"] = uncertainty_block
+
+    # The formal safety catalogue on the simulated trace: robustness per
+    # requirement, in its own unit (D3). Runtime monitoring of this route,
+    # not a proof; the block says so.
+    safety_block = _safety_margins_2d(states, planned_pixels, grids_for_plan, rover)
+    if safety_block is not None:
+        response["safety_margins"] = safety_block
 
     # Published only once the response the caller receives is fully built.
     # Assigning mid-request meant a plan whose serialisation then failed
@@ -1738,6 +1785,9 @@ def plan_4d(req: Plan4DRequest, request: Request):
         )
     )
 
+    # The formal safety catalogue on the planner's own per-state arrays (D3).
+    safety_block = _safety_margins_4d(result, geometry, grids_for_plan, rover, slice_hours, req.coarsen)
+
     return {
         "path_pixels": fine_pixels,
         "path_pixels_coarse": result["path_pixels"],
@@ -1765,6 +1815,10 @@ def plan_4d(req: Plan4DRequest, request: Request):
         "path_time_to_haven_h": result["path_time_to_haven_h"],
         "path_hours_until_earthset": result["path_hours_until_earthset"],
         "path_haven_margin_h": result["path_haven_margin_h"],
+        # Robustness of every formal safety requirement along this route
+        # (D3): rho per requirement in hours / degC / pct / deg, the smallest
+        # normalised margin, and the verdict of a runtime monitor.
+        **({"safety_margins": safety_block} if safety_block is not None else {}),
         "n_slices": n_slices,
         "slice_hours": slice_hours,
         "slice_hours_source": slice_hours_source,
@@ -2246,6 +2300,61 @@ def dem_uncertainty(req: DemUncertaintyRequest, request: Request):
     }
 
 
+def _safety_margins_2d(
+    states: list, planned_pixels: list, grids: dict, rover: dict
+) -> dict[str, Any] | None:
+    """``safety_margins`` for a simulated 2-D route; None (logged) if the
+    monitor itself fails -- a monitor bug must not take the plan down."""
+    try:
+        trace = trace_from_states(
+            states,
+            [(int(r), int(c)) for r, c in planned_pixels],
+            grids.get("elevation"),
+            float(grids["metadata"]["resolution_m"]),
+            rover,
+        )
+        return evaluate_catalogue(trace, rover)
+    except Exception:  # noqa: BLE001 - reported, never fatal
+        logger.error("Safety monitor failed on the 2-D trace:\n%s", traceback.format_exc())
+        return None
+
+
+def _safety_margins_4d(
+    result: dict,
+    geometry: "_CoarseGeometry",
+    grids_for_plan: dict,
+    rover: dict,
+    slice_hours: float,
+    coarsen: int,
+) -> dict[str, Any] | None:
+    """``safety_margins`` for a 4-D plan, on the planner's coarse grid: the
+    block-max slope and centre elevation the planner gated on and the
+    block-mean thermal field the cost cube was built from."""
+    try:
+        coarse_thermal = coarsen_grid(
+            np.asarray(grids_for_plan["thermal"], dtype=np.float64), coarsen, how="mean"
+        )
+        trace = trace_from_plan4d(
+            result["path_states"],
+            result["path_battery_pct"],
+            result["path_dark_hours"],
+            result.get("path_earth_visible"),
+            result.get("path_hours_until_earthset"),
+            result.get("path_haven_margin_h"),
+            slice_hours,
+            geometry.slope,
+            geometry.elevation,
+            coarse_thermal,
+            geometry.resolution_m,
+            rover,
+            path_time_to_haven_h=result.get("path_time_to_haven_h"),
+        )
+        return evaluate_catalogue(trace, rover)
+    except Exception:  # noqa: BLE001 - reported, never fatal
+        logger.error("Safety monitor failed on the 4-D trace:\n%s", traceback.format_exc())
+        return None
+
+
 def _attach_constraint_check(
     result: dict, profile: dict, grids: dict, rover: dict
 ) -> None:
@@ -2272,6 +2381,11 @@ def _attach_constraint_check(
                 elevation_grid=grids["elevation"],
             )
             summary = summarize_simulation(states, rover)
+            # The formal, margin-bearing version of the same verdicts (D3):
+            # the boolean constraint_check stays as it was; this adds rho.
+            safety_block = _safety_margins_2d(states, result["path_pixels"], grids, rover)
+            if safety_block is not None:
+                result["safety_margins"] = safety_block
         except Exception:
             logger.warning(
                 "Constraint check skipped for %s: %s",
@@ -2359,11 +2473,57 @@ def compare(req: CompareRequest):
         result["color"] = profile["color"]
         _attach_constraint_check(result, profile, grids, rover)
         results.append(result)
+    comparison = compare_results(results, rover)
+    # Rank the profiles by their smallest formal safety margin (D3):
+    # satisfied routes with the largest smallest-margin first, violated
+    # ones last. The existing comparison keys are untouched.
+    ranking = rank_by_margin(
+        [(r["profile_id"], r["safety_margins"]) for r in results if r.get("safety_margins")]
+    )
+    comparison["safety_margin_ranking"] = ranking
+    comparison["largest_min_margin_profile"] = ranking[0]["label"] if ranking else None
     return {
         "start": req.start,
         "goal": req.goal,
         "results": results,
-        "comparison": compare_results(results, rover),
+        "comparison": comparison,
+    }
+
+
+@app.post("/api/safety-check")
+def safety_check(req: SafetyCheckRequest):
+    """Robustness of the formal safety catalogue on a telemetry trace (D3).
+
+    The same monitor /api/plan and /api/plan-4d run on their own routes,
+    exposed for a trace the caller supplies -- flown telemetry, a replayed
+    log, a hand-made what-if. Requirements whose signals are absent are
+    reported as not applicable. ``engine="rtamt"`` is refused with a 422
+    when the package is not installed rather than silently falling back.
+    """
+    if req.engine not in SAFETY_ENGINES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"engine must be one of {list(SAFETY_ENGINES)}, got {req.engine!r}",
+        )
+    rover = get_rover(req.rover_id)
+    try:
+        trace = trace_from_samples(
+            req.samples, rover, complete=req.complete, stranded=req.stranded
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"samples: {exc}") from exc
+    try:
+        block = evaluate_catalogue(
+            trace, rover, engine=req.engine, recharge_deadline_h=req.recharge_deadline_h
+        )
+    except ImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "rover_id": rover["id"],
+        "n_samples": trace.n_samples,
+        "signals_present": sorted(trace.signals),
+        "ignored_keys": trace.notes.get("ignored_keys", []),
+        "safety_margins": block,
     }
 
 

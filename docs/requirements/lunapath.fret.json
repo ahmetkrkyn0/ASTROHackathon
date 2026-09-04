@@ -1,0 +1,571 @@
+{
+  "project": "LunaPath",
+  "schema": "lunapath-fret-export/1 -- fields modelled on FRET's requirement export (reqid, fulltext, rationale, semantics) plus a monitor block",
+  "provenance": {
+    "method": "written by hand in FRETISH following FRET's grammar ([scope] [condition] component shall [timing] [response]); translated to STL by hand; not exported from the FRET tool",
+    "checked_by": "backend/app/safety_monitor.py -- RTAMT 0.3.5 discrete-time offline monitor cross-checked by a built-in evaluator, on planned and telemetry traces",
+    "claim": "checked by runtime monitoring of the planned trace (STL robustness); not proven by model checking -- the verdict is about this trace only",
+    "fret_reference": "Giannakopoulou, Mavridou, Pressburger, Schumann et al., Formal Requirements Elicitation with FRET, NASA Ames (github.com/NASA-SW-VnV/fret)",
+    "rtamt_reference": "Nickovic & Yamaguchi, RTAMT: Online Robustness Monitors from STL (github.com/nickovic/rtamt)"
+  },
+  "component": "the rover",
+  "recharge_deadline_h": 6.0,
+  "rovers": {
+    "lpr_1": "LPR-1 (Varsayilan)",
+    "luvmi_m": "LUVMI-M",
+    "nasa_viper": "NASA VIPER",
+    "cnsa_yutu_2": "CNSA Yutu-2"
+  },
+  "generated_by": "scripts/export_fret_requirements.py",
+  "requirements": [
+    {
+      "reqid": "LP-R01",
+      "name": "shadow_endurance",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "The rover shall always satisfy shadow_continuous_h <= h_max_shadow_h",
+      "rationale": "The rover's battery and heaters are sized for at most h_max_shadow_h of continuous darkness (VIPER: 96 h; LPR-1: 50 h). Longer unbroken shadow is loss of the vehicle.",
+      "comments": "shadow_continuous_h is the running count of hours in shadow (shadow_ratio > 0.2, the simulator's threshold), reset when lit; 4-D traces use the planner's path_dark_hours.",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "shadow_continuous_h <= h_max_shadow_h",
+        "variables": [
+          "shadow_continuous_h"
+        ],
+        "ftLTL": "G (shadow_continuous_h <= h_max_shadow_h)   [boolean form: G (F[0,h_max_shadow_h] lit)]",
+        "stl": "always (shadow_continuous_h <= h_max_shadow_h)",
+        "monitored_stl": "always (shadow_continuous_h <= 50)"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "shadow_continuous_h",
+        "unit": "h",
+        "rover_parameter": "h_max_shadow_h",
+        "threshold_source": "rover",
+        "thresholds_by_rover": {
+          "lpr_1": 50.0,
+          "luvmi_m": 4.0,
+          "nasa_viper": 96.0,
+          "cnsa_yutu_2": 2.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "always (shadow_continuous_h <= 50)",
+          "luvmi_m": "always (shadow_continuous_h <= 4)",
+          "nasa_viper": "always (shadow_continuous_h <= 96)",
+          "cnsa_yutu_2": "always (shadow_continuous_h <= 2)"
+        },
+        "normalizer": "threshold",
+        "trace_kinds": [
+          "2d",
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R02",
+      "name": "soc_reserve",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "The rover shall always satisfy soc_pct >= soc_min",
+      "rationale": "The reserve (soc_min_pct) is the energy kept for survival heating; the plan must never spend it.",
+      "comments": "2-D traces use battery_low_pct, the step's low point before any recharge stop.",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "soc_pct >= soc_min",
+        "variables": [
+          "soc_pct"
+        ],
+        "ftLTL": "G (soc_pct >= soc_min)",
+        "stl": "always (soc_pct >= soc_min)",
+        "monitored_stl": "always (soc_pct >= 20)"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "soc_pct",
+        "unit": "pct",
+        "rover_parameter": "soc_min_pct",
+        "threshold_source": "rover",
+        "thresholds_by_rover": {
+          "lpr_1": 20.0,
+          "luvmi_m": 20.0,
+          "nasa_viper": 20.0,
+          "cnsa_yutu_2": 30.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "always (soc_pct >= 20)",
+          "luvmi_m": "always (soc_pct >= 20)",
+          "nasa_viper": "always (soc_pct >= 20)",
+          "cnsa_yutu_2": "always (soc_pct >= 30)"
+        },
+        "normalizer": "threshold",
+        "trace_kinds": [
+          "2d",
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R03",
+      "name": "soc_recovery",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "Upon soc_pct < soc_min the rover shall within 6 hours satisfy charging",
+      "rationale": "A rover under its reserve must start recovering promptly; the deadline bounds how long it may sit in deficit.",
+      "comments": "Monitored through the causal counter hours_below_reserve_h (hours since the battery was last at or above the reserve or charging was observed), so the margin is in hours and needs no bounded window. The 6 h deadline is a catalogue constant, not a rover parameter.",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": "soc_pct < soc_min",
+        "component": "rover",
+        "timing": "within 6 hours",
+        "response": "charging",
+        "variables": [
+          "hours_below_reserve_h"
+        ],
+        "ftLTL": "G ((soc_pct < soc_min) -> F[0,6h] charging)",
+        "stl": "always (hours_below_reserve_h <= recharge_deadline_h)",
+        "monitored_stl": "always (hours_below_reserve_h <= 6)"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "hours_below_reserve_h",
+        "unit": "h",
+        "rover_parameter": null,
+        "threshold_source": "catalogue",
+        "thresholds_by_rover": {
+          "lpr_1": 6.0,
+          "luvmi_m": 6.0,
+          "nasa_viper": 6.0,
+          "cnsa_yutu_2": 6.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "always (hours_below_reserve_h <= 6)",
+          "luvmi_m": "always (hours_below_reserve_h <= 6)",
+          "nasa_viper": "always (hours_below_reserve_h <= 6)",
+          "cnsa_yutu_2": "always (hours_below_reserve_h <= 6)"
+        },
+        "normalizer": "threshold",
+        "trace_kinds": [
+          "2d",
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R04",
+      "name": "electronics_thermal",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "The rover shall always satisfy elec_op_min_c <= inner_temp_c <= elec_op_max_c",
+      "rationale": "Avionics survive only inside their operating envelope; the inner temperature is the surface temperature plus the rover's thermal offset.",
+      "comments": "inner_temp_c = cost_engine.surface_to_inner(surface_temp_c, rover). Rovers without an electronics envelope (LUVMI-M) report this requirement as not applicable.",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "elec_op_min_c <= inner_temp_c <= elec_op_max_c",
+        "variables": [
+          "inner_temp_c"
+        ],
+        "ftLTL": "G (inner_temp_c >= elec_op_min_c & inner_temp_c <= elec_op_max_c)",
+        "stl": "always ((inner_temp_c >= elec_op_min_c) and (inner_temp_c <= elec_op_max_c))",
+        "monitored_stl": "always ((inner_temp_c >= -10) and (inner_temp_c <= 40))"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "inner_temp_c",
+        "unit": "degC",
+        "rover_parameter": "elec_op_min_c/elec_op_max_c",
+        "threshold_source": "rover",
+        "thresholds_by_rover": {
+          "lpr_1": [
+            -10.0,
+            40.0
+          ],
+          "luvmi_m": null,
+          "nasa_viper": [
+            -20.0,
+            50.0
+          ],
+          "cnsa_yutu_2": [
+            -40.0,
+            55.0
+          ]
+        },
+        "formula_by_rover": {
+          "lpr_1": "always ((inner_temp_c >= -10) and (inner_temp_c <= 40))",
+          "luvmi_m": null,
+          "nasa_viper": "always ((inner_temp_c >= -20) and (inner_temp_c <= 50))",
+          "cnsa_yutu_2": "always ((inner_temp_c >= -40) and (inner_temp_c <= 55))"
+        },
+        "normalizer": "half_range",
+        "trace_kinds": [
+          "2d",
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R05",
+      "name": "battery_thermal",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "The rover shall always satisfy bat_op_min_c <= inner_temp_c <= bat_op_max_c",
+      "rationale": "Lithium cells neither charge nor discharge safely outside their envelope.",
+      "comments": "Uses the same inner-temperature model as LP-R04; LunaPath has no separate battery thermal model.",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "bat_op_min_c <= inner_temp_c <= bat_op_max_c",
+        "variables": [
+          "inner_temp_c"
+        ],
+        "ftLTL": "G (inner_temp_c >= bat_op_min_c & inner_temp_c <= bat_op_max_c)",
+        "stl": "always ((inner_temp_c >= bat_op_min_c) and (inner_temp_c <= bat_op_max_c))",
+        "monitored_stl": "always ((inner_temp_c >= 0) and (inner_temp_c <= 35))"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "inner_temp_c",
+        "unit": "degC",
+        "rover_parameter": "bat_op_min_c/bat_op_max_c",
+        "threshold_source": "rover",
+        "thresholds_by_rover": {
+          "lpr_1": [
+            0.0,
+            35.0
+          ],
+          "luvmi_m": [
+            -100.0,
+            0.0
+          ],
+          "nasa_viper": [
+            0.0,
+            35.0
+          ],
+          "cnsa_yutu_2": [
+            -10.0,
+            30.0
+          ]
+        },
+        "formula_by_rover": {
+          "lpr_1": "always ((inner_temp_c >= 0) and (inner_temp_c <= 35))",
+          "luvmi_m": "always ((inner_temp_c >= -100) and (inner_temp_c <= 0))",
+          "nasa_viper": "always ((inner_temp_c >= 0) and (inner_temp_c <= 35))",
+          "cnsa_yutu_2": "always ((inner_temp_c >= -10) and (inner_temp_c <= 30))"
+        },
+        "normalizer": "half_range",
+        "trace_kinds": [
+          "2d",
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R06",
+      "name": "step_slope",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "The rover shall always satisfy drive_slope_deg <= slope_max_deg",
+      "rationale": "The traction limit the planners gate every edge on; the simulator costs the worse of the cell slope and the step grade.",
+      "comments": "",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "drive_slope_deg <= slope_max_deg",
+        "variables": [
+          "drive_slope_deg"
+        ],
+        "ftLTL": "G (drive_slope_deg <= slope_max_deg)",
+        "stl": "always (drive_slope_deg <= slope_max_deg)",
+        "monitored_stl": "always (drive_slope_deg <= 25)"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "drive_slope_deg",
+        "unit": "deg",
+        "rover_parameter": "slope_max_deg",
+        "threshold_source": "rover",
+        "thresholds_by_rover": {
+          "lpr_1": 25.0,
+          "luvmi_m": 25.0,
+          "nasa_viper": 20.0,
+          "cnsa_yutu_2": 20.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "always (drive_slope_deg <= 25)",
+          "luvmi_m": "always (drive_slope_deg <= 25)",
+          "nasa_viper": "always (drive_slope_deg <= 20)",
+          "cnsa_yutu_2": "always (drive_slope_deg <= 20)"
+        },
+        "normalizer": "threshold",
+        "trace_kinds": [
+          "2d",
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R07",
+      "name": "cross_slope",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "The rover shall always satisfy lateral_slope_deg <= slope_lateral_max_deg",
+      "rationale": "Roll-over limit: the terrain gradient resolved perpendicular to the heading (cost_engine.lateral_slope_tan, the planners' rule).",
+      "comments": "",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "lateral_slope_deg <= slope_lateral_max_deg",
+        "variables": [
+          "lateral_slope_deg"
+        ],
+        "ftLTL": "G (lateral_slope_deg <= slope_lateral_max_deg)",
+        "stl": "always (lateral_slope_deg <= slope_lateral_max_deg)",
+        "monitored_stl": "always (lateral_slope_deg <= 18)"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "lateral_slope_deg",
+        "unit": "deg",
+        "rover_parameter": "slope_lateral_max_deg",
+        "threshold_source": "rover",
+        "thresholds_by_rover": {
+          "lpr_1": 18.0,
+          "luvmi_m": 15.0,
+          "nasa_viper": 15.0,
+          "cnsa_yutu_2": 15.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "always (lateral_slope_deg <= 18)",
+          "luvmi_m": "always (lateral_slope_deg <= 15)",
+          "nasa_viper": "always (lateral_slope_deg <= 15)",
+          "cnsa_yutu_2": "always (lateral_slope_deg <= 15)"
+        },
+        "normalizer": "threshold",
+        "trace_kinds": [
+          "2d",
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R08",
+      "name": "dte_while_moving",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "In moving mode the rover shall always satisfy earth_visible",
+      "rationale": "VIPER's teleoperation rule: the rover does not drive without a direct-to-Earth link (A4).",
+      "comments": "Time-robustness proxy: earth_link_h is the hours of Earth link left at a state that sees the Earth (path_hours_until_earthset; open-ended = +inf) and minus the move's duration -- hours driven blind -- at one that does not.",
+      "semantics": {
+        "type": "nasa",
+        "scope": "moving",
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "earth_visible",
+        "variables": [
+          "earth_link_h",
+          "moving"
+        ],
+        "ftLTL": "G (moving -> earth_visible)",
+        "stl": "always (moving -> (earth_link_h > 0))",
+        "monitored_stl": "always (earth_link_h > 0)"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "earth_link_h",
+        "unit": "h",
+        "rover_parameter": null,
+        "threshold_source": "fixed",
+        "thresholds_by_rover": {
+          "lpr_1": 0.0,
+          "luvmi_m": 0.0,
+          "nasa_viper": 0.0,
+          "cnsa_yutu_2": 0.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "always (earth_link_h > 0)",
+          "luvmi_m": "always (earth_link_h > 0)",
+          "nasa_viper": "always (earth_link_h > 0)",
+          "cnsa_yutu_2": "always (earth_link_h > 0)"
+        },
+        "normalizer": "hours_per_day",
+        "trace_kinds": [
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R09",
+      "name": "safe_haven_leg",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "The rover shall always satisfy time_to_haven_h <= hours_until_earthset",
+      "rationale": "VIPER's leg rule (A1): from every state the rover can reach a safe haven before it loses the Earth link.",
+      "comments": "haven_margin_h is path_haven_margin_h from /api/plan-4d (open-ended Earthset = +inf).",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "time_to_haven_h <= hours_until_earthset",
+        "variables": [
+          "haven_margin_h"
+        ],
+        "ftLTL": "G (hours_until_earthset - time_to_haven_h >= 0)",
+        "stl": "always (haven_margin_h >= 0)",
+        "monitored_stl": "always (haven_margin_h >= 0)"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "haven_margin_h",
+        "unit": "h",
+        "rover_parameter": null,
+        "threshold_source": "fixed",
+        "thresholds_by_rover": {
+          "lpr_1": 0.0,
+          "luvmi_m": 0.0,
+          "nasa_viper": 0.0,
+          "cnsa_yutu_2": 0.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "always (haven_margin_h >= 0)",
+          "luvmi_m": "always (haven_margin_h >= 0)",
+          "nasa_viper": "always (haven_margin_h >= 0)",
+          "cnsa_yutu_2": "always (haven_margin_h >= 0)"
+        },
+        "normalizer": "hours_per_day",
+        "trace_kinds": [
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R10",
+      "name": "goal_reached",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "The rover shall eventually satisfy at_goal",
+      "rationale": "The traverse is a mission only if it ends at the goal; a stranded prefix stops short.",
+      "comments": "Robustness is minus the closest approach in metres: 0 when reached, -(remaining distance) when not.",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": null,
+        "component": "rover",
+        "timing": "eventually",
+        "response": "at_goal",
+        "variables": [
+          "dist_to_goal_m"
+        ],
+        "ftLTL": "F at_goal",
+        "stl": "eventually (dist_to_goal_m <= 0)",
+        "monitored_stl": "eventually (dist_to_goal_m <= 0)"
+      },
+      "monitor": {
+        "class": "mission",
+        "signal": "dist_to_goal_m",
+        "unit": "m",
+        "rover_parameter": null,
+        "threshold_source": "fixed",
+        "thresholds_by_rover": {
+          "lpr_1": 0.0,
+          "luvmi_m": 0.0,
+          "nasa_viper": 0.0,
+          "cnsa_yutu_2": 0.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "eventually (dist_to_goal_m <= 0)",
+          "luvmi_m": "eventually (dist_to_goal_m <= 0)",
+          "nasa_viper": "eventually (dist_to_goal_m <= 0)",
+          "cnsa_yutu_2": "eventually (dist_to_goal_m <= 0)"
+        },
+        "normalizer": "path_length",
+        "trace_kinds": [
+          "2d",
+          "4d",
+          "telemetry"
+        ]
+      }
+    },
+    {
+      "reqid": "LP-R11",
+      "name": "soc_at_goal",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "In at_goal mode the rover shall always satisfy soc_pct >= soc_min",
+      "rationale": "Arriving with the reserve intact is what makes the next leg plannable.",
+      "comments": "Scope at_goal is a sample mask; inapplicable when the goal is never reached (LP-R10 reports that).",
+      "semantics": {
+        "type": "nasa",
+        "scope": "at_goal",
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "soc_pct >= soc_min",
+        "variables": [
+          "at_goal",
+          "soc_pct"
+        ],
+        "ftLTL": "G (at_goal -> soc_pct >= soc_min)",
+        "stl": "always (at_goal -> (soc_pct >= soc_min))",
+        "monitored_stl": "always (soc_pct >= 20)"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "soc_pct",
+        "unit": "pct",
+        "rover_parameter": "soc_min_pct",
+        "threshold_source": "rover",
+        "thresholds_by_rover": {
+          "lpr_1": 20.0,
+          "luvmi_m": 20.0,
+          "nasa_viper": 20.0,
+          "cnsa_yutu_2": 30.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "always (soc_pct >= 20)",
+          "luvmi_m": "always (soc_pct >= 20)",
+          "nasa_viper": "always (soc_pct >= 20)",
+          "cnsa_yutu_2": "always (soc_pct >= 30)"
+        },
+        "normalizer": "threshold",
+        "trace_kinds": [
+          "2d",
+          "4d",
+          "telemetry"
+        ]
+      }
+    }
+  ]
+}
