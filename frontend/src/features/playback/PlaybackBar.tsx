@@ -1,31 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react'
-import type { Waypoint } from '../../api'
 import { batteryToHex } from '../../colormap'
+import { useMission, useMissionActions } from '../../mission/MissionContext'
+import { useMissionRuntime } from '../../mission/MissionRuntimeContext'
 
-interface PlaybackBarProps {
-  waypoints: Waypoint[]
-  currentStep: number | null
-  /**
-   * Bir React state setter'i, sade bir geri cagirma degil.
-   *
-   * Oynatma dongusu adimi bir onceki degerden turetiyor ve bunu updater
-   * fonksiyonuyla yapiyor; dar tip (step: number) => void o kullanimi
-   * yasakliyordu ama App zaten setRoutePlaybackStep geciyor. Tip, calisan
-   * davranisi tarif edecek sekilde genisletildi.
-   */
-  onStepChange: React.Dispatch<React.SetStateAction<number | null>>
-  onPlayToggle?: (isPlaying: boolean) => void
-}
-
-export const PlaybackBar: React.FC<PlaybackBarProps> = ({
-  waypoints,
-  currentStep,
-  onStepChange,
-  onPlayToggle,
-}) => {
+export const PlaybackBar: React.FC = () => {
+  const { planResult } = useMission()
+  const { routePlaybackStep: currentStep } = useMissionRuntime()
+  const { setPlaybackStep: onStepChange } = useMissionActions()
   const [isPlaying, setIsPlaying] = useState(false)
   const timerRef = useRef<number | null>(null)
 
+  // Not memoised, unlike App's own copy of this list: the only thing derived
+  // from it that reaches a dependency array here is totalSteps, a number.
+  const waypoints = planResult?.waypoints ?? []
   const totalSteps = waypoints.length
   const activeStep = currentStep !== null ? Math.min(currentStep, totalSteps - 1) : 0
   const activeWp = waypoints[activeStep]
@@ -38,7 +25,6 @@ export const PlaybackBar: React.FC<PlaybackBarProps> = ({
           const next = (prev ?? 0) + 1
           if (next >= totalSteps) {
             setIsPlaying(false)
-            onPlayToggle?.(false)
             return totalSteps - 1
           }
           return next
@@ -56,7 +42,7 @@ export const PlaybackBar: React.FC<PlaybackBarProps> = ({
         clearInterval(timerRef.current)
       }
     }
-  }, [isPlaying, totalSteps, onStepChange, onPlayToggle])
+  }, [isPlaying, totalSteps, onStepChange])
 
   const togglePlay = () => {
     const nextPlay = !isPlaying
@@ -64,7 +50,6 @@ export const PlaybackBar: React.FC<PlaybackBarProps> = ({
       onStepChange(0)
     }
     setIsPlaying(nextPlay)
-    onPlayToggle?.(nextPlay)
   }
 
   if (totalSteps === 0) return null

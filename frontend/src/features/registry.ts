@@ -3,6 +3,7 @@ import type { MissionMode } from '../mission/types'
 import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
 import { MissionSetup } from './mission-setup'
+import { Playback } from './playback'
 import { RouteAnalysis } from './route-analysis'
 
 /**
@@ -65,6 +66,11 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // plan -- the exact quiet mistake the filter exists to make explicit.
   { id: 'mission-snapshot', slot: 'leftRail', Component: MissionSnapshot, modes: ['analyze'] },
   { id: 'route-analysis', slot: 'rightRail', Component: RouteAnalysis, modes: ['analyze'] },
+  // analyze only, from App.tsx's `missionMode === 'analyze' && planResult`
+  // guard. Only the mode half becomes a registration: the bar already
+  // renders nothing without waypoints, so knowing what an empty route looks
+  // like stays inside the feature.
+  { id: 'playback', slot: 'bottomDock', Component: Playback, modes: ['analyze'] },
 ]
 
 /**

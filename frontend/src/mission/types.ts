@@ -1,3 +1,4 @@
+import type { Dispatch, SetStateAction } from 'react'
 import type { ClickMode, MapViewMode } from '../MapCanvas'
 import type { PlanResponse, PlanWeights, RoverEntry } from '../api'
 
@@ -195,8 +196,16 @@ export interface MissionActions {
   /** Clears endpoints, route and error. Keeps the selected rover. */
   resetMission: () => void
   setMissionMode: (mode: MissionMode) => void
-  /** The playback cursor; null shows the route at rest. */
-  setPlaybackStep: (step: number | null) => void
+  /**
+   * The playback cursor; null shows the route at rest.
+   *
+   * A state setter rather than a plain callback, because the playback loop
+   * derives the next step from the previous one and passes an updater
+   * function to do it. App already hands over exactly that; the narrower
+   * `(step: number | null) => void` described less than what was being
+   * passed.
+   */
+  setPlaybackStep: Dispatch<SetStateAction<number | null>>
   setPayloadW: (watts: number) => void
   setHeaterW: (watts: number) => void
   setViewMode: (mode: ViewModeId) => void

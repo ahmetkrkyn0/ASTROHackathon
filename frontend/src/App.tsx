@@ -28,7 +28,6 @@ import {
 import TopBar, { type MissionMode } from './components/TopBar/TopBar'
 import LayerDropdown from './components/Map/LayerDropdown'
 import RouteSolvingOverlay from './components/Map/RouteSolvingOverlay'
-import PlaybackBar from './components/Analysis/PlaybackBar'
 import MissionAssistant from './components/Assistant/MissionAssistant'
 import FleetSelectionView from './components/Fleet/FleetSelectionView'
 
@@ -755,15 +754,6 @@ export default function App() {
                     )
                   )}
                 </div>
-              )}
-
-              {/* Playback Scrubber (Analysis Mode Only) */}
-              {missionMode === 'analyze' && planResult && (
-                <PlaybackBar
-                  waypoints={waypoints}
-                  currentStep={routePlaybackStep}
-                  onStepChange={setRoutePlaybackStep}
-                />
               )}
 
               {/* Bottom-Left Scale Bar */}
