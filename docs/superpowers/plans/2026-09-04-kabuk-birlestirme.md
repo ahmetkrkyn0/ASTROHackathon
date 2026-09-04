@@ -1029,6 +1029,34 @@ takıldığın yerde `6c639cd` commit'ine bak. `SpaceBackdrop`, `TopBar`, `MapCa
 yerine geçiyor, bir raya oturmuyor. Kabuk "hangar mı kokpit mi" kararını kendisi
 verir; tek örneği olan bir `stage` slot'u icat edilmez.
 
+### Faz 2 context düzeltmesi — Task 9'dan önce
+
+Task 9–13'ün tek tek gövde metinleri, `MissionActions` context'i eklenmeden
+önce yazılmıştı. Yukarıdaki sekiz adımlık desen kanoniktir: paneller veriyi
+`useMission()`'dan, eylemleri `useMissionActions()`'dan alır.
+
+Task 9, `MissionValue`'ya yalnızca şu dört türetilemeyen değeri ekler ve
+`App.tsx`'teki `missionValue` nesnesi ile bağımlılık dizisini günceller:
+
+```ts
+rovers: RoverEntry[]
+clickMode: ClickMode
+isSolving: boolean
+layerError: string | null
+```
+
+Her alan, `rover` alanındaki biçimde neden gerektiğini ve yakın ama farklı
+olan değerden farkını açıklayan yorum taşır. Böylece `MissionValue` 15 alanda
+kalır. `routePlaybackStep`, `payloadW` ve `heaterW` Task 11'de oluşturulan
+ayrı, dar `MissionRuntime` context'ine gider; bunları genel mission snapshot'a
+eklemek sözleşmeyi 15 alan sınırının üstüne çıkarır.
+
+Türetilen değerler sözleşmeye girmez: `hasRoute` `Boolean(planResult)`, veri
+bağlantısı `Boolean(gridMeta)`, durum ise
+`layerError ? 'ATTN' : isSolving ? 'SOLVING' : planResult ? 'LOCKED' : 'NOMINAL'`
+ile bileşende hesaplanır. Pencere mobilyası (`hudOpen`, `leftOpen`, `rightOpen`,
+`hudMinimized`) mission context'ine girmez.
+
 ### Task 8: `MissionSnapshotPanel` → `leftRail`
 
 **Dosyalar:**
@@ -1112,10 +1140,12 @@ git commit -m "feat(mission-snapshot): move the panel into the registry"
 **Dosyalar:**
 - Taşı: `frontend/src/components/Planning/MissionSetupPanel.tsx` ve `RoverSelectDrawer.tsx` → `frontend/src/features/mission-setup/`
 - Oluştur: `frontend/src/features/mission-setup/index.tsx`
-- Değiştir: `frontend/src/features/registry.ts`, `frontend/src/App.tsx`
+- Değiştir: `frontend/src/features/registry.ts`, `frontend/src/App.tsx`, `frontend/src/mission/types.ts`
 
 **Arayüzler:**
-- Tüketir: `useMission()` — `roverId`, `weights`, `start`, `goal`.
+- Tüketir: `useMission()` — `rovers`, `rover`, `weights`, `start`, `goal`,
+  `planResult`, `clickMode`, `isSolving`; `useMissionActions()` — rover seçimi,
+  ağırlık, tıklama modu, rota, sıfırlama ve mod eylemleri.
 - Üretir: `MissionSetup`; kayıt id'si `'mission-setup'`, `modes: ['plan']`.
 
 - [ ] **Adım 1: İki dosyayı taşı**
@@ -1129,11 +1159,17 @@ git mv components/Planning/MissionSetupPanel.tsx components/Planning/RoverSelect
 
 - [ ] **Adım 2: `MissionSetupPanel`'in prop'larını context'e çevir**
 
-`interface MissionSetupPanelProps` silinir; `useMission()`'dan okunur.
+`interface MissionSetupPanelProps` silinir. Veri `useMission()`'dan, eylemler
+`useMissionActions()`'dan okunur; `hasRoute` `Boolean(planResult)` ile türetilir.
 `RoverSelectDrawer` prop almaya devam eder — o bir alt bileşen, kayıt değil ve
 verisini ebeveyninden alır. Import yolu `./RoverSelectDrawer` olarak kalır.
 
-- [ ] **Adım 3: Giriş noktasını yaz**
+- [ ] **Adım 3: Faz 2 context alanlarını ekle**
+
+Önce Faz 2 context düzeltmesindeki dört alanı `MissionValue`'ya yorumlarıyla
+ekle; `App.tsx`'teki `missionValue` nesnesi ve bağımlılık dizisiyle eşleştir.
+
+- [ ] **Adım 4: Giriş noktasını yaz**
 
 `frontend/src/features/mission-setup/index.tsx`:
 
@@ -1145,19 +1181,19 @@ export function MissionSetup() {
 }
 ```
 
-- [ ] **Adım 4: Kayda ekle**
+- [ ] **Adım 5: Kayda ekle**
 
 ```ts
   // Yalnızca plan modunda: hangar seçimi bittikten sonra anlamlı.
   { id: 'mission-setup', slot: 'leftRail', Component: MissionSetup, modes: ['plan'] },
 ```
 
-- [ ] **Adım 5: `App.tsx`'ten koşullu JSX'i sil**
+- [ ] **Adım 6: `App.tsx`'ten koşullu JSX'i sil**
 
 `missionMode === 'plan' ? <MissionSetupPanel … /> : …` üçlüsü kaldırılır; mod
 kararı artık kayıtta.
 
-- [ ] **Adım 6: Kapı ve gözle doğrulama**
+- [ ] **Adım 7: Kapı ve gözle doğrulama**
 
 ```bash
 cd frontend && npm run typecheck && npm run lint && npm test && npm run dev
@@ -1165,7 +1201,7 @@ cd frontend && npm run typecheck && npm run lint && npm test && npm run dev
 
 Beklenen: panel yalnızca `plan` modunda görünür; `fleet` ve `analyze`'da yok.
 
-- [ ] **Adım 7: Commit**
+- [ ] **Adım 8: Commit**
 
 ```bash
 git add -A
@@ -1180,7 +1216,8 @@ git commit -m "feat(mission-setup): register the panel for plan mode only"
 - Değiştir: `frontend/src/features/registry.ts`, `frontend/src/App.tsx`
 
 **Arayüzler:**
-- Tüketir: `useMission()`, `useFocusTelemetry()`.
+- Tüketir: `useMission()` — `gridMeta`, `layerError`, `isSolving`, `planResult`,
+  `activeViewMode`, `start`, `goal`; `useFocusTelemetry()`.
 - Üretir: `MissionContextFeature`; kayıt id'si `'mission-context'`, mod yok
   (hem `plan` hem `analyze`'da görünüyor, `fleet`'te kokpit zaten yok).
 
@@ -1202,7 +1239,7 @@ import { useMission } from '../../mission/MissionContext'
 import { useFocusTelemetry } from '../../mission/MissionContext'
 
 export default function MissionContextPanel() {
-  const { gridMeta, activeViewMode } = useMission()
+  const { gridMeta, layerError, isSolving, planResult, activeViewMode, start, goal } = useMission()
   const focus = useFocusTelemetry()
   // gövde değişmez
 }
@@ -1258,10 +1295,13 @@ EOF
 **Dosyalar:**
 - Taşı: `frontend/src/components/Analysis/RouteAnalysisInspector.tsx` → `frontend/src/features/route-analysis/`
 - Oluştur: `frontend/src/features/route-analysis/index.tsx`
-- Değiştir: `frontend/src/features/registry.ts`, `frontend/src/App.tsx`
+- Oluştur: `frontend/src/mission/MissionRuntimeContext.ts`, `frontend/src/mission/MissionRuntimeProvider.tsx`
+- Değiştir: `frontend/src/features/registry.ts`, `frontend/src/App.tsx`, `frontend/src/mission/types.ts`, `frontend/src/mission/MissionContext.ts`
 
 **Arayüzler:**
-- Tüketir: `useMission()` — `planResult`.
+- Tüketir: `useMission()` — `planResult`; `useMissionRuntime()` —
+  `routePlaybackStep`, `payloadW`, `heaterW`; `useMissionActions()` —
+  `setPayloadW`, `setHeaterW`.
 - Üretir: `RouteAnalysis`; kayıt id'si `'route-analysis'`, `modes: ['analyze']`.
 
 - [ ] **Adım 1: Dosyayı taşı**
@@ -1274,8 +1314,11 @@ git mv components/Analysis/RouteAnalysisInspector.tsx features/route-analysis/
 
 - [ ] **Adım 2: Prop'ları context'e çevir**
 
-`interface RouteAnalysisInspectorProps` silinir; `planResult` `useMission()`'dan
-okunur. `planResult` yokken bileşen `null` döndürmeye devam eder — `App.tsx`
+`interface RouteAnalysisInspectorProps` silinir. Bu görev, `MissionRuntime`
+context'i ve yalnızca provider bileşenini oluşturarak `App.tsx`'te mount eder;
+veri `useMission()` ve `useMissionRuntime()`'dan, eylemler
+`useMissionActions()`'dan okunur. `planResult` yokken bileşen `null` döndürmeye
+devam eder — `App.tsx`
 bugün bunu `missionMode === 'analyze' && planResult &&` ile dışarıdan yapıyor,
 sorumluluk bileşenin içine taşınır.
 
@@ -1320,13 +1363,14 @@ git commit -m "feat(route-analysis): register the inspector for analyze mode"
 - Değiştir: `frontend/src/features/registry.ts`, `frontend/src/App.tsx`
 
 **Arayüzler:**
-- Tüketir: `useMission()` — `planResult`.
+- Tüketir: `useMission()` — `planResult`; `useMissionRuntime()` —
+  `routePlaybackStep`; `useMissionActions()` — `setPlaybackStep`.
 - Üretir: `Playback`; kayıt id'si `'playback'`, `modes: ['analyze']`.
 
 **Not:** `routePlaybackStep` state'i bugün `App.tsx`'te. Bu görevde
 **taşınmaz**: iki yazarı olan bir state'i feature'ın içine gömmek `MapCanvas`'ı
-kırar. `App.tsx`'te kalır ve `PlaybackBar` ona `useMission()` üzerinden erişir;
-alan Task 7'de kurulan değere eklenir.
+kırar. `App.tsx`'te kalır ve `PlaybackBar` ona `useMissionRuntime()` üzerinden
+erişir; updater `useMissionActions()`'ta kalır.
 
 > **Bilinen kusur — `goktug/ai-scene`'den miras, bu planın kapsamı dışında.**
 >
@@ -1359,7 +1403,7 @@ alan Task 7'de kurulan değere eklenir.
 > **Karar (4 Eylül): düzeltme Göktuğ'a bırakıldı**, kendi feature'ı ve tasarım
 > niyetini o biliyor. Bu görev `PlaybackBar`'ı yalnızca kayda taşır,
 > davranışına dokunmaz. Göktuğ düzeltmeyi bu görevden önce yaparsa taşıma
-> değişmez; sonra yaparsa `MapCanvas`'ın yeni prop'u `MissionValue`'daki
+> değişmez; sonra yaparsa `MapCanvas`'ın yeni prop'u `MissionRuntime`'daki
 > `routePlaybackStep`'ten beslenir.
 
 - [ ] **Adım 1: Dosyayı taşı**
@@ -1370,24 +1414,10 @@ mkdir -p features/playback
 git mv components/Analysis/PlaybackBar.tsx features/playback/
 ```
 
-- [ ] **Adım 2: `routePlaybackStep`'i mission değerine ekle**
+- [ ] **Adım 2: Prop'ları context'e çevir ve giriş noktasını yaz**
 
-`App.tsx`'teki `missionValue` nesnesine ve bağımlılık dizisine:
-
-```tsx
-  routePlaybackStep,
-  setRoutePlaybackStep,
-```
-
-Aynı alanlar `mission/types.ts`'teki `MissionValue`'ya eklenir:
-
-```ts
-  /** Oynatma imleci; null ise rota durağan gösterilir. */
-  routePlaybackStep: number | null
-  setRoutePlaybackStep: (step: number | null) => void
-```
-
-- [ ] **Adım 3: Prop'ları context'e çevir ve giriş noktasını yaz**
+`PlaybackBar`, Task 11'deki runtime context'inden adımı okur; updater
+`MissionActions`'tadır ve functional-updater çağrısını destekler.
 
 ```tsx
 import PlaybackBar from './PlaybackBar'
@@ -1397,15 +1427,15 @@ export function Playback() {
 }
 ```
 
-- [ ] **Adım 4: Kayda ekle**
+- [ ] **Adım 3: Kayda ekle**
 
 ```ts
   { id: 'playback', slot: 'bottomDock', Component: Playback, modes: ['analyze'] },
 ```
 
-- [ ] **Adım 5: `App.tsx`'ten JSX'i sil, `MapCanvas`'ın prop'una dokunma**
+- [ ] **Adım 4: `App.tsx`'ten JSX'i sil, `MapCanvas`'ın prop'una dokunma**
 
-- [ ] **Adım 6: Kapı ve gözle doğrulama**
+- [ ] **Adım 5: Kapı ve gözle doğrulama**
 
 ```bash
 cd frontend && npm run typecheck && npm run lint && npm test && npm run dev
@@ -1414,7 +1444,7 @@ cd frontend && npm run typecheck && npm run lint && npm test && npm run dev
 Beklenen: `analyze` modunda alt şeritte görünür; oynatma sırasında rota
 `MapCanvas`'ta hâlâ animasyonlu.
 
-- [ ] **Adım 7: Commit**
+- [ ] **Adım 6: Commit**
 
 ```bash
 git add -A
@@ -1423,7 +1453,7 @@ feat(playback): register the playback bar for analyze mode
 
 routePlaybackStep stays in App.tsx rather than moving into the feature:
 MapCanvas reads it too, and burying a two-consumer state inside one feature
-would break the other. It joins MissionValue instead.
+would break the other. It stays in App and is published by MissionRuntime.
 EOF
 )"
 ```
@@ -1440,8 +1470,8 @@ ayrı görevlere bölmek bir gözden geçirene fazladan karar kazandırmaz.
 - Değiştir: `frontend/src/features/registry.ts`, `frontend/src/App.tsx`
 
 **Arayüzler:**
-- Tüketir: `useMission()` — `activeViewMode`; `isSolving` (Task 12'deki gibi
-  `MissionValue`'ya eklenir).
+- Tüketir: `useMission()` — `activeViewMode`, `dimension`, `isSolving`, `start`,
+  `goal`, `rover`; `useMissionActions()` — `setViewMode`, `setDimension`.
 - Üretir: `LayerPicker`, `SolvingIndicator`.
 
 - [ ] **Adım 1: İki dosyayı taşı**
@@ -1453,24 +1483,14 @@ git mv components/Map/LayerDropdown.tsx features/layer-picker/
 git mv components/Map/RouteSolvingOverlay.tsx features/solving-indicator/
 ```
 
-- [ ] **Adım 2: `isSolving`'i mission değerine ekle**
+- [ ] **Adım 2: Prop'ları context'e çevir**
 
-`mission/types.ts`'te `MissionValue`'ya:
+`LayerDropdown` veri alanlarını `useMission()`'dan, yazma eylemlerini
+`useMissionActions()`'dan okur. `RouteSolvingOverlay`, `isSolving`, başlangıç,
+hedef ve `rover?.name ?? 'Rover'` değerini `useMission()`'dan okur; `Props`
+arayüzleri silinir.
 
-```ts
-  /** Bir plan isteği uçuşta mı. */
-  isSolving: boolean
-```
-
-`App.tsx`'te `missionValue` nesnesine ve bağımlılık dizisine `isSolving`
-eklenir.
-
-- [ ] **Adım 3: Prop'ları context'e çevir**
-
-`LayerDropdown` `activeViewMode`'u, `RouteSolvingOverlay` `isSolving`'i
-`useMission()`'dan okur; `Props` arayüzleri silinir.
-
-- [ ] **Adım 4: İki giriş noktası yaz**
+- [ ] **Adım 3: İki giriş noktası yaz**
 
 ```tsx
 // features/layer-picker/index.tsx
@@ -1488,7 +1508,7 @@ export function SolvingIndicator() {
 }
 ```
 
-- [ ] **Adım 5: Kayda ekle**
+- [ ] **Adım 4: Kayda ekle**
 
 Kayıt sırası slot içindeki render sırasıdır; gösterge katman seçicinin üstünde
 çizilmeli, bu yüzden sonra gelir.
@@ -1498,9 +1518,9 @@ Kayıt sırası slot içindeki render sırasıdır; gösterge katman seçicinin 
   { id: 'solving-indicator', slot: 'canvasOverlay', Component: SolvingIndicator },
 ```
 
-- [ ] **Adım 6: `App.tsx`'ten iki JSX'i sil**
+- [ ] **Adım 5: `App.tsx`'ten iki JSX'i sil**
 
-- [ ] **Adım 7: Kapı ve gözle doğrulama**
+- [ ] **Adım 6: Kapı ve gözle doğrulama**
 
 ```bash
 cd frontend && npm run typecheck && npm run lint && npm test && npm run dev
@@ -1511,7 +1531,7 @@ sırasında çözüm göstergesi beliriyor. **Konum kayması varsa** sebebi Task
 `CanvasOverlaySlot` sarmalayıcısının ebeveyninde `position: relative`
 olmamasıdır.
 
-- [ ] **Adım 8: Commit**
+- [ ] **Adım 7: Commit**
 
 ```bash
 git add -A
