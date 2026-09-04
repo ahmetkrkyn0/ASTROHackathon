@@ -2,9 +2,11 @@ import type { ComponentType } from 'react'
 import type { MissionMode } from '../mission/types'
 import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
+import { LayerPicker } from './layer-picker'
 import { MissionSetup } from './mission-setup'
 import { Playback } from './playback'
 import { RouteAnalysis } from './route-analysis'
+import { SolvingIndicator } from './solving-indicator'
 
 /**
  * Where a feature mounts.
@@ -71,6 +73,13 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // renders nothing without waypoints, so knowing what an empty route looks
   // like stays inside the feature.
   { id: 'playback', slot: 'bottomDock', Component: Playback, modes: ['analyze'] },
+  // No modes: App.tsx rendered both of these inside the map stage, which the
+  // fleet branch replaces wholesale, so plan and analyze are every stage they
+  // could appear in. Registration order is paint order within a slot, and the
+  // solving indicator covers the map while a route is being solved, so it
+  // comes after the picker it may draw over.
+  { id: 'layer-picker', slot: 'canvasOverlay', Component: LayerPicker },
+  { id: 'solving-indicator', slot: 'canvasOverlay', Component: SolvingIndicator },
 ]
 
 /**

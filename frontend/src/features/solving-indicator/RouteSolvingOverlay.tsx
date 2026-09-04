@@ -1,18 +1,10 @@
 import React from 'react'
+import { useMission } from '../../mission/MissionContext'
 
-interface RouteSolvingOverlayProps {
-  isSolving: boolean
-  start: [number, number] | null
-  goal: [number, number] | null
-  roverName?: string
-}
+export const RouteSolvingOverlay: React.FC = () => {
+  const { isSolving, start, goal, rover } = useMission()
+  const roverName = rover?.name ?? 'Rover'
 
-export const RouteSolvingOverlay: React.FC<RouteSolvingOverlayProps> = ({
-  isSolving,
-  start,
-  goal,
-  roverName = 'Rover',
-}) => {
   if (!isSolving) return null
 
   return (

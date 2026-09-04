@@ -26,8 +26,6 @@ import {
 
 // New Mission Control Workstation Components
 import TopBar, { type MissionMode } from './components/TopBar/TopBar'
-import LayerDropdown from './components/Map/LayerDropdown'
-import RouteSolvingOverlay from './components/Map/RouteSolvingOverlay'
 import MissionAssistant from './components/Assistant/MissionAssistant'
 import FleetSelectionView from './components/Fleet/FleetSelectionView'
 
@@ -657,26 +655,6 @@ export default function App() {
                   </div>
                 )
               )}
-
-              {/* Top-Right: Grouped Compact Layer Dropdown, 2D/3D Toggle & HUD Toggle */}
-              <div className="map-overlay-top-right">
-                <LayerDropdown
-                  viewMode={viewMode}
-                  onViewModeChange={setViewMode}
-                  dimension={dimension}
-                  onDimensionChange={setDimension}
-                  hudOpen={hudOpen}
-                  onToggleHud={() => setHudOpen((v) => !v)}
-                />
-              </div>
-
-              {/* Route Solving Engineering Animation Overlay */}
-              <RouteSolvingOverlay
-                isSolving={isSolving}
-                start={start}
-                goal={goal}
-                roverName={selectedRover?.name}
-              />
 
               {/* Primary Map Viewport (2D or 3D). .map-canvas-shell already
                   carries position: relative (App.css:1208), which is what
