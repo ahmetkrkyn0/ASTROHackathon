@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import sys
 import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -78,6 +79,17 @@ from .terrain import (
     encode_layer_f32,
     terrain_manifest,
 )
+
+# lunapath/src/virtual_lidar.py is the real, DEM-ray-marched LiDAR model
+# (it reuses app.horizon's own ray geometry) and previously had no HTTP
+# route at all -- the 3-D frontend ran an independent client-side
+# reimplementation instead. That module already imports backend/app the
+# other way (adding this directory to its own sys.path) for MOON_RADIUS_M,
+# so this mirrors it rather than inventing a third layout.
+_LUNAPATH_SRC = str(Path(__file__).resolve().parent.parent.parent / "lunapath" / "src")
+if _LUNAPATH_SRC not in sys.path:
+    sys.path.insert(0, _LUNAPATH_SRC)
+from virtual_lidar import DEFAULT_ELEVATION_ANGLES_DEG, virtual_scan  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -1444,6 +1456,97 @@ def terrain(
         # every client is told to fetch as-is.
         binary_query=urlencode(query),
     )
+
+
+# Pure-Python nested loop (see virtual_lidar.py's own note on why it is not
+# vectorised): n_azimuth * len(elevation_angles) * (max_range_m / step_m)
+# ray-steps. At the frontend's own defaults (180 x 16 x ~120 steps) that is
+# ~350k iterations, sub-second; these caps bound the worst case a caller
+# could ask for to a few seconds rather than an unbounded hang.
+_LIDAR_SCAN_MAX_AZIMUTH = 360
+_LIDAR_SCAN_MAX_RANGE_M = 150.0
+
+
+@app.get("/api/lidar-scan")
+def lidar_scan(
+    request: Request,
+    row: float = Query(..., description="Sensor origin row, fractional grid coordinate."),
+    col: float = Query(..., description="Sensor origin column, fractional grid coordinate."),
+    sensor_height_m: float = Query(1.6, description="Sensor height above the DEM surface, metres."),
+    n_azimuth: int = Query(180, ge=1, le=_LIDAR_SCAN_MAX_AZIMUTH),
+    max_range_m: float = Query(60.0, gt=0, le=_LIDAR_SCAN_MAX_RANGE_M),
+    elevation_angles_deg: str | None = Query(
+        None,
+        description=(
+            "Comma-separated beam elevation angles in degrees. Lets a "
+            "caller match its own channel spec exactly (e.g. the frontend's "
+            "16-channel -16..+14 layout) instead of this endpoint's default "
+            "-15..0. Falls back to DEFAULT_ELEVATION_ANGLES_DEG if omitted."
+        ),
+    ),
+):
+    """First-return synthetic LiDAR scan of the orbital DEM around one pose.
+
+    This is virtual_lidar.virtual_scan -- a real ray-march over the same
+    elevation grid app.horizon uses for shadow geometry, reused per-pose
+    instead of per-cell -- not a client-side reimplementation. Its own
+    documented limitation still applies: the working DEM is 5 m/px, so this
+    resolves terrain relief, not the sub-metre rocks a rover LiDAR would
+    also see. The 3-D scene combines this response with its own local
+    raycasting against the rock meshes it renders, which this endpoint has
+    no way to know about -- two different scales of one scan, not a
+    contradiction between them.
+    """
+    grids = _active_grids(request)
+    metadata = grids["metadata"]
+    rows, cols = int(metadata["shape"][0]), int(metadata["shape"][1])
+    if not (0 <= row <= rows - 1 and 0 <= col <= cols - 1):
+        raise HTTPException(
+            status_code=422,
+            detail=f"({row}, {col}) is outside the {rows}x{cols} grid.",
+        )
+
+    resolution_m = float(metadata["resolution_m"])
+    if elevation_angles_deg is None:
+        angles = DEFAULT_ELEVATION_ANGLES_DEG
+    else:
+        try:
+            angles = tuple(float(v) for v in elevation_angles_deg.split(","))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="elevation_angles_deg must be comma-separated numbers.",
+            ) from exc
+        if not (1 <= len(angles) <= 64):
+            raise HTTPException(
+                status_code=422,
+                detail="elevation_angles_deg must list between 1 and 64 angles.",
+            )
+
+    try:
+        points = virtual_scan(
+            elevation=np.asarray(grids["elevation"], dtype=np.float64),
+            resolution_m=resolution_m,
+            origin_row=row,
+            origin_col=col,
+            sensor_height_m=sensor_height_m,
+            n_azimuth=n_azimuth,
+            elevation_angles_deg=angles,
+            max_range_m=max_range_m,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "origin": {"row": row, "col": col, "sensor_height_m": sensor_height_m},
+        "resolution_m": resolution_m,
+        "max_range_m": max_range_m,
+        "n_azimuth": n_azimuth,
+        "elevation_angles_deg": list(angles),
+        # Each point is (east_m, north_m, up_m) relative to the sensor
+        # origin -- up_m is height above the SENSOR, not the DEM datum.
+        "points": points.tolist(),
+    }
 
 
 def _series_field_cube(

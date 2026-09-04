@@ -64,6 +64,24 @@ function jetColor(t: number): [number, number, number] {
   return [r, g, b]
 }
 
+/**
+ * A raw hit distance becomes what the sensor actually reports: dropped
+ * entirely (no atmosphere means no fog, so misses here are range, grazing
+ * incidence and dark regolith albedo instead), or jittered by 2 cm range
+ * noise. Shared by both return sources below so a backend-sourced terrain
+ * point and a locally-raycast rock point carry the same sensor character.
+ */
+function applySensorNoise(rawDistance: number, random: () => number): number | null {
+  const dropoutProbability = 0.008 + 0.055 * Math.pow(rawDistance / LIDAR_CONFIG.maxRangeM, 2)
+  if (random() < dropoutProbability) return null
+  const gaussian = Math.sqrt(-2 * Math.log(Math.max(random(), 1e-9))) * Math.cos(2 * Math.PI * random())
+  return THREE.MathUtils.clamp(
+    rawDistance + gaussian * LIDAR_CONFIG.rangeNoiseSigmaM,
+    LIDAR_CONFIG.minRangeM,
+    LIDAR_CONFIG.maxRangeM,
+  )
+}
+
 function hash2(a: number, b: number): number {
   let h = Math.imul(a | 0, 0x45d9f3b) ^ Math.imul(b | 0, 0x119de1f3)
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b)
@@ -239,18 +257,8 @@ export function simulateLidarScan(
       const rawDistance = Math.min(rockDistance, groundDistance)
       if (!Number.isFinite(rawDistance)) continue
 
-      // No atmosphere means no fog attenuation. Remaining missed returns are
-      // dominated here by range, grazing incidence and dark regolith albedo.
-      const dropoutProbability = 0.008 + 0.055 * Math.pow(rawDistance / LIDAR_CONFIG.maxRangeM, 2)
-      if (random() < dropoutProbability) continue
-
-      // Box-Muller range noise, sigma 2 cm, applied along the measured beam.
-      const gaussian = Math.sqrt(-2 * Math.log(Math.max(random(), 1e-9))) * Math.cos(2 * Math.PI * random())
-      const measuredDistance = THREE.MathUtils.clamp(
-        rawDistance + gaussian * LIDAR_CONFIG.rangeNoiseSigmaM,
-        LIDAR_CONFIG.minRangeM,
-        LIDAR_CONFIG.maxRangeM,
-      )
+      const measuredDistance = applySensorNoise(rawDistance, random)
+      if (measuredDistance === null) continue
       const point = origin.clone().addScaledVector(direction, measuredDistance)
       positions.push(point.x, point.y, point.z)
       if (point.y < minY) minY = point.y
@@ -289,6 +297,164 @@ export function simulateLidarScan(
     colors[i * 3 + 1] = g
     colors[i * 3 + 2] = b
   }
+  return {
+    positions: new Float32Array(positions),
+    colors,
+    azimuthEndpoints,
+    summary: {
+      beams,
+      returns,
+      rockReturns,
+      terrainReturns,
+      returnRate: beams > 0 ? returns / beams : 0,
+      nearestObstacleM,
+      detectedRocks: detectedRockIds.size,
+    },
+  }
+}
+
+export interface BackendLidarScanResponse {
+  origin: { row: number; col: number; sensor_height_m: number }
+  resolution_m: number
+  max_range_m: number
+  n_azimuth: number
+  elevation_angles_deg: number[]
+  /** (east_m, north_m, up_m) per return, relative to the sensor origin. */
+  points: [number, number, number][]
+}
+
+/**
+ * The real thing: backend/app/main.py's /api/lidar-scan runs
+ * lunapath/src/virtual_lidar.py's ray march over the actual loaded DEM --
+ * the same geometry app.horizon uses for shadow computation -- rather than
+ * a second, independent reimplementation living only in the browser.
+ * Passing this scene's own LIDAR_CONFIG channel spec (azimuth count,
+ * elevation angles, range) keeps the beam grid identical to what
+ * buildLidarScanFromBackend below expects to merge rock returns into.
+ */
+export async function fetchBackendLidarScan(
+  row: number,
+  col: number,
+  sensorHeightM: number,
+  signal?: AbortSignal,
+): Promise<BackendLidarScanResponse> {
+  const params = new URLSearchParams({
+    row: String(row),
+    col: String(col),
+    sensor_height_m: String(sensorHeightM),
+    n_azimuth: String(LIDAR_CONFIG.azimuthSteps),
+    max_range_m: String(LIDAR_CONFIG.maxRangeM),
+    elevation_angles_deg: LIDAR_CONFIG.elevationAnglesDeg.join(','),
+  })
+  const response = await fetch(`/api/lidar-scan?${params.toString()}`, { signal })
+  if (!response.ok) throw new Error(`/api/lidar-scan -> ${response.status}`)
+  return response.json() as Promise<BackendLidarScanResponse>
+}
+
+/**
+ * Merge the backend's real terrain ray-march with a LOCAL rock-only pass.
+ * The backend's 5 m/px DEM cannot resolve metre-scale rocks (stated in
+ * virtual_lidar.py's own docstring) -- they exist only as this scene's
+ * meshes, which the backend has no way to see -- so this is not a
+ * duplicate of the backend scan, it is the other half of the same one.
+ */
+export function buildLidarScanFromBackend(
+  origin: THREE.Vector3,
+  verticalScale: number,
+  backendPoints: ReadonlyArray<readonly [number, number, number]>,
+  rockMeshes: THREE.Mesh[],
+  scanSeed = 1,
+): LidarScanResult {
+  const positions: number[] = []
+  const random = seededRandom(scanSeed)
+  const detectedRockIds = new Set<string>()
+  let rockReturns = 0
+  let terrainReturns = 0
+  let nearestObstacleM: number | null = null
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  // Nearest return per azimuth bucket, across BOTH sources, for the
+  // animated sweep fan -- a rock closer than the terrain at that azimuth
+  // must win here exactly as it would in the single-pass scan above.
+  const nearestByAzimuth = new Map<number, { point: THREE.Vector3; distance: number }>()
+
+  const record = (azimuthIndex: number, point: THREE.Vector3, distance: number) => {
+    positions.push(point.x, point.y, point.z)
+    if (point.y < minY) minY = point.y
+    if (point.y > maxY) maxY = point.y
+    const current = nearestByAzimuth.get(azimuthIndex)
+    if (!current || distance < current.distance) {
+      nearestByAzimuth.set(azimuthIndex, { point, distance })
+    }
+  }
+
+  for (const [eastM, northM, upM] of backendPoints) {
+    // hypot(east, north) recovers the backend's own horizontal-range step
+    // regardless of elevation angle, so atan2 reconstructs the exact
+    // azimuth bucket it was cast at -- east = sin(az)*r, north = cos(az)*r.
+    const rawDistance = Math.hypot(eastM, northM, upM)
+    if (rawDistance < LIDAR_CONFIG.minRangeM || rawDistance > LIDAR_CONFIG.maxRangeM) continue
+    const measuredDistance = applySensorNoise(rawDistance, random)
+    if (measuredDistance === null) continue
+    const scale = measuredDistance / rawDistance
+    const point = new THREE.Vector3(
+      origin.x + eastM * scale,
+      origin.y + upM * verticalScale * scale,
+      origin.z - northM * scale,
+    )
+    terrainReturns++
+    const azimuth = Math.atan2(eastM, northM)
+    const azimuthTurns = (azimuth < 0 ? azimuth + Math.PI * 2 : azimuth) / (Math.PI * 2)
+    const azimuthIndex = Math.round(azimuthTurns * LIDAR_CONFIG.azimuthSteps) % LIDAR_CONFIG.azimuthSteps
+    record(azimuthIndex, point, measuredDistance)
+  }
+
+  const raycaster = new THREE.Raycaster()
+  raycaster.near = LIDAR_CONFIG.minRangeM
+  raycaster.far = LIDAR_CONFIG.maxRangeM
+  for (let azimuthIndex = 0; azimuthIndex < LIDAR_CONFIG.azimuthSteps; azimuthIndex++) {
+    const azimuth = (azimuthIndex / LIDAR_CONFIG.azimuthSteps) * Math.PI * 2
+    for (const elevationDeg of LIDAR_CONFIG.elevationAnglesDeg) {
+      const elevation = THREE.MathUtils.degToRad(elevationDeg)
+      const direction = new THREE.Vector3(
+        Math.sin(azimuth) * Math.cos(elevation),
+        Math.sin(elevation),
+        -Math.cos(azimuth) * Math.cos(elevation),
+      ).normalize()
+      raycaster.set(origin, direction)
+      const rockHit = raycaster.intersectObjects(rockMeshes, false)[0]
+      if (!rockHit) continue
+      const measuredDistance = applySensorNoise(rockHit.distance, random)
+      if (measuredDistance === null) continue
+      const point = origin.clone().addScaledVector(direction, measuredDistance)
+      rockReturns++
+      const rockId = String(rockHit.object.userData.lidarRockId ?? rockHit.object.uuid)
+      detectedRockIds.add(rockId)
+      nearestObstacleM = nearestObstacleM === null
+        ? measuredDistance
+        : Math.min(nearestObstacleM, measuredDistance)
+      record(azimuthIndex, point, measuredDistance)
+    }
+  }
+
+  const azimuthEndpoints: Array<THREE.Vector3 | null> = []
+  for (let azimuthIndex = 0; azimuthIndex < LIDAR_CONFIG.azimuthSteps; azimuthIndex++) {
+    azimuthEndpoints.push(nearestByAzimuth.get(azimuthIndex)?.point ?? null)
+  }
+
+  const beams = LIDAR_CONFIG.azimuthSteps * LIDAR_CONFIG.elevationAnglesDeg.length
+  const returns = positions.length / 3
+  const ySpan = maxY - minY
+  const colors = new Float32Array(positions.length)
+  for (let i = 0; i < returns; i++) {
+    const y = positions[i * 3 + 1]
+    const t = ySpan > 1e-6 ? (y - minY) / ySpan : 0.5
+    const [r, g, b] = jetColor(t)
+    colors[i * 3] = r
+    colors[i * 3 + 1] = g
+    colors[i * 3 + 2] = b
+  }
+
   return {
     positions: new Float32Array(positions),
     colors,

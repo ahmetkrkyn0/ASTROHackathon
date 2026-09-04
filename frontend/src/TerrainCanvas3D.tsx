@@ -27,6 +27,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { MapViewMode } from './MapCanvas'
 import type { Waypoint } from './api'
 import {
+  buildLidarScanFromBackend,
+  fetchBackendLidarScan,
   generateRockField,
   LIDAR_CONFIG,
   sampleTerrainHeight,
@@ -1303,7 +1305,10 @@ export default function TerrainCanvas3D({
     if (!state || status !== 'ready' || !state.heights) return
     const heights = state.heights
 
-    const timer = window.setTimeout(() => {
+    const controller = new AbortController()
+    let cancelled = false
+
+    const timer = window.setTimeout(async () => {
       const { rows, cols, resolution_m: resolutionM } = state.manifest.grid
       const source = activeWaypoint ?? waypoints?.[0] ?? null
       const row = THREE.MathUtils.clamp(source?.row ?? Math.floor(rows / 2), 0, rows - 1)
@@ -1390,12 +1395,35 @@ export default function TerrainCanvas3D({
       const rockMeshes = state.rockGroup.children.filter(
         (object): object is THREE.Mesh => object instanceof THREE.Mesh,
       )
-      const scan = simulateLidarScan(
-        state.lidarOrigin,
-        terrain,
-        rockMeshes,
-        ((row + 1) * 73856093) ^ ((col + 1) * 19349663),
-      )
+      const scanSeed = ((row + 1) * 73856093) ^ ((col + 1) * 19349663)
+
+      // The terrain half of this scan is now the real thing: a ray march
+      // over the actual loaded DEM, computed by backend/app/main.py's
+      // /api/lidar-scan (lunapath/src/virtual_lidar.py), not a second
+      // client-side reimplementation of it. Rocks stay local regardless --
+      // the backend's 5 m/px DEM cannot resolve them, by that module's own
+      // documented limitation, so this merges the backend's terrain return
+      // with a local raycast against the meshes the backend cannot see.
+      let scan: LidarScanResult
+      try {
+        const backendScan = await fetchBackendLidarScan(row, col, 1.6, controller.signal)
+        if (cancelled) return
+        scan = buildLidarScanFromBackend(
+          state.lidarOrigin,
+          terrain.verticalScale,
+          backendScan.points,
+          rockMeshes,
+          scanSeed,
+        )
+      } catch (error) {
+        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return
+        // Backend unreachable or erroring: fall back to the local DEM march
+        // rather than leaving the scene showing a stale or empty scan.
+        console.warn('LiDAR: /api/lidar-scan failed, using local fallback', error)
+        scan = simulateLidarScan(state.lidarOrigin, terrain, rockMeshes, scanSeed)
+      }
+      if (cancelled) return
+
       state.lidarScan = scan
       state.lidarRevolutionStartedAt = performance.now()
 
@@ -1411,7 +1439,11 @@ export default function TerrainCanvas3D({
       setLidarTelemetry(scan.summary)
     }, 0)
 
-    return () => window.clearTimeout(timer)
+    return () => {
+      cancelled = true
+      controller.abort()
+      window.clearTimeout(timer)
+    }
   }, [activeWaypoint, cameraMode, exaggeration, status, waypoints])
 
   useEffect(() => {
