@@ -1051,6 +1051,15 @@ kalır. `routePlaybackStep`, `payloadW` ve `heaterW` Task 11'de oluşturulan
 ayrı, dar `MissionRuntime` context'ine gider; bunları genel mission snapshot'a
 eklemek sözleşmeyi 15 alan sınırının üstüne çıkarır.
 
+`MissionRuntime` yalnızca şu üç değeri taşır ve `App.tsx`'te `useMemo` ile
+oluşturulur: `routePlaybackStep`, `payloadW`, `heaterW`. Context + hook
+`MissionRuntimeContext.ts`'te, yalnız provider bileşeni
+`MissionRuntimeProvider.tsx`'te olur; böylece Fast Refresh kuralı korunur.
+Provider, `MissionProvider` içinde ve `OverlayProvider` dışında sarılır.
+`setPlaybackStep` yazma eylemidir: Task 12'de `MissionActions` imzası
+`React.Dispatch<React.SetStateAction<number | null>>` olarak genişletilir;
+değer context'ine setter konmaz.
+
 Türetilen değerler sözleşmeye girmez: `hasRoute` `Boolean(planResult)`, veri
 bağlantısı `Boolean(gridMeta)`, durum ise
 `layerError ? 'ATTN' : isSolving ? 'SOLVING' : planResult ? 'LOCKED' : 'NOMINAL'`
@@ -1296,7 +1305,7 @@ EOF
 - Taşı: `frontend/src/components/Analysis/RouteAnalysisInspector.tsx` → `frontend/src/features/route-analysis/`
 - Oluştur: `frontend/src/features/route-analysis/index.tsx`
 - Oluştur: `frontend/src/mission/MissionRuntimeContext.ts`, `frontend/src/mission/MissionRuntimeProvider.tsx`
-- Değiştir: `frontend/src/features/registry.ts`, `frontend/src/App.tsx`, `frontend/src/mission/types.ts`, `frontend/src/mission/MissionContext.ts`
+- Değiştir: `frontend/src/features/registry.ts`, `frontend/src/App.tsx`, `frontend/src/mission/types.ts`
 
 **Arayüzler:**
 - Tüketir: `useMission()` — `planResult`; `useMissionRuntime()` —
@@ -1315,8 +1324,9 @@ git mv components/Analysis/RouteAnalysisInspector.tsx features/route-analysis/
 - [ ] **Adım 2: Prop'ları context'e çevir**
 
 `interface RouteAnalysisInspectorProps` silinir. Bu görev, `MissionRuntime`
-context'i ve yalnızca provider bileşenini oluşturarak `App.tsx`'te mount eder;
-veri `useMission()` ve `useMissionRuntime()`'dan, eylemler
+context'ini ve yalnızca provider bileşenini oluşturup `App.tsx`'te mount eder.
+`MissionRuntime` değeri `useMemo` ile `{ routePlaybackStep, payloadW, heaterW }`
+olarak kurulur; veri `useMission()` ve `useMissionRuntime()`'dan, eylemler
 `useMissionActions()`'dan okunur. `planResult` yokken bileşen `null` döndürmeye
 devam eder — `App.tsx`
 bugün bunu `missionMode === 'analyze' && planResult &&` ile dışarıdan yapıyor,
@@ -1417,7 +1427,9 @@ git mv components/Analysis/PlaybackBar.tsx features/playback/
 - [ ] **Adım 2: Prop'ları context'e çevir ve giriş noktasını yaz**
 
 `PlaybackBar`, Task 11'deki runtime context'inden adımı okur; updater
-`MissionActions`'tadır ve functional-updater çağrısını destekler.
+`MissionActions`'tadır ve bu görevde imzası
+`React.Dispatch<React.SetStateAction<number | null>>` olarak genişletilerek
+functional-updater çağrısını destekler.
 
 ```tsx
 import PlaybackBar from './PlaybackBar'
