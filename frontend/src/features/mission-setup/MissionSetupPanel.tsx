@@ -1,24 +1,7 @@
 import React, { useState } from 'react'
-import type { ClickMode } from '../../MapCanvas'
-import type { PlanWeights, RoverEntry } from '../../api'
+import type { PlanWeights } from '../../api'
+import { useMission, useMissionActions } from '../../mission/MissionContext'
 import RoverSelectDrawer from './RoverSelectDrawer'
-
-interface MissionSetupPanelProps {
-  selectedRover: RoverEntry | null
-  rovers: RoverEntry[]
-  onSelectRover: (rover: RoverEntry) => void
-  weights: PlanWeights
-  onWeightsChange: (weights: PlanWeights) => void
-  start: [number, number] | null
-  goal: [number, number] | null
-  hasRoute: boolean
-  clickMode: ClickMode
-  onSetClickMode: (mode: ClickMode) => void
-  onPlanRoute: () => void
-  onReset: () => void
-  isSolving: boolean
-  onOpenFleetHangar?: () => void
-}
 
 const WEIGHT_CONTROLS: Array<{
   key: keyof PlanWeights
@@ -31,22 +14,18 @@ const WEIGHT_CONTROLS: Array<{
   { key: 'w_thermal', label: 'Thermal Risk', desc: 'Steers clear of extreme cryogenic zones' },
 ]
 
-export const MissionSetupPanel: React.FC<MissionSetupPanelProps> = ({
-  selectedRover,
-  rovers,
-  onSelectRover,
-  weights,
-  onWeightsChange,
-  start,
-  goal,
-  hasRoute,
-  clickMode,
-  onSetClickMode,
-  onPlanRoute,
-  onReset,
-  isSolving,
-  onOpenFleetHangar,
-}) => {
+export const MissionSetupPanel: React.FC = () => {
+  const { rover: selectedRover, rovers, weights, start, goal, planResult, clickMode, isSolving } =
+    useMission()
+  const {
+    selectRover: onSelectRover,
+    setWeights: onWeightsChange,
+    setClickMode: onSetClickMode,
+    planRoute: onPlanRoute,
+    resetMission: onReset,
+    setMissionMode,
+  } = useMissionActions()
+  const hasRoute = Boolean(planResult)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const handleWeightChange = (key: keyof PlanWeights, val: number) => {
@@ -73,7 +52,7 @@ export const MissionSetupPanel: React.FC<MissionSetupPanelProps> = ({
           <button
             type="button"
             className="lp-text-action-btn"
-            onClick={onOpenFleetHangar ?? (() => setDrawerOpen(true))}
+            onClick={() => setMissionMode('fleet')}
             title="Open comprehensive full-screen fleet hangar"
           >
             Fleet Hangar ⤢

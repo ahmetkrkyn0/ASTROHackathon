@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import type { MissionMode } from '../mission/types'
 import { MissionSnapshot } from './mission-snapshot'
+import { MissionSetup } from './mission-setup'
 
 /**
  * Where a feature mounts.
@@ -51,6 +52,8 @@ export interface FeatureRegistration {
  * those tasks independently reviewable.
  */
 export const FEATURES: readonly FeatureRegistration[] = [
+  // Plan only: meaningful after the hangar's rover selection is complete.
+  { id: 'mission-setup', slot: 'leftRail', Component: MissionSetup, modes: ['plan'] },
   // analyze only. App.tsx rendered this as the else-branch of
   // `missionMode === 'plan' ? MissionSetupPanel : MissionSnapshotPanel`, and
   // fleet replaces the whole cockpit, so analyze was the only stage it ever

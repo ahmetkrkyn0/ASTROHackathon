@@ -28,7 +28,6 @@ import {
 import TopBar, { type MissionMode } from './components/TopBar/TopBar'
 import LayerDropdown from './components/Map/LayerDropdown'
 import RouteSolvingOverlay from './components/Map/RouteSolvingOverlay'
-import MissionSetupPanel from './components/Planning/MissionSetupPanel'
 import MissionContextPanel from './components/Planning/MissionContextPanel'
 import RouteAnalysisInspector from './components/Analysis/RouteAnalysisInspector'
 import PlaybackBar from './components/Analysis/PlaybackBar'
@@ -446,8 +445,8 @@ export default function App() {
 
   // Exactly the fields MissionValue declares and no more: an extra one is a
   // compile error, which is what keeps this object honest as the contract
-  // grows. Nine of the ten already existed under these names -- this branch
-  // and the feature branch both grew from berke-3d.
+  // grows. Eleven fields already existed under these names; this task adds
+  // the four values the mission setup feature needs from its context.
   const missionValue: MissionValue = useMemo(
     () => ({
       gridMeta: elevationLayer
@@ -459,10 +458,14 @@ export default function App() {
         : null,
       roverId: selectedRoverId,
       rover: selectedRover,
+      rovers,
       weights,
       start,
       goal,
       planResult,
+      clickMode,
+      isSolving,
+      layerError,
       // Always null, and deliberately: this cockpit has no "select a cell"
       // control. Start and goal are placed by mode-scoped clicks and mean
       // "route from here" / "route to here". A feature that wants today's
@@ -474,13 +477,17 @@ export default function App() {
     }),
     [
       dimension,
+      clickMode,
       elevationLayer,
       focusTelemetry.resolutionM,
       goal,
+      isSolving,
+      layerError,
       missionMode,
       planResult,
       selectedRover,
       selectedRoverId,
+      rovers,
       start,
       viewMode,
       weights,
@@ -567,30 +574,7 @@ export default function App() {
                 {leftOpen ? '\u2039' : '\u203A'}
               </button>
 
-              {leftOpen && (
-                <>
-                  {missionMode === 'plan' ? (
-                    <MissionSetupPanel
-                      selectedRover={selectedRover}
-                      rovers={rovers}
-                      onSelectRover={handleRoverSelect}
-                      weights={weights}
-                      onWeightsChange={setWeights}
-                      start={start}
-                      goal={goal}
-                      hasRoute={Boolean(planResult)}
-                      clickMode={clickMode}
-                      onSetClickMode={setClickMode}
-                      onPlanRoute={handlePlan}
-                      onReset={handleReset}
-                      isSolving={isSolving}
-                      onOpenFleetHangar={() => setMissionMode('fleet')}
-                    />
-                ) : null}
-              </>
-            )}
-
-            <LeftRailSlot />
+              {leftOpen && <LeftRailSlot />}
           </aside>
 
           {/* ── CENTER STAGE: 2D/3D TERRAIN WORKBENCH ───────────────────────── */}

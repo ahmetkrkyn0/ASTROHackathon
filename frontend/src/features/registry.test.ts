@@ -69,6 +69,18 @@ describe('selectFeatures', () => {
 })
 
 describe('FEATURES', () => {
+  it('shows mission setup in the left rail only during plan mode', () => {
+    expect(selectFeatures(FEATURES, 'leftRail', 'plan').map((feature) => feature.id)).toContain(
+      'mission-setup',
+    )
+    expect(selectFeatures(FEATURES, 'leftRail', 'fleet').map((feature) => feature.id)).not.toContain(
+      'mission-setup',
+    )
+    expect(selectFeatures(FEATURES, 'leftRail', 'analyze').map((feature) => feature.id)).not.toContain(
+      'mission-setup',
+    )
+  })
+
   it('has no duplicate ids', () => {
     // The id is the React key. Two entries sharing one makes React reuse a
     // component instance across two different features, which shows up as a

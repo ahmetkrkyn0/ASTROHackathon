@@ -91,11 +91,41 @@ export interface MissionValue {
    * limit needs this and has to handle the null.
    */
   rover: RoverEntry | null
+  /**
+   * The complete rover catalogue fetched by App, for the mission setup selector.
+   *
+   * This is distinct from `rover`: the selected entry gives one rover's
+   * specifications, while the setup panel needs the whole list to let the
+   * operator change that selection without another fetch.
+   */
+  rovers: RoverEntry[]
   weights: PlanWeights
   start: Cell | null
   goal: Cell | null
   /** The raw backend response, uncropped. */
   planResult: PlanResponse | null
+  /**
+   * Which target, if any, the next map click places.
+   *
+   * It is a value rather than an action because the setup panel must show
+   * which picker is armed; `setClickMode` stays in MissionActions so the
+   * panel cannot own a second click-placement state.
+   */
+  clickMode: ClickMode
+  /**
+   * True while the route request is in flight.
+   *
+   * A route control reads this to disable repeat submissions and describe the
+   * active solve, while App remains the sole owner of the request lifecycle.
+   */
+  isSolving: boolean
+  /**
+   * The latest terrain-layer load failure, if a layer could not be published.
+   *
+   * It belongs with mission data because a later feature may explain an
+   * unavailable layer, but no panel infers a broader mission status from it.
+   */
+  layerError: string | null
   /**
    * A cell the operator selected as a cell, in its own right.
    *
