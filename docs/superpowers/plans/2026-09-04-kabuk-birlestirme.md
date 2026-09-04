@@ -19,6 +19,47 @@ ESLint 9 (flat config), three.js.
 
 **Spec:** `docs/superpowers/specs/2026-09-04-kabuk-birlestirme-design.md`
 
+## Devir Durumu — 4 Eylül 2026
+
+Bu bölüm planı devralan için. Geri kalan her şey ilk yazıldığı gibi, **aşağıda
+sayılan düzeltmeler uygulanmış** hâlde.
+
+**Dal:** `berke-3d-shell`. `berke-3d` `f17d943`'te ve bu iş boyunca hiç
+değişmedi; birleşme Task 25'te, tek merge olarak.
+
+**Biten:** Task 1–8 ve Task 7b. `git log --oneline f17d943..HEAD` hepsini
+gösterir; her görev tek commit ve commit mesajı o görevde ne sapıldığını yazar.
+
+**Kapı:** `cd frontend && npm run typecheck && npm run lint && npm test`.
+Üçü de geçmeden commit yok. Şu an 35 test, 5 dosya.
+
+**Uygulamayı çalıştırma:** `cd backend && python -m uvicorn app.main:app --port 8000`
+ve `cd frontend && npm run dev`. `http://localhost:3000/?app` landing'i atlayıp
+doğrudan hangara girer — tarayıcıda doğrulama yaparken bunu kullan.
+
+### Uygulama sırasında bulunan ve plana işlenen düzeltmeler
+
+| Bulgu | Etkisi |
+|---|---|
+| `Cell` bir demet, obje değil | Task 18–20'deki 39 `start`/`goal` dönüşümü iptal |
+| `MissionValue`'da `hoverCell`/`cellTelemetry` bilerek yok | Task 21 feature'ın kendi telemetrisini çekmesine döndü |
+| Chatbot'un context dosyaları lint'ten geçmiyor | `MissionContext` ve `OverlayContext` ikiye bölündü |
+| Kanonik sözleşme salt okunur | Task 7b eklendi: ayrı `MissionActions` context'i |
+| `draw2d.ts` bizde kalıyor | `sampleRamp` eklendi, 5 yeni test |
+
+### Devralanın bilmesi gereken üç şey
+
+1. **Her panelin modunu `App.tsx`'ten oku, varsayma.** Task 8'de az kalsın
+   sessiz bir hata gitti: panel mod'suz kaydedilirse `plan` modunda da görünür.
+   `App.tsx`'teki koşullu JSX hangi modda render ettiğini söyler; kayıt satırı
+   onu birebir yansıtmalı.
+2. **Chatbot dalından alınan her `.tsx`, bileşen + başka bir şey dışa açıyorsa
+   lint'i kırar.** Çözüm bölmek, kuralı kapatmak değil. İki örneği var.
+3. **`MissionValue`'ya alan eklerken gerekçesini yaz.** Sözleşmeyi peşin
+   şişirme; her panel kendi görevinde ihtiyacı olanı ekler.
+
+---
+
 ## Global Kısıtlar
 
 Her görevin gereksinimleri örtük olarak bu bölümü içerir.
@@ -968,9 +1009,20 @@ alanın neden var olduğunu okunmaz hale getirir.
 
 ---
 
-Kalan görevler aynı biçimi izler: panel `features/` altına taşınır, prop'ları
-`useMission()` ile değiştirilir, kayda bir satır eklenir, `App.tsx`'ten JSX'i
-silinir. `SpaceBackdrop`, `TopBar`, `MapCanvas`, `TerrainCanvas3D` ve
+Kalan görevler Task 8'in kurduğu biçimi izler. Adım adım:
+
+1. `git mv components/<Alan>/<Panel>.tsx features/<ad>/`
+2. `interface <Panel>Props` silinir; bileşen `React.FC` olur, prop almaz
+3. Veri `useMission()`'dan, eylemler `useMissionActions()`'dan okunur
+4. Eksik veri alanı varsa `mission/types.ts`'e **gerekçesiyle** eklenir ve
+   `App.tsx`'teki `missionValue`'da doldurulur (bağımlılık dizisini unutma)
+5. `features/<ad>/index.tsx` — tek satırlık giriş noktası
+6. `registry.ts`'e bir kayıt satırı; **modu `App.tsx`'teki koşuldan oku**
+7. `App.tsx`'ten JSX, import ve artık kullanılmayan handler silinir
+8. Kapı + tarayıcıda gözle doğrulama, sonra commit
+
+Task 8 (`mission-snapshot`) bu adımların hepsini içeren çalışan örnektir;
+takıldığın yerde `6c639cd` commit'ine bak. `SpaceBackdrop`, `TopBar`, `MapCanvas`, `TerrainCanvas3D` ve
 `FleetSelectionView` **kabukta kalır** ve prop almaya devam eder.
 
 `FleetSelectionView` bilerek dışarıda: `fleet` modunda kokpitin tamamının
