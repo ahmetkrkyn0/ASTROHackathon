@@ -9,6 +9,7 @@ import React, {
 import type { Waypoint } from './api'
 import { drawOverlays } from './overlay/draw2d'
 import type { OverlayCommand } from './overlay/types'
+import { useOverlayCommands } from './overlay/useOverlays'
 import {
   aspectToRgb,
   computeHillshade,
@@ -61,8 +62,6 @@ interface Props {
   onCellClick: (row: number, col: number) => void
   onAnimationStepChange?: (step: number | null) => void
   onHoverCellChange?: (cell: [number, number] | null) => void
-  /** Feature-module marks, drawn above the base map. See overlay/types.ts. */
-  overlays?: readonly OverlayCommand[]
 }
 
 export interface MapCanvasHandle {
@@ -87,10 +86,15 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     onCellClick,
     onAnimationStepChange,
     onHoverCellChange,
-    overlays,
   },
   ref,
 ) {
+  // The marks features registered, read here rather than passed down: App
+  // renders OverlayProvider and so cannot consume it, and the hook falls back
+  // to one shared empty list outside a provider, which keeps this canvas
+  // usable on its own.
+  const overlays = useOverlayCommands()
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const baseImageRef = useRef<ImageData | null>(null)
   const animationTimerRef = useRef<number | null>(null)
