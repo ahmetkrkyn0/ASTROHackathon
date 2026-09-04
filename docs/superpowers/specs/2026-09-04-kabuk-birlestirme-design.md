@@ -114,8 +114,23 @@ okur. Göktuğ'un `missionMode === 'plan' ? … : …` koşullu JSX'i böylece
 |---|---|
 | `shell/slots.tsx`, `shell/FeatureHost.tsx` | `shell/slots.tsx` |
 | `mission/MissionContext.tsx`, `types.ts`, `selectors.ts`, `geo.ts` | `mission/MissionContext.ts`, `mission/MissionProvider.tsx` |
-| `overlay/OverlayContext.tsx`, `types.ts`, `draw2d.ts`, `useOverlays.ts` | `overlay/OverlayProvider.tsx`, `overlay/useOverlays.ts` |
+| `overlay/OverlayContext.tsx`, `types.ts`, `useOverlays.ts` | `overlay/OverlayProvider.tsx`, `overlay/useOverlays.ts` |
 | `features/registry.ts` (+ `modes`) | — |
+
+**`overlay/draw2d.ts` bu kuralın istisnasıdır: `berke-3d-frontend`'inki kalır,
+yalnızca kanonik tiplere göre yeniden yazılır.** Gerekçe ölçüldü:
+
+| | `berke-3d-frontend` | chatbot |
+|---|---|---|
+| Dışa açılan | `drawOverlays`, `ribbonEdges`, `normaliseToDomain` | yalnızca `drawOverlayCommands` |
+| Geometri | dışa açık, saf fonksiyon | private (`drawRibbon`, `sampleRamp`, …) |
+| Test | `draw2d.test.ts` — 9 vaka | dalda **hiç frontend testi yok** |
+
+Chatbot'un dosyası alınırsa NaN, tekrarlanan waypoint, dejenere segment ve düz
+alan durumlarını kapsayan dokuz test silinir ve yerine gelen mantık private
+olduğu için test edilemez. Bunlar koridor çizimini sessizce bozan uç
+durumlardır. Kanonik olan tip sözleşmesidir, o sözleşmeyi en iyi test edilmiş
+uygulama karşılar.
 
 `goktug/ai-scene`'in `components/<Alan>/` klasörü `features/` altına taşınır ve
 kayıt olur.
@@ -279,12 +294,37 @@ Tehlike sırasına göre.
 ### 1. `hoverCell` → `selectedCell` — sessiz davranış değişikliği
 
 Bu bir yeniden adlandırma değil. `berke-3d-frontend`'de `hoverCell` fareyle
-üzerine gelinen hücre; chatbot'ta `selectedCell` seçili hücre. Farklı davranış.
+üzerine gelinen hücre; chatbot'ta `selectedCell` seçili hücre. Farklı davranış
+ve yanlış eşleme derlemeyi geçer, yalnızca davranışı bozar.
 
-`useMission` çağıran **11 dosyanın her biri için** "bu gerçekten hover mı
-istiyor, seçim mi" ayrı ayrı cevaplanmalı. Yanlış eşleme derlemeyi geçer,
-davranışı bozar. Faz 3'te her feature'ın kendi commit'inde karara bağlanır ve
-commit mesajında hangisinin seçildiği yazılır.
+Kapsamı ölçüldü ve ilk sanıldığından çok dar çıktı. `useMission` on bir dosyada
+çağrılıyor, ama anlamı değişen alanı **tek bir feature** kullanıyor:
+
+| feature | `hoverCell` | `cellTelemetry` |
+|---|---|---|
+| `cost-explain` | 7 kullanım | 3 kullanım |
+| diğer sekizi | 0 | 0 |
+
+Dolayısıyla bu risk on bir dosyalık bir denetim değil, tek bir görevde verilen
+tek bir karardır. `cost-explain` imlecin altındaki hücrenin maliyet dökümünü
+gösteriyor; `hoverCell` semantiği kasıtlıdır ve `cellTelemetry` ile birlikte
+taşınmalıdır. Kanonik `MissionValue` bu yüzden `selectedCell`'in yanında
+`hoverCell` alanını da taşır — ikisi farklı şeydir ve biri diğerinin yerine
+geçemez.
+
+### 1b. Taşınmamış feature'lar derlemeyi kırar
+
+`frontend/tsconfig.json` `"include": ["src"]` diyor: `src/` altındaki her dosya,
+hiçbir yerden import edilmese bile typecheck edilir. Faz 1'de eski
+`mission/MissionContext.ts` ve `overlay/OverlayProvider.tsx` silindiğinde henüz
+taşınmamış dokuz feature bu dosyalara bakmaya devam edeceği için
+`npm run typecheck` kırılır ve Faz 1'in kapısı hiç açılmaz.
+
+Çözüm, Faz 1'in ilk adımıdır: dokuz feature dizini
+`frontend/src/features/_pending/` altına alınır, bu yol `tsconfig.json`'a
+`exclude` ve `eslint.config.js`'e `ignores` olarak eklenir. Faz 3 her feature'ı
+kendi görevinde oradan çıkarır; `_pending` boşaldığında dizin ve iki
+yapılandırma satırı Faz 5'te silinir.
 
 ### 2. `field` overlay komutu — performans
 
