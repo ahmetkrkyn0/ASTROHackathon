@@ -531,8 +531,15 @@ Kaydın tek yeni mantığı budur ve saf bir fonksiyona çıkarıldığı için 
 repodaki test altyapısıyla (jsdom yok) gerçekten test edilebilir.
 
 **Dosyalar:**
-- Değiştir: `frontend/src/features/registry.ts`
+- Oluştur: `frontend/src/features/registry.ts`
 - Oluştur: `frontend/src/features/registry.test.ts`
+
+Planın ilk sürümü dosyanın var olduğunu varsayıyordu; yok. Chatbot'unki de
+olduğu gibi alınamaz, çünkü `features/assistant`'ı import ediyor ve o dizin
+Task 22'ye kadar gelmiyor. Dolayısıyla dosya buradan doğuyor: slot tipi ve
+yorumları o daldan, `FEATURES` **boş** bir dizi olarak. Her feature kendi
+görevinde kendi kaydını ekler — görevlerin tek tek incelenebilir olmasının
+sebebi de bu.
 
 **Arayüzler:**
 - Üretir: `FeatureSlot`, `FeatureRegistration { id; slot; Component; modes? }`,
