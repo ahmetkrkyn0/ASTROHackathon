@@ -144,6 +144,17 @@ sağlayıcı olarak `stub` seçilirse gerçek model hiç çağrılmaz.
    npm run dev
    ```
 
+   Arayüz üç aşamalı ve her biri adresinde görünür, yani geri tuşu aşamalar
+   arasında gezer ve yenileme bulunduğunuz aşamaya döner:
+
+   | Adres | Aşama |
+   | --- | --- |
+   | `/` | Açılış |
+   | `/?stage=hangar` | Filo hangarı — rover ve rota öncelikleri |
+   | `/?stage=planner` | Kokpit — harita, planlama, analiz |
+
+   Eski `?app` kısayolu doğrudan kokpiti açmaya devam eder.
+
 3. **DEM → ızgara** (isteğe bağlı; önce uygun GeoTIFF’i `lunapath/data/raw` veya üst dizindeki `data/raw` içine koyun; varsayılan dosya adı script içinde tanımlıdır):
 
    ```bash

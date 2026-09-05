@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import LandingPage from './LandingPage'
 import FleetSelectionView from './components/Fleet/FleetSelectionView'
+import { type AppPhase, hrefForPhase, phaseFromHref } from './shell/phaseUrl'
 import MapCanvas, {
   type ClickMode,
   DOWNSAMPLE,
@@ -54,7 +55,6 @@ const DEFAULT_WEIGHTS: PlanWeights = {
 const DEFAULT_POINT: [number, number] = [250, 250]
 const TOAST_DURATION_MS = 5200
 type BootstrapState = 'loading' | 'ready' | 'error'
-type AppPhase = 'landing' | 'fleet' | 'app'
 
 interface FocusTelemetry {
   row: number
@@ -117,16 +117,11 @@ const LEGEND_ITEMS = [
 ] as const
 
 export default function App() {
-  // Phase and lifecycle: defaults to landing or direct to app if specified in URL
-  const [phase, setPhase] = useState<AppPhase>(() => {
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href)
-      if (url.searchParams.has('app') || url.hash.includes('planner')) {
-        return 'app'
-      }
-    }
-    return 'landing'
-  })
+  // Phase and lifecycle. The address names the stage, so a reload comes back to
+  // it instead of restarting the landing sequence.
+  const [phase, setPhase] = useState<AppPhase>(() =>
+    typeof window === 'undefined' ? 'landing' : phaseFromHref(window.location.href),
+  )
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>('loading')
   const [planningEngaged, setPlanningEngaged] = useState(false)
 
@@ -266,6 +261,26 @@ export default function App() {
     }
 
     void init()
+  }, [])
+
+  /**
+   * Keep the address and the stage in step, in both directions.
+   *
+   * The push is guarded by comparing the address against the phase rather than
+   * by a flag: after a Back the browser has already rewritten the URL, so the
+   * two agree and nothing is pushed. That is what stops the listener below and
+   * this effect from feeding each other an endless history.
+   */
+  useEffect(() => {
+    const currentHref = window.location.href
+    if (phaseFromHref(currentHref) === phase) return
+    window.history.pushState({ phase }, '', hrefForPhase(phase, currentHref))
+  }, [phase])
+
+  useEffect(() => {
+    const onPopState = () => setPhase(phaseFromHref(window.location.href))
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
   }, [])
 
   // Landing hands over to the hangar, not to the map: a rover is chosen
