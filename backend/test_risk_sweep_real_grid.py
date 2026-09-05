@@ -46,7 +46,11 @@ VIPER_SHORT_GOAL = {"row": 346, "col": 462}
 
 # SHA-256 of the v4 cost grid (default weights) as computed by the C3 build
 # on 5 Sept 2026, before B2 touched the cost path. risk_alpha=None must
-# reproduce it byte for byte.
+# reproduce it byte for byte. Since C4 the grid also carries NASA's LDRM
+# roughness as a fifth term whenever its cache is beside the processed
+# grids (v5; digests in test_roughness_real_grid); the four-term v4 grid
+# is what the same code produces with that layer removed, so the lock is
+# applied to the layer-less base grids here.
 V4_COST_SHA256 = {
     "lpr_1": "0e74607d668efa227af0357fde24a53a95636a6bf13cd11af9d97ac92f5c7bd1",
     "nasa_viper": "8788936cee3f8cde6cff1db5370fd9a09776e62f50c69e59a1a95581375ad3cf",
@@ -57,9 +61,17 @@ def _digest(grid: np.ndarray) -> str:
     return hashlib.sha256(np.ascontiguousarray(np.asarray(grid, dtype=np.float64)).tobytes()).hexdigest()
 
 
+def _four_term_base(grids: dict) -> dict:
+    """The loaded grids without the C4 roughness layer (a no-op when the
+    cache is absent)."""
+    base = {k: v for k, v in grids.items() if k != "roughness"}
+    base["metadata"] = {k: v for k, v in grids["metadata"].items() if k != "roughness"}
+    return base
+
+
 @needs_grids
 def test_the_nominal_cost_grid_is_the_v4_grid_bit_for_bit():
-    grids = load_preprocessed_grids()
+    grids = _four_term_base(load_preprocessed_grids())
     for rover_id, digest in V4_COST_SHA256.items():
         assert _digest(grids_for_rover(grids, rover_id)["cost"]) == digest
         assert _digest(grids_for_rover(grids, rover_id, None, risk_alpha=None)["cost"]) == digest

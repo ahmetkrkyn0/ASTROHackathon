@@ -47,6 +47,8 @@ MODELLED_FIELDS: frozenset[str] = frozenset(
         "w_energy",
         "w_shadow",
         "w_thermal",
+        # C4: the fifth criterion's weight (LOLA LDRM roughness).
+        "w_roughness",
         "sensor_payload_w",
         "sensor_heater_w",
         # C3: the anchors cost_engine.edge_travel_time_s reads through
@@ -176,6 +178,18 @@ REGOLITH_VIPER_TESTBED: dict[str, Any] = {
     "read_by": "nothing",
 }
 
+# ── C4: the roughness criterion's weight ─────────────────────────────────────
+# ASSUMPTION, stated rather than hidden: no rover profile and no mission
+# profile has a published weighting for a roughness criterion (the four
+# existing weights are the reference document's gradient-normalised expert
+# weights, not AHP -- doc 11). The fifth criterion therefore enters every
+# profile at one value, of the order of the minor criteria already there
+# (shadow 0.10-0.30, thermal 0-0.35), and the other four are NOT rescaled so
+# the term stays purely additive. Its sensitivity is swept 0-0.5 in
+# docs/research/roughness_psr_report.md; on Site11 the lunar-night route
+# moved at 0.05 already, the daytime pair only from 0.15 (probe 3, C4 spec).
+W_ROUGHNESS_DEFAULT: float = 0.15
+
 # Multi-rover catalogue
 ROVERS: dict[str, dict[str, Any]] = {
     "lpr_1": {
@@ -213,6 +227,7 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_energy": 0.259,
         "w_shadow": 0.142,
         "w_thermal": 0.190,
+        "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
     },
@@ -251,6 +266,7 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_energy": 0.30,
         "w_shadow": 0.30,
         "w_thermal": 0.0,
+        "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
     },
@@ -293,6 +309,7 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_energy": 0.25,
         "w_shadow": 0.20,
         "w_thermal": 0.20,
+        "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
     },
@@ -336,6 +353,7 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_energy": 0.30,
         "w_shadow": 0.20,
         "w_thermal": 0.0,
+        "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
     },
@@ -390,6 +408,7 @@ def rover_default_weights(rover_id: str | None = None) -> dict[str, float]:
         "w_energy": float(rover["w_energy"]),
         "w_shadow": float(rover["w_shadow"]),
         "w_thermal": float(rover["w_thermal"]),
+        "w_roughness": float(rover["w_roughness"]),
     }
 
 
@@ -501,3 +520,4 @@ W_SLOPE = float(_DEFAULT_ROVER["w_slope"])
 W_ENERGY = float(_DEFAULT_ROVER["w_energy"])
 W_SHADOW = float(_DEFAULT_ROVER["w_shadow"])
 W_THERMAL = float(_DEFAULT_ROVER["w_thermal"])
+W_ROUGHNESS = float(_DEFAULT_ROVER["w_roughness"])

@@ -23,6 +23,7 @@ from .constants import (
     DEFAULT_ROVER_ID,
     UnknownRoverError,
     W_ENERGY,
+    W_ROUGHNESS,
     W_SHADOW,
     W_SLOPE,
     W_THERMAL,
@@ -69,6 +70,16 @@ from .localization import evaluate_pose
 from .pose import PoseEstimate
 from .replan_triggers import evaluate_triggers_detailed
 from .rover_grids import grids_for_rover
+from .roughness import (
+    LPSR_PRODUCT,
+    LPSR_RESOLUTION_M,
+    PGDA_PRODUCT_URL as PGDA_ROUGHNESS_PRODUCT_URL,
+    PSR_CLAIM,
+    RoughnessScale,
+    psr_shadow_overlap,
+    roughness_block,
+    route_roughness_summary,
+)
 from .risk import (
     RISK_ALPHA_MAX,
     RISK_ALPHA_MIN,
@@ -409,8 +420,11 @@ class PlanWeights(BaseModel):
     w_energy: float = W_ENERGY
     w_shadow: float = W_SHADOW
     w_thermal: float = W_THERMAL
+    # C4: the measured roughness criterion's weight. Steers nothing when the
+    # roughness cache is absent; the response's `roughness.applied` says so.
+    w_roughness: float = W_ROUGHNESS
 
-    @field_validator("w_slope", "w_energy", "w_shadow", "w_thermal")
+    @field_validator("w_slope", "w_energy", "w_shadow", "w_thermal", "w_roughness")
     @classmethod
     def _check_range(cls, v: float) -> float:
         if not 0.0 <= v <= 2.0:
@@ -864,6 +878,12 @@ def get_cell_telemetry(
         rover_id or metadata.get("rover_id", metadata.get("default_rover_id"))
     )
     thermal_min = grids.get("thermal_min")
+    # NASA's measured roughness and PSR layers (C4), when cached beside the
+    # grids: the fifth criterion joins the breakdown and the card says
+    # whether the cell sits inside a PSR.
+    roughness_grid = grids.get("roughness")
+    psr_grid = grids.get("psr")
+    roughness_scale = _roughness_scale_of(grids)
     context = PlanContext(
         slope=np.asarray(grids["slope"], dtype=np.float64),
         thermal=np.asarray(grids["thermal"], dtype=np.float64),
@@ -875,11 +895,17 @@ def get_cell_telemetry(
             None if thermal_min is None
             else np.asarray(thermal_min, dtype=np.float64)
         ),
+        roughness=(
+            None if roughness_grid is None
+            else np.asarray(roughness_grid, dtype=np.float64)
+        ),
+        roughness_scale=roughness_scale,
     )
     cost_map = default_cost_map(
         rover,
         metadata.get("cost_weights"),
         metadata.get("layer_validity"),
+        roughness_scale=roughness_scale,
     )
     breakdown = cost_map.explain(row, col, context)
 
@@ -925,6 +951,20 @@ def get_cell_telemetry(
         "span_km": round((rows * resolution_m) / 1000.0, 4),
         "cost_breakdown": breakdown,
         "layer_validity": metadata.get("layer_validity", {}),
+        # NASA's measured roughness (metres; the 50 m pixel's 100 m-baseline
+        # statistic, not the cell's own), its [0, 1] criterion value, and
+        # whether the cell lies inside NASA's PSR mask (C4). null when the
+        # cache is absent.
+        "roughness_m": (
+            None if roughness_grid is None else _read_grid_value(roughness_grid, row, col)
+        ),
+        "f_roughness": (
+            None if roughness_scale is None or roughness_grid is None
+            else roughness_scale.f(float(np.asarray(roughness_grid)[row, col]))
+        ),
+        "in_psr": (
+            None if psr_grid is None else bool(float(np.asarray(psr_grid)[row, col]) >= 0.5)
+        ),
         # The safe haven verdict for this cell and the driving hours to the
         # nearest one (None: unreachable). null with the reason in
         # safe_haven_model when no epoch, horizon cube or kernels.
@@ -1094,6 +1134,11 @@ def plan(req: PlanRequest, request: Request):
     # read their tails, where each sigma came from, and the route re-priced
     # at its slip tail. Nominal physics above; this block is the tail.
     response["risk"] = _risk_block_2d(states, grids_for_plan, req.rover_id, rover, req.risk_alpha)
+
+    # The measured roughness the route crossed (C4): NASA's LDRM value and
+    # the criterion per cell, and how many cells lie in NASA's PSR mask.
+    # applied=false with the reason when the cache is absent.
+    response["roughness"] = _roughness_block_2d(planned_pixels, grids_for_plan)
 
     # Published only once the response the caller receives is fully built.
     # Assigning mid-request meant a plan whose serialisation then failed
@@ -1764,6 +1809,10 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # nominal cube, bit for bit.
         risk_alpha=req.risk_alpha,
         slope_sigma=grids_for_plan.get("slope_sigma"),
+        # NASA's measured roughness (C4), block-max coarsened inside the
+        # cube like the slope; None without the cache.
+        roughness=grids_for_plan.get("roughness"),
+        roughness_scale=_roughness_scale_of(grids_for_plan),
     )
     wait_cube = build_wait_cost_cube(
         illum_series, rover, slice_hours, weights_dict, coarsen=req.coarsen
@@ -2065,6 +2114,9 @@ def plan_4d(req: Plan4DRequest, request: Request):
         "risk": _risk_block_4d(
             result, geometry, shadow_cube, rover, req.risk_alpha, grids_for_plan, req.rover_id, req.coarsen
         ),
+        # The measured roughness the route crossed on the planner's own
+        # blocks (C4): block-max LDRM value, criterion, PSR contact.
+        "roughness": _roughness_block_4d(result, grids_for_plan, req.coarsen),
         "n_slices": n_slices,
         "slice_hours": slice_hours,
         "slice_hours_source": slice_hours_source,
@@ -2645,12 +2697,93 @@ def _slip_block_4d(
     return route_slip_summary(legs, rover)
 
 
+#: Why the roughness block reports applied=false on grids without the cache.
+_NO_ROUGHNESS_REASON = (
+    "no roughness layer beside the processed grids (roughness_grid.npy + "
+    "roughness_meta.json, written by scripts/build_roughness_cache.py from NASA PGDA "
+    "product 90); the cost sums the four criteria and w_roughness steers nothing"
+)
+
+
+def _roughness_scale_of(grids: dict) -> RoughnessScale | None:
+    """The loaded roughness layer's [0, 1] scale (C4), or None without the
+    layer. A layer whose metadata carries no scale is refused, as the
+    loader refuses it."""
+    if grids.get("roughness") is None:
+        return None
+    return RoughnessScale.from_meta(((grids.get("metadata") or {}).get("roughness") or {}).get("scale"))
+
+
+def _roughness_weight(grids_for_plan: dict) -> float:
+    """The w_roughness the adapted grids were costed with (grids_for_rover
+    stamps the resolved weights)."""
+    weights = (grids_for_plan.get("metadata") or {}).get("cost_weights") or {}
+    return float(weights.get("w_roughness", W_ROUGHNESS))
+
+
+def _roughness_block_2d(pixels: list, grids_for_plan: dict) -> dict[str, Any]:
+    """``roughness`` for a 2-D route (C4): NASA's LDRM value and the criterion
+    at every cell the planner visits, and how many of them lie in the PSR
+    mask. Fine-grid cell values."""
+    scale = _roughness_scale_of(grids_for_plan)
+    weight = _roughness_weight(grids_for_plan)
+    if scale is None:
+        return roughness_block(False, weight, reason=_NO_ROUGHNESS_REASON)
+    rows = np.array([int(p[0]) for p in pixels], dtype=int)
+    cols = np.array([int(p[1]) for p in pixels], dtype=int)
+    roughness = np.asarray(grids_for_plan["roughness"], dtype=np.float64)
+    values = roughness[rows, cols] if rows.size else np.array([])
+    psr = grids_for_plan.get("psr")
+    in_psr = None if psr is None else (np.asarray(psr, dtype=np.float64)[rows, cols] if rows.size else np.array([]))
+    route = route_roughness_summary(values, scale.f_grid(values), in_psr)
+    route["grid"] = "fine: cell values"
+    return roughness_block(True, weight, route=route)
+
+
+def _roughness_block_4d(result: dict, grids_for_plan: dict, coarsen: int) -> dict[str, Any]:
+    """``roughness`` for a 4-D route (C4) on the planner's blocks: the block's
+    roughest 50 m pixel (the value the cube priced), and a block counts as
+    PSR when any of its cells is. WAIT states repeat a cell and are
+    collapsed, so n_cells is the number of positions along the route."""
+    scale = _roughness_scale_of(grids_for_plan)
+    weight = _roughness_weight(grids_for_plan)
+    if scale is None:
+        return roughness_block(False, weight, reason=_NO_ROUGHNESS_REASON)
+    roughness_c = coarsen_grid(grids_for_plan["roughness"], coarsen, how="max")
+    psr = grids_for_plan.get("psr")
+    psr_c = None if psr is None else coarsen_grid(psr, coarsen, how="max")
+    cells: list[tuple[int, int]] = []
+    for row, col, _t in result.get("path_states") or []:
+        if not cells or cells[-1] != (int(row), int(col)):
+            cells.append((int(row), int(col)))
+    rows = np.array([r for r, _c in cells], dtype=int)
+    cols = np.array([c for _r, c in cells], dtype=int)
+    values = roughness_c[rows, cols] if rows.size else np.array([])
+    in_psr = None if psr_c is None else (psr_c[rows, cols] if rows.size else np.array([]))
+    route = route_roughness_summary(values, scale.f_grid(values), in_psr)
+    route["grid"] = "coarse: block-max roughness, block touches PSR"
+    route["coarsen"] = int(coarsen)
+    return roughness_block(True, weight, route=route)
+
+
 def _risk_sources(grids_for_plan: dict, rover_id: str, rover: dict) -> dict[str, Any]:
     """Where the risk tails' sigmas come from on these grids (B2): C3's
     anchors for the slip, NASA's clone cache -- when it is beside the
-    processed grids -- for the slope. Cached per (grids, rover)."""
+    processed grids -- for the slope. Cached per (grids, rover). With the
+    roughness layer loaded (C4) the block also says that roughness has NO
+    tail: LDRM publishes no per-pixel sigma."""
     layers, info = uncertainty_layers_for_grids(grids_for_plan, rover_id)
-    return sigma_sources(rover, info if layers is not None else None)
+    sources = sigma_sources(rover, info if layers is not None else None)
+    if grids_for_plan.get("roughness") is not None:
+        sources["roughness"] = {
+            "source": "none",
+            "validity": None,
+            "reason": (
+                "LOLA LDRM publishes no per-pixel roughness sigma (LDSM has one, LDRM "
+                "does not); the roughness criterion reads its nominal value at every alpha"
+            ),
+        }
+    return sources
 
 
 def _risk_legs_2d(states: list, grids_for_plan: dict, rover: dict) -> list:
@@ -3116,6 +3249,61 @@ def safety_check(req: SafetyCheckRequest):
     }
 
 
+@app.get("/api/psr-validation")
+def psr_validation(
+    threshold: float = Query(
+        0.99,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "shadow_ratio at or above which our model calls a cell permanently "
+            "dark; compared against NASA's PSR mask."
+        ),
+    ),
+):
+    """How NASA's measured PSR mask agrees with our own shadow model (C4).
+
+    The PSR layer is a validation, not a planning input: this reports the
+    Jaccard of the mask with our ``shadow_ratio >= threshold`` cells, the
+    share of PSR cells we call dark, the share of our dark cells that are
+    PSR, and the mean shadow ratio / median cold-end temperature inside and
+    outside the mask -- measured on the loaded window, reported as it comes
+    out. 404 with the script's name when the mask is not cached.
+    """
+    grids = _get_grids()
+    psr = grids.get("psr")
+    if psr is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "psr is not present in the loaded grids. It is NASA's measured PSR "
+                "map (PGDA 90): run scripts/build_roughness_cache.py, then reload "
+                "with POST /api/load-preprocessed."
+            ),
+        )
+    metadata = grids.get("metadata") or {}
+    validity = metadata.get("layer_validity") or {}
+    stats = psr_shadow_overlap(
+        psr, grids["shadow_ratio"], thermal_min=grids.get("thermal_min"), threshold=threshold
+    )
+    return {
+        **stats,
+        "product": LPSR_PRODUCT,
+        "resolution_m": LPSR_RESOLUTION_M,
+        "product_url": PGDA_ROUGHNESS_PRODUCT_URL,
+        "psr_meta": metadata.get("psr"),
+        "validity": {"psr": validity.get("psr"), "shadow_ratio": validity.get("shadow_ratio")},
+        "claim": PSR_CLAIM,
+        "reading": (
+            "jaccard is the overlap of the two sets; psr_recall the share of NASA's "
+            "PSR cells our model calls dark; dark_precision the share of our dark "
+            "cells that NASA calls PSR (1 - false_positive_fraction). The mask is "
+            "20 m/px on a 5 m grid, so a few-cell disagreement at every PSR edge is "
+            "the resolution ratio, not a model error."
+        ),
+    }
+
+
 @app.get("/api/layers/{layer_name}")
 def get_layer(
     layer_name: str,
@@ -3141,6 +3329,7 @@ def get_layer(
     w_energy: float | None = None,
     w_shadow: float | None = None,
     w_thermal: float | None = None,
+    w_roughness: float | None = None,
 ):
     base_grids = _get_grids()
     valid_layers = (
@@ -3154,6 +3343,9 @@ def get_layer(
         "traversable",
         "earth_visibility",
         *UNCERTAINTY_LAYERS,
+        # NASA's measured roughness and PSR layers (C4), when cached.
+        "roughness",
+        "psr",
     )
     if layer_name not in valid_layers:
         raise HTTPException(status_code=400, detail=f"Layer must be one of {valid_layers}")
@@ -3165,6 +3357,7 @@ def get_layer(
             "w_energy": w_energy,
             "w_shadow": w_shadow,
             "w_thermal": w_thermal,
+            "w_roughness": w_roughness,
         }.items()
         if value is not None
     }
@@ -3197,6 +3390,13 @@ def get_layer(
                 "an optional cache: run scripts/build_earth_visibility_cache.py "
                 "(needs horizon_map.npy and the NAIF kernels), then reload "
                 "with POST /api/load-preprocessed."
+            )
+        elif layer_name in ("roughness", "psr"):
+            detail = (
+                f"{layer_name} is not present in the loaded grids. It is NASA's "
+                "measured product (PGDA 90): run scripts/build_roughness_cache.py "
+                "(fetches the LOLA LDRM roughness and LPSR PSR windows over "
+                "/vsicurl/), then reload with POST /api/load-preprocessed."
             )
         else:
             detail = (
@@ -3262,6 +3462,7 @@ def terrain(
     w_energy: float | None = None,
     w_shadow: float | None = None,
     w_thermal: float | None = None,
+    w_roughness: float | None = None,
 ):
     """Everything a 3-D scene needs before it fetches a byte of grid.
 
@@ -3281,6 +3482,7 @@ def terrain(
             "w_energy": w_energy,
             "w_shadow": w_shadow,
             "w_thermal": w_thermal,
+            "w_roughness": w_roughness,
         }.items()
         if value is not None
     }

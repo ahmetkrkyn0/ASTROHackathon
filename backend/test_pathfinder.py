@@ -188,8 +188,11 @@ def test_a_stamped_cost_grid_is_reused_verbatim():
                 "w_energy": 0.259,
                 "w_shadow": 0.142,
                 "w_thermal": 0.190,
+                "w_roughness": 0.15,  # C4: a grid stamped with this build carries five weights
             },
             "cost_model": COST_MODEL_ID,
+            # C4: this build also stamps which criteria the grid summed.
+            "cost_criteria": ["slope", "energy", "shadow", "thermal"],
         }
     )
     result = astar(grids, (0, 0), (5, 5), rover=get_rover("lpr_1"))

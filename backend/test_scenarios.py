@@ -37,6 +37,7 @@ def test_every_profile_declares_the_full_weight_and_constraint_set():
             "w_energy",
             "w_shadow",
             "w_thermal",
+            "w_roughness",  # C4
         }, profile_id
         assert set(profile["constraints"]) == {
             "max_shadow_h",

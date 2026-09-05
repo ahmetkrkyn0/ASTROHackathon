@@ -14,6 +14,7 @@ import numpy as np
 
 from . import constants as C
 from .risk import slip_cvar, slope_cvar
+from .roughness import RoughnessScale
 from .slip_model import slip_ratio, slip_ratio_array
 
 # Identifies the formula compute_cost_grid implements. Bump this whenever a
@@ -27,15 +28,36 @@ from .slip_model import slip_ratio, slip_ratio_array
 # per-metre energies behind f_energy_cell -- and with them the grid -- now
 # grow with slip. B2 (risk_alpha) does NOT bump it: with risk_alpha=None the
 # grid is this formula, operation for operation; a grid built under an alpha
-# is keyed by metadata["risk_alpha"] instead (rover_grids).
-COST_MODEL_ID: str = "weighted_cell_cost_shadow_aware_energy_slip_v4"
+# is keyed by metadata["risk_alpha"] instead (rover_grids). The v5 bump is
+# C4: a fifth criterion, f_roughness (NASA's LOLA LDRM roughness, MEASURED),
+# enters the weighted sum with w_roughness whenever the roughness layer is
+# beside the processed grids -- so with the layer the grid is a different
+# number; without it the four-term body runs operation for operation as v4
+# did (asserted bit for bit in test_roughness_cost and, on Site11, by the
+# v4 SHA-256 lock with the layer removed).
+COST_MODEL_ID: str = "weighted_cell_cost_shadow_aware_energy_slip_roughness_v5"
 
 _WEIGHT_KEYS: tuple[str, ...] = (
     "w_slope",
     "w_energy",
     "w_shadow",
     "w_thermal",
+    "w_roughness",
 )
+
+#: The criteria compute_cost_grid always sums, in order; roughness (C4) is
+#: appended only when its layer is present -- see cost_criteria_for.
+COST_CRITERIA_BASE: tuple[str, ...] = ("slope", "energy", "shadow", "thermal")
+
+
+def cost_criteria_for(roughness_present: bool) -> list[str]:
+    """The criteria a cost grid built with (or without) the roughness layer
+    actually sums; stamped as ``metadata["cost_criteria"]`` so a response
+    can say whether ``w_roughness`` steered anything."""
+    criteria = list(COST_CRITERIA_BASE)
+    if roughness_present:
+        criteria.append("roughness")
+    return criteria
 
 
 def _resolve_rover(rover: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
@@ -80,6 +102,7 @@ def default_weights(rover: Mapping[str, Any] | None = None) -> dict[str, float]:
         "w_energy": float(rover_cfg["w_energy"]),
         "w_shadow": float(rover_cfg["w_shadow"]),
         "w_thermal": float(rover_cfg["w_thermal"]),
+        "w_roughness": float(rover_cfg["w_roughness"]),
     }
 
 
@@ -917,6 +940,25 @@ def log_barrier_penalty(
 
 # ── Combined edge cost ──────────────────────────────────────────────────────
 
+# ── 2.3.5  f_roughness — measured hectometre-scale roughness (C4) ──────────
+
+def f_roughness(roughness_m: float | None, scale: "RoughnessScale | None") -> float:
+    """Roughness penalty in MRU [0, 1]: the cell's percentile rank among the
+    80-90 S region's 50 m LDRM pixels (:class:`app.roughness.RoughnessScale`).
+
+    *roughness_m* is NASA's LOLA LDRM roughness (metres, 100 m baseline) of
+    the 50 m pixel that contains the cell -- a MEASURED block statistic, not
+    the roughness of the cell. *scale* is the statistical mapping to [0, 1]
+    (MODEL) that ships with the layer; a roughness value without its scale
+    cannot be normalised and is refused. A missing value (NaN/None) reads
+    ``NAN_ROUGHNESS_F`` and never blocks a cell. Scalar reference form of
+    :func:`app.cost_vec.f_roughness_grid` (same ``np.interp`` call).
+    """
+    if scale is None:
+        raise ValueError("f_roughness needs the layer's RoughnessScale (roughness_meta.json['scale'])")
+    return float(scale.f(roughness_m))
+
+
 def total_edge_cost(
     slope_deg: float,
     distance_m: float,
@@ -977,8 +1019,16 @@ def compute_cost_grid(
     thermal_min_grid: np.ndarray | None = None,
     risk_alpha: float | None = None,
     slope_sigma_grid: np.ndarray | None = None,
+    roughness_grid: np.ndarray | None = None,
+    roughness_scale: "RoughnessScale | None" = None,
 ) -> np.ndarray:
     """Compute a continuous weighted cost layer for each grid cell.
+
+    *roughness_grid* (C4) is NASA's LDRM roughness in metres on the same
+    grid and *roughness_scale* its [0, 1] mapping; given together, the
+    fifth criterion ``w_roughness * f_roughness_grid`` is added AFTER the
+    four-term sum, so without them the body below is the v4 formula
+    operation for operation. A grid without its scale is refused.
 
     This is a *cell-level proxy* for the planner's full edge cost:
     - the slope and energy terms (`f_slope`, `f_energy_cell`) read the local
@@ -1006,6 +1056,19 @@ def compute_cost_grid(
                 f"slope_sigma grid {slope_sigma.shape} must match the slope grid {slope_grid.shape}"
             )
 
+    roughness = None
+    if roughness_grid is not None:
+        if roughness_scale is None:
+            raise ValueError(
+                "a roughness grid cannot enter the cost without its RoughnessScale "
+                "(roughness_meta.json['scale']); pass roughness_scale or drop the grid"
+            )
+        roughness = np.asarray(roughness_grid, dtype=np.float64)
+        if roughness.shape != slope_grid.shape:
+            raise ValueError(
+                f"roughness grid {roughness.shape} must match the slope grid {slope_grid.shape}"
+            )
+
     if traversable is None:
         traversable_mask = np.ones_like(slope_grid, dtype=bool)
     else:
@@ -1023,6 +1086,7 @@ def compute_cost_grid(
     # every plan. (Backend review, #8.)
     from .cost_vec import (
         f_energy_cell_grid,
+        f_roughness_grid,
         f_shadow_cell_grid,
         f_slope_grid,
         f_thermal_grid,
@@ -1054,6 +1118,14 @@ def compute_cost_grid(
             # equilibrium is not a safe cell. (Round 4 review, H-3.)
             + resolved["w_thermal"] * f_thermal_grid(thermal, rover_cfg, thermal_min)
         )
+        # C4: the measured roughness criterion, added after the four-term
+        # sum so the layer-less path above stays the v4 body bit for bit. A
+        # missing measurement reads the regional median rank (0.5); it never
+        # joins the invalid mask below.
+        if roughness is not None:
+            combined = combined + resolved["w_roughness"] * f_roughness_grid(
+                roughness, roughness_scale
+            )
 
     cost_grid = np.maximum(combined, 0.01)
     invalid = (

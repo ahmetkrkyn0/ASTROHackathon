@@ -29,6 +29,7 @@ from .cost_engine import (
     slip_free_view,
 )
 from .risk import slip_cvar_array, slope_cvar_array
+from .roughness import RoughnessScale  # noqa: F401  (type of the scale argument)
 
 
 def f_slope_grid(
@@ -219,3 +220,22 @@ def _f_thermal_one_grid(
     if total_weight == 0.0:
         return np.zeros(np.shape(inner), dtype=np.float64)
     return accumulator / total_weight
+
+
+def f_roughness_grid(
+    roughness_m: np.ndarray, scale: "RoughnessScale | None"
+) -> np.ndarray:
+    """Array form of :func:`app.cost_engine.f_roughness` (C4).
+
+    *roughness_m* is NASA's LDRM roughness (metres, 100 m baseline, the 50 m
+    pixel's value on every 5 m cell it contains) and *scale* the layer's
+    [0, 1] mapping -- the cell's percentile rank among the 80-90 S region's
+    pixels. Both forms call the same ``np.interp`` on the same array path,
+    so they are bit-equal; a missing value reads ``NAN_ROUGHNESS_F``. A grid
+    without its scale is refused, as the scalar form refuses it.
+    """
+    if scale is None:
+        raise ValueError(
+            "f_roughness_grid needs the layer's RoughnessScale (roughness_meta.json['scale'])"
+        )
+    return scale.f_grid(roughness_m)

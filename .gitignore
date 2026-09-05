@@ -55,3 +55,8 @@ lunapath/data/processed/dem_clones_meta.json
 lunapath/data/processed/dem_clone_horizons_meta.json
 # PDS3 labels fetched next to LOLA .img products
 *.lbl
+# C4: NASA LDRM roughness / LPSR PSR cache provenance and the report's raw
+# 50 m windows (scripts/build_roughness_cache.py); rebuilt with the caches.
+lunapath/data/processed/roughness_meta.json
+lunapath/data/processed/psr_meta.json
+lunapath/data/processed/roughness_baselines.npz

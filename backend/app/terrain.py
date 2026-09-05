@@ -101,6 +101,9 @@ LAYER_UNITS: dict[str, str] = {
     "slope_sigma": "deg",
     "elevation_sigma": "m",
     "slope_sigma_nasa": "deg",
+    # NASA's measured products (C4): present only with the roughness cache.
+    "roughness": "m",
+    "psr": "boolean",
 }
 
 #: What each layer means to someone building the scene, in one line.
@@ -127,6 +130,16 @@ LAYER_DESCRIPTIONS: dict[str, str] = {
         "adjustment's error model, not a measurement."
     ),
     "slope_sigma_nasa": "NASA PGDA's slope uncertainty (slperr) for the DEM.",
+    "roughness": (
+        "NASA LOLA LDRM roughness (PGDA product 90): spread of LOLA spot height "
+        "residuals around a plane fit within a 100 m window, posted at 50 m/px; every "
+        "5 m cell carries its 50 m pixel's value -- a hectometre-scale block statistic, "
+        "not the cell's own roughness."
+    ),
+    "psr": (
+        "NASA PGDA PSR map (LPSR, 20 m/px): 1.0 inside a permanently shadowed region, "
+        "0.0 outside. A measured product and a check of shadow_ratio, not a planning input."
+    ),
 }
 
 #: Layers both representations serve, in the order the manifest lists them.
@@ -148,6 +161,9 @@ TERRAIN_LAYERS: tuple[str, ...] = (
     "slope_sigma",
     "elevation_sigma",
     "slope_sigma_nasa",
+    # NASA's measured roughness and PSR layers (C4), when cached.
+    "roughness",
+    "psr",
 )
 
 

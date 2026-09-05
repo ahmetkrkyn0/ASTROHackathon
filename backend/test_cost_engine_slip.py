@@ -123,7 +123,7 @@ def test_the_energy_criterion_keeps_its_normalisation_under_slip():
 
 def test_the_cost_model_id_says_slip_is_in_the_grid():
     """A cost grid computed by the slip-free build must not be reused."""
-    assert COST_MODEL_ID.endswith("slip_v4")
+    assert "slip" in COST_MODEL_ID and COST_MODEL_ID.endswith("_v5")  # C4 bumped v4 -> v5
 
 
 def test_the_energy_criterion_keeps_its_scale_when_slip_enters():

@@ -10,7 +10,11 @@ from . import constants as C
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 SCENARIOS_DIR = os.path.join(DATA_DIR, "scenarios")
 
-# Weights and constraints frozen at v3.2 spec (docs/lunapath_referans_belgesi_2.md §5.2)
+# Weights and constraints frozen at v3.2 spec (docs/lunapath_referans_belgesi_2.md §5.2).
+# C4 adds the fifth criterion, w_roughness, to every profile at the catalogue
+# default: no profile has a published roughness weighting, so none is invented
+# per profile, and the four frozen weights are NOT rescaled (their unit sum was
+# a convention, not a constraint the planner reads; see the C4 spec).
 MISSION_PROFILES: dict[str, dict] = {
     "balanced": {
         "name": "Dengeli Kesif",
@@ -20,6 +24,7 @@ MISSION_PROFILES: dict[str, dict] = {
             "w_energy": C.W_ENERGY,
             "w_shadow": C.W_SHADOW,
             "w_thermal": C.W_THERMAL,
+            "w_roughness": C.W_ROUGHNESS,
         },
         "constraints": {
             "max_shadow_h": 40.0,
@@ -37,6 +42,7 @@ MISSION_PROFILES: dict[str, dict] = {
             "w_energy": 0.450,
             "w_shadow": 0.150,
             "w_thermal": 0.150,
+            "w_roughness": C.W_ROUGHNESS,
         },
         "constraints": {
             "max_shadow_h": 30.0,
@@ -54,6 +60,7 @@ MISSION_PROFILES: dict[str, dict] = {
             "w_energy": 0.150,
             "w_shadow": 0.100,
             "w_thermal": 0.250,
+            "w_roughness": C.W_ROUGHNESS,
         },
         "constraints": {
             "max_shadow_h": 50.0,
@@ -71,6 +78,7 @@ MISSION_PROFILES: dict[str, dict] = {
             "w_energy": 0.150,
             "w_shadow": 0.300,
             "w_thermal": 0.350,
+            "w_roughness": C.W_ROUGHNESS,
         },
         "constraints": {
             "max_shadow_h": 45.0,

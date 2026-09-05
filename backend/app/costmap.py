@@ -16,6 +16,8 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
+from .roughness import RoughnessScale
+
 MIN_CELL_COST: float = 0.01
 
 
@@ -31,6 +33,11 @@ class PlanContext:
 
     *slope_sigma* (B2) is the per-cell slope spread from NASA's DEM clones
     (B3); only a layer built with a ``risk_alpha`` reads it.
+
+    *roughness* (C4) is NASA's LOLA LDRM roughness in metres (the 50 m
+    pixel's 100 m-baseline statistic on every cell it contains) and
+    *roughness_scale* its [0, 1] mapping; only a RoughnessLayer reads them,
+    and it needs both.
     """
 
     slope: np.ndarray
@@ -41,6 +48,8 @@ class PlanContext:
     rover: Mapping[str, Any]
     thermal_min: np.ndarray | None = None
     slope_sigma: np.ndarray | None = None
+    roughness: np.ndarray | None = None
+    roughness_scale: RoughnessScale | None = None
 
 
 @runtime_checkable
@@ -124,6 +133,11 @@ class CostMap:
                 None if ctx.slope_sigma is None
                 else np.asarray(ctx.slope_sigma)[cell]
             ),
+            roughness=(
+                None if ctx.roughness is None
+                else np.asarray(ctx.roughness)[cell]
+            ),
+            roughness_scale=ctx.roughness_scale,
         )
 
     def explain(self, row: int, col: int, ctx: PlanContext) -> dict[str, float | None]:
@@ -176,6 +190,7 @@ from .cost_engine import (  # noqa: F401  (scalar forms are the reference)
 )
 from .cost_vec import (
     f_energy_cell_grid,
+    f_roughness_grid,
     f_shadow_cell_grid,
     f_slope_grid,
     f_thermal_grid,
@@ -272,13 +287,43 @@ class ThermalLayer:
         return _f_thermal_vec(ctx.thermal, ctx.rover, ctx.thermal_min)
 
 
+class RoughnessLayer:
+    """The fifth criterion (C4): NASA's LOLA LDRM roughness, a MEASURED layer,
+    read through the statistical [0, 1] scale that ships with it (MODEL).
+
+    The layer only exists when the roughness cache is beside the processed
+    grids -- ``default_cost_map`` adds it iff it is handed a scale -- and a
+    context that reaches it without the roughness grid is a wiring error,
+    not a zero: it is refused rather than silently priced at nothing.
+    """
+
+    name = "roughness"
+
+    def __init__(self, weight: float, scale: RoughnessScale, validity: str = "MEASURED") -> None:
+        if scale is None:
+            raise ValueError("RoughnessLayer needs the layer's RoughnessScale")
+        self.weight = float(weight)
+        self.scale = scale
+        self.validity = str(validity)
+
+    def contribution(self, ctx: PlanContext) -> np.ndarray:
+        if ctx.roughness is None:
+            raise ValueError(
+                "RoughnessLayer is in the cost map but the PlanContext carries no "
+                "roughness grid; pass PlanContext(roughness=...) or build the map without the layer"
+            )
+        return f_roughness_grid(ctx.roughness, self.scale)
+
+
 def default_cost_map(
     rover: Mapping[str, Any],
     weights: Mapping[str, float] | None = None,
     layer_validity: Mapping[str, str] | None = None,
     risk_alpha: float | None = None,
+    roughness_scale: RoughnessScale | None = None,
 ) -> CostMap:
-    """The four AHP criteria, wired to the rover's weight profile.
+    """The four AHP criteria, wired to the rover's weight profile -- plus the
+    measured roughness criterion (C4) when its scale is given.
 
     *layer_validity* is the ``metadata["layer_validity"]`` mapping; when
     given, the shadow and thermal layers report the provenance of the grids
@@ -287,14 +332,23 @@ def default_cost_map(
     *risk_alpha* (B2) makes the slope and energy layers read their CVaR
     tails (the context's ``slope_sigma`` supplies the slope's spread);
     ``None`` is the nominal map.
+
+    *roughness_scale* (C4) adds ``RoughnessLayer``; without it the map is the
+    four-layer map exactly as before, so a deployment without the roughness
+    cache prices nothing it does not have.
     """
     resolved = resolve_weights(weights, rover)
     validity = dict(layer_validity or {})
-    return CostMap(
-        [
-            SlopeLayer(resolved["w_slope"], validity.get("slope", "DERIVED"), risk_alpha),
-            EnergyLayer(resolved["w_energy"], "MODEL", risk_alpha),
-            ShadowLayer(resolved["w_shadow"], validity.get("shadow_ratio", "DERIVED")),
-            ThermalLayer(resolved["w_thermal"], validity.get("thermal", "MODEL")),
-        ]
-    )
+    layers: list[CostLayer] = [
+        SlopeLayer(resolved["w_slope"], validity.get("slope", "DERIVED"), risk_alpha),
+        EnergyLayer(resolved["w_energy"], "MODEL", risk_alpha),
+        ShadowLayer(resolved["w_shadow"], validity.get("shadow_ratio", "DERIVED")),
+        ThermalLayer(resolved["w_thermal"], validity.get("thermal", "MODEL")),
+    ]
+    if roughness_scale is not None:
+        layers.append(
+            RoughnessLayer(
+                resolved["w_roughness"], roughness_scale, validity.get("roughness", "MEASURED")
+            )
+        )
+    return CostMap(layers)

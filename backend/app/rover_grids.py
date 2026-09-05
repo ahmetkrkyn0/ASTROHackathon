@@ -23,8 +23,9 @@ from __future__ import annotations
 import numpy as np
 
 from .constants import DEFAULT_ROVER_ID, get_rover
-from .cost_engine import COST_MODEL_ID, compute_cost_grid, resolve_weights
+from .cost_engine import COST_MODEL_ID, compute_cost_grid, cost_criteria_for, resolve_weights
 from .risk import RISK_MEASURE_ID
+from .roughness import RoughnessScale
 from .traversability import compute_traversability_bool
 from .uncertainty import uncertainty_layers_for_grids
 
@@ -76,6 +77,15 @@ def grids_for_rover(
             slope_sigma = layers["slope_sigma"]
             sigma_info = dict(info or {})
 
+    # The measured roughness layer (C4) and its scale, when the cache is
+    # beside the processed grids: the fifth criterion enters the cost here.
+    # A roughness grid whose metadata carries no scale is refused rather
+    # than priced by guesswork.
+    roughness = base_grids.get("roughness")
+    roughness_scale = None
+    if roughness is not None:
+        roughness_scale = RoughnessScale.from_meta((metadata.get("roughness") or {}).get("scale"))
+
     # The stored cost grid carries the same trust problem as the stored mask:
     # it is only reusable if it was built with THIS rover, THESE weights, THIS
     # risk appetite, and a mask matching the one just recomputed. The
@@ -96,6 +106,11 @@ def grids_for_rover(
     # changed the energy term, and reusing it would have kept planning on
     # the inert-energy costs the fix was meant to remove. (Review #5.)
     stored_model = metadata.get("cost_model")
+    # C4: rover, weights, mask, model and alpha can all match while the
+    # CRITERIA differ -- a five-criterion grid handed back without its
+    # roughness layer (or a four-criterion one with the layer now present).
+    # The cost_criteria stamp is compared for exactly that case.
+    criteria = cost_criteria_for(roughness is not None)
     needs_cost_recompute = (
         rover_id != default_rover_id
         or resolved_weights != stored_weights
@@ -103,6 +118,7 @@ def grids_for_rover(
         or "cost" not in base_grids
         or stored_model != COST_MODEL_ID
         or stored_alpha != alpha
+        or metadata.get("cost_criteria") != criteria
     )
     cost = (
         compute_cost_grid(
@@ -116,6 +132,8 @@ def grids_for_rover(
             thermal_min_grid=base_grids.get("thermal_min"),
             risk_alpha=alpha,
             slope_sigma_grid=slope_sigma,
+            roughness_grid=roughness,
+            roughness_scale=roughness_scale,
         )
         if needs_cost_recompute
         else base_grids["cost"]
@@ -124,6 +142,10 @@ def grids_for_rover(
     if needs_cost_recompute:
         metadata["cost_model"] = COST_MODEL_ID
     metadata["cost_weights"] = resolved_weights
+    # Which criteria the grid actually sums (C4): five with the roughness
+    # layer, four without -- so a response can say the fifth weight steered
+    # nothing when the cache is absent.
+    metadata["cost_criteria"] = criteria
     metadata["rover_id"] = rover_id
     metadata["rover_name"] = rover["name"]
     metadata["default_rover_id"] = default_rover_id

@@ -163,7 +163,7 @@ def test_compute_cost_grid_without_alpha_is_unchanged_by_the_new_arguments():
         risk_alpha=None, slope_sigma_grid=sigma,
     )
     assert np.array_equal(nominal, again)
-    assert COST_MODEL_ID.endswith("_v4")
+    assert COST_MODEL_ID.endswith("_v5")  # B2 did not bump it; C4 did
 
 
 def test_compute_cost_grid_never_gets_cheaper_as_alpha_rises():
@@ -300,6 +300,8 @@ def _base_for_cache(rover_id: str = "lpr_1", shape=(10, 10)) -> dict:
     base["traversable"] = adapted["traversable"]
     base["metadata"]["cost_weights"] = adapted["metadata"]["cost_weights"]
     base["metadata"]["cost_model"] = adapted["metadata"]["cost_model"]
+    # C4: this build also stamps which criteria the grid summed.
+    base["metadata"]["cost_criteria"] = adapted["metadata"]["cost_criteria"]
     return base
 
 

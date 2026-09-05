@@ -1141,6 +1141,130 @@ Kurallar:
 `criteria`/`sigma_sources` etiketleri; her sayının yanında `validity: MODEL`
 (FRONTEND_YAPISI kuralı). Sürgüde 0,5'i "nominal" diye etiketlemeyin — nominal `null`'dır.
 
+## Ölçülmüş pürüzlülük ve PSR maskesi — NASA PGDA ürün 90 (5 Eylül 2026 eki, C4)
+
+NASA GSFC'nin güney kutbu için yayımladığı iki **ölçülmüş** ürün planlama penceresine
+ko-registre edildi (Barker vd. 2023, PSJ 4:183; PGDA ürün 90; DOI 10.60903/gsfcpgda-lola-spole):
+LOLA **LDRM pürüzlülüğü** (`LDRM_80S_50MPP_ADJ_ROUGH_100M`, 50 m/px, 100 m taban — "LOLA
+spotlarının, 100 m çaplı pencerede LDEM'e oturtulan düzlem etrafındaki yükseklik artıklarının
+yayılımı", metre) ve **LPSR PSR maskesi** (`LPSR_80S_20MPP_ADJ`, 20 m/px, 1/0).
+`scripts/build_roughness_cache.py` ikisini `/vsicurl/` ile tek tile olarak indirir, `nearest`
+ile 5 m gride oturtur (her 5 m hücre onu kapsayan ürün pikselinin değerini **aynen** alır),
+CRS parametre eşitliğini ve kayıt sağlamasını (NASA'nın 100 m eğimi ↔ bizim 50 m blok eğimimiz,
+Spearman 0,989) yazar. Önbellek yoksa aşağıdakilerin hiçbiri görünmez; mevcut alanlar değişmez.
+
+Kurallar:
+
+- **Pürüzlülük beşinci maliyet kriteridir:** `f_roughness ∈ [0, 1]`, ağırlığı `w_roughness`
+  (varsayılan **0,15** — dört mevcut ağırlık yeniden ölçeklenmedi, toplam 1,15; değer bir
+  **varsayımdır**, hiçbir profilin yayımlanmış pürüzlülük ağırlığı yok; raporda 0–0,3 taraması).
+  `COST_MODEL_ID` **v5**: katman varken maliyet gridi değişti; katman yokken dört terim v4 ile
+  bit-eşittir (Site11'de SHA-256 kilidi testte, iki yönlü).
+- **İddia sınırı:** katman `MEASURED` ama **50 m/px ve 100 m taban** — bir 5 m hücreye yazılan
+  değer, onu kapsayan pikselin **hektometre ölçekli blok istatistiğidir**, hücrenin kendi
+  pürüzlülüğü değil; "30 cm kaya görünür oldu" denmez. Kaya bolluğu (Diviner) **kullanılmadı**
+  (kapsam ±80°). `f_roughness`'ın ölçeği **istatistiktir (`MODEL`)**: hücrenin 80–90°S
+  bölgesinin 50 m pikselleri arasındaki persentil sırası (ürünün 36 tile'lık örneğinden ampirik
+  CDF, 201 kantil düğümü `roughness_meta.json["scale"]`'de); rover toleransı değil. LDRM'nin
+  yayımlanmış σ'sı yok → pürüzlülüğün B2 kuyruğu yoktur (`risk.sigma_sources.roughness.source:
+  "none"`); her α'da nominal okunur. NaN pürüzlülük 0,5 okur ve hücreyi geçilmez yapmaz.
+- **PSR planlamaya girmez** (VIPER'ın bilimsel hedefi PSR içidir; termal kapı Site11'deki
+  14 016 PSR hücresinin 13 933'ünü zaten kapatıyor — LPR-1 için yalnız 83 geçilebilir; gölge ve
+  termal kriterler karanlığı zaten fiyatlıyor). Maske katman + hücre kartı + doğrulama ucudur.
+- Katman etiketleri `MEASURED`; `cost` etiketi **yükselmez** (`DERIVED` kalır: en zayıf girdi
+  belirler). `metadata.cost_criteria` gridin gerçekten topladığı kriterleri listeler
+  (`["slope","energy","shadow","thermal","roughness"]` ya da dört terim).
+
+### `GET /api/terrain` ve `GET /api/layers/{ad}?format=f32`
+
+| Katman | Birim | `validity` | Anlam |
+|---|---|---|---|
+| `roughness` | m | MEASURED | LDRM 100 m tabanlı pürüzlülük; 5 m hücre = kapsayan 50 m pikselin değeri (10×10 hücre/piksel) |
+| `psr` | boolean | MEASURED | LPSR maskesi: 1,0 PSR içi, 0,0 dışı; 5 m hücre = kapsayan 20 m pikselin değeri (4×4) |
+
+`/api/layers/cost?w_roughness=` ve `/api/terrain?w_roughness=` sorgu parametresi eklendi
+(diğer dört ağırlık gibi). Önbellek yokken `/api/layers/{roughness,psr}` **404** + betik adı.
+Manifest `metadata` bloğunda `roughness` (ürün, URL, taban, çözünürlük, `fetched_utc`, pencere,
+CRS kanıtı, `registration_check`, `scale`, `regional_sample`, iddia) ve `psr` meta'ları.
+
+### `POST /api/plan`, `POST /api/plan-4d`, `/api/compare`, `/api/plan-multi` — `weights.w_roughness`
+
+```json
+{"start": {"row": 358, "col": 494}, "goal": {"row": 206, "col": 426}, "rover_id": "lpr_1",
+ "weights": {"w_roughness": 0.15}}
+```
+
+| Alan | Anlam |
+|---|---|
+| `weights.w_roughness` | `[0, 2]`, dışı 422; verilmezse rover varsayılanı 0,15. `/api/profiles` her profilde `weights.w_roughness` (0,15), `/api/rovers` her rover'da `default_weights.w_roughness`. Katman yokken ağırlık hiçbir şeyi yönlendirmez ve yanıt bunu söyler. |
+
+### `POST /api/plan`, `POST /api/plan-4d` — `roughness` bloğu (her zaman)
+
+```json
+"roughness": {
+  "applied": true, "validity": "MEASURED", "scale_validity": "MODEL",
+  "product": "LDRM_80S_50MPP_ADJ_ROUGH_100M", "baseline_m": 100, "resolution_m": 50,
+  "product_url": "https://pgda.gsfc.nasa.gov/products/90", "weight": 0.15,
+  "route": {"n_cells": 156, "nan_cells": 0, "mean_roughness_m": 1.04, "max_roughness_m": 1.96,
+            "mean_f_roughness": 0.83, "cells_in_psr": 0, "grid": "fine: cell values"},
+  "reason": null, "claim": "LOLA LDRM roughness, MEASURED ... NOT the roughness of the cell itself ...",
+  "references": ["Barker, M. K. et al. (2023) ...", "..."]
+}
+```
+
+| Alan | Anlam |
+|---|---|
+| `applied` | Katman yüklü ve kriter gride girdiyse `true`; değilse `false` + `reason` (`route: null`). `weight` her durumda kullanılan `w_roughness`. |
+| `route.mean_roughness_m`, `max_roughness_m` | Rota hücrelerindeki LDRM değerinin ortalaması/maksimumu (metre; blok istatistiği). 4-B'de blok-maks pürüzlülük (`grid: "coarse: block-max roughness, block touches PSR"`, `coarsen`). |
+| `route.mean_f_roughness` | Rota boyunca kriterin ortalaması (bölgesel persentil sırası). |
+| `route.cells_in_psr` | Rotanın PGDA PSR maskesine giren hücre (4-B'de blok) sayısı; `psr` katmanı yoksa `null`. |
+| `route.n_cells` | 2-B'de `summary.waypoint_count`; 4-B'de rota boyunca pozisyon sayısı (WAIT tekrarları atılır = hamle + 1). |
+
+`risk.sigma_sources.roughness` (yalnız katman yüklüyken): `{"source": "none", "reason": "LDRM
+publishes no per-pixel sigma …"}`; `risk.criteria` değişmedi.
+
+### `GET /api/cell-telemetry?row=&col=` — üç yeni alan
+
+| Alan | Anlam |
+|---|---|
+| `roughness_m` | Hücrenin LDRM değeri (metre; kapsayan 50 m pikselin blok istatistiği); katman yoksa `null`. |
+| `f_roughness` | Kriterin değeri [0, 1]; katman yoksa `null`. `cost_breakdown.roughness = w_roughness · f_roughness` (katman varken beşinci anahtar). |
+| `in_psr` | Hücre PGDA PSR maskesinde mi (`true`/`false`); katman yoksa `null`. |
+
+### `GET /api/psr-validation?threshold=0.99`
+
+```json
+{"threshold": 0.99, "n_cells": 250000, "n_psr": 14016, "psr_fraction": 0.056, "n_dark": 16363,
+ "n_intersection": 13781, "n_union": 16598, "jaccard": 0.830, "psr_recall": 0.983, "dark_precision": 0.842,
+ "false_positive_fraction": 0.158, "mean_shadow_inside_psr": 0.998, "mean_shadow_outside_psr": 0.629,
+ "thermal_min_median_inside_psr": -183.15, "thermal_min_median_outside_psr": -98.6,
+ "product": "LPSR_80S_20MPP_ADJ", "resolution_m": 20, "product_url": "...", "psr_meta": {"...": "..."},
+ "validity": {"psr": "MEASURED", "shadow_ratio": "DERIVED"}, "claim": "...", "reading": "..."}
+```
+
+| Alan | Anlam |
+|---|---|
+| `jaccard` | PGDA PSR maskesi ile bizim `shadow_ratio ≥ threshold` hücrelerimizin kesişim/birleşim oranı. |
+| `psr_recall` | PSR hücrelerinin modelimizce karanlık sayılan payı. |
+| `dark_precision`, `false_positive_fraction` | Karanlık dediğimiz hücrelerin PSR olan payı ve tümleyeni. |
+| `mean_shadow_*`, `thermal_min_median_*` | Maske içi/dışı ortalama gölge oranı ve medyan soğuk-uç sıcaklığı (PSR içi 90 K tabanı). |
+| `threshold` | İstek parametresi `[0, 1]`, varsayılan 0,99. `psr` katmanı yoksa **404** + betik adı. |
+
+**Ölçülen (Site11, [roughness_psr_report.md](../research/roughness_psr_report.md)):** pürüzlülük
+(100 m) medyan 0,83 m (p5 0,40 / p95 1,78 / maks 4,87; bölge medyanı 0,57), eğimle Spearman
+**0,21** (kriter eğimin yeniden ifadesi değil); `f_roughness` Site11'de p5 0,23 / p50 0,78 / p95 0,98.
+PSR ∩ `shadow_ratio ≥ 0,99`: Jaccard **0,830** (PSR'ın %98,3'ü yakalandı, karanlıkların %84,2'si
+PSR), 20 m ürün bloğunda **0,912**; PSR içinde `thermal_min` medyanı −183,15 °C. Rota etkisi
+çifte bağlı: Ay gecesi çifti w = 0,05'te bile yer değiştiriyor (örtüşme %20; w = 0,15'te %5,
+rota ort. pürüzlülük 0,75 → 0,66 m, mesafe aynı), LPR-1 gündüz çifti 0,15'e kadar hiç, sonra
+%97 örtüşme; VIPER standart 0,30'a, kısa leg 0,20'ye kadar aynı. Ay gecesi rotası daha düz zemini **+54 Wh / −1,2 pt SOC** ile satın alıyor (1 465,7 → 1 519,4 Wh, 87,10 → 85,91). 4-B (coarsen 4, w 0 → 0,15) + B5 1 000 koşum: üç standart rota da aynı hamle / varış / min SOC / tamamlanma (LPR-1 28 Eyl 41 hamle 2,979 h %92,5; Ay gecesi 116 hamle 6,749 h, blok örtüşmesi 0,89; VIPER kısa leg 8 hamle). Etki **küçük ve çifte bağlı**; öyle gösterilmeli.
+
+**Frontend'in çizebileceği (kod değişmeden):** `roughness` katmanını (m) ve `psr` maskesini
+(kontur) `fetchLayer` ile; hücre kartında `roughness_m`/`f_roughness`/`in_psr` ve
+`cost_breakdown.roughness` dilimi; rota kartında `roughness.route` (ort./maks m, PSR hücresi);
+ağırlık panelinde beşinci sürgü `w_roughness`; `/api/psr-validation`'dan Jaccard'ı "PGDA ile
+%83 örtüşme" rozeti olarak — her sayının yanında `validity` (katman MEASURED, ölçek MODEL).
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,

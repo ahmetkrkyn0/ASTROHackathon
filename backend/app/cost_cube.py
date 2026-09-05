@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 
 from .costmap import PlanContext, default_cost_map
+from .roughness import RoughnessScale  # noqa: F401  (type of the roughness_scale argument)
 from .thermal_model import (
     REGOLITH_THERMAL_TAU_S,
     relax_surface_c,
@@ -87,8 +88,19 @@ def build_cost_cube(
     tau_s: float = REGOLITH_THERMAL_TAU_S,
     risk_alpha: float | None = None,
     slope_sigma: np.ndarray | None = None,
+    roughness: np.ndarray | None = None,
+    roughness_scale: "RoughnessScale | None" = None,
 ) -> np.ndarray:
     """(T, H', W') cost cube, one slice per shadow-ratio snapshot.
+
+    Roughness (C4)
+    --------------
+    *roughness* is the FINE measured LDRM roughness grid (metres) and
+    *roughness_scale* its [0, 1] mapping; given together, the fifth
+    criterion enters every slice. Roughness does not vary with time, and it
+    is coarsened with ``how="max"`` like the slope: a block is priced at its
+    roughest 50 m pixel, the conservative pairing. One without the other is
+    refused; neither is the four-criterion cube as before.
 
     Risk appetite (B2)
     ------------------
@@ -163,6 +175,20 @@ def build_cost_cube(
             )
         with np.errstate(all="ignore"):
             sigma_c = coarsen_grid(sigma_fine, coarsen, how="max")
+    roughness_c = None
+    if roughness is not None or roughness_scale is not None:
+        if roughness is None or roughness_scale is None:
+            raise ValueError(
+                "roughness and roughness_scale must be given together (C4): a roughness "
+                "grid cannot be priced without its scale, and a scale prices nothing without the grid"
+            )
+        roughness_fine = np.asarray(roughness, dtype=np.float64)
+        if roughness_fine.shape != slope.shape:
+            raise ValueError(
+                f"roughness {roughness_fine.shape} must match the slope grid {slope.shape}"
+            )
+        with np.errstate(all="ignore"):
+            roughness_c = coarsen_grid(roughness_fine, coarsen, how="max")
 
     # The sunlit-peak field. data_loader publishes it directly -- it is the
     # single stored statistic everything else is derived from -- so normally
@@ -186,7 +212,9 @@ def build_cost_cube(
     )
     dt_s = max(0.0, float(slice_hours)) * 3600.0
 
-    cost_map = default_cost_map(rover, weights, risk_alpha=risk_alpha)
+    cost_map = default_cost_map(
+        rover, weights, risk_alpha=risk_alpha, roughness_scale=roughness_scale
+    )
 
     # Every layer is evaluated per slice. The optimisation this replaces --
     # evaluating "invariant" layers once -- rested on the assumption that
@@ -238,6 +266,8 @@ def build_cost_cube(
             resolution_m=resolution_c,
             rover=rover,
             slope_sigma=sigma_c,
+            roughness=roughness_c,
+            roughness_scale=roughness_scale,
         )
         slices.append(cost_map.total(context))
 
