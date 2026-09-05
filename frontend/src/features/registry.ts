@@ -7,6 +7,7 @@ import { CorridorFeature } from './corridor'
 import { CostExplain } from './cost-explain'
 import { LayerPicker } from './layer-picker'
 import { LayerProvenance } from './layer-provenance'
+import { MissionReport } from './mission-report'
 import { MissionSetup } from './mission-setup'
 import { MissionValidation } from './mission-validation'
 import { Playback } from './playback'
@@ -144,6 +145,11 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // Floating, not railed: the assistant opens over the mission and has to
   // keep working with both rails collapsed.
   { id: 'assistant', slot: 'globalOverlay', Component: Assistant },
+  // Analyze only, and floating for the same reason the assistant is: the
+  // report covers the whole cockpit once the rover has arrived, so it is
+  // neither a rail panel nor a layer on the map. It renders nothing until a
+  // route exists, so the mode filter is the only guard it needs.
+  { id: 'mission-report', slot: 'globalOverlay', Component: MissionReport, modes: ['analyze'] },
   // Analyze only: it compares a route that already exists against alternative
   // weightings, which is a question asked after one has been planned.
   { id: 'profile-compare', slot: 'rightRail', Component: ProfileCompare, modes: ['analyze'] },
