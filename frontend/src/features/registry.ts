@@ -90,8 +90,12 @@ export interface FeatureRegistration {
  * those tasks independently reviewable.
  */
 export const FEATURES: readonly FeatureRegistration[] = [
-  // No modes: App.tsx used to render this panel in both plan and analyze branches.
-  { id: 'mission-context', slot: 'rightRail', Component: MissionContextFeature },
+  // Analyze only, though App.tsx once rendered it in both branches. It is a
+  // readout -- sector, resolution, extent, and whatever the pointer is over --
+  // and while a route is being placed the operator is looking at the map, not
+  // at a column describing it. Restricting it is what empties the right rail
+  // in plan, which is the point: plan gets the wider map.
+  { id: 'mission-context', slot: 'rightRail', Component: MissionContextFeature, modes: ['analyze'] },
   // Plan only: meaningful after the hangar's rover selection is complete.
   { id: 'mission-setup', slot: 'leftRail', Component: MissionSetup, modes: ['plan'] },
   // analyze only. App.tsx rendered this as the else-branch of
@@ -139,9 +143,10 @@ export const FEATURES: readonly FeatureRegistration[] = [
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation, group: 'systems' },
   { id: 'corridor', slot: 'rightRail', Component: CorridorFeature, group: 'systems' },
   { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop, group: 'systems' },
-  // No modes: the cost of the cell under the pointer is worth reading while a
-  // route is being placed and while one is being reviewed.
-  { id: 'cost-explain', slot: 'rightRail', Component: CostExplain },
+  // Analyze only. The cost under the pointer is worth reading in both modes,
+  // but it is the last primary occupant of the right rail, and leaving it
+  // registered in plan would keep a 288px column open for one hover readout.
+  { id: 'cost-explain', slot: 'rightRail', Component: CostExplain, modes: ['analyze'] },
   // Floating, not railed: the assistant opens over the mission and has to
   // keep working with both rails collapsed.
   { id: 'assistant', slot: 'globalOverlay', Component: Assistant },
