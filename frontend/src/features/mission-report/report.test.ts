@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { PlanResponse, SimSummary, Waypoint } from '../../api'
+import type { PlanExecution, PlanResponse, SimSummary, Waypoint } from '../../api'
 import {
+  VERDICT_REASON_CODES,
   decideVerdict,
   energySplit,
   milestones,
   riskShares,
   slopeHistogram,
+  type Verdict,
+  type VerdictReasonCode,
 } from './report'
+import verdictCases from './verdictCases.json'
 
 const SUMMARY: SimSummary = {
   total_distance_km: 1,
@@ -71,7 +75,7 @@ describe('decideVerdict', () => {
   it('blocks a stranded route', () => {
     const result = decideVerdict(plan({ stranded: true, stranded_at_step: 12 }))
     expect(result.verdict).toBe('NO-GO')
-    expect(result.reasons[0]).toContain('12')
+    expect(result.reasons[0].text).toContain('12')
   })
 
   it('blocks a breached shadow limit', () => {
@@ -85,7 +89,7 @@ describe('decideVerdict', () => {
       plan({}, { execution: { stranded: false, planned_nodes: 90, executable_nodes: 40, truncated: true, reason: 'battery' } }),
     )
     expect(result.verdict).toBe('NO-GO')
-    expect(result.reasons[0]).toContain('40/90')
+    expect(result.reasons[0].text).toContain('40/90')
   })
 
   // The distinction the whole verdict rests on: a soft finding must not
@@ -96,8 +100,8 @@ describe('decideVerdict', () => {
 
   it('lists blocking reasons before warnings', () => {
     const result = decideVerdict(plan({ stranded: true, total_recharges: 2 }))
-    expect(result.reasons[0]).toContain('enerjisiz')
-    expect(result.reasons[result.reasons.length - 1]).toContain('şarj')
+    expect(result.reasons[0].text).toContain('enerjisiz')
+    expect(result.reasons[result.reasons.length - 1].text).toContain('şarj')
   })
 })
 
@@ -162,4 +166,50 @@ describe('milestones endpoint priority', () => {
     expect(marks[marks.length - 1]).toMatchObject({ title: 'HEDEF', step: 19 })
     expect(marks.some((m) => m.title === 'EN DÜŞÜK PİL')).toBe(false)
   })
+})
+
+/**
+ * The parity fixture, shared with backend/test_report_verdict.py.
+ *
+ * One cast, at the boundary: the JSON cannot be typed as SimSummary because
+ * `absent` cases deliberately omit non-nullable fields, which is the whole
+ * reason the fixture exists (JS `undefined < 30` is false, Python `None < 30`
+ * raises, and null is neither -- JS coerces it to 0).
+ */
+interface VerdictCase {
+  name: string
+  summary: Record<string, unknown>
+  execution: PlanExecution | null
+  absent: string[]
+  verdict: Verdict
+  codes: VerdictReasonCode[]
+}
+
+const PARITY_CASES = verdictCases.cases as unknown as VerdictCase[]
+const PARITY_BASE = verdictCases.base as unknown as Record<string, unknown>
+
+describe('verdict parity cases', () => {
+  it('covers every reason code the module can produce', () => {
+    const seen = new Set(PARITY_CASES.flatMap((one) => one.codes))
+    for (const code of VERDICT_REASON_CODES) expect(seen).toContain(code)
+  })
+
+  for (const one of PARITY_CASES) {
+    it(one.name, () => {
+      const summary: Record<string, unknown> = { ...PARITY_BASE, ...one.summary }
+      for (const key of one.absent) delete summary[key]
+
+      const result = decideVerdict({
+        status: 'success',
+        astar_metrics: {} as PlanResponse['astar_metrics'],
+        summary: summary as unknown as SimSummary,
+        geojson: {},
+        waypoints: [],
+        ...(one.execution ? { execution: one.execution } : {}),
+      })
+
+      expect(result.verdict).toBe(one.verdict)
+      expect(result.reasons.map((reason) => reason.code)).toEqual(one.codes)
+    })
+  }
 })

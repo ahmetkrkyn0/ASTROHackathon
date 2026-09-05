@@ -11,14 +11,49 @@ import type { RouteStatistics, SlopeBin } from '../../net/types'
 
 export type Verdict = 'GO' | 'GO-WITH-RISK' | 'NO-GO'
 
-export interface VerdictResult {
-  verdict: Verdict
-  /** Why, in the operator's language, worst finding first. */
-  reasons: string[]
+/**
+ * Every finding the verdict can rest on.
+ *
+ * The codes exist because `backend/app/report.py` decides the same thing for
+ * the assistant, and a parity test compares the two by code -- prose is not a
+ * contract, and the two copies phrase their reasons differently on purpose:
+ * this one carries the numbers, the backend's carries none because
+ * `ai_grounding` blocks any digit it did not register.
+ */
+export const VERDICT_REASON_CODES = [
+  'STRANDED',
+  'EXECUTION_TRUNCATED',
+  'SHADOW_LIMIT_EXCEEDED',
+  'CRITICAL_STEPS',
+  'HIGH_RISK_STEPS',
+  'BATTERY_WATCH',
+  'PEAK_POWER_EXCEEDED',
+  'RECHARGES_REQUIRED',
+  'NO_VIOLATION',
+] as const
+
+export type VerdictReasonCode = (typeof VERDICT_REASON_CODES)[number]
+
+export interface VerdictReason {
+  code: VerdictReasonCode
+  /** Why, in the operator's language. */
+  text: string
 }
 
-/** Below this the battery reserve is close enough to matter to the verdict. */
-const BATTERY_WATCH_PCT = 30
+export interface VerdictResult {
+  verdict: Verdict
+  /** Worst finding first, blocking before warning. */
+  reasons: VerdictReason[]
+}
+
+/**
+ * Below this the battery reserve is close enough to matter to the verdict.
+ *
+ * Exported because the report's KPI colouring and its battery chart draw the
+ * same line, and because the backend mirrors this literal -- the parity test
+ * reads it out of this file.
+ */
+export const BATTERY_WATCH_PCT = 30
 
 /**
  * The route's disposition, from the simulation summary alone.
@@ -31,45 +66,67 @@ const BATTERY_WATCH_PCT = 30
  */
 export function decideVerdict(plan: PlanResponse): VerdictResult {
   const s = plan.summary
-  const blocking: string[] = []
-  const warnings: string[] = []
+  const blocking: VerdictReason[] = []
+  const warnings: VerdictReason[] = []
 
   if (s.stranded) {
-    blocking.push(
-      `Rover ${s.stranded_at_step ?? '?'}. adımda enerjisiz kaldı — rota tamamlanamıyor.`,
-    )
+    blocking.push({
+      code: 'STRANDED',
+      text: `Rover ${s.stranded_at_step ?? '?'}. adımda enerjisiz kaldı — rota tamamlanamıyor.`,
+    })
   }
   if (plan.execution?.truncated) {
-    blocking.push(
-      `Rota kesildi: ${plan.execution.executable_nodes}/${plan.execution.planned_nodes} düğüm sürülebilir` +
+    blocking.push({
+      code: 'EXECUTION_TRUNCATED',
+      text:
+        `Rota kesildi: ${plan.execution.executable_nodes}/${plan.execution.planned_nodes} düğüm sürülebilir` +
         (plan.execution.reason ? ` (${plan.execution.reason}).` : '.'),
-    )
+    })
   }
   if (s.shadow_limit_exceeded) {
-    blocking.push(
-      `Kesintisiz gölge ${s.max_continuous_shadow_h.toFixed(1)} s, rover limiti ${s.shadow_limit_h?.toFixed(1)} s.`,
-    )
+    blocking.push({
+      code: 'SHADOW_LIMIT_EXCEEDED',
+      text: `Kesintisiz gölge ${s.max_continuous_shadow_h.toFixed(1)} s, rover limiti ${s.shadow_limit_h?.toFixed(1)} s.`,
+    })
   }
   if (s.critical_steps_count > 0) {
-    blocking.push(`${s.critical_steps_count} adım CRITICAL risk seviyesinde.`)
+    blocking.push({
+      code: 'CRITICAL_STEPS',
+      text: `${s.critical_steps_count} adım CRITICAL risk seviyesinde.`,
+    })
   }
 
   if (s.high_or_above_steps_count > 0) {
-    warnings.push(`${s.high_or_above_steps_count} adım HIGH veya üzeri riskte.`)
+    warnings.push({
+      code: 'HIGH_RISK_STEPS',
+      text: `${s.high_or_above_steps_count} adım HIGH veya üzeri riskte.`,
+    })
   }
   if (s.min_battery_pct < BATTERY_WATCH_PCT) {
-    warnings.push(`Pil en düşük %${s.min_battery_pct.toFixed(1)} seviyesine indi.`)
+    warnings.push({
+      code: 'BATTERY_WATCH',
+      text: `Pil en düşük %${s.min_battery_pct.toFixed(1)} seviyesine indi.`,
+    })
   }
   if (s.peak_power_exceeded_steps > 0) {
-    warnings.push(`${s.peak_power_exceeded_steps} adımda tepe güç bütçesi aşıldı.`)
+    warnings.push({
+      code: 'PEAK_POWER_EXCEEDED',
+      text: `${s.peak_power_exceeded_steps} adımda tepe güç bütçesi aşıldı.`,
+    })
   }
   if (s.total_recharges > 0) {
-    warnings.push(`Rota ${s.total_recharges} şarj molası gerektiriyor.`)
+    warnings.push({
+      code: 'RECHARGES_REQUIRED',
+      text: `Rota ${s.total_recharges} şarj molası gerektiriyor.`,
+    })
   }
 
   if (blocking.length > 0) return { verdict: 'NO-GO', reasons: [...blocking, ...warnings] }
   if (warnings.length > 0) return { verdict: 'GO-WITH-RISK', reasons: warnings }
-  return { verdict: 'GO', reasons: ['Sürüş kısıtlarının hiçbiri ihlal edilmedi.'] }
+  return {
+    verdict: 'GO',
+    reasons: [{ code: 'NO_VIOLATION', text: 'Sürüş kısıtlarının hiçbiri ihlal edilmedi.' }],
+  }
 }
 
 export const VERDICT_COLOR: Record<Verdict, string> = {

@@ -13,6 +13,7 @@ import {
 } from './charts'
 import { fmt } from './format'
 import {
+  BATTERY_WATCH_PCT,
   RISK_LEVELS,
   VERDICT_COLOR,
   decideVerdict,
@@ -28,9 +29,6 @@ interface Props {
   heaterW: number
   onClose: () => void
 }
-
-/** The reserve the battery chart draws as a line to read the trough against. */
-const BATTERY_RESERVE_PCT = 30
 
 const Section: React.FC<{ label: string; note?: string; children: React.ReactNode }> = ({
   label,
@@ -130,12 +128,12 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
     {
       label: 'BİTİŞ PİLİ',
       value: `%${fmt(summary.final_battery_pct)}`,
-      color: summary.final_battery_pct < BATTERY_RESERVE_PCT ? 'var(--risk-high)' : undefined,
+      color: summary.final_battery_pct < BATTERY_WATCH_PCT ? 'var(--risk-high)' : undefined,
     },
     {
       label: 'EN DÜŞÜK PİL',
       value: `%${fmt(summary.min_battery_pct)}`,
-      color: summary.min_battery_pct < BATTERY_RESERVE_PCT ? 'var(--risk-high)' : undefined,
+      color: summary.min_battery_pct < BATTERY_WATCH_PCT ? 'var(--risk-high)' : undefined,
     },
     { label: 'HARCANAN ENERJİ', value: `${fmt(summary.total_energy_consumed_wh, 0)} Wh` },
     { label: 'MAKS. EĞİM', value: `${fmt(summary.max_slope_deg)}°` },
@@ -184,9 +182,9 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
           <Section label="KARAR ÖZETİ">
             <ul className="lp-report-reasons">
               {view.verdict.reasons.map((reason) => (
-                <li key={reason}>
+                <li key={reason.code}>
                   <span className="lp-reason-dot" style={{ background: verdictColor }} />
-                  {reason}
+                  {reason.text}
                 </li>
               ))}
             </ul>
@@ -219,7 +217,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
               yMax={100}
               markers={view.recharges}
               refLines={[
-                { y: BATTERY_RESERVE_PCT, label: 'REZERV %30', color: 'var(--risk-high)' },
+                { y: BATTERY_WATCH_PCT, label: 'REZERV %30', color: 'var(--risk-high)' },
                 {
                   y: summary.min_battery_pct,
                   label: `MİN %${fmt(summary.min_battery_pct)}`,
