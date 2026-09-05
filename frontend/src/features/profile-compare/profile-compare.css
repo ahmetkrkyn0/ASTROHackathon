@@ -33,7 +33,7 @@
 .lp-compare-metrics div { display: flex; justify-content: space-between; gap: 8px; }
 
 .lp-compare-metrics dt {
-  font-size: var(--fs-micro); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--text-dim-2);
+  font-size: var(--fs-micro); letter-spacing: var(--track-label); color: var(--text-dim-2);
 }
 
 .lp-compare-metrics dd {

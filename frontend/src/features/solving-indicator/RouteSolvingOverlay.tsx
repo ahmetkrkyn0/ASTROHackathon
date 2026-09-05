@@ -27,7 +27,7 @@ export const RouteSolvingOverlay: React.FC = () => {
           <span className="lp-radar-spinner" />
           <div className="lp-solving-title-group">
             <span className="lp-solving-kicker">A* PATHFINDER · KINEMATIC SOLVER</span>
-            <h3 className="lp-solving-title">COMPUTING ROUTE SOLUTION</h3>
+            <h3 className="lp-solving-title">Computing route</h3>
           </div>
         </div>
         <p className="lp-solving-detail">
@@ -45,7 +45,7 @@ export const RouteSolvingOverlay: React.FC = () => {
               GOAL: [{goal[0]}, {goal[1]}]
             </span>
           )}
-          <span className="lp-solving-tag lp-solving-tag--active">OPTIMIZING PATH</span>
+          <span className="lp-solving-tag lp-solving-tag--active">Optimising path</span>
         </div>
       </div>
     </div>

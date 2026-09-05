@@ -46,7 +46,7 @@ export const RoverSelectDrawer: React.FC<RoverSelectDrawerProps> = ({
       <div className="lp-slide-drawer" onClick={(e) => e.stopPropagation()}>
         <div className="lp-drawer-header">
           <div>
-            <span className="lp-meta-label">FLEET SPECIFICATIONS</span>
+            <span className="lp-meta-label">Fleet specifications</span>
             <h2 className="lp-drawer-title">Select Mission Rover</h2>
           </div>
           <button
@@ -87,7 +87,7 @@ export const RoverSelectDrawer: React.FC<RoverSelectDrawerProps> = ({
                     <span className="lp-agency-badge">{meta.agency}</span>
                     <span className="lp-highlight-badge">{meta.highlight}</span>
                   </div>
-                  {isSelected && <span className="lp-active-pill">ACTIVE ROVER</span>}
+                  {isSelected && <span className="lp-active-pill">Active rover</span>}
                 </div>
 
                 <div className="lp-rover-card-name-row">
@@ -99,19 +99,19 @@ export const RoverSelectDrawer: React.FC<RoverSelectDrawerProps> = ({
 
                 <div className="lp-rover-specs-table">
                   <div className="lp-spec-cell">
-                    <span className="lp-spec-label">BATTERY</span>
+                    <span className="lp-spec-label">Battery</span>
                     <strong className="lp-spec-val">{rover.e_cap_wh.toFixed(0)} Wh</strong>
                   </div>
                   <div className="lp-spec-cell">
-                    <span className="lp-spec-label">SPEED</span>
+                    <span className="lp-spec-label">Speed</span>
                     <strong className="lp-spec-val">{rover.v_max_ms.toFixed(2)} m/s</strong>
                   </div>
                   <div className="lp-spec-cell">
-                    <span className="lp-spec-label">MAX SLOPE</span>
+                    <span className="lp-spec-label">Max slope</span>
                     <strong className="lp-spec-val">{rover.slope_max_deg.toFixed(0)}°</strong>
                   </div>
                   <div className="lp-spec-cell">
-                    <span className="lp-spec-label">MASS</span>
+                    <span className="lp-spec-label">Mass</span>
                     <strong className="lp-spec-val">{rover.mass_kg.toFixed(0)} kg</strong>
                   </div>
                 </div>

@@ -126,21 +126,21 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
 
   const kpis: Array<{ label: string; value: string; color?: string }> = [
     { label: 'DISTANCE', value: `${fmt(summary.total_distance_km, 2)} km` },
-    { label: 'DURATION', value: `${fmt(summary.total_elapsed_hours, 1)} h` },
+    { label: 'Duration', value: `${fmt(summary.total_elapsed_hours, 1)} h` },
     {
-      label: 'END BATTERY',
+      label: 'End battery',
       value: `${fmt(summary.final_battery_pct)}%`,
       color: summary.final_battery_pct < BATTERY_RESERVE_PCT ? 'var(--risk-high)' : undefined,
     },
     {
-      label: 'LOWEST BATTERY',
+      label: 'Lowest battery',
       value: `${fmt(summary.min_battery_pct)}%`,
       color: summary.min_battery_pct < BATTERY_RESERVE_PCT ? 'var(--risk-high)' : undefined,
     },
-    { label: 'ENERGY USED', value: `${fmt(summary.total_energy_consumed_wh, 0)} Wh` },
-    { label: 'MAX SLOPE', value: `${fmt(summary.max_slope_deg)}°` },
-    { label: 'RECHARGES', value: String(summary.total_recharges) },
-    { label: 'ROUTE NODES', value: String(summary.waypoint_count) },
+    { label: 'Energy used', value: `${fmt(summary.total_energy_consumed_wh, 0)} Wh` },
+    { label: 'Max slope', value: `${fmt(summary.max_slope_deg)}°` },
+    { label: 'Recharges', value: String(summary.total_recharges) },
+    { label: 'Route nodes', value: String(summary.waypoint_count) },
   ]
 
   return (
@@ -153,12 +153,13 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
       >
         <header className="lp-report-header">
           <div className="lp-report-title-block">
-            <span className="lp-meta-label">MISSION REPORT</span>
+            <span className="lp-meta-label">Mission report</span>
             <h2 className="lp-report-title">Route complete</h2>
-            <span className="lp-report-subtitle">
-              {plan.rover?.name ?? 'Rover'} · {summary.waypoint_count} nodes ·{' '}
-              {fmt(summary.total_distance_km, 2)} km
-            </span>
+            <p className="lp-report-subtitle">
+              {plan.rover?.name ?? 'Rover'} drove{' '}
+              <span className="lp-report-figure">{fmt(summary.total_distance_km, 2)} km</span> over{' '}
+              <span className="lp-report-figure">{summary.waypoint_count}</span> waypoints.
+            </p>
           </div>
           <div className="lp-report-header-right">
             <span
@@ -391,13 +392,13 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
                     <table className="lp-report-table">
                       <thead>
                         <tr>
-                          <th>POINT</th>
-                          <th>STEP</th>
+                          <th>Point</th>
+                          <th>Step</th>
                           <th>KM</th>
-                          <th>BATTERY</th>
-                          <th>SLOPE</th>
-                          <th>TEMP</th>
-                          <th>RISK</th>
+                          <th>Battery</th>
+                          <th>Slope</th>
+                          <th>Temp</th>
+                          <th>Risk</th>
                         </tr>
                       </thead>
                       <tbody>

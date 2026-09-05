@@ -86,10 +86,18 @@
   letter-spacing: -0.005em;
 }
 
+/* A sentence, not three facts joined by punctuation. The numbers stay in the
+   data face because they are measurements; the words around them do not. */
 .lp-report-subtitle {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+}
+
+.lp-report-figure {
   font-family: var(--font-data);
-  font-size: var(--fs-small);
-  color: var(--text-dim-2);
+  color: var(--text-2);
 }
 
 .lp-report-header-right {

@@ -69,7 +69,7 @@ export const PlaybackBar: React.FC = () => {
         </button>
 
         <div className="lp-playback-meta">
-          <span className="lp-mono-label">WAYPOINT</span>
+          <span className="lp-mono-label">Waypoint</span>
           <strong className="lp-mono-val">
             {String(activeStep + 1).padStart(3, '0')} / {String(totalSteps).padStart(3, '0')}
           </strong>

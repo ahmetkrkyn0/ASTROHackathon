@@ -46,17 +46,17 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
             <span className="landing-brand-sub">Mission Workstation</span>
           </div>
           <div className="landing-status">
-            <span>REGION LSP · 89.15°S</span>
+            <span>Lunar south pole, 89.15°S</span>
             <span className="landing-link">
               <i className="landing-link-dot" aria-hidden="true" />
-              DATA LINK ACTIVE
+              Data link active
             </span>
           </div>
         </header>
 
         <div className="landing-main">
           <div className="landing-copy">
-            <p className="landing-kicker">LUNAR SOUTH POLE MISSION PLANNING</p>
+            <p className="landing-kicker">Lunar south pole mission planning</p>
             <h1>Plan and analyze rover routes across the lunar south pole.</h1>
             <p className="landing-description">
               LunaPath combines terrain, slope, shadow, thermal and energy-aware route planning with
@@ -75,22 +75,20 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
               >
                 Open Mission Planner
               </button>
-              <span className="landing-hint">ENTER COCKPIT · NO ROUTE LOADED</span>
+              <span className="landing-hint">No route loaded</span>
             </div>
           </div>
         </div>
 
         <footer className="landing-footline">
           <div className="landing-capabilities" aria-label="Key mission planning features">
-            <span>Terrain Analysis</span>
-            <span className="landing-sep">·</span>
-            <span>Energy-Aware Routing</span>
-            <span className="landing-sep">·</span>
-            <span>3D Mission Simulation</span>
+            <span>Terrain analysis</span>
+            <span>Energy-aware routing</span>
+            <span>3-D mission simulation</span>
           </div>
           {/* Data honesty, section 29: the terrain is synthetic, and the screen
               that introduces the product is where that has to be said. */}
-          <span className="landing-dataset">DATASET: SYNTHETIC DEMO TERRAIN · NOT FLIGHT LDEM</span>
+          <span className="landing-dataset">Synthetic demo terrain, not flight LDEM</span>
         </footer>
       </div>
     </section>

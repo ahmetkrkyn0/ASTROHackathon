@@ -12,7 +12,7 @@ export const MissionSnapshotPanel: React.FC = () => {
       {/* Top Banner & Replan Button */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">MISSION SNAPSHOT</span>
+          <span className="lp-meta-label">Mission snapshot</span>
           <span className="lp-status-pill is-locked">LOCKED</span>
         </div>
         <p className="lp-panel-desc-text">
@@ -32,7 +32,7 @@ export const MissionSnapshotPanel: React.FC = () => {
       {/* Rover Vehicle Snapshot */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">ACTIVE ROVER</span>
+          <span className="lp-meta-label">Active rover</span>
         </div>
         {rover ? (
           <div className="lp-snapshot-card">
@@ -52,7 +52,7 @@ export const MissionSnapshotPanel: React.FC = () => {
       {/* Target Points Snapshot */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">MISSION TRAJECTORY WAYPOINTS</span>
+          <span className="lp-meta-label">Trajectory waypoints</span>
         </div>
         <div className="lp-snapshot-points">
           <div className="lp-point-pill lp-point-start">

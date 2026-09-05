@@ -11,8 +11,7 @@
 }
 
 .lp-ros-subhead {
-  margin: 12px 0 6px; font-size: var(--fs-micro); letter-spacing: var(--track-caps);
-  text-transform: uppercase; color: var(--text-dim-2); font-weight: 600;
+  margin: 12px 0 6px; font-size: var(--fs-micro); letter-spacing: var(--track-normal); color: var(--text-dim-2); font-weight: 600;
 }
 
 .lp-ros-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }

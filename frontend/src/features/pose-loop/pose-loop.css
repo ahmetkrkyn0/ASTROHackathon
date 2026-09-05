@@ -9,7 +9,7 @@
 .lp-pose-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
 .lp-pose-field span {
-  font-size: var(--fs-micro); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--text-dim-2);
+  font-size: var(--fs-micro); letter-spacing: var(--track-label); color: var(--text-dim-2);
 }
 
 .lp-pose-wide { grid-column: 1 / -1; }
@@ -53,7 +53,7 @@
 .lp-pose-facts div { display: flex; flex-direction: column; gap: 2px; }
 
 .lp-pose-facts dt {
-  font-size: var(--fs-micro); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--text-dim-2);
+  font-size: var(--fs-micro); letter-spacing: var(--track-label); color: var(--text-dim-2);
 }
 
 .lp-pose-facts dd {

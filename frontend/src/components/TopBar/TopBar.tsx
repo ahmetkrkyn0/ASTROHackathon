@@ -78,7 +78,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           </button>
         </div>
 
-        {!hasRoute && <span className="lp-route-required">ROUTE REQUIRED</span>}
+        {!hasRoute && <span className="lp-route-required">Route required</span>}
       </div>
 
       <div className="lp-topbar-right">
@@ -89,19 +89,19 @@ export const TopBar: React.FC<TopBarProps> = ({
             onClick={onToggleSystems}
             title="ROS bridge, reality check, provenance, corridor, pose loop and replan triggers"
           >
-            SYSTEMS
+            Systems
           </button>
         )}
 
         <span className="lp-topbar-meta">
-          MISSION{' '}
+          Mission{' '}
           <span className={`lp-mission-status ${isSolving ? 'is-solving' : 'is-nominal'}`}>
             {isSolving ? 'SOLVING' : missionStatus}
           </span>
         </span>
 
         <span className="lp-topbar-meta">
-          DATA LINK
+          Data link
           <i className={`lp-link-dot ${dataLinkActive ? 'is-online' : 'is-offline'}`} />
           <span className={dataLinkActive ? 'lp-link-live' : 'lp-link-down'}>
             {dataLinkActive ? 'ACTIVE' : 'SYNCING'}

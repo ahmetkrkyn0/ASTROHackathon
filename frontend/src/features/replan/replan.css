@@ -19,7 +19,6 @@
 .lp-replan-field span {
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
-  text-transform: uppercase;
   color: var(--text-dim-2);
 }
 

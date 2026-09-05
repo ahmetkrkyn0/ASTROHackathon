@@ -127,7 +127,7 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
       <header className="lp-fleet-header">
         <div className="lp-fleet-header-content">
           <div className="lp-fleet-badge-row">
-            <span className="lp-fleet-phase-badge">STAGE 01 · FLEET COMMAND</span>
+            <span className="lp-fleet-phase-badge">Fleet command</span>
             <span className="lp-fleet-site-badge">SITE 11 · LUNAR SOUTH POLE (89.5°S)</span>
           </div>
           <h1 className="lp-fleet-headline">Select Mission Exploration Rover</h1>
@@ -193,26 +193,26 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
                 {/* Key Technical Specifications Table */}
                 <div className="lp-card-specs-grid">
                   <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">BATTERY CAPACITY</span>
+                    <span className="lp-card-spec-k">Battery capacity</span>
                     <strong className="lp-card-spec-v">{rover.e_cap_wh.toFixed(0)} Wh</strong>
                   </div>
                   <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">MAX SPEED</span>
+                    <span className="lp-card-spec-k">Max speed</span>
                     <strong className="lp-card-spec-v">{rover.v_max_ms.toFixed(2)} m/s</strong>
                   </div>
                   <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">MAX CLIMB SLOPE</span>
+                    <span className="lp-card-spec-k">Max climb slope</span>
                     <strong className="lp-card-spec-v">{rover.slope_max_deg.toFixed(0)}°</strong>
                   </div>
                   <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">TOTAL MASS</span>
+                    <span className="lp-card-spec-k">Total mass</span>
                     <strong className="lp-card-spec-v">{rover.mass_kg.toFixed(0)} kg</strong>
                   </div>
                 </div>
 
                 {/* Scientific Payload Suite */}
                 <div className="lp-card-payload-box">
-                  <span className="lp-card-payload-title">SCIENCE & SENSOR SUITE</span>
+                  <span className="lp-card-payload-title">Science and sensor suite</span>
                   <p className="lp-card-payload-text">{meta.payload}</p>
                 </div>
               </div>
@@ -271,7 +271,7 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
         {/* Big Deployment Action Button */}
         <div className="lp-dock-action-col">
           <div className="lp-dock-rover-summary">
-            <span className="lp-meta-label">DEPLOYMENT READY</span>
+            <span className="lp-meta-label">Ready to deploy</span>
             <strong className="lp-dock-rover-name">
               {selectedRover ? selectedRover.name : 'Choose a vehicle above'}
             </strong>

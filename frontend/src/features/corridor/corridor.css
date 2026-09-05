@@ -47,7 +47,6 @@
   text-align: right;
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
-  text-transform: uppercase;
   color: var(--text-dim-2);
   padding: 4px 6px;
 }

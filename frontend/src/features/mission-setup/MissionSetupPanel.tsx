@@ -104,7 +104,7 @@ export const MissionSetupPanel: React.FC = () => {
       {/* ── 1. VEHICLE ASSIGNMENT & QUICK SELECTOR TABS ── */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">MISSION SETUP</span>
+          <span className="lp-meta-label">Mission setup</span>
           <button
             type="button"
             className="lp-text-action-btn"
@@ -155,7 +155,7 @@ export const MissionSetupPanel: React.FC = () => {
       {/* ── 2. MISSION SEQUENCE & TARGET PICKERS ── */}
       <section className="lp-panel-section lp-mission-sequence-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">MISSION SEQUENCE</span>
+          <span className="lp-meta-label">Mission sequence</span>
         </div>
 
         <div className="lp-sequence-list">
@@ -279,7 +279,7 @@ export const MissionSetupPanel: React.FC = () => {
       {/* ── 3. ROUTE PRIORITIES SLIDERS ── */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">ROUTE PRIORITIES</span>
+          <span className="lp-meta-label">Route priorities</span>
         </div>
 
         {/* Mission profile presets (GET /api/profiles). Selecting one writes
@@ -288,7 +288,7 @@ export const MissionSetupPanel: React.FC = () => {
         {profiles && Object.keys(profiles).length > 0 && (
           <div className="lp-profile-block">
             <div className="lp-profile-head">
-              <span className="lp-profile-caption">MISSION PROFILE</span>
+              <span className="lp-profile-caption">Mission profile</span>
               <span className={`lp-profile-active-tag ${activeProfile ? '' : 'is-custom'}`}>
                 {activeProfile ? activeProfile.name : 'Custom'}
               </span>

@@ -181,10 +181,9 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: var(--font-data);
+  font-family: var(--font-label);
   font-size: var(--fs-micro);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
   color: var(--text-dimmest);
   white-space: nowrap;
 }
@@ -230,10 +229,9 @@
 }
 
 .chat-level-label {
-  font-family: var(--font-data);
+  font-family: var(--font-label);
   font-size: var(--fs-micro);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
   color: var(--text-dimmest);
 }
 
@@ -405,10 +403,9 @@
 }
 
 .chat-role {
-  font-family: var(--font-data);
+  font-family: var(--font-label);
   font-size: var(--fs-micro);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
   color: var(--text-dimmest);
 }
 
@@ -416,10 +413,9 @@
   padding: 0;
   border: 0;
   background: none;
-  font-family: var(--font-data);
+  font-family: var(--font-label);
   font-size: var(--fs-micro);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
   color: var(--text-dim-2);
 }
 
@@ -503,10 +499,9 @@
 .chat-warning-tag {
   flex-shrink: 0;
   padding-top: 1px;
-  font-family: var(--font-data);
+  font-family: var(--font-label);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
-  text-transform: uppercase;
 }
 
 .chat-warning-copy {
@@ -542,10 +537,9 @@
 /* ── Limitations and evidence ───────────────────────────────────────────── */
 
 .chat-block-title {
-  font-family: var(--font-data);
+  font-family: var(--font-label);
   font-size: var(--fs-micro);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
   color: var(--text-dimmest);
 }
 
@@ -591,10 +585,9 @@
   padding: 2px 7px;
   border-radius: var(--radius);
   border: 1px solid rgba(29, 36, 50, 0.4);
-  font-family: var(--font-data);
+  font-family: var(--font-label);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
-  text-transform: uppercase;
   color: var(--text-muted-2);
   white-space: nowrap;
 }
@@ -824,7 +817,6 @@
   font-size: var(--fs-small);
   font-weight: 600;
   letter-spacing: var(--track-normal);
-  text-transform: uppercase;
   color: var(--chat-muted, var(--text-muted));
 }
 
@@ -846,15 +838,14 @@
 .chat-panel .panel-title {
   font-size: var(--fs-small);
   font-weight: 500;
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
 }
 
 .chat-panel .panel-kicker {
   order: 2;
   margin: 5px 0 0;
   color: var(--text-dim-2);
-  font-family: var(--font-data);
+  font-family: var(--font-label);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
 }

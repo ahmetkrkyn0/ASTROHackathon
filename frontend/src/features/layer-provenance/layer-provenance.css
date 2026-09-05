@@ -55,8 +55,7 @@
 
 .lp-provenance-facts dt {
   font-size: var(--fs-micro);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
   color: var(--text-dim-2);
 }
 

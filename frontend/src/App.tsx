@@ -672,7 +672,7 @@ export default function App() {
                     <div className="lp-hud-header">
                       <div className="lp-hud-title-group">
                         <span className="lp-pulse-dot" />
-                        <span className="lp-hud-title">SURFACE TELEMETRY</span>
+                        <span className="lp-hud-title">Surface telemetry</span>
                       </div>
                       <div className="lp-hud-actions">
                         <button

@@ -389,7 +389,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
             justifyContent: 'center',
             background: 'rgba(5, 7, 13, 0.86)',
             color: '#c8cddb',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: "var(--font-data)",
             fontSize: 12,
             letterSpacing: '0.14em',
             textTransform: 'uppercase',
@@ -771,7 +771,7 @@ function drawMarker(
 
   ctx.shadowBlur = 0
   ctx.fillStyle = '#05070d'
-  ctx.font = 'bold 8px IBM Plex Mono, monospace'
+  ctx.font = 'bold 8px "Azeret Mono", ui-monospace, monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(label, col, row + 0.5)
