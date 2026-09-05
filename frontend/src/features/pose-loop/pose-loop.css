@@ -45,7 +45,7 @@
 
 /* stop_and_localize is NOT a replan. Replanning from a pose you do not
    trust is planning from a lie, so the two never share a colour. */
-.lp-pose-stop_and_localize { background: rgba(232, 200, 90, 0.16); color: var(--risk-med); }
+.lp-pose-stop_and_localize { background: rgba(227, 213, 72, 0.16); color: var(--risk-med); }
 .lp-pose-replan            { background: rgba(248, 113, 113, 0.16); color: var(--risk-crit); }
 .lp-pose-continue          { background: rgba(52, 211, 153, 0.14); color: var(--risk-low); }
 

@@ -175,7 +175,7 @@
   /* The lit/shadowed axis the old deck encoded. Kept as an axis, retuned onto
      the canvas: sun reads warm, permanent shadow reads cold cyan. */
   --terminator: var(--risk-med);
-  --terminator-dim: rgba(232, 200, 90, 0.14);
+  --terminator-dim: rgba(227, 213, 72, 0.14);
   --umbra: var(--cyan);
   --umbra-dim: rgba(79, 216, 240, 0.14);
 
@@ -328,7 +328,7 @@ body {
   height: 38vh;
   background: radial-gradient(
     120% 100% at 50% 100%,
-    rgba(232, 200, 90, 0.14),
+    rgba(227, 213, 72, 0.14),
     transparent 70%
   );
 }
@@ -693,9 +693,9 @@ select {
 .cinematic-cta {
   min-height: 44px;
   border-radius: var(--radius);
-  border: 1px solid rgba(232, 200, 90, 0.45);
-  background: linear-gradient(135deg, rgba(232, 200, 90, 0.96), rgba(224, 142, 42, 0.92));
-  color: rgba(232, 200, 90, 0.08);
+  border: 1px solid rgba(227, 213, 72, 0.45);
+  background: linear-gradient(135deg, rgba(227, 213, 72, 0.96), rgba(224, 142, 42, 0.92));
+  color: rgba(227, 213, 72, 0.08);
   font-family: var(--font-body);
   font-size: var(--fs-body);
   font-weight: 700;
@@ -713,7 +713,7 @@ select {
 }
 
 .cinematic-cta:not(:disabled):hover {
-  background: linear-gradient(135deg, rgba(240, 154, 74, 0.98), rgba(236, 154, 52, 0.95));
+  background: linear-gradient(135deg, rgba(214, 151, 112, 0.98), rgba(236, 154, 52, 0.95));
 }
 
 
@@ -793,7 +793,7 @@ select {
 }
 
 .status-line-muted {
-  color: rgba(139, 148, 166, 0.72);
+  color: var(--text-muted);
 }
 
 .content-grid {
@@ -866,7 +866,7 @@ select {
 }
 
 .rail-toggle:hover {
-  background: rgba(179, 165, 255, 0.08);
+  background: rgba(186, 175, 245, 0.08);
   color: var(--primary-container);
 }
 
@@ -919,9 +919,9 @@ select {
   display: grid;
   place-items: center;
   background:
-    linear-gradient(135deg, rgba(179, 165, 255, 0.2), rgba(179, 165, 255, 0.04)),
+    linear-gradient(135deg, rgba(186, 175, 245, 0.2), rgba(186, 175, 245, 0.04)),
     var(--surface-lowest);
-  border: 1px solid rgba(179, 165, 255, 0.18);
+  border: 1px solid rgba(186, 175, 245, 0.18);
   color: var(--primary-container);
   font-family: var(--font-data);
   font-size: var(--fs-body);
@@ -937,7 +937,7 @@ select {
 .map-data-label,
 .panel-kicker {
   margin: 0 0 4px;
-  color: rgba(139, 148, 166, 0.58);
+  color: var(--text-muted-2);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
 }
@@ -965,7 +965,7 @@ select {
 
 .eyebrow {
   margin: 0 0 12px;
-  color: rgba(139, 148, 166, 0.5);
+  color: var(--text-dimmest);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
 }
@@ -995,17 +995,17 @@ select {
 }
 
 .status-pill--idle {
-  color: rgba(139, 148, 166, 0.76);
+  color: var(--text-muted);
 }
 
 .status-pill--ready,
 .status-pill--safe {
-  border-color: rgba(79, 208, 138, 0.24);
+  border-color: rgba(74, 143, 216, 0.24);
   color: var(--safe);
 }
 
 .status-pill--critical {
-  border-color: rgba(238, 90, 82, 0.26);
+  border-color: rgba(237, 75, 61, 0.26);
   color: var(--critical);
 }
 
@@ -1035,7 +1035,7 @@ select {
   background: var(--surface-lowest);
   border: 1px solid rgba(29, 36, 50, 0.34);
   border-radius: var(--radius);
-  color: rgba(139, 148, 166, 0.82);
+  color: var(--text-muted);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
@@ -1079,7 +1079,7 @@ select {
 }
 
 .rover-card-specs span {
-  color: rgba(139, 148, 166, 0.58);
+  color: var(--text-muted-2);
 }
 
 .rover-summary-grid {
@@ -1095,7 +1095,7 @@ select {
   background: transparent;
   border: none;
   border-left: 3px solid transparent;
-  color: rgba(139, 148, 166, 0.76);
+  color: var(--text-muted);
   text-align: left;
   cursor: pointer;
   transition: background 0.18s ease, color 0.18s ease;
@@ -1106,7 +1106,7 @@ select {
 }
 
 .profile-button.is-active {
-  background: rgba(179, 165, 255, 0.1);
+  background: rgba(186, 175, 245, 0.1);
   color: var(--primary-container);
 }
 
@@ -1118,7 +1118,7 @@ select {
 }
 
 .profile-id {
-  color: rgba(139, 148, 166, 0.54);
+  color: var(--text-dimmest);
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
@@ -1144,7 +1144,7 @@ select {
   padding: 0 12px;
   background: var(--surface-lowest);
   border: 1px solid rgba(29, 36, 50, 0.34);
-  color: rgba(139, 148, 166, 0.82);
+  color: var(--text-muted);
   font-family: var(--font-body);
   font-size: var(--fs-small);
   font-weight: 700;
@@ -1152,12 +1152,12 @@ select {
 }
 
 .coord-chip.is-start {
-  border-color: rgba(79, 208, 138, 0.4);
+  border-color: rgba(74, 143, 216, 0.4);
   color: var(--safe);
 }
 
 .coord-chip.is-goal {
-  border-color: rgba(238, 90, 82, 0.4);
+  border-color: rgba(237, 75, 61, 0.4);
   color: var(--critical);
 }
 
@@ -1176,7 +1176,7 @@ select {
 .coord-label {
   display: block;
   margin-bottom: 5px;
-  color: rgba(139, 148, 166, 0.48);
+  color: var(--text-dimmest);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
 }
@@ -1217,7 +1217,7 @@ select {
 }
 
 .slider-name {
-  color: rgba(139, 148, 166, 0.6);
+  color: var(--text-muted-2);
 }
 
 .slider-value {
@@ -1234,7 +1234,7 @@ select {
 .alert-card {
   padding: 12px;
   background: rgba(147, 0, 10, 0.18);
-  border: 1px solid rgba(240, 154, 74, 0.22);
+  border: 1px solid rgba(214, 151, 112, 0.22);
   color: var(--coral-text);
   font-size: var(--fs-body);
   line-height: 1.5;
@@ -1261,18 +1261,18 @@ select {
   gap: 14px;
   padding: 14px 14px 14px 16px;
   border-radius: var(--radius);
-  border: 1px solid rgba(240, 154, 74, 0.2);
+  border: 1px solid rgba(214, 151, 112, 0.2);
   background: rgba(14, 15, 24, 0.94);
   box-shadow: var(--shadow-float);
   pointer-events: auto;
 }
 
 .toast-card--warning {
-  border-color: rgba(240, 154, 74, 0.28);
+  border-color: rgba(214, 151, 112, 0.28);
 }
 
 .toast-card--error {
-  border-color: rgba(238, 90, 82, 0.28);
+  border-color: rgba(237, 75, 61, 0.28);
 }
 
 .toast-copy {
@@ -1298,7 +1298,7 @@ select {
 }
 
 .toast-detail {
-  color: rgba(139, 148, 166, 0.68);
+  color: var(--text-muted-2);
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-normal);
@@ -1309,7 +1309,7 @@ select {
   padding: 0;
   background: transparent;
   border: none;
-  color: rgba(139, 148, 166, 0.74);
+  color: var(--text-muted);
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
@@ -1334,20 +1334,20 @@ select {
 .ghost-btn {
   background: var(--surface-high);
   border: 1px solid rgba(139, 148, 166, 0.2);
-  color: rgba(139, 148, 166, 0.86);
+  color: var(--text-3);
   font-weight: 600;
 }
 
 /* The one action that spends energy, in the colour that means energy. */
 .primary-btn {
-  background: linear-gradient(135deg, rgba(232, 200, 90, 0.96), rgba(224, 142, 42, 0.92));
-  border: 1px solid rgba(232, 200, 90, 0.45);
-  color: rgba(232, 200, 90, 0.08);
+  background: linear-gradient(135deg, rgba(227, 213, 72, 0.96), rgba(224, 142, 42, 0.92));
+  border: 1px solid rgba(227, 213, 72, 0.45);
+  color: rgba(227, 213, 72, 0.08);
   font-weight: 700;
 }
 
 .primary-btn:not(:disabled):hover {
-  background: linear-gradient(135deg, rgba(240, 154, 74, 0.98), rgba(236, 154, 52, 0.95));
+  background: linear-gradient(135deg, rgba(214, 151, 112, 0.98), rgba(236, 154, 52, 0.95));
 }
 
 .primary-btn:disabled {
@@ -1499,7 +1499,7 @@ select {
 }
 
 .map-data-label {
-  color: rgba(139, 148, 166, 0.48);
+  color: var(--text-dimmest);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
 }
@@ -1537,7 +1537,7 @@ select {
   padding: 0 12px;
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(139, 148, 166, 0.72);
+  color: var(--text-muted);
   cursor: pointer;
   font-family: var(--font-body);
   font-size: var(--fs-small);
@@ -1610,7 +1610,7 @@ select {
 }
 
 .telemetry-label {
-  color: rgba(139, 148, 166, 0.48);
+  color: var(--text-dimmest);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
 }
@@ -1696,7 +1696,7 @@ select {
 }
 
 .battery-copy span {
-  color: rgba(139, 148, 166, 0.48);
+  color: var(--text-dimmest);
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
@@ -1751,7 +1751,7 @@ select {
 
 .risk-count-card span {
   display: block;
-  color: rgba(139, 148, 166, 0.48);
+  color: var(--text-dimmest);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
   text-transform: uppercase;
@@ -1765,7 +1765,7 @@ select {
 }
 
 .waypoint-meta {
-  color: rgba(139, 148, 166, 0.52);
+  color: var(--text-dimmest);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
   text-transform: uppercase;
@@ -1786,7 +1786,7 @@ select {
 
 .milestone-stat span {
   display: block;
-  color: rgba(139, 148, 166, 0.48);
+  color: var(--text-dimmest);
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
@@ -1833,7 +1833,7 @@ select {
 }
 
 .waypoint-detail {
-  color: rgba(139, 148, 166, 0.66);
+  color: var(--text-muted-2);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-normal);
   white-space: nowrap;
@@ -2144,7 +2144,7 @@ select {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  color: rgba(139, 148, 166, 0.82);
+  color: var(--text-muted);
   font-family: var(--font-body);
   font-size: var(--fs-micro);
   font-weight: 700;
@@ -2522,9 +2522,9 @@ select {
 }
 
 .lp-dim-btn.is-active {
-  background: rgba(179, 165, 255, 0.2);
+  background: rgba(186, 175, 245, 0.2);
   color: var(--text);
-  border: 1px solid rgba(179, 165, 255, 0.4);
+  border: 1px solid rgba(186, 175, 245, 0.4);
 }
 
 .lp-layer-menu-wrapper {
@@ -2619,7 +2619,7 @@ select {
 }
 
 .lp-layer-item.is-selected {
-  background: rgba(179, 165, 255, 0.14);
+  background: rgba(186, 175, 245, 0.14);
 }
 
 .lp-layer-item-name {
@@ -2629,10 +2629,37 @@ select {
   color: var(--text);
 }
 
+/* The option's name. It had no colour rule at all, so it inherited the
+   button's user-agent default -- pure black -- and rendered at 1.07:1 on this
+   panel: the least readable text in the application, and it was the primary
+   label of every row. Its own description underneath was legible, so the
+   hierarchy read inverted.
+
+   `--text-2` rather than `--text`: the selected row below takes the brighter
+   one, and the difference is how the menu shows which layer is active. */
+.lp-layer-item-title {
+  display: block;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.lp-layer-item.is-selected .lp-layer-item-title {
+  color: var(--text);
+}
+
+/* Same omission, same cause. */
+.lp-layer-check {
+  color: var(--lavender);
+  font-size: var(--fs-body);
+}
+
 .lp-layer-item-desc {
   display: block;
   font-size: var(--fs-micro);
-  color: var(--text-dim-2);
+  /* --text-muted, not --text-dim-2: the row's hover wash lifts the background
+     and pushed the dimmer token to 4.23:1, under AA, exactly when the pointer
+     is on the row being read. */
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
@@ -2785,7 +2812,7 @@ select {
 }
 
 .lp-text-action-btn:hover {
-  background: rgba(179, 165, 255, 0.12);
+  background: rgba(186, 175, 245, 0.12);
 }
 
 /* Selected Rover Card */
@@ -2806,8 +2833,8 @@ select {
 .lp-rover-avatar-box {
   width: 32px;
   height: 32px;
-  background: rgba(179, 165, 255, 0.14);
-  border: 1px solid rgba(179, 165, 255, 0.3);
+  background: rgba(186, 175, 245, 0.14);
+  border: 1px solid rgba(186, 175, 245, 0.3);
   border-radius: var(--radius);
   display: flex;
   align-items: center;
@@ -3010,8 +3037,8 @@ select {
 /* Verified only after simulation: a returned plan can exceed it. */
 .lp-constraint-badge.is-verified {
   color: var(--risk-med);
-  background: rgba(232, 200, 90, 0.1);
-  border: 1px solid rgba(232, 200, 90, 0.28);
+  background: rgba(227, 213, 72, 0.1);
+  border: 1px solid rgba(227, 213, 72, 0.28);
 }
 
 /* Priority Sliders */
@@ -3150,7 +3177,7 @@ select {
 }
 
 .lp-pick-btn.is-set-goal {
-  border-color: rgba(255, 122, 92, 0.4);
+  border-color: rgba(237, 133, 110, 0.4);
   color: var(--coral-text);
   font-family: var(--font-data);
   font-size: var(--fs-small);
@@ -3267,7 +3294,7 @@ select {
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   color: var(--accent-lavender);
-  background: rgba(179, 165, 255, 0.12);
+  background: rgba(186, 175, 245, 0.12);
   padding: 2px 6px;
   border-radius: var(--radius);
 }
@@ -3330,8 +3357,8 @@ select {
   width: 100%;
   padding: 8px;
   border-radius: var(--radius);
-  background: rgba(179, 165, 255, 0.12);
-  border: 1px solid rgba(179, 165, 255, 0.25);
+  background: rgba(186, 175, 245, 0.12);
+  border: 1px solid rgba(186, 175, 245, 0.25);
   color: var(--accent-lavender);
   font-family: var(--font-data);
   font-size: var(--fs-small);
@@ -3465,7 +3492,7 @@ select {
 
 /* Analysis Mode Left Rail (Snapshot) */
 .lp-status-pill.is-locked {
-  background: rgba(179, 165, 255, 0.12);
+  background: rgba(186, 175, 245, 0.12);
   color: var(--accent-lavender);
   font-weight: 700;
   font-size: var(--fs-micro);
@@ -3480,8 +3507,8 @@ select {
   gap: 8px;
   width: 100%;
   padding: 10px;
-  background: rgba(179, 165, 255, 0.14);
-  border: 1px solid rgba(179, 165, 255, 0.35);
+  background: rgba(186, 175, 245, 0.14);
+  border: 1px solid rgba(186, 175, 245, 0.35);
   border-radius: var(--radius);
   color: var(--text);
   font-family: var(--font-data);
@@ -3492,7 +3519,7 @@ select {
 }
 
 .lp-replan-btn:hover {
-  background: rgba(179, 165, 255, 0.25);
+  background: rgba(186, 175, 245, 0.25);
 }
 
 .lp-snapshot-card {
@@ -3601,7 +3628,7 @@ select {
 /* Tier 1 / 2 / 3 Analysis Hierarchy */
 .lp-tier-1-section {
   background: rgba(14, 20, 34, 0.7);
-  border: 1px solid rgba(179, 165, 255, 0.25);
+  border: 1px solid rgba(186, 175, 245, 0.25);
   border-radius: var(--radius);
   padding: 14px;
 }
@@ -3992,11 +4019,11 @@ select {
 @keyframes lpPulseBorderGoal {
   0%, 100% {
     border-color: var(--coral);
-    box-shadow: 0 0 0 0 rgba(255, 122, 92, 0.4);
+    box-shadow: 0 0 0 0 rgba(237, 133, 110, 0.4);
   }
   50% {
     border-color: var(--coral);
-    box-shadow: 0 0 0 4px rgba(255, 122, 92, 0.15);
+    box-shadow: 0 0 0 4px rgba(237, 133, 110, 0.15);
   }
 }
 
@@ -4160,8 +4187,8 @@ select {
 
 .lp-rover-tab.is-active {
   color: var(--text);
-  background: rgba(179, 165, 255, 0.16);
-  border-color: rgba(179, 165, 255, 0.4);
+  background: rgba(186, 175, 245, 0.16);
+  border-color: rgba(186, 175, 245, 0.4);
 }
 
 /* ── Sequence & Action Buttons in Planning Panel ── */
@@ -4213,15 +4240,15 @@ select {
 }
 
 .lp-seq-action-btn.is-picking-goal {
-  background: rgba(255, 122, 92, 0.15);
+  background: rgba(237, 133, 110, 0.15);
   border-color: var(--coral);
   color: var(--coral);
   animation: lpPulseBorderGoal 1.5s infinite;
 }
 
 .lp-seq-action-btn.is-set-goal {
-  background: rgba(255, 122, 92, 0.1);
-  border-color: rgba(255, 122, 92, 0.4);
+  background: rgba(237, 133, 110, 0.1);
+  border-color: rgba(237, 133, 110, 0.4);
   color: var(--coral);
 }
 
@@ -4280,8 +4307,8 @@ select {
 
 .lp-panel-clear-btn:hover:not(:disabled) {
   color: var(--coral);
-  border-color: rgba(255, 122, 92, 0.4);
-  background: rgba(255, 122, 92, 0.08);
+  border-color: rgba(237, 133, 110, 0.4);
+  background: rgba(237, 133, 110, 0.08);
 }
 
 .lp-panel-clear-btn:disabled {
@@ -4399,13 +4426,13 @@ select {
 }
 
 .lp-drawer-rover-card:hover {
-  border-color: rgba(179, 165, 255, 0.35);
+  border-color: rgba(186, 175, 245, 0.35);
   background: rgba(17, 24, 42, 0.95);
 }
 
 .lp-drawer-rover-card.is-selected {
   border-color: var(--lavender);
-  background: rgba(179, 165, 255, 0.06);
+  background: rgba(186, 175, 245, 0.06);
 }
 
 .lp-drawer-card-top {
@@ -4446,8 +4473,8 @@ select {
 }
 
 .lp-assign-btn {
-  background: rgba(179, 165, 255, 0.14);
-  border: 1px solid rgba(179, 165, 255, 0.3);
+  background: rgba(186, 175, 245, 0.14);
+  border: 1px solid rgba(186, 175, 245, 0.3);
   color: var(--text);
   font-family: var(--font-display);
   font-size: var(--fs-body);
@@ -4460,7 +4487,7 @@ select {
 }
 
 .lp-assign-btn:hover {
-  background: rgba(179, 165, 255, 0.25);
+  background: rgba(186, 175, 245, 0.25);
 }
 
 .lp-assign-btn.is-assigned {
@@ -4536,7 +4563,7 @@ select {
 }
 
 .lp-hud-minimized:hover {
-  border-color: rgba(179, 165, 255, 0.4);
+  border-color: rgba(186, 175, 245, 0.4);
   transform: translateY(1px);
 }
 
@@ -4585,8 +4612,8 @@ select {
 }
 
 .lp-hud-pill.is-goal {
-  background: rgba(255, 122, 92, 0.15);
-  border: 1px solid rgba(255, 122, 92, 0.3);
+  background: rgba(237, 133, 110, 0.15);
+  border: 1px solid rgba(237, 133, 110, 0.3);
   color: var(--coral);
 }
 
@@ -4612,8 +4639,8 @@ select {
 }
 
 .lp-hud-dock-btn.is-active {
-  background: rgba(179, 165, 255, 0.15);
-  border-color: rgba(179, 165, 255, 0.35);
+  background: rgba(186, 175, 245, 0.15);
+  border-color: rgba(186, 175, 245, 0.35);
   color: var(--text);
 }
 

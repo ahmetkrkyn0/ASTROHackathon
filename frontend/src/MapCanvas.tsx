@@ -367,7 +367,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
         style={{
           width: '100%',
           height: '100%',
-          border: '1px solid rgba(179, 165, 255, 0.2)',
+          border: '1px solid rgba(186, 175, 245, 0.2)',
           background: '#05070d',
           boxShadow: '0 24px 64px rgba(0, 0, 0, 0.45)',
           cursor: clickMode === 'idle' ? 'default' : 'crosshair',
@@ -551,7 +551,7 @@ function drawHoverCrosshair(
   const y = row + 0.5
 
   ctx.save()
-  ctx.strokeStyle = 'rgba(179, 165, 255, 0.18)'
+  ctx.strokeStyle = 'rgba(186, 175, 245, 0.18)'
   ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(x, 0)

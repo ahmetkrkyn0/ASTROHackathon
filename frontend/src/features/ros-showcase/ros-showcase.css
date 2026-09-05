@@ -5,8 +5,8 @@
 
 .lp-ros-disclaimer {
   margin: 0 0 11px; padding: 7px 9px; border-radius: var(--radius);
-  background: rgba(232, 200, 90, 0.1);
-  border: 1px solid rgba(232, 200, 90, 0.28);
+  background: rgba(227, 213, 72, 0.1);
+  border: 1px solid rgba(227, 213, 72, 0.28);
   font-size: var(--fs-micro); line-height: 1.5; color: var(--risk-med);
 }
 
