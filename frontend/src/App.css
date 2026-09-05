@@ -734,13 +734,6 @@ select {
   cursor: default;
 }
 
-.landing-hint {
-  color: var(--text-dim-2);
-  font-family: var(--font-label);
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-normal);
-}
-
 /* ── Capability footer ── */
 .landing-footline {
   display: flex;
@@ -759,14 +752,6 @@ select {
   align-items: center;
   gap: 28px;
   color: var(--text-muted);
-  font-family: var(--font-label);
-  font-size: var(--fs-small);
-  letter-spacing: var(--track-normal);
-}
-
-
-.landing-dataset {
-  color: var(--text-dimmest);
   font-family: var(--font-label);
   font-size: var(--fs-small);
   letter-spacing: var(--track-normal);
@@ -2104,7 +2089,6 @@ select {
 
   .landing-brand-sub,
   .landing-kicker,
-  .landing-hint,
   .loading-copy,
   .loading-percent {
     font-size: var(--fs-micro);
@@ -2124,10 +2108,6 @@ select {
 
   .landing-actions {
     margin-top: 26px;
-  }
-
-  .landing-dataset {
-    display: none;
   }
 
   .landing-explore-button {
