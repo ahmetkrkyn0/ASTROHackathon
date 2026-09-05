@@ -69,6 +69,17 @@ from .localization import evaluate_pose
 from .pose import PoseEstimate
 from .replan_triggers import evaluate_triggers_detailed
 from .rover_grids import grids_for_rover
+from .risk import (
+    RISK_ALPHA_MAX,
+    RISK_ALPHA_MIN,
+    RISK_CLAIM,
+    RISK_MEASURE_ID,
+    RISK_REFERENCES,
+    RISK_VALIDITY,
+    risk_block,
+    route_risk_summary,
+    sigma_sources,
+)
 from .slip_model import route_slip_summary
 from .safe_haven import (
     gated_shortest_drive,
@@ -92,7 +103,12 @@ from .scenarios import (
     load_scenario,
 )
 from .route_analysis import route_statistics as compute_route_statistics
-from .serializer import build_plan_response, lonlat_to_pixel, pixel_to_lonlat
+from .serializer import (
+    build_plan_response,
+    lonlat_to_pixel,
+    pixel_to_lonlat,
+    states_to_waypoints,
+)
 from .mission_reference import reference_summary
 from .simulation import simulate_path, summarize_simulation
 from .safety_monitor import (
@@ -402,12 +418,30 @@ class PlanWeights(BaseModel):
         return v
 
 
+#: The operator's risk appetite (B2): the slope and energy criteria read the
+#: CVaR tail of their inputs at this alpha. Omitted = the nominal grid, bit
+#: for bit; 0.5 is NOT the mean (mu + 0.798 sigma).
+_RISK_ALPHA_FIELD = Field(
+    default=None,
+    ge=RISK_ALPHA_MIN,
+    le=RISK_ALPHA_MAX,
+    description=(
+        "Risk appetite in [0.5, 0.999]: the ranking cost prices each cell at "
+        "the mean of the worst (1 - alpha) tail of its slip and slope "
+        "distributions (CVaR). Omit for the nominal cost; travel time, "
+        "battery and margins always use the mean. 0.5 is mu + 0.798 sigma, "
+        "not the mean."
+    ),
+)
+
+
 class PlanRequest(BaseModel):
     start: Union[StartGoalPixel, StartGoalGeo]
     goal: Union[StartGoalPixel, StartGoalGeo]
     rover_id: str = DEFAULT_ROVER_ID
     weights: PlanWeights = Field(default_factory=PlanWeights)
     include_simulation: bool = True
+    risk_alpha: Optional[float] = _RISK_ALPHA_FIELD
 
 
 def _reject_non_finite_telemetry(state: dict[str, float]) -> dict[str, float]:
@@ -550,6 +584,42 @@ class Plan4DRequest(BaseModel):
             "threshold)."
         ),
     )
+    risk_alpha: Optional[float] = _RISK_ALPHA_FIELD
+
+
+class RiskSweepRequest(BaseModel):
+    """Plan the same pair under several risk appetites, side by side (B2).
+
+    Runs the 2-D planner (with its physics simulation) once per alpha --
+    and once nominally unless ``include_nominal`` is off -- and compares
+    the routes: nominal-physics metrics, overlap with the nominal route,
+    and every route re-priced at every alpha of the sweep. For the 4-D
+    planner pass ``risk_alpha`` to /api/plan-4d.
+    """
+
+    start: Union[StartGoalPixel, StartGoalGeo]
+    goal: Union[StartGoalPixel, StartGoalGeo]
+    rover_id: str = DEFAULT_ROVER_ID
+    weights: PlanWeights = Field(default_factory=PlanWeights)
+    alphas: list[float] = Field(
+        default_factory=lambda: [0.5, 0.9, 0.99],
+        min_length=1,
+        max_length=6,
+        description="Risk appetites to plan at, each in [0.5, 0.999]; duplicates are dropped.",
+    )
+    include_nominal: bool = Field(
+        default=True, description="Also plan the nominal (no alpha) route and compare against it."
+    )
+
+    @field_validator("alphas")
+    @classmethod
+    def _check_alphas(cls, values: list[float]) -> list[float]:
+        for value in values:
+            if not (RISK_ALPHA_MIN <= float(value) <= RISK_ALPHA_MAX):
+                raise ValueError(
+                    f"every alpha must lie in [{RISK_ALPHA_MIN}, {RISK_ALPHA_MAX}], got {value}"
+                )
+        return values
 
 
 # A bare list[int] let a 3-element start reach astar and raise IndexError as
@@ -869,7 +939,9 @@ def plan(req: PlanRequest, request: Request):
     grids = _active_grids(request)
     rover = get_rover(req.rover_id)
     weights_dict = req.weights.model_dump()
-    grids_for_plan = grids_for_rover(grids, req.rover_id, weights_dict)
+    # The risk appetite (B2) reaches the cost grid here and nowhere else:
+    # the simulation below runs the mean-slip physics whatever alpha is.
+    grids_for_plan = grids_for_rover(grids, req.rover_id, weights_dict, risk_alpha=req.risk_alpha)
 
     metadata = grids_for_plan["metadata"]
     start = _to_pixel(req.start, "start", metadata)
@@ -1017,6 +1089,11 @@ def plan(req: PlanRequest, request: Request):
     # The slip the route paid for (C3): the model's label, its anchors'
     # claim, and the hours and Wh slip added along this route.
     response["slip_model"] = _slip_block_2d(states, rover)
+
+    # The risk appetite this route was ranked under (B2): which criteria
+    # read their tails, where each sigma came from, and the route re-priced
+    # at its slip tail. Nominal physics above; this block is the tail.
+    response["risk"] = _risk_block_2d(states, grids_for_plan, req.rover_id, rover, req.risk_alpha)
 
     # Published only once the response the caller receives is fully built.
     # Assigning mid-request meant a plan whose serialisation then failed
@@ -1461,7 +1538,9 @@ def plan_4d(req: Plan4DRequest, request: Request):
     grids = _active_grids(request)
     rover = get_rover(req.rover_id)
     weights_dict = req.weights.model_dump()
-    grids_for_plan = grids_for_rover(grids, req.rover_id, weights_dict)
+    # Under a risk appetite (B2) this also attaches the clone slope sigma
+    # the cost cube reads; the planner's physics stays at the mean.
+    grids_for_plan = grids_for_rover(grids, req.rover_id, weights_dict, risk_alpha=req.risk_alpha)
     metadata = grids_for_plan["metadata"]
 
     rows, cols = int(metadata["shape"][0]), int(metadata["shape"][1])
@@ -1681,6 +1760,10 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # time constant, so the cube needs to know how long a slice is.
         # (Round 4 review, H-1 and H-3.)
         slice_hours=slice_hours,
+        # The risk appetite and the slope sigma it reads (B2); None is the
+        # nominal cube, bit for bit.
+        risk_alpha=req.risk_alpha,
+        slope_sigma=grids_for_plan.get("slope_sigma"),
     )
     wait_cube = build_wait_cost_cube(
         illum_series, rover, slice_hours, weights_dict, coarsen=req.coarsen
@@ -1977,6 +2060,11 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # The slip the route paid for (C3): label, claim, and the hours and
         # Wh slip added along this route on the planner's own edges.
         "slip_model": _slip_block_4d(result, geometry, shadow_cube, rover),
+        # The risk appetite the cube was ranked under (B2) and the route
+        # re-priced at its slip tail; the clock above is the mean.
+        "risk": _risk_block_4d(
+            result, geometry, shadow_cube, rover, req.risk_alpha, grids_for_plan, req.rover_id, req.coarsen
+        ),
         "n_slices": n_slices,
         "slice_hours": slice_hours,
         "slice_hours_source": slice_hours_source,
@@ -2555,6 +2643,303 @@ def _slip_block_4d(
             drawn = gross_energy_per_metre_wh(edge_slope, exposure, rover) * distance
         legs.append((edge_slope, distance, seconds / 3600.0, drawn))
     return route_slip_summary(legs, rover)
+
+
+def _risk_sources(grids_for_plan: dict, rover_id: str, rover: dict) -> dict[str, Any]:
+    """Where the risk tails' sigmas come from on these grids (B2): C3's
+    anchors for the slip, NASA's clone cache -- when it is beside the
+    processed grids -- for the slope. Cached per (grids, rover)."""
+    layers, info = uncertainty_layers_for_grids(grids_for_plan, rover_id)
+    return sigma_sources(rover, info if layers is not None else None)
+
+
+def _risk_legs_2d(states: list, grids_for_plan: dict, rover: dict) -> list:
+    """The legs of a simulated 2-D route for ``route_risk_summary`` (B2):
+    ``_slip_block_2d``'s legs plus the clone slope sigma at each driven cell
+    (None without the cache)."""
+    sigma = grids_for_plan.get("slope_sigma")
+    legs = []
+    for previous, current in zip(states[:-1], states[1:]):
+        distance = float(current.distance_m) - float(previous.distance_m)
+        if distance <= 0.0:
+            continue
+        drive_slope = max(float(current.slope_deg), float(current.segment_slope_deg))
+        seconds = edge_travel_time_s(drive_slope, distance, rover)
+        hours = seconds / 3600.0 if math.isfinite(seconds) else float("inf")
+        cell_sigma = (
+            None if sigma is None else float(np.asarray(sigma)[int(current.row), int(current.col)])
+        )
+        legs.append((drive_slope, distance, hours, float(current.step_energy_wh), cell_sigma))
+    return legs
+
+
+def _risk_block_2d(
+    states: list, grids_for_plan: dict, rover_id: str, rover: dict, alpha: float | None
+) -> dict[str, Any]:
+    """``risk`` for a simulated 2-D route (B2)."""
+    sources = _risk_sources(grids_for_plan, rover_id, rover)
+    route = None
+    if alpha is not None:
+        route = route_risk_summary(_risk_legs_2d(states, grids_for_plan, rover), rover, alpha)
+    return risk_block(alpha, sources, route)
+
+
+def _risk_legs_4d(
+    result: dict,
+    geometry: "_CoarseGeometry",
+    shadow_cube: np.ndarray | None,
+    rover: dict,
+    sigma_coarse: np.ndarray | None,
+) -> list:
+    """The MOVE legs of a 4-D route for ``route_risk_summary`` (B2), priced
+    as ``_slip_block_4d`` prices them, with the block-max slope sigma of the
+    two blocks averaged like the slope itself."""
+    states = result.get("path_states") or []
+    res = float(geometry.resolution_m)
+    legs = []
+    for (r0, c0, t0), (r1, c1, t1) in zip(states[:-1], states[1:]):
+        if (r0, c0) == (r1, c1):
+            continue
+        diagonal = r0 != r1 and c0 != c1
+        distance = res * math.sqrt(2.0) if diagonal else res
+        edge_slope = 0.5 * (float(geometry.slope[r0, c0]) + float(geometry.slope[r1, c1]))
+        edge_sigma = (
+            None
+            if sigma_coarse is None
+            else 0.5 * (float(sigma_coarse[r0, c0]) + float(sigma_coarse[r1, c1]))
+        )
+        seconds = edge_travel_time_s(edge_slope, distance, rover)
+        if not math.isfinite(seconds):
+            legs.append((edge_slope, distance, float("inf"), None, edge_sigma))
+            continue
+        drawn = None
+        if shadow_cube is not None:
+            exposure = 0.5 * (float(shadow_cube[t0, r0, c0]) + float(shadow_cube[t1, r1, c1]))
+            drawn = gross_energy_per_metre_wh(edge_slope, exposure, rover) * distance
+        legs.append((edge_slope, distance, seconds / 3600.0, drawn, edge_sigma))
+    return legs
+
+
+def _risk_block_4d(
+    result: dict,
+    geometry: "_CoarseGeometry",
+    shadow_cube: np.ndarray | None,
+    rover: dict,
+    alpha: float | None,
+    grids_for_plan: dict,
+    rover_id: str,
+    coarsen: int,
+) -> dict[str, Any]:
+    """``risk`` for a 4-D route (B2)."""
+    sources = _risk_sources(grids_for_plan, rover_id, rover)
+    route = None
+    if alpha is not None:
+        sigma_fine = grids_for_plan.get("slope_sigma")
+        sigma_coarse = None
+        if sigma_fine is not None:
+            with np.errstate(all="ignore"):
+                sigma_coarse = coarsen_grid(np.asarray(sigma_fine, dtype=np.float64), coarsen, how="max")
+        route = route_risk_summary(
+            _risk_legs_4d(result, geometry, shadow_cube, rover, sigma_coarse), rover, alpha
+        )
+    return risk_block(alpha, sources, route)
+
+
+def _validate_start_goal(grids_for_plan: dict, start, goal, rover: dict) -> None:
+    """The 422s /api/plan raises for a bad pair, for endpoints that plan
+    the same pair several times."""
+    shape = grids_for_plan["metadata"]["shape"]
+    rows, cols = int(shape[0]), int(shape[1])
+    for label, point in (("start", start), ("goal", goal)):
+        if not (0 <= point[0] < rows and 0 <= point[1] < cols):
+            raise HTTPException(
+                status_code=422, detail=f"{label} {tuple(point)} is outside the {rows}x{cols} grid."
+            )
+    traversable = grids_for_plan["traversable"]
+    for label, point in (("start", start), ("goal", goal)):
+        if not bool(traversable[point[0], point[1]]):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{label} {tuple(point)} is not traversable for {rover['name']} "
+                    "(slope limit or extreme thermal)."
+                ),
+            )
+
+
+@app.post("/api/risk-sweep")
+def risk_sweep(req: RiskSweepRequest, request: Request):
+    """The risk-appetite slider (B2): the same pair planned nominally and at
+    every requested alpha with the 2-D planner, side by side.
+
+    Each result carries the nominal-physics summary of ITS route (hours,
+    Wh, battery -- alpha never changes the physics), the slip block, the
+    risk block, and its cell overlap with the nominal route. ``risk_matrix``
+    re-prices every route at every alpha of the sweep, so "does the alpha
+    route buy anything in the tail" is answered on the same footing;
+    ``comparison`` lists the nominal-physics deltas against the nominal
+    route. CVaR of MODEL distributions, never a measured risk (``claim``).
+    """
+    import time as _time
+
+    grids = _active_grids(request)
+    rover = get_rover(req.rover_id)
+    weights_dict = req.weights.model_dump()
+    alphas: list[float] = []
+    for value in req.alphas:
+        if float(value) not in alphas:
+            alphas.append(float(value))
+    sweep: list[float | None] = ([None] if req.include_nominal else []) + alphas
+
+    nominal_grids = grids_for_rover(grids, req.rover_id, weights_dict)
+    metadata = nominal_grids["metadata"]
+    start = _to_pixel(req.start, "start", metadata)
+    goal = _to_pixel(req.goal, "goal", metadata)
+    _validate_start_goal(nominal_grids, start, goal, rover)
+    sources = _risk_sources(nominal_grids, req.rover_id, rover)
+
+    results: list[dict[str, Any]] = []
+    legs_by_route: list[list | None] = []
+    nominal_cells: set[tuple[int, int]] | None = None
+    nominal_summary: dict[str, Any] | None = None
+    nominal_slip: dict[str, Any] | None = None
+    for alpha in sweep:
+        t0 = _time.perf_counter()
+        grids_for_plan = (
+            nominal_grids
+            if alpha is None
+            else grids_for_rover(grids, req.rover_id, weights_dict, risk_alpha=alpha)
+        )
+        astar_result = astar(grids_for_plan, start, goal, weights=weights_dict, rover=rover)
+        entry: dict[str, Any] = {
+            "risk_alpha": alpha,
+            "error": None,
+            "waypoints": [],
+            "summary": None,
+            "astar_metrics": astar_result.get("metrics", {}),
+            "slip_model": None,
+            "risk": risk_block(alpha, sources, None),
+            "overlap_with_nominal": None,
+            "plan_ms": None,
+        }
+        legs: list | None = None
+        if astar_result.get("error"):
+            entry["error"] = str(astar_result["error"])
+        else:
+            try:
+                states = simulate_path(
+                    astar_result,
+                    grids_for_plan["cost"],
+                    grids_for_plan["slope"],
+                    grids_for_plan["thermal"],
+                    grids_for_plan["shadow_ratio"],
+                    rover=rover,
+                    pixel_size_m=float(metadata["resolution_m"]),
+                    elevation_grid=grids_for_plan["elevation"],
+                )
+                summary = summarize_simulation(states, rover)
+            except Exception:
+                logger.error("Risk sweep simulation failed:\n%s", traceback.format_exc())
+                entry["error"] = "Internal simulation error."
+            else:
+                legs = _risk_legs_2d(states, grids_for_plan, rover)
+                entry["waypoints"] = states_to_waypoints(states, metadata, grids_for_plan["elevation"])
+                entry["summary"] = summary
+                entry["slip_model"] = _slip_block_2d(states, rover)
+                entry["risk"] = risk_block(
+                    alpha, sources, None if alpha is None else route_risk_summary(legs, rover, alpha)
+                )
+                cells = {(int(s.row), int(s.col)) for s in states}
+                if alpha is None:
+                    nominal_cells = cells
+                    nominal_summary = summary
+                    nominal_slip = entry["slip_model"]["route"]
+                if nominal_cells is not None:
+                    entry["overlap_with_nominal"] = len(cells & nominal_cells) / max(1, len(cells | nominal_cells))
+        entry["plan_ms"] = round((_time.perf_counter() - t0) * 1000.0, 3)
+        results.append(entry)
+        legs_by_route.append(legs)
+
+    matrix: dict[str, Any] = {
+        "route_alphas": list(sweep),
+        "eval_alphas": list(alphas),
+        "risk_adjusted_hours": [],
+        "mean_slip_cvar": [],
+        "max_slope_cvar_deg": [],
+    }
+    for legs in legs_by_route:
+        rows = [None if legs is None else route_risk_summary(legs, rover, a) for a in alphas]
+        for key in ("risk_adjusted_hours", "mean_slip_cvar", "max_slope_cvar_deg"):
+            matrix[key].append([None if row is None else row[key] for row in rows])
+
+    comparison: dict[str, Any] | None = None
+    if nominal_summary is not None and nominal_slip is not None:
+        nominal_block = {
+            "distance_km": nominal_summary["total_distance_km"],
+            "hours": nominal_summary["total_elapsed_hours"],
+            "energy_wh": nominal_summary["total_energy_consumed_wh"],
+            "min_battery_pct": nominal_summary["min_battery_pct"],
+            "mean_slip": nominal_slip["mean_slip"],
+            "max_slip": nominal_slip["max_slip"],
+        }
+        deltas = []
+        for entry in results:
+            if entry["risk_alpha"] is None or entry["summary"] is None:
+                continue
+            summary = entry["summary"]
+            slip = entry["slip_model"]["route"]
+            deltas.append(
+                {
+                    "risk_alpha": entry["risk_alpha"],
+                    "distance_km": round(summary["total_distance_km"] - nominal_block["distance_km"], 4),
+                    "hours": round(summary["total_elapsed_hours"] - nominal_block["hours"], 4),
+                    "energy_wh": round(summary["total_energy_consumed_wh"] - nominal_block["energy_wh"], 2),
+                    "min_battery_pct": round(summary["min_battery_pct"] - nominal_block["min_battery_pct"], 2),
+                    "mean_slip": slip["mean_slip"] - nominal_block["mean_slip"],
+                    "max_slip": slip["max_slip"] - nominal_block["max_slip"],
+                    "overlap_with_nominal": entry["overlap_with_nominal"],
+                }
+            )
+        # Which route carries the least risk-adjusted time at the sweep's
+        # highest alpha -- None when the nominal route does.
+        lowest_alpha: float | None = None
+        lowest_hours: float | None = None
+        column = len(alphas) - 1
+        for route_alpha, hours_row in zip(sweep, matrix["risk_adjusted_hours"]):
+            value = hours_row[column] if hours_row else None
+            if value is None:
+                continue
+            if lowest_hours is None or value < lowest_hours:
+                lowest_hours, lowest_alpha = value, route_alpha
+        comparison = {
+            "nominal": nominal_block,
+            "deltas": deltas,
+            "evaluated_at_alpha": alphas[-1],
+            "lowest_risk_adjusted_hours_alpha": lowest_alpha,
+            "lowest_risk_adjusted_hours": lowest_hours,
+        }
+
+    return {
+        "start": [int(start[0]), int(start[1])],
+        "goal": [int(goal[0]), int(goal[1])],
+        "rover_id": req.rover_id,
+        "planner": "2d",
+        "alphas": list(sweep),
+        "results": results,
+        "risk_matrix": matrix,
+        "comparison": comparison,
+        "validity": RISK_VALIDITY,
+        "measure": RISK_MEASURE_ID,
+        "sigma_sources": sources,
+        "claim": RISK_CLAIM,
+        "note": (
+            "risk_alpha omitted (null) is the nominal grid, bit for bit; alpha = 0.5 "
+            "is mu + 0.798 sigma, NOT the mean. Every summary here is mean-slip "
+            "physics; only the ranking changed. For the 4-D planner pass "
+            "risk_alpha to /api/plan-4d."
+        ),
+        "references": list(RISK_REFERENCES),
+    }
 
 
 def _attach_constraint_check(

@@ -28,6 +28,9 @@ class PlanContext:
     cell spans (see :mod:`app.thermal_model`). ``thermal_min`` defaults to
     None, in which case every consumer falls back to the peak, which is what
     the whole codebase did before round 4.
+
+    *slope_sigma* (B2) is the per-cell slope spread from NASA's DEM clones
+    (B3); only a layer built with a ``risk_alpha`` reads it.
     """
 
     slope: np.ndarray
@@ -37,6 +40,7 @@ class PlanContext:
     resolution_m: float
     rover: Mapping[str, Any]
     thermal_min: np.ndarray | None = None
+    slope_sigma: np.ndarray | None = None
 
 
 @runtime_checkable
@@ -115,6 +119,10 @@ class CostMap:
             thermal_min=(
                 None if ctx.thermal_min is None
                 else np.asarray(ctx.thermal_min)[cell]
+            ),
+            slope_sigma=(
+                None if ctx.slope_sigma is None
+                else np.asarray(ctx.slope_sigma)[cell]
             ),
         )
 
@@ -195,22 +203,34 @@ _f_thermal_vec = f_thermal_grid
 class SlopeLayer:
     name = "slope"
 
-    def __init__(self, weight: float, validity: str = "DERIVED") -> None:
+    def __init__(
+        self, weight: float, validity: str = "DERIVED", risk_alpha: float | None = None
+    ) -> None:
         self.weight = float(weight)
         self.validity = str(validity)
+        # B2: with a risk appetite the sigmoid reads the slope's capped CVaR
+        # tail from ctx.slope_sigma; None is the nominal slope, bit for bit.
+        self.risk_alpha = None if risk_alpha is None else float(risk_alpha)
 
     def contribution(self, ctx: PlanContext) -> np.ndarray:
-        return _f_slope_vec(ctx.slope, ctx.rover)
+        return _f_slope_vec(
+            ctx.slope, ctx.rover, risk_alpha=self.risk_alpha, slope_sigma=ctx.slope_sigma
+        )
 
 
 class EnergyLayer:
     name = "energy"
 
-    def __init__(self, weight: float, validity: str = "MODEL") -> None:
+    def __init__(
+        self, weight: float, validity: str = "MODEL", risk_alpha: float | None = None
+    ) -> None:
         self.weight = float(weight)
         # Energy's contribution is a physics formula on slope + distance, not
         # an input grid, so it is always MODEL regardless of metadata.
         self.validity = str(validity)
+        # B2: with a risk appetite the cell is priced at its slip tail
+        # (C3's spread plus the slope sigma by the delta method).
+        self.risk_alpha = None if risk_alpha is None else float(risk_alpha)
 
     def contribution(self, ctx: PlanContext) -> np.ndarray:
         # Reads slope AND shadow. f_energy_cell is a resolution-independent
@@ -219,7 +239,13 @@ class EnergyLayer:
         # restatement of SlopeLayer -- the two penalties were rank-identical
         # before it, so this layer's 0.259 weight expressed no preference of
         # its own. (Round 3 review, H-4.)
-        return _f_energy_vec(ctx.slope, ctx.rover, ctx.shadow_ratio)
+        return _f_energy_vec(
+            ctx.slope,
+            ctx.rover,
+            ctx.shadow_ratio,
+            risk_alpha=self.risk_alpha,
+            slope_sigma=ctx.slope_sigma,
+        )
 
 
 class ShadowLayer:
@@ -250,19 +276,24 @@ def default_cost_map(
     rover: Mapping[str, Any],
     weights: Mapping[str, float] | None = None,
     layer_validity: Mapping[str, str] | None = None,
+    risk_alpha: float | None = None,
 ) -> CostMap:
     """The four AHP criteria, wired to the rover's weight profile.
 
     *layer_validity* is the ``metadata["layer_validity"]`` mapping; when
     given, the shadow and thermal layers report the provenance of the grids
     they actually read instead of an optimistic class default.
+
+    *risk_alpha* (B2) makes the slope and energy layers read their CVaR
+    tails (the context's ``slope_sigma`` supplies the slope's spread);
+    ``None`` is the nominal map.
     """
     resolved = resolve_weights(weights, rover)
     validity = dict(layer_validity or {})
     return CostMap(
         [
-            SlopeLayer(resolved["w_slope"], validity.get("slope", "DERIVED")),
-            EnergyLayer(resolved["w_energy"], "MODEL"),
+            SlopeLayer(resolved["w_slope"], validity.get("slope", "DERIVED"), risk_alpha),
+            EnergyLayer(resolved["w_energy"], "MODEL", risk_alpha),
             ShadowLayer(resolved["w_shadow"], validity.get("shadow_ratio", "DERIVED")),
             ThermalLayer(resolved["w_thermal"], validity.get("thermal", "MODEL")),
         ]

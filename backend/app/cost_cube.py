@@ -85,8 +85,18 @@ def build_cost_cube(
     couple_thermal: bool = True,
     slice_hours: float = 1.0,
     tau_s: float = REGOLITH_THERMAL_TAU_S,
+    risk_alpha: float | None = None,
+    slope_sigma: np.ndarray | None = None,
 ) -> np.ndarray:
     """(T, H', W') cost cube, one slice per shadow-ratio snapshot.
+
+    Risk appetite (B2)
+    ------------------
+    *risk_alpha* makes the slope and energy layers read their CVaR tails;
+    *slope_sigma* is the FINE per-cell slope spread (B3), coarsened with
+    ``how="max"`` like the slope itself -- the block's worst slope paired
+    with its widest spread, a conservative pairing. ``None`` is the nominal
+    cube, bit for bit.
 
     Thermal dynamics
     ----------------
@@ -144,6 +154,15 @@ def build_cost_cube(
     traversable_c = coarsen_traversable(traversable, coarsen)
     base_shadow_c = coarsen_grid(base_shadow, coarsen, how="mean")
     resolution_c = resolution_m * max(1, int(coarsen))
+    sigma_c = None
+    if slope_sigma is not None:
+        sigma_fine = np.asarray(slope_sigma, dtype=np.float64)
+        if sigma_fine.shape != slope.shape:
+            raise ValueError(
+                f"slope_sigma {sigma_fine.shape} must match the slope grid {slope.shape}"
+            )
+        with np.errstate(all="ignore"):
+            sigma_c = coarsen_grid(sigma_fine, coarsen, how="max")
 
     # The sunlit-peak field. data_loader publishes it directly -- it is the
     # single stored statistic everything else is derived from -- so normally
@@ -167,7 +186,7 @@ def build_cost_cube(
     )
     dt_s = max(0.0, float(slice_hours)) * 3600.0
 
-    cost_map = default_cost_map(rover, weights)
+    cost_map = default_cost_map(rover, weights, risk_alpha=risk_alpha)
 
     # Every layer is evaluated per slice. The optimisation this replaces --
     # evaluating "invariant" layers once -- rested on the assumption that
@@ -218,6 +237,7 @@ def build_cost_cube(
             traversable=traversable_c,
             resolution_m=resolution_c,
             rover=rover,
+            slope_sigma=sigma_c,
         )
         slices.append(cost_map.total(context))
 

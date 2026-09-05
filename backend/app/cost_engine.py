@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from . import constants as C
+from .risk import slip_cvar, slope_cvar
 from .slip_model import slip_ratio, slip_ratio_array
 
 # Identifies the formula compute_cost_grid implements. Bump this whenever a
@@ -24,7 +25,9 @@ from .slip_model import slip_ratio, slip_ratio_array
 # criterion is no longer a monotone restatement of the slope criterion. The
 # v4 bump is C3: edge_travel_time_s applies the rover's slip curve, so the
 # per-metre energies behind f_energy_cell -- and with them the grid -- now
-# grow with slip.
+# grow with slip. B2 (risk_alpha) does NOT bump it: with risk_alpha=None the
+# grid is this formula, operation for operation; a grid built under an alpha
+# is keyed by metadata["risk_alpha"] instead (rover_grids).
 COST_MODEL_ID: str = "weighted_cell_cost_shadow_aware_energy_slip_v4"
 
 _WEIGHT_KEYS: tuple[str, ...] = (
@@ -97,13 +100,30 @@ def resolve_weights(
 
 # ── 2.3.1  f_slope — Sigmoid slope penalty ──────────────────────────────────
 
-def f_slope(theta_deg: float, rover: Mapping[str, Any] | None = None) -> float:
+def f_slope(
+    theta_deg: float,
+    rover: Mapping[str, Any] | None = None,
+    risk_alpha: float | None = None,
+    slope_sigma: float | None = None,
+) -> float:
+    """Sigmoid slope penalty in MRU [0, 1]; ``inf`` above the rover's limit.
+
+    B2: with *risk_alpha* the sigmoid reads the slope's CVaR tail,
+    ``min(slope_max, |slope| + slope_sigma * m_alpha)`` (:func:`risk.slope_cvar`),
+    while the impassable gate stays on the NOMINAL slope -- so a risk
+    appetite reorders passable cells and never changes which cells are
+    passable. Without a (finite, positive) *slope_sigma* the tail is the
+    nominal slope. ``risk_alpha=None`` is the pre-B2 body, unchanged.
+    """
     rover_cfg = _resolve_rover(rover)
     slope_max = float(rover_cfg["slope_max_deg"])
     slope_comfortable = float(rover_cfg["slope_comfortable_deg"])
     if theta_deg > slope_max:
         return float("inf")
-    return 1.0 / (1.0 + math.exp(-0.4 * (theta_deg - slope_comfortable)))
+    theta = theta_deg
+    if risk_alpha is not None:
+        theta = slope_cvar(theta_deg, risk_alpha, slope_sigma, rover_cfg)
+    return 1.0 / (1.0 + math.exp(-0.4 * (theta - slope_comfortable)))
 
 
 # ── 2.3.2  f_energy — Physics-based energy penalty ──────────────────────────
@@ -163,8 +183,12 @@ def net_energy_per_metre_wh(
     theta_deg: float,
     shadow_ratio: float = 0.0,
     rover: Mapping[str, Any] | None = None,
+    slip: float | None = None,
 ) -> float:
     """Energy the BATTERY loses to advance one metre.
+
+    *slip*, when given, replaces the curve's mean slip in the per-metre time
+    (B2 prices a cell at its slip tail this way); ``None`` is the curve.
 
     Draw minus the solar input the cell actually offers, floored at zero: a
     cell where the array outproduces the drive is free, not negative, because
@@ -186,7 +210,7 @@ def net_energy_per_metre_wh(
     """
     rover_cfg = _resolve_rover(rover)
     theta = max(0.0, float(theta_deg))
-    seconds = edge_travel_time_s(theta, 1.0, rover_cfg)
+    seconds = edge_travel_time_s(theta, 1.0, rover_cfg, slip=slip)
     if not math.isfinite(seconds):
         return float("inf")
     mu = 1.0 + float(rover_cfg["mu_coeff"]) * math.sin(math.radians(theta))
@@ -249,8 +273,18 @@ def f_energy_cell(
     theta_deg: float,
     rover: Mapping[str, Any] | None = None,
     shadow_ratio: float = 0.0,
+    risk_alpha: float | None = None,
+    slope_sigma: float | None = None,
 ) -> float:
     """Cell-level energy penalty in MRU [0, 1].
+
+    B2: with *risk_alpha* the cell is priced at its slip TAIL,
+    ``min(0.9, CVaR_alpha(slip))`` from C3's anchor spread and the slope
+    sigma carried in by the delta method (:func:`risk.slip_cvar`), in place
+    of the curve's mean; the reference scale below is untouched, so a tail
+    that exceeds the slip-free worst cell saturates at 1.0 (measured on
+    Site11: 15 percent of LPR-1's passable cells saturate nominally, 40
+    percent at alpha 0.99). ``risk_alpha=None`` is the pre-B2 body.
 
     Unlike :func:`f_energy`, which reports one edge's energy as a FRACTION OF
     BATTERY CAPACITY, this reports how much MORE energy a cell costs than the
@@ -306,7 +340,10 @@ def f_energy_cell(
     # charged in full by the planner and the simulator).
     reference = slip_free_view(rover_cfg)
     best_wh = net_energy_per_metre_wh(0.0, 0.0, reference)
-    here_wh = net_energy_per_metre_wh(max(0.0, theta), shadow_ratio, rover_cfg)
+    slip = None
+    if risk_alpha is not None:
+        slip = slip_cvar(max(0.0, theta), risk_alpha, rover_cfg, slope_sigma)
+    here_wh = net_energy_per_metre_wh(max(0.0, theta), shadow_ratio, rover_cfg, slip=slip)
     worst_wh = net_energy_per_metre_wh(slope_max, 1.0, reference)
     if not math.isfinite(here_wh) or best_wh < 0.0:
         return float("inf")
@@ -433,6 +470,7 @@ def edge_travel_time_s(
     theta_deg: float,
     d_m: float,
     rover: Mapping[str, Any] | None = None,
+    slip: float | None = None,
 ) -> float:
     """Return traversal time for one edge in seconds.
 
@@ -446,6 +484,11 @@ def edge_travel_time_s(
     safe-haven distances, corridor slice counts, auto slice length) stays
     consistent. :func:`edge_travel_time_s_array` is the vectorised twin in
     the same operation order.
+
+    *slip* (B2) says "use this ratio instead of the curve's mean" -- the
+    energy criterion prices a cell at its CVaR tail through it. ``None``
+    is the curve, and that path is the pre-B2 arithmetic operation for
+    operation.
     """
     rover_cfg = _resolve_rover(rover)
     cos_t = math.cos(math.radians(theta_deg))
@@ -455,7 +498,8 @@ def edge_travel_time_s(
     if v <= 0:
         return float("inf")
     L = d_m / cos_t
-    L_wheel = L / (1.0 - slip_ratio(theta_deg, rover_cfg))
+    s = slip_ratio(theta_deg, rover_cfg) if slip is None else float(slip)
+    L_wheel = L / (1.0 - s)
     return L_wheel / v
 
 
@@ -463,6 +507,7 @@ def edge_travel_time_s_array(
     theta_deg: np.ndarray,
     d_m: np.ndarray | float,
     rover: Mapping[str, Any] | None = None,
+    slip: np.ndarray | None = None,
 ) -> np.ndarray:
     """:func:`edge_travel_time_s` over arrays, in the same operation order.
 
@@ -470,7 +515,8 @@ def edge_travel_time_s_array(
     this platform (tested per profile), which is what lets the gated graph
     (``safe_haven._gated_edges``) and the corridor tables be built
     vectorised while the 4-D planner calls the scalar per edge: a move whose
-    travel is exactly one slice rounds the same way in all three.
+    travel is exactly one slice rounds the same way in all three. *slip*
+    as in the scalar (B2).
     """
     rover_cfg = _resolve_rover(rover)
     theta = np.asarray(theta_deg, dtype=np.float64)
@@ -480,7 +526,8 @@ def edge_travel_time_s_array(
     with np.errstate(divide="ignore", invalid="ignore"):
         v = v_max * cos_t
         L = distance / cos_t
-        L_wheel = L / (1.0 - slip_ratio_array(theta, rover_cfg))
+        s = slip_ratio_array(theta, rover_cfg) if slip is None else np.asarray(slip, dtype=np.float64)
+        L_wheel = L / (1.0 - s)
         seconds = L_wheel / v
     return np.where((cos_t > 0.0) & (v > 0.0), seconds, np.inf)
 
@@ -928,6 +975,8 @@ def compute_cost_grid(
     weights: Mapping[str, float] | None = None,
     rover: Mapping[str, Any] | None = None,
     thermal_min_grid: np.ndarray | None = None,
+    risk_alpha: float | None = None,
+    slope_sigma_grid: np.ndarray | None = None,
 ) -> np.ndarray:
     """Compute a continuous weighted cost layer for each grid cell.
 
@@ -942,9 +991,20 @@ def compute_cost_grid(
       path planning.
 
     Blocked cells are kept separate via ``traversable`` and receive ``inf``.
+
+    *risk_alpha* (B2) makes the slope and energy terms read their CVaR
+    tails, with *slope_sigma_grid* (B3's per-cell slope sigma, same shape)
+    as the slope's spread; ``None`` is this formula unchanged, bit for bit.
     """
     if slope_grid.shape != thermal_grid.shape or slope_grid.shape != shadow_ratio_grid.shape:
         raise ValueError("slope, thermal, and shadow grids must have identical shapes")
+    slope_sigma = None
+    if slope_sigma_grid is not None:
+        slope_sigma = np.asarray(slope_sigma_grid, dtype=np.float64)
+        if slope_sigma.shape != slope_grid.shape:
+            raise ValueError(
+                f"slope_sigma grid {slope_sigma.shape} must match the slope grid {slope_grid.shape}"
+            )
 
     if traversable is None:
         traversable_mask = np.ones_like(slope_grid, dtype=bool)
@@ -979,11 +1039,15 @@ def compute_cost_grid(
 
     with np.errstate(invalid="ignore"):
         combined = (
-            resolved["w_slope"] * f_slope_grid(slope, rover_cfg)
+            resolved["w_slope"]
+            * f_slope_grid(slope, rover_cfg, risk_alpha=risk_alpha, slope_sigma=slope_sigma)
             # Reads shadow as well as slope now: without it the energy layer
             # was a monotone restatement of the slope layer and two of the
             # four AHP criteria decided the same thing. (Round 3, H-4.)
-            + resolved["w_energy"] * f_energy_cell_grid(slope, rover_cfg, shadow)
+            + resolved["w_energy"]
+            * f_energy_cell_grid(
+                slope, rover_cfg, shadow, risk_alpha=risk_alpha, slope_sigma=slope_sigma
+            )
             + resolved["w_shadow"] * f_shadow_cell_grid(shadow)
             # Both ends of the cell's temperature range when the caller has
             # them: a cell survivable at its peak but not at its cold-end

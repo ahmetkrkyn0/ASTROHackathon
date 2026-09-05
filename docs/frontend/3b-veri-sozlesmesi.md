@@ -1020,6 +1020,127 @@ farkı `docs/research/slip_calibration_report.md`'dedir. Maliyet gridi kimliği
 `validity: MODEL` etiketi (FRONTEND_YAPISI kuralı: etiketsiz gösterilmez).
 `declared_only.regolith` bir "referans" sekmesi.
 
+## Risk iştahı — CVaR tabanlı risk-farkında maliyet (5 Eylül 2026 eki, B2)
+
+Bir hücrenin maliyeti artık isteğe bağlı olarak **dağılımın kuyruğundan** okunabilir.
+C3 her slip çapasına bir `σ` koymuştu (`slip_stats(θ) → (μ, σ)`), B3 her hücreye
+NASA'nın 100 DEM klonundan bir eğim belirsizliği `σ_θ` üretmişti; B2 bu iki dağılımın
+"en kötü (1−α)'lık kuyruğunun ortalamasını" (Conditional Value-at-Risk,
+`CVaR_α = μ + σ·φ(z_α)/(1−α)`) **sıralama maliyetine** bağlar. Yöntem JPL'in STEP'i
+(Fan vd., RSS 2021; DARPA SubT'de sahada) ve Keio'nun Endo vd. ICRA 2023 çalışmasıdır;
+Endo'nun "%11 → %95 başarı" sayıları **onların sentetik deneylerinden**dir, bizim etkimiz
+Site11'de ölçülüdür ([risk_sweep_report.md](../research/risk_sweep_report.md)).
+
+Kurallar:
+
+- `risk_alpha` **verilmezse** (`null`) grid bugünkü grid ile **bit-eşittir** (v4;
+  Site11'de SHA-256 kilidiyle test edilir). **α = 0,5 ortalama DEĞİLDİR**:
+  `CVaR_0,5 = μ + 0,798σ`. Nominal = alan yok.
+- α yalnızca **sıralamayı** değiştirir: eğim kriteri `min(slope_max, θ + σ_θ·m_α)`
+  okur (`θ > slope_max → geçilmez` kapısı nominal θ'da kalır; geçilebilirlik α'dan
+  bağımsız), enerji kriteri hücreyi `CVaR_α(slip)` ile fiyatlar (σ = C3 çapa yayılımı ⊕
+  B3 eğim σ'sının delta yöntemiyle slip'e taşınması). **Süre, batarya, `path_battery_pct`,
+  `safety_margins`, `/api/stress-test`, koridor bütçeleri, safe-haven süreleri ortalama
+  slip fiziğidir** — aynı rota her α'da aynı saati verir.
+- **İddia sınırı:** CVaR, `MODEL` etiketli dağılımların bir dönüşümüdür; "ölçülmüş risk"
+  denmez. Slip σ'sı varsayımdır (Yutu-2 aralık/4; diğer çapalara aktarılmış bağıl yayılım
+  0,5), eğim σ'sı NASA klonlarından DERIVED'dır, termal σ'nın kaynağı yoktur — termal
+  CVaR **uygulanmadı** (kanca: `risk.thermal_cvar_cold_c`; Site11'de `f_thermal` zaten
+  hücrelerin %73'ünde (LPR-1) / %54'ünde (VIPER) 0,99'a doymuş).
+- Klon önbelleği yoksa eğim kriteri nominal kalır, slip kuyruğu yalnız C3 σ'sını taşır ve
+  yanıt bunu söyler (`sigma_sources.slope.source: "none"`, `criteria.slope: "nominal"`).
+
+### `POST /api/plan`, `POST /api/plan-4d` — yeni istek alanı `risk_alpha`
+
+```json
+{"start": {"row": 358, "col": 494}, "goal": {"row": 206, "col": 426}, "rover_id": "lpr_1",
+ "start_utc": "2026-09-28T00:00:00", "risk_alpha": 0.9}
+```
+
+| Alan | Anlam |
+|---|---|
+| `risk_alpha` | İsteğe bağlı, `[0.5, 0.999]`; dışı 422. Verilmezse nominal grid. `/api/compare` ve `/api/plan-multi` bu alanı almaz (görev profilleri nominal). |
+
+### `POST /api/plan`, `POST /api/plan-4d` — `risk` bloğu (her zaman)
+
+```json
+"risk": {
+  "alpha": 0.9, "applied": true, "validity": "MODEL",
+  "measure": "cvar_normal_closed_form_v1", "multiplier": 1.755,
+  "scope": "ranking cost only: ...; travel time, battery, safety margins ... use the mean ...",
+  "criteria": {"slope": "cvar", "energy": "cvar"},
+  "sigma_sources": {
+    "slip":  {"source": "C3 anchors: sigma per anchor (Yutu-2's measured 0..0.075 range read as +-2 sigma; ...) plus the slope sigma carried into slip by the delta method", "validity": "MODEL",
+              "relative_spread_at_anchors": [{"slope_deg": 0.0, "sigma_over_mu": 0.5}, {"slope_deg": 15.0, "sigma_over_mu": 0.5}]},
+    "slope": {"source": "dem_clones", "model": "pgda_clones", "n_clones": 100, "validity": "DERIVED", "product_url": "https://pgda.gsfc.nasa.gov/products/78"}
+  },
+  "route": {
+    "moves": 42, "skipped_edges": 0,
+    "mean_slip_mu": 0.313, "mean_slip_cvar": 0.51, "max_slip_cvar": 0.9, "max_slip_cvar_slope_deg": 16.9,
+    "max_slope_cvar_deg": 19.6, "slope_sigma_known_fraction": 1.0,
+    "hours": 2.23, "risk_adjusted_hours": 3.4, "hours_factor": 1.52,
+    "drawn_wh": 970.0, "risk_adjusted_drawn_wh": 1480.0
+  },
+  "claim": "CVaR of MODEL-labelled distributions, not a measured risk: ..."
+}
+```
+
+| Alan | Anlam |
+|---|---|
+| `alpha`, `applied`, `multiplier` | İstenen α (`null` = nominal, `applied: false`, `route: null`); `multiplier = φ(z_α)/(1−α)` (0,5 → 0,798; 0,9 → 1,755; 0,99 → 2,665). |
+| `criteria` | Hangi kriter kuyruğu okudu: `slope` yalnızca eğim σ (klon önbelleği) varken `"cvar"`, aksi hâlde `"nominal"`; `energy` α verildiyse `"cvar"`. |
+| `sigma_sources.slip` | C3 çapalarının bağıl yayılımı (varsayım) + delta yöntemi; `validity: MODEL`. Eğrisiz profilde `"none: ..."`. |
+| `sigma_sources.slope` | `"dem_clones"` (B3; `model`, `n_clones`, `validity: DERIVED`) ya da `"none"` (+ `reason`). |
+| `route.mean_slip_mu`, `mean_slip_cvar`, `max_slip_cvar`, `max_slip_cvar_slope_deg` | Rotanın ortalama slip'i (μ, mesafe ağırlıklı) ve aynı rotanın α'daki CVaR slip'i; en yüksek kuyruk slip'i ve eğimi (kap 0,9). |
+| `route.max_slope_cvar_deg`, `slope_sigma_known_fraction` | Rota boyunca eğim kuyruğunun maksimumu (rover'ın `slope_max_deg`'inde kapalı; σ yoksa nominal maks); σ'sı bilinen kenar oranı. |
+| `route.hours` → `risk_adjusted_hours`, `hours_factor`; `drawn_wh` → `risk_adjusted_drawn_wh` | Rotanın **ortalama-slip sürüş saati/Wh'si** ve aynı rotanın kuyruk slip'iyle yeniden fiyatlanmış hâli (`t_α = t·(1−μ)/(1−s_α)`). Planlayıcının saati değişmez; bu "kuyrukta ne kadar zaman/enerji satın alındı" sorusunun cevabıdır. 4-B'de Wh gölge küpünün ortalama maruziyetiyle, 2-B'de simülasyonun `step_energy_wh`'siyle. |
+| `scope`, `claim`, `validity` | Nereye girdiği; iddia sınırı; her zaman `MODEL`. |
+
+### `POST /api/risk-sweep` — risk iştahı sürgüsü (2-B, yan yana)
+
+```json
+{"start": {"row": 358, "col": 494}, "goal": {"row": 206, "col": 426}, "rover_id": "lpr_1",
+ "alphas": [0.5, 0.9, 0.99], "include_nominal": true}
+```
+
+```json
+{
+  "start": [358, 494], "goal": [206, 426], "rover_id": "lpr_1", "planner": "2d",
+  "alphas": [null, 0.5, 0.9, 0.99],
+  "results": [
+    {"risk_alpha": null, "error": null, "waypoints": [{"row": 358, "col": 494, "...": "..."}],
+     "summary": {"total_distance_km": 0.91, "total_elapsed_hours": 1.62, "total_energy_consumed_wh": 597.2, "min_battery_pct": 94.3, "...": "..."},
+     "astar_metrics": {"...": "..."}, "slip_model": {"...": "..."}, "risk": {"alpha": null, "applied": false, "...": "..."},
+     "overlap_with_nominal": 1.0, "plan_ms": 420.0},
+    {"risk_alpha": 0.99, "...": "...", "overlap_with_nominal": 0.49, "plan_ms": 290.0}
+  ],
+  "risk_matrix": {"route_alphas": [null, 0.5, 0.9, 0.99], "eval_alphas": [0.5, 0.9, 0.99],
+                  "risk_adjusted_hours": [[1.9, 2.4, 3.1], "..."], "mean_slip_cvar": ["..."], "max_slope_cvar_deg": ["..."]},
+  "comparison": {"nominal": {"distance_km": 0.91, "hours": 1.62, "energy_wh": 597.2, "min_battery_pct": 94.3, "mean_slip": 0.175, "max_slip": 0.586},
+                 "deltas": [{"risk_alpha": 0.5, "distance_km": 0.0, "hours": -0.003, "energy_wh": -1.4, "min_battery_pct": 0.01, "mean_slip": -0.0001, "max_slip": -0.023, "overlap_with_nominal": 0.81}, "..."],
+                 "evaluated_at_alpha": 0.99, "lowest_risk_adjusted_hours_alpha": 0.99, "lowest_risk_adjusted_hours": 2.9},
+  "validity": "MODEL", "measure": "cvar_normal_closed_form_v1", "sigma_sources": {"...": "..."},
+  "claim": "...", "note": "risk_alpha omitted (null) is the nominal grid ...; alpha = 0.5 is mu + 0.798 sigma, NOT the mean ...", "references": ["..."]
+}
+```
+
+| Alan | Anlam |
+|---|---|
+| `alphas` (istek) | 1–6 değer, her biri `[0.5, 0.999]`; tekrarlar atılır, sıra korunur. `include_nominal` (varsayılan `true`) nominal rotayı da ekler. |
+| `results[*]` | Her α için 2-B plan + simülasyon: `waypoints` (`/api/plan`'ın `waypoints` biçimi), `summary` (kendi rotasının **ortalama-slip fiziği**), `astar_metrics`, `slip_model`, `risk`, `overlap_with_nominal` (hücre Jaccard'ı; nominal yoksa `null`), `plan_ms`. Rota bulunamazsa `error` dolu, `waypoints: []`. |
+| `risk_matrix` | Her rota (satır, `route_alphas`) her α'da (sütun, `eval_alphas`) yeniden fiyatlanır: `risk_adjusted_hours`, `mean_slip_cvar`, `max_slope_cvar_deg`. "α rotası kuyrukta gerçekten bir şey satın aldı mı?" sorusu aynı zeminde cevaplanır. |
+| `comparison` | Nominal rotanın metrikleri ve her α rotasının nominale göre Δ'sı (mesafe, saat, Wh, min SOC, ort./maks slip, örtüşme); `lowest_risk_adjusted_hours_alpha`: en yüksek α'da en düşük risk-ayarlı saati taşıyan rota (`null` = nominal). `include_nominal: false` ya da nominal rota yoksa `null`. |
+| `planner` | Her zaman `"2d"`; 4-B için `/api/plan-4d`'ye `risk_alpha` verilir. |
+
+**Ölçülen örnek (Site11, [risk_sweep_report.md](../research/risk_sweep_report.md)):** eğim σ_θ medyanı 1,54° (100 NASA klonu); α = 0,99'da CVaR slip medyanı 0,20 → 0,50, hücrelerin %27'si 0,9 kapısında, maliyet sıralaması nominale Spearman 0,985 (LPR-1). `/api/risk-sweep` LPR-1 (358,494)→(206,426): α = 0,99 rotası nominalle %49 örtüşüyor, tüketim 597 → 593 Wh, maks slip 0,586 → 0,563, min SOC +0,07 pt; risk matrisi α = 0,99'da nominal rotanın risk-ayarlı sürüş saatini 3,38 h, α = 0,99 rotasınınkini 3,70 h veriyor (kuyrukta nominal daha ucuz — ağırlıklı kriterler kuyruk süresini minimize etmez). Ay gecesi çifti: −26 Wh, +18 m, min SOC +0,39 pt, kuyrukta α rotası kazanıyor (5,53 vs 5,56 h). VIPER kısa leg: α rotası maks slip'i **yükseltiyor** (0,594 → 0,627). 4-B (`/api/plan-4d`, coarsen 4): LPR-1 28 Eyl α ∈ {0,5, 0,9, 0,99} aynı 42 hamlelik rotayı seçiyor (nominal 41, örtüşme %55), varış 2,98 h aynı, min SOC %92,5 → %93,1, B5 tamamlanma %100 aynı; VIPER kısa leg her α'da aynı rota. Etki **küçük** ve öyle gösterilmeli; sayılar `MODEL` etiketlidir.
+
+**Frontend'in çizebileceği (kod değişmeden):** rota panelinde bir "risk iştahı" sürgüsü
+(`null` / 0,5 / 0,9 / 0,99) → `/api/risk-sweep` sonuçlarını üst üste çizip
+`comparison.deltas`'ı ve `risk_matrix`'i tablo olarak göstermek; her rota kartında
+`risk.route.mean_slip_cvar` ve `risk_adjusted_hours` ("kuyrukta +X h") ile
+`criteria`/`sigma_sources` etiketleri; her sayının yanında `validity: MODEL`
+(FRONTEND_YAPISI kuralı). Sürgüde 0,5'i "nominal" diye etiketlemeyin — nominal `null`'dır.
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,
