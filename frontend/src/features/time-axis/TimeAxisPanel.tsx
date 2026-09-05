@@ -7,6 +7,8 @@ export function TimeAxisPanel({
   manifest,
   field,
   setField,
+  fieldVisible,
+  setFieldVisible,
   sliceIndex,
   setSliceIndex,
   playing,
@@ -20,6 +22,8 @@ export function TimeAxisPanel({
   manifest: SeriesManifest | null
   field: SeriesField
   setField: (next: SeriesField) => void
+  fieldVisible: boolean
+  setFieldVisible: (next: boolean) => void
   sliceIndex: number
   setSliceIndex: (next: number) => void
   playing: boolean
@@ -54,10 +58,25 @@ export function TimeAxisPanel({
 
         <span className="lp-time-clock">+{hours.toFixed(1)} h</span>
 
+        {/* The field is a layer, so it is switched on like one. It used to
+            paint itself over the terrain the moment ANALYZE mounted, which
+            made the same DEM look like a darker place than it had been one
+            tab earlier -- a measurement nobody had asked to see, arriving as
+            what looked like the lighting being turned off. */}
+        <label className="lp-time-layer-toggle">
+          <input
+            type="checkbox"
+            checked={fieldVisible}
+            onChange={(event) => setFieldVisible(event.target.checked)}
+          />
+          Layer
+        </label>
+
         <select
           className="lp-time-field"
           value={field}
           onChange={(event) => setField(event.target.value as SeriesField)}
+          disabled={!fieldVisible}
         >
           <option value="shadow">Shadow</option>
           <option value="surface_temp_c">Surface temp</option>

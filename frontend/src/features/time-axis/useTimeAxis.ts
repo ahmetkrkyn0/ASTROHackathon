@@ -51,6 +51,22 @@ export function useTimeAxis() {
   const [manifest, setManifest] = useState<SeriesManifest | null>(null)
   const [cube, setCube] = useState<SeriesCube | null>(null)
   const [field, setField] = useState<SeriesField>('shadow')
+  /**
+   * Whether the field is painted over the terrain.
+   *
+   * Off by default, and that is the whole point. The layer used to appear the
+   * moment ANALYZE mounted, without anyone asking for it: the shadow ramp runs
+   * white to black, so the same DEM arrived roughly 50 levels darker in
+   * shadowed ground than it had been one tab earlier, and the map read as
+   * having had its lighting turned off rather than as carrying a measurement.
+   *
+   * Separate from `field` rather than folded into it as an 'off' member: the
+   * field name drives which cube is fetched, and a viewer who turns the layer
+   * on should not then wait for a download that could have happened while
+   * they were reading the route. The cube still loads; only the paint is
+   * withheld.
+   */
+  const [fieldVisible, setFieldVisible] = useState(false)
   const [sliceIndex, setSliceIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [plan4d, setPlan4d] = useState<Plan4DResponse | null>(null)
@@ -151,6 +167,8 @@ export function useTimeAxis() {
   const timeVarying = manifest !== null && manifest.shadow_model.model !== 'static'
 
   return {
+    fieldVisible,
+    setFieldVisible,
     manifest,
     cube,
     field,

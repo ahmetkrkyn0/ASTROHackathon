@@ -15,8 +15,22 @@ export function TimeAxis() {
   // and a quarter of a million pointless writes.
   const commands = useMemo(
     () =>
-      timeAxisOverlays(state.cube, state.sliceIndex, state.field, state.manifest, state.plan4d),
-    [state.cube, state.field, state.manifest, state.plan4d, state.sliceIndex],
+      timeAxisOverlays(
+        state.cube,
+        state.sliceIndex,
+        state.field,
+        state.manifest,
+        state.plan4d,
+        state.fieldVisible,
+      ),
+    [
+      state.cube,
+      state.field,
+      state.fieldVisible,
+      state.manifest,
+      state.plan4d,
+      state.sliceIndex,
+    ],
   )
 
   useEffect(() => overlays.register(OVERLAY_ID, commands), [overlays, commands])

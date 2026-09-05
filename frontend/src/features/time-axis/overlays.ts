@@ -26,10 +26,14 @@ export function timeAxisOverlays(
   field: SeriesField,
   manifest: SeriesManifest | null,
   plan4d: Plan4DResponse | null,
+  fieldVisible: boolean,
 ): OverlayCommand[] {
   const commands: OverlayCommand[] = []
 
-  if (cube && manifest) {
+  // The route is drawn whenever there is one; the field only when it has been
+  // asked for. They are separate answers: the 4D route is the result of a
+  // request the operator made, the field is a layer over the terrain.
+  if (fieldVisible && cube && manifest) {
     const entry = manifest.fields[field]
     // The manifest's own min/max across the WHOLE cube, not this slice's:
     // a per-slice domain would re-normalise the colours every frame and the
@@ -52,12 +56,14 @@ export function timeAxisOverlays(
       cols: cube.cols,
       values,
       ramp: { min, max, colors: RAMP_STOPS[field] },
-      // 0.35, not the 0.6 this started at. The shadow ramp runs white to
-      // black, so at 0.6 it did not read as a field painted over the terrain
-      // -- it read as the lighting being switched off, and the same DEM
-      // looked like a different, darker place in ANALYZE than in PLAN. The
-      // hillshade underneath is the thing that makes the surface legible as
-      // terrain at all, and a field laid on top of it has to let it through.
+      // 0.35, down from 0.6. The shadow ramp runs white to black, so at 0.6
+      // this did not read as a field painted over the terrain -- it read as
+      // the lighting being switched off. The hillshade underneath is what
+      // makes the surface legible as terrain at all, and a field laid over it
+      // has to let it through. Lowering the alpha was not enough on its own,
+      // which is why the layer is now off until asked for: even at 0.35 it
+      // darkened shadowed ground by about 50 levels, across the whole map,
+      // for an operator who had only switched to ANALYZE to read a route.
       style: { opacity: 0.35 },
     })
   }

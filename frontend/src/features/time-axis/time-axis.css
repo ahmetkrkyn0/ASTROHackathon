@@ -31,6 +31,24 @@
   text-align: right;
 }
 
+/* The field's on/off, beside the picker that says which field. Disabled the
+   select rather than hiding it: which layer would be drawn is worth reading
+   even when none is. */
+.lp-time-layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lp-time-layer-toggle input {
+  accent-color: var(--lavender);
+  cursor: pointer;
+}
+
 .lp-time-field {
   background: rgba(12, 16, 24, 0.65);
   border: 1px solid rgba(139, 148, 166, 0.24);
@@ -38,6 +56,11 @@
   color: var(--text-2);
   font-size: var(--fs-small);
   padding: 4px 6px;
+}
+
+.lp-time-field:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .lp-time-note { margin: 8px 0 0; font-size: var(--fs-small); line-height: 1.5; color: var(--text-muted); }
