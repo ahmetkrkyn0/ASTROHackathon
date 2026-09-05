@@ -34,7 +34,14 @@ from typing import Any, Literal, Mapping, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .ai_analysis import DIMENSIONLESS, GuideFact, Metric, Provenance, make_metric
+from .ai_analysis import (
+    COUNT_WORDS,
+    DIMENSIONLESS,
+    GuideFact,
+    Metric,
+    Provenance,
+    make_metric,
+)
 
 # -- the closed parameter vocabulary (K3 validates against this) -------------
 
@@ -438,20 +445,6 @@ _CRITERIA: dict[str, tuple[str, str, str]] = {
 
 # Closed table, used only to register an alternative rendering of a COUNT
 # metric K1 itself produced. Never applied to a measured quantity.
-_COUNT_WORDS: dict[int, str] = {
-    1: "bir",
-    2: "iki",
-    3: "üç",
-    4: "dört",
-    5: "beş",
-    6: "altı",
-    7: "yedi",
-    8: "sekiz",
-    9: "dokuz",
-    10: "on",
-}
-
-
 def short_name(name: str) -> str:
     """The catalogue name without its parenthetical qualifier.
 
@@ -597,7 +590,7 @@ def guide_registry(
 
     metrics: list[Metric] = []
     count = len(rovers)
-    word = _COUNT_WORDS.get(count)
+    word = COUNT_WORDS.get(count)
     metrics.append(
         make_metric(
             key="rover_count",

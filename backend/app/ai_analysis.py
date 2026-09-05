@@ -109,6 +109,37 @@ _UNIT_ALIAS_FORMS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Numeral words for the small counts K1 registers, so a metric can authorise the
+# ONE word form its own value has. Deliberately a lookup and not a rule: an
+# auto-derived numeral word would let the verbalizer spell any registered value,
+# which is the whole thing the grounding check exists to stop.
+#
+# Lives here rather than in ai_guide because two registries need it and ai_guide
+# already imports from this module.
+COUNT_WORDS: dict[int, str] = {
+    1: "bir",
+    2: "iki",
+    3: "üç",
+    4: "dört",
+    5: "beş",
+    6: "altı",
+    7: "yedi",
+    8: "sekiz",
+    9: "dokuz",
+    10: "on",
+}
+
+
+def count_word(value: int, noun: str) -> list[str]:
+    """The spelled-out rendering of one registered count, or nothing.
+
+    Returns a list so it drops straight into ``display_alt``; an unlisted count
+    authorises no word at all, which is the safe direction.
+    """
+    word = COUNT_WORDS.get(value)
+    return [f"{word} {noun}"] if word else []
+
+
 def unit_aliases(display: str, unit: str) -> list[str]:
     """Digit-preserving alternative renderings of one canonical display."""
     forms = _UNIT_ALIAS_FORMS.get(unit)
@@ -526,6 +557,11 @@ def compare_registry(
             unit=DIMENSIONLESS,
             provenance=provenance,
             precision=0,
+            # VERBALIZER_PROMPT explains the four profiles in words ("Dört görev
+            # profili ..."), so the model writes "dört profil" and the numeral-word
+            # scan blocked a faithful answer. One value's word form, registered
+            # explicitly -- the same thing ai_guide does for the rover count.
+            display_alt=count_word(len(profiles), "profil"),
         )
     ]
     for profile in profiles:

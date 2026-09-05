@@ -25,6 +25,7 @@ from app.ai_analysis import (
     AnalysisEnvelope,
     EnvelopeWarning,
     Provenance,
+    compare_registry,
     make_metric,
     percent_of_ratio,
     plan_registry,
@@ -115,6 +116,49 @@ def test_a_turkish_suffix_after_the_unit_is_accepted():
 def test_a_registered_count_is_accepted():
     verdict = validate_draft("4 profil karşılaştırıldı.", _envelope(_count()), EMPTY)
     assert verdict.ok
+
+
+def test_the_profile_count_may_also_be_spelled_out():
+    """VERBALIZER_PROMPT explains the four profiles in words ("Dört görev
+    profili ..."), so the model writes "dört profil" and the numeral-word scan
+    blocked a faithful comparison answer -- once in a live run. compare_registry
+    now registers that one word form, the way ai_guide does for the rover count.
+    """
+    payload = {
+        "profiles": [
+            {"profile_id": pid, "profile_name": name, "simulation_summary": {}}
+            for pid, name in (
+                ("balanced", "Balanced Recon"),
+                ("energy", "Energy Saver"),
+                ("fast", "Fast Recon"),
+                ("shadow", "Shadow Traverse"),
+            )
+        ]
+    }
+    envelope = _envelope(*compare_registry(payload, _prov()))
+    verdict = validate_draft("Dört profil karşılaştırıldı.", envelope, EMPTY)
+    assert verdict.ok, diagnostic(verdict)
+
+
+@pytest.mark.parametrize(
+    "draft",
+    [
+        # The alias authorises ONE value, not the habit of spelling counts out.
+        "Üç profil karşılaştırıldı.",
+        "3 profil karşılaştırıldı.",
+        "Dört adım CRITICAL risk seviyesinde.",
+    ],
+)
+def test_the_count_word_authorises_only_its_own_value(draft):
+    payload = {
+        "profiles": [
+            {"profile_id": str(i), "profile_name": f"P{i}", "simulation_summary": {}}
+            for i in range(4)
+        ]
+    }
+    envelope = _envelope(*compare_registry(payload, _prov()))
+    verdict = validate_draft(draft, envelope, EMPTY)
+    assert not verdict.ok, draft
 
 
 # -- numeric grounding: everything else fails closed --------------------------
