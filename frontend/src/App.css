@@ -928,19 +928,13 @@ select {
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr) 288px;
   overflow: hidden;
-  transition: grid-template-columns 0.3s ease;
 }
 
-.content-grid.left-collapsed {
-  grid-template-columns: 34px minmax(0, 1fr) 288px;
-}
-
-.content-grid.right-collapsed {
-  grid-template-columns: 264px minmax(0, 1fr) 34px;
-}
-
-.content-grid.left-collapsed.right-collapsed {
-  grid-template-columns: 34px minmax(0, 1fr) 34px;
+/* Plan renders no right rail, so the track it would occupy must go too --
+   a three-column template with two children leaves 288px of empty surface
+   between the map's right edge and the window. */
+.content-grid.no-right-rail {
+  grid-template-columns: 264px minmax(0, 1fr);
 }
 
 .left-rail,
@@ -953,7 +947,6 @@ select {
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease;
   /* Scroll the rail as one column. Was overflow:hidden, which clipped every
      stacked feature past the fold once the registry put more than one panel
      here; the panels no longer scroll individually (see .lp-panel-content). */
@@ -965,35 +958,8 @@ select {
   border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease;
   overflow-y: auto;
   overflow-x: hidden;
-}
-
-.left-rail.is-collapsed,
-.right-rail.is-collapsed {
-  overflow: visible;
-}
-
-.rail-toggle {
-  width: 100%;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--line);
-  color: var(--text-muted);
-  font-size: var(--fs-title);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.18s ease, color 0.18s ease;
-}
-
-.rail-toggle:hover {
-  background: rgba(186, 175, 245, 0.08);
-  color: var(--primary-container);
 }
 
 .rail-scroll,
@@ -1969,16 +1935,8 @@ select {
     grid-template-columns: 230px minmax(0, 1fr) 276px;
   }
 
-  .content-grid.left-collapsed {
-    grid-template-columns: 40px minmax(0, 1fr) 276px;
-  }
-
-  .content-grid.right-collapsed {
-    grid-template-columns: 230px minmax(0, 1fr) 40px;
-  }
-
-  .content-grid.left-collapsed.right-collapsed {
-    grid-template-columns: 34px minmax(0, 1fr) 34px;
+  .content-grid.no-right-rail {
+    grid-template-columns: 230px minmax(0, 1fr);
   }
 }
 
@@ -1991,16 +1949,12 @@ select {
     max-width: 100%;
   }
 
-  .content-grid,
-  .content-grid.left-collapsed,
-  .content-grid.right-collapsed,
-  .content-grid.left-collapsed.right-collapsed {
+  .content-grid {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 1fr) auto auto;
   }
 
-  .left-rail,
-  .left-rail.is-collapsed {
+  .left-rail {
     order: 2;
     border-right: none;
     border-top: 1px solid rgba(29, 36, 50, 0.26);
@@ -2011,20 +1965,10 @@ select {
     min-height: 50vh;
   }
 
-  .right-rail,
-  .right-rail.is-collapsed {
+  .right-rail {
     order: 3;
     border-left: none;
     border-top: 1px solid rgba(29, 36, 50, 0.26);
-  }
-
-  .rail-toggle {
-    display: none;
-  }
-
-  .left-rail.is-collapsed,
-  .right-rail.is-collapsed {
-    overflow: auto;
   }
 
   .map-stage {
@@ -2909,23 +2853,6 @@ select {
   line-height: 1.45;
   color: var(--text-dim-2);
   margin: 0;
-}
-
-.lp-text-action-btn {
-  background: transparent;
-  border: none;
-  color: var(--accent-lavender);
-  font-family: var(--font-data);
-  font-size: var(--fs-small);
-  font-weight: 600;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius);
-  transition: background 140ms ease;
-}
-
-.lp-text-action-btn:hover {
-  background: rgba(186, 175, 245, 0.12);
 }
 
 /* Selected Rover Card */
@@ -4427,6 +4354,32 @@ select {
   cursor: not-allowed;
 }
 
+/* The way back to the hangar, under the rover card it changes. Ghost, like
+   Undo and Clear: it leaves the cockpit, which is not the thing to press
+   here. Full width because it acts on the card above it rather than sitting
+   in a row of peers, and lavender on hover -- the accent means navigation
+   here, where the two buttons above it mean discard. */
+.lp-change-vehicle-btn {
+  width: 100%;
+  margin-top: 10px;
+  background: none;
+  border: 1px solid var(--line-button);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  padding: 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.lp-change-vehicle-btn:hover {
+  color: var(--primary-container);
+  border-color: rgba(186, 175, 245, 0.4);
+  background: rgba(186, 175, 245, 0.08);
+}
+
 .lp-panel-plan-btn {
   background: var(--lavender);
   border: 0;
@@ -5058,10 +5011,28 @@ select {
   color: var(--mint);
 }
 
+/* The hangar's one filled surface, drawn exactly like the landing screen's:
+   solid lavender, dark ink, no border. Both buttons do the same job -- the
+   single thing on the screen you are meant to press -- so they say it the
+   same way.
+
+   It used to be a cyan-to-lavender gradient carrying --text, which failed on
+   three counts. The gradient was depth by fill, which the palette's own
+   header rules out. --cyan is a semantic colour here, spent on measured
+   readings, and a button is not a reading. And #e7eaf1 body text ran 1.40:1
+   over the cyan end and 1.65:1 over the lavender end -- the label was the
+   least readable thing in the hangar despite being its loudest element. The
+   dark ink reverses that to 9.8:1, and 12.3:1 on hover.
+
+   The lift-on-hover and the drop shadow go with it: nothing else in this
+   interface moves toward the cursor, and depth here is a hairline between
+   two flat greys, never a shadow. Hover retones instead, on the same
+   140ms background transition the landing button uses. The arrow keeps its
+   own nudge -- that one is the affordance, not decoration. */
 .lp-deploy-btn {
-  background: linear-gradient(135deg, var(--cyan) 0%, var(--lavender) 100%);
-  border: 1px solid rgba(199, 205, 219, 0.25);
-  color: var(--text);
+  background: var(--lavender);
+  border: 0;
+  color: #0a0c14;
   font-family: var(--font-display);
   font-size: var(--fs-value);
   font-weight: 700;
@@ -5069,24 +5040,24 @@ select {
   padding: 13px 26px;
   border-radius: var(--radius);
   cursor: pointer;
-  box-shadow: var(--shadow-pop);
   display: flex;
   align-items: center;
   gap: 10px;
-  transition: all 0.2s ease;
+  transition: background 140ms ease;
   white-space: nowrap;
 }
 
 .lp-deploy-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-pop);
-  background: linear-gradient(135deg, var(--cyan) 0%, var(--lavender) 100%);
+  background: var(--lavender-bright);
+}
+
+.lp-deploy-btn:active:not(:disabled) {
+  transform: scale(0.985);
 }
 
 .lp-deploy-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 .lp-deploy-arrow {

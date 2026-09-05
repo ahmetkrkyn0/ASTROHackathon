@@ -67,58 +67,47 @@ export const MissionSetupPanel: React.FC = () => {
 
   return (
     <div className="lp-panel-content">
-      {/* ── 1. VEHICLE ASSIGNMENT & QUICK SELECTOR TABS ── */}
+      {/* ── 1. THE TWO PICKERS, FIRST ──
+          These are the only controls in the rail that require the map, and
+          placing a point is the one thing the operator is here to do before
+          anything else on this screen means much. They used to sit below the
+          rover card and the four-step sequence list -- roughly 380px down,
+          under everything that only reports state -- so the panel opened on
+          a readout and buried its own call to action. The sequence list below
+          still reports what they set. */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">Mission setup</span>
-          <button
-            type="button"
-            className="lp-text-action-btn"
-            onClick={onOpenFleetSelect}
-            title="Return to the fleet hangar and pick a different rover"
-          >
-            Change Rover
-          </button>
+          <span className="lp-meta-label">Mission targets</span>
         </div>
 
-        {/* Selected Rover Specs Card */}
-        {selectedRover ? (
-          <div className="lp-selected-rover-card">
-            <div className="lp-rover-header">
-              <div className="lp-rover-avatar-box">
-                <span className="lp-rover-avatar-icon">▲</span>
-              </div>
-              <div className="lp-rover-title-block">
-                <h3 className="lp-rover-card-name">{selectedRover.name}</h3>
-                <span className="lp-rover-model-code">{selectedRover.id.toUpperCase()}</span>
-              </div>
-            </div>
-
-            <div className="lp-rover-metric-grid">
-              <div className="lp-rover-metric">
-                <span className="lp-metric-name">Battery</span>
-                <strong className="lp-metric-val">{selectedRover.e_cap_wh.toFixed(0)} Wh</strong>
-              </div>
-              <div className="lp-rover-metric">
-                <span className="lp-metric-name">Speed</span>
-                <strong className="lp-metric-val">{selectedRover.v_max_ms.toFixed(2)} m/s</strong>
-              </div>
-              <div className="lp-rover-metric">
-                <span className="lp-metric-name">Max Slope</span>
-                <strong className="lp-metric-val">{selectedRover.slope_max_deg.toFixed(0)}°</strong>
-              </div>
-              <div className="lp-rover-metric">
-                <span className="lp-metric-name">Mass</span>
-                <strong className="lp-metric-val">{selectedRover.mass_kg.toFixed(0)} kg</strong>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="lp-empty-rover-box">Loading rover specifications...</div>
-        )}
+        <div className="lp-pick-actions">
+          <button
+            type="button"
+            className={`lp-pick-btn ${clickMode === 'start' ? 'is-picking' : ''} ${start ? 'is-set-start' : ''}`}
+            onClick={() => onSetClickMode(clickMode === 'start' ? 'idle' : 'start')}
+          >
+            {start
+              ? `START ${start[0]}, ${start[1]}`
+              : clickMode === 'start'
+                ? 'Pick on map…'
+                : 'Select Start'}
+          </button>
+          <button
+            type="button"
+            className={`lp-pick-btn ${clickMode === 'goal' ? 'is-picking' : ''} ${goal ? 'is-set-goal' : ''}`}
+            onClick={() => onSetClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
+            disabled={!start}
+          >
+            {goal
+              ? `GOAL ${goal[0]}, ${goal[1]}`
+              : clickMode === 'goal'
+                ? 'Pick on map…'
+                : 'Select Goal'}
+          </button>
+        </div>
       </section>
 
-      {/* ── 2. MISSION SEQUENCE & TARGET PICKERS ── */}
+      {/* ── 2. MISSION SEQUENCE & ACTIONS ── */}
       <section className="lp-panel-section lp-mission-sequence-section">
         <div className="lp-section-header-row">
           <span className="lp-meta-label">Mission sequence</span>
@@ -160,35 +149,6 @@ export const MissionSetupPanel: React.FC = () => {
               {hasRoute ? 'LOCKED' : 'NOT GENERATED'}
             </span>
           </div>
-        </div>
-
-        {/* The pickers, full width under the list they report on. Cramming a
-            button into each row squeezed the sub-line to one word per line at
-            the 264px the design actually asks for. */}
-        <div className="lp-pick-actions">
-          <button
-            type="button"
-            className={`lp-pick-btn ${clickMode === 'start' ? 'is-picking' : ''} ${start ? 'is-set-start' : ''}`}
-            onClick={() => onSetClickMode(clickMode === 'start' ? 'idle' : 'start')}
-          >
-            {start
-              ? `START ${start[0]}, ${start[1]}`
-              : clickMode === 'start'
-                ? 'Pick on map…'
-                : 'Select Start'}
-          </button>
-          <button
-            type="button"
-            className={`lp-pick-btn ${clickMode === 'goal' ? 'is-picking' : ''} ${goal ? 'is-set-goal' : ''}`}
-            onClick={() => onSetClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
-            disabled={!start}
-          >
-            {goal
-              ? `GOAL ${goal[0]}, ${goal[1]}`
-              : clickMode === 'goal'
-                ? 'Pick on map…'
-                : 'Select Goal'}
-          </button>
         </div>
 
         {/* Action Controls directly in the Left Dashboard */}
@@ -242,18 +202,76 @@ export const MissionSetupPanel: React.FC = () => {
         )}
       </section>
 
-      {/* ── 3. ROUTE PRIORITIES, AS SET IN THE HANGAR ── */}
+      {/* ── 3. THE ASSIGNED VEHICLE ──
+          Mostly a readout: the rover is chosen in the hangar. It opened the
+          panel for a long time, which put four specs the operator had just
+          finished reading above the two buttons they came here to press.
+          Step 01 of the sequence above already names the rover; this is the
+          detail behind that line, and detail belongs under the summary.
+
+          The way back to the hangar lives here, under the card, rather than
+          as an arrow in the top bar. An arrow in the corner has to be
+          guessed at -- it says a direction, not a destination -- and it sat
+          three sections away from the rover it would change. Here the label
+          says where it goes, next to the thing that prompts the thought. */}
+      <section className="lp-panel-section">
+        <div className="lp-section-header-row">
+          <span className="lp-meta-label">Assigned vehicle</span>
+        </div>
+
+        {/* Selected Rover Specs Card */}
+        {selectedRover ? (
+          <div className="lp-selected-rover-card">
+            <div className="lp-rover-header">
+              <div className="lp-rover-avatar-box">
+                <span className="lp-rover-avatar-icon">▲</span>
+              </div>
+              <div className="lp-rover-title-block">
+                <h3 className="lp-rover-card-name">{selectedRover.name}</h3>
+                <span className="lp-rover-model-code">{selectedRover.id.toUpperCase()}</span>
+              </div>
+            </div>
+
+            <div className="lp-rover-metric-grid">
+              <div className="lp-rover-metric">
+                <span className="lp-metric-name">Battery</span>
+                <strong className="lp-metric-val">{selectedRover.e_cap_wh.toFixed(0)} Wh</strong>
+              </div>
+              <div className="lp-rover-metric">
+                <span className="lp-metric-name">Speed</span>
+                <strong className="lp-metric-val">{selectedRover.v_max_ms.toFixed(2)} m/s</strong>
+              </div>
+              <div className="lp-rover-metric">
+                <span className="lp-metric-name">Max Slope</span>
+                <strong className="lp-metric-val">{selectedRover.slope_max_deg.toFixed(0)}°</strong>
+              </div>
+              <div className="lp-rover-metric">
+                <span className="lp-metric-name">Mass</span>
+                <strong className="lp-metric-val">{selectedRover.mass_kg.toFixed(0)} kg</strong>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="lp-empty-rover-box">Loading rover specifications...</div>
+        )}
+      
+        {/* Enabled even while solving: leaving for the hangar is how you
+            abandon a solve you no longer want, and the mission state that
+            matters -- rover, weights, start, goal -- survives the trip. */}
+        <button
+          type="button"
+          className="lp-change-vehicle-btn"
+          onClick={onOpenFleetSelect}
+          title="Return to the fleet hangar to pick a different rover or change route priorities"
+        >
+          Change vehicle
+        </button>
+      </section>
+
+      {/* ── 4. ROUTE PRIORITIES, AS SET IN THE HANGAR ── */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
           <span className="lp-meta-label">Route priorities</span>
-          <button
-            type="button"
-            className="lp-text-action-btn"
-            onClick={onOpenFleetSelect}
-            title="Return to the fleet hangar to change the mission profile and weights"
-          >
-            Change
-          </button>
         </div>
 
         {/* Read-only, and that is the point: /api/plan reads these at solve

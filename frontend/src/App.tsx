@@ -40,6 +40,7 @@ import { MissionProvider } from './mission/MissionProvider'
 import { MissionRuntimeProvider } from './mission/MissionRuntimeProvider'
 import type { MissionActions, MissionRuntime, MissionValue } from './mission/types'
 import { OverlayProvider } from './overlay/OverlayProvider'
+import { FEATURES, selectFeatures } from './features/registry'
 import SystemsDrawer from './shell/SystemsDrawer'
 import {
   BottomDock,
@@ -139,8 +140,6 @@ export default function App() {
   const [isSolving, setIsSolving] = useState(false)
 
   // Rail and HUD collapse states
-  const [leftOpen, setLeftOpen] = useState(true)
-  const [rightOpen, setRightOpen] = useState(true)
   const [hudOpen, setHudOpen] = useState(true)
   const [hudMinimized, setHudMinimized] = useState(false)
   const [systemsOpen, setSystemsOpen] = useState(false)
@@ -585,6 +584,14 @@ export default function App() {
   }, [hoverPoint, routePlaybackStep, waypoints])
 
   const missionStatus = layerError ? 'ATTN' : isSolving ? 'SOLVING' : planResult ? 'LOCKED' : 'NOMINAL'
+  // Whether the right rail has anything to show in this mode. Asked of the
+  // registry rather than hardcoded to `missionMode === 'analyze'`, so a
+  // feature registered for plan later brings the column back on its own.
+  const rightRailFeatures = useMemo(
+    () => selectFeatures(FEATURES, 'rightRail', missionMode),
+    [missionMode],
+  )
+
   const appIsVisible = phase === 'app'
 
   // Exactly the fields MissionValue declares and no more: an extra one is a
@@ -718,23 +725,21 @@ export default function App() {
         />
 
         {/* The cockpit. Rover selection lives in the hangar stage; "Change
-            Rover" in the left rail returns there rather than opening a modal
-            over the map. */}
+            vehicle", under the rover card that prompts the thought, returns
+            there rather than opening a modal over the map. */}
         <main
-            className={`content-grid ${!leftOpen ? 'left-collapsed' : ''} ${!rightOpen ? 'right-collapsed' : ''}`}
+            className={`content-grid ${rightRailFeatures.length === 0 ? 'no-right-rail' : ''}`}
           >
-            {/* ── LEFT RAIL: MISSION SETUP (PLAN) vs MISSION SNAPSHOT (ANALYZE) ── */}
-            <aside className={`left-rail ${!leftOpen ? 'is-collapsed' : ''}`}>
-              <button
-                type="button"
-                className="rail-toggle rail-toggle--left"
-                onClick={() => setLeftOpen((v) => !v)}
-                aria-label={leftOpen ? 'Collapse left panel' : 'Expand left panel'}
-              >
-                {leftOpen ? '\u2039' : '\u203A'}
-              </button>
-
-              {leftOpen && <LeftRailSlot />}
+            {/* ── LEFT RAIL: MISSION SETUP (PLAN) vs MISSION SNAPSHOT (ANALYZE) ──
+                Both rails are permanent. They each used to carry a 40px
+                collapse strip, which spent the top of the panel, plus a
+                hairline, on a control for a problem nobody had: the rails
+                hold what the cockpit is driven from, and folding them away
+                leaves a map you cannot plan on. Removing it also lifts the
+                first section 40px, which is where Mission targets wanted to
+                be. */}
+            <aside className="left-rail">
+              <LeftRailSlot />
           </aside>
 
           {/* ── CENTER STAGE: 2D/3D TERRAIN WORKBENCH ───────────────────────── */}
@@ -889,18 +894,17 @@ export default function App() {
           </section>
 
           {/* ── RIGHT RAIL: MISSION CONTEXT (PLAN) vs ROUTE ANALYSIS (ANALYZE) ── */}
-          <aside className={`right-rail ${!rightOpen ? 'is-collapsed' : ''}`}>
-            <button
-              type="button"
-              className="rail-toggle rail-toggle--right"
-              onClick={() => setRightOpen((v) => !v)}
-              aria-label={rightOpen ? 'Collapse right panel' : 'Expand right panel'}
-            >
-              {rightOpen ? '\u203A' : '\u2039'}
-            </button>
-
-            <RightRailSlot />
-          </aside>
+          {/* The right rail exists only when something is registered for it.
+              In plan nothing is: it is a column of readouts, and the map is
+              what the operator is actually working in -- so plan gets the
+              288px back rather than an empty bordered gutter beside the
+              terrain. .content-grid names its third column, so leaving the
+              <aside> in place and empty would have kept the column. */}
+          {rightRailFeatures.length > 0 && (
+            <aside className="right-rail">
+              <RightRailSlot />
+            </aside>
+          )}
         </main>
 
         {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
