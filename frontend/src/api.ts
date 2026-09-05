@@ -387,6 +387,14 @@ export async function planRoute(
   goal: [number, number],
   weights: PlanWeights,
   roverId: string,
+  /**
+   * The same rock cells the 3D scene renders as obstacles (see
+   * TerrainCanvas3D's use of generateRockField), computed by the caller
+   * BEFORE planning and passed through here so the backend's A* actually
+   * routes around them instead of the route being decided first and the
+   * rocks drawn on top of it afterwards.
+   */
+  obstacleCells?: Array<[number, number]>,
 ): Promise<PlanResponse> {
   const r = await fetch(`${BASE}/plan`, {
     method: 'POST',
@@ -397,6 +405,9 @@ export async function planRoute(
       rover_id: roverId,
       weights,
       include_simulation: true,
+      ...(obstacleCells && obstacleCells.length > 0
+        ? { obstacle_cells: obstacleCells.map(([row, col]) => ({ row, col })) }
+        : {}),
     }),
   })
   if (!r.ok) {

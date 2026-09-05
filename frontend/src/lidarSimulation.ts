@@ -32,6 +32,15 @@ export interface RockDescriptor {
   radiusZ: number
   rotationY: number
   seed: number
+  /**
+   * Grid cell this rock sits in, only populated when generateRockField is
+   * given grid metadata to convert into. App.tsx uses this to tell the
+   * backend planner which cells these (otherwise purely client-side,
+   * decorative) rocks occupy, so a route can actually be planned around
+   * them instead of just rendered on top of them.
+   */
+  row?: number
+  col?: number
 }
 
 export interface LidarScanSummary {
@@ -142,6 +151,12 @@ export function generateRockField(
   originX: number,
   originZ: number,
   radiusM = LIDAR_CONFIG.maxRangeM + 8,
+  // Optional: when given, each descriptor also gets the (row, col) grid
+  // cell its world position falls in, using the exact inverse of the
+  // x = col*stepX - width/2 / z = row*stepZ - depth/2 mapping every other
+  // world<->grid conversion in this codebase already uses. Only App.tsx's
+  // pre-planning obstacle pass needs this; rendering call sites can omit it.
+  grid?: { rows: number; cols: number; resolutionM: number },
 ): RockDescriptor[] {
   const chunkM = 18
   const minChunkX = Math.floor((originX - radiusM) / chunkM)
@@ -154,7 +169,12 @@ export function generateRockField(
     for (let cx = minChunkX; cx <= maxChunkX; cx++) {
       const seed = hash2(cx, cz)
       const random = seededRandom(seed)
-      const count = random() < 0.36 ? 1 : 2
+      // ~40% of chunks now sit empty, and a chunk that does get a rock is
+      // mostly a single one -- roughly half the overall density this field
+      // had before, without touching how far it reaches or how varied the
+      // rocks look.
+      if (random() < 0.4) continue
+      const count = random() < 0.7 ? 1 : 2
       for (let i = 0; i < count; i++) {
         const x = (cx + 0.12 + random() * 0.76) * chunkM
         const z = (cz + 0.12 + random() * 0.76) * chunkM
@@ -164,6 +184,16 @@ export function generateRockField(
         // A long-tailed size distribution: mostly cobbles, with occasional
         // boulders large enough to be a genuine mobility hazard.
         const size = 0.28 + Math.pow(random(), 2.35) * 1.9
+        let row: number | undefined
+        let col: number | undefined
+        if (grid) {
+          const gridWidth = grid.cols * grid.resolutionM
+          const gridDepth = grid.rows * grid.resolutionM
+          const stepX = gridWidth / (grid.cols - 1)
+          const stepZ = gridDepth / (grid.rows - 1)
+          col = Math.round((x + gridWidth / 2) / stepX)
+          row = Math.round((z + gridDepth / 2) / stepZ)
+        }
         rocks.push({
           id: `${cx}:${cz}:${i}`,
           x,
@@ -173,6 +203,8 @@ export function generateRockField(
           radiusZ: size * (0.72 + random() * 0.48),
           rotationY: random() * Math.PI * 2,
           seed: hash2(seed, i + 1),
+          row,
+          col,
         })
       }
     }

@@ -7,6 +7,7 @@ import MapCanvas, {
   type MapCanvasHandle,
   type MapViewMode,
 } from './MapCanvas'
+import { generateRockField, type RockDescriptor } from './lidarSimulation'
 import SpaceBackdrop from './SpaceBackdrop'
 import TerrainCanvas3D from './TerrainCanvas3D'
 import {
@@ -155,6 +156,22 @@ export default function App() {
   const [planError, setPlanError] = useState<string | null>(null)
   const [focusTelemetry, setFocusTelemetry] = useState<FocusTelemetry>(DEFAULT_FOCUS_TELEMETRY)
   const [routePlaybackStep, setRoutePlaybackStep] = useState<number | null>(null)
+  // 3D playback runs on its own clock, in simulated route hours rather than
+  // a fixed per-tick step count: the backend's kinematic planner already
+  // charges real time per segment (rover speed, slope, even recharge stops
+  // -- see Waypoint.elapsed_hours), so driving this clock against that
+  // timeline is what makes the rover arrive "at the real physics-implied
+  // pace" instead of visually snapping between 5 m grid nodes at a fixed
+  // frame rate. MapCanvas's own 2D playback (routePlaybackStep, above) is
+  // untouched -- this is additive, not a replacement.
+  const [playbackHours, setPlaybackHours] = useState(0)
+  const [isPlaying3D, setIsPlaying3D] = useState(false)
+  // Computed once per plan, BEFORE calling planRoute, and handed to both the
+  // backend (as obstacle_cells, so A* actually routes around them) and
+  // TerrainCanvas3D (as the exact rocks to render) -- the same list either
+  // side of the request, so what got avoided and what gets drawn can never
+  // drift apart the way two independent generateRockField calls could.
+  const [obstacleRocks, setObstacleRocks] = useState<RockDescriptor[] | null>(null)
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
@@ -176,6 +193,57 @@ export default function App() {
     },
     [dismissToast],
   )
+
+  // Advance playbackHours in real wall-clock time while the 3D view is
+  // showing and a route is playing. Compressed into a fixed watch-length
+  // window (nobody watches a multi-hour traverse in real time), but the
+  // RELATIVE pacing within that window still comes straight from the
+  // planner's own elapsed_hours -- a segment the rover takes longer over
+  // (steep, or a recharge stop) still takes proportionally longer on screen.
+  const totalPlaybackHours = planResult?.waypoints[planResult.waypoints.length - 1]?.elapsed_hours ?? 0
+  useEffect(() => {
+    if (!isPlaying3D || dimension !== '3d' || totalPlaybackHours <= 0) return
+    const playbackSeconds = Math.min(45, Math.max(10, totalPlaybackHours * 6))
+    const hoursPerMs = totalPlaybackHours / (playbackSeconds * 1000)
+
+    let raf = 0
+    let lastTs: number | null = null
+    const tick = (ts: number) => {
+      if (lastTs === null) lastTs = ts
+      const dt = ts - lastTs
+      lastTs = ts
+      setPlaybackHours((prev) => {
+        const next = prev + dt * hoursPerMs
+        if (next >= totalPlaybackHours) {
+          setIsPlaying3D(false)
+          return totalPlaybackHours
+        }
+        return next
+      })
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [isPlaying3D, dimension, totalPlaybackHours])
+
+  // The waypoint at/just before playbackHours, plus how far along (0-1) the
+  // rover is toward the next one -- TerrainCanvas3D lerps position between
+  // them with this fraction rather than snapping node to node.
+  const { activeWaypoint3D, roverFraction3D } = useMemo(() => {
+    const wps = planResult?.waypoints
+    if (!wps || wps.length === 0) return { activeWaypoint3D: null, roverFraction3D: 0 }
+    let index = 0
+    for (let i = 0; i < wps.length; i++) {
+      if (wps[i].elapsed_hours <= playbackHours) index = i
+      else break
+    }
+    const current = wps[index]
+    const next = wps[index + 1]
+    if (!next) return { activeWaypoint3D: current, roverFraction3D: 0 }
+    const span = next.elapsed_hours - current.elapsed_hours
+    const fraction = span > 1e-9 ? Math.min(1, Math.max(0, (playbackHours - current.elapsed_hours) / span)) : 0
+    return { activeWaypoint3D: current, roverFraction3D: fraction }
+  }, [planResult, playbackHours])
 
   useEffect(() => {
     // Diziyi burada yakaliyoruz, temizlikte degil: .current yalnizca push ile
@@ -327,6 +395,8 @@ export default function App() {
       setPlanResult(null)
       setPlanError(null)
       setRoutePlaybackStep(null)
+      setIsPlaying3D(false)
+      setPlaybackHours(0)
       setMissionMode('plan')
     },
     [selectedRoverId],
@@ -341,23 +411,69 @@ export default function App() {
     setPlanError(null)
     setPlanResult(null)
     setRoutePlaybackStep(null)
+    setIsPlaying3D(false)
+    setPlaybackHours(0)
+
+    // Seed the rock field from start/goal alone, BEFORE the route exists --
+    // the only way for the backend to route around these cells is to know
+    // about them before it plans, not after. World<->grid conversion here
+    // is the same x = col*stepX - width/2 mapping TerrainCanvas3D uses for
+    // every other row/col <-> world placement in the scene.
+    let rocks: RockDescriptor[] = []
+    if (elevationLayer) {
+      const rows = elevationLayer.shape[0]
+      const cols = elevationLayer.shape[1]
+      const resolutionM = focusTelemetry.resolutionM
+      const width = cols * resolutionM
+      const depth = rows * resolutionM
+      const stepX = width / (cols - 1)
+      const stepZ = depth / (rows - 1)
+      const toWorld = (row: number, col: number) => ({
+        x: col * stepX - width / 2,
+        z: row * stepZ - depth / 2,
+      })
+      const startWorld = toWorld(start[0], start[1])
+      const goalWorld = toWorld(goal[0], goal[1])
+      const midX = (startWorld.x + goalWorld.x) / 2
+      const midZ = (startWorld.z + goalWorld.z) / 2
+      const halfDiagonal = Math.hypot(goalWorld.x - startWorld.x, goalWorld.z - startWorld.z) / 2
+      const radiusM = Math.min(500, halfDiagonal + 60)
+      rocks = generateRockField(midX, midZ, radiusM, { rows, cols, resolutionM })
+    }
+    setObstacleRocks(rocks.length > 0 ? rocks : null)
+
+    const obstacleCells = new Map<string, [number, number]>()
+    for (const rock of rocks) {
+      if (rock.row === undefined || rock.col === undefined) continue
+      obstacleCells.set(`${rock.row}:${rock.col}`, [rock.row, rock.col])
+    }
 
     try {
-      const result = await planRoute(start, goal, weights, selectedRoverId)
+      const result = await planRoute(
+        start,
+        goal,
+        weights,
+        selectedRoverId,
+        Array.from(obstacleCells.values()),
+      )
       // Display the radar scanning search animation briefly for authentic mission control feedback
       window.setTimeout(() => {
         setPlanResult(result)
         setIsSolving(false)
         setPlanning(false)
         setMissionMode('analyze')
-        window.setTimeout(() => mapRef.current?.startAnimation(), 100)
+        window.setTimeout(() => {
+          mapRef.current?.startAnimation()
+          setPlaybackHours(0)
+          setIsPlaying3D(true)
+        }, 100)
       }, 750)
     } catch (error) {
       setIsSolving(false)
       setPlanning(false)
       setPlanError((error as Error).message)
     }
-  }, [goal, isSolving, selectedRoverId, start, weights])
+  }, [elevationLayer, focusTelemetry.resolutionM, goal, isSolving, selectedRoverId, start, weights])
 
   // Reset full mission setup. Every call here is a state setter, so this is
   // stable for the life of the app.
@@ -369,6 +485,9 @@ export default function App() {
     setClickMode('idle')
     setHoverPoint(null)
     setRoutePlaybackStep(null)
+    setIsPlaying3D(false)
+    setPlaybackHours(0)
+    setObstacleRocks(null)
     setMissionMode('plan')
   }, [])
 
@@ -663,11 +782,12 @@ export default function App() {
                   <TerrainCanvas3D
                     viewMode={viewMode}
                     waypoints={planResult?.waypoints ?? null}
-                    activeWaypoint={
-                      routePlaybackStep !== null
-                        ? (planResult?.waypoints[routePlaybackStep] ?? null)
-                        : (planResult?.waypoints[0] ?? null)
-                    }
+                    activeWaypoint={activeWaypoint3D}
+                    roverFraction={roverFraction3D}
+                    isPlaying={isPlaying3D}
+                    obstacleRocks={obstacleRocks}
+                    clickMode={clickMode}
+                    onCellClick={handleCellClick}
                     exaggeration={null}
                     sliceIndex={sliceIndex}
                     photo={photoDrape}

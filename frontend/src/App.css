@@ -1997,6 +1997,10 @@ select {
   height: 100%;
 }
 
+.terrain3d-root.is-picking canvas {
+  cursor: crosshair;
+}
+
 .terrain3d-rockbox-layer {
   position: absolute;
   inset: 0;

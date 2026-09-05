@@ -363,6 +363,12 @@ class PlanRequest(BaseModel):
     rover_id: str = DEFAULT_ROVER_ID
     weights: PlanWeights = Field(default_factory=PlanWeights)
     include_simulation: bool = True
+    # Cells the caller's own scene has already placed a rock (or other local
+    # obstacle) on -- generated client-side, so the planner has no other way
+    # to know about them. Optional and defaulted to empty rather than
+    # required: every existing caller that doesn't send it keeps planning
+    # exactly as before.
+    obstacle_cells: list[StartGoalPixel] = Field(default_factory=list)
 
 
 def _reject_non_finite_telemetry(state: dict[str, float]) -> dict[str, float]:
@@ -647,6 +653,25 @@ def plan(req: PlanRequest, request: Request):
                 "(slope limit or extreme thermal)."
             ),
         )
+
+    # Client-side decorative rocks (see TerrainCanvas3D's rock field) have no
+    # other way to reach the planner: they are generated in the browser, not
+    # part of the DEM this grid was built from. Blocking their cells in a
+    # COPY of the traversable mask -- never grids_for_plan["traversable"]
+    # itself, which can be the shared base_grids array when no rover/weight
+    # adaptation was needed -- makes astar() route around them exactly the
+    # way it already does for a slope or thermal barrier, no separate
+    # obstacle-avoidance code path required.
+    if req.obstacle_cells:
+        traversable_with_obstacles = np.array(grids_for_plan["traversable"], dtype=bool, copy=True)
+        for cell in req.obstacle_cells:
+            r, c = cell.row, cell.col
+            if not (0 <= r < rows and 0 <= c < cols):
+                continue
+            if (r, c) == tuple(start) or (r, c) == tuple(goal):
+                continue
+            traversable_with_obstacles[r, c] = False
+        grids_for_plan = {**grids_for_plan, "traversable": traversable_with_obstacles}
 
     astar_result = astar(
         grids_for_plan,
