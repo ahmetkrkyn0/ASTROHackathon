@@ -26,11 +26,14 @@ from .ai_analysis import (
     EnvelopeWarning,
     GuideFact,
     Provenance,
+    VerdictStatement,
     cell_registry,
     compare_registry,
     constraint_warnings,
     plan_registry,
     summary_section,
+    verdict_registry,
+    verdict_warnings,
 )
 from .ai_contract import (
     AiMissionSnapshot,
@@ -55,6 +58,7 @@ from .ai_grounding import (
     whitelist_tokens,
 )
 from .ai_prompt import VERBALIZER_PROMPT
+from .report import decide_verdict_from_snapshot, verdict_sentence
 from .ai_guide import guide_facts, guide_lexicon, guide_registry
 from .ai_router import (
     gate,
@@ -96,6 +100,11 @@ _CAPABILITY_LIMITATIONS: dict[str, tuple[tuple[str, str], ...]] = {
         (
             "NO_CAUSAL_ATTRIBUTION",
             "Bu özet, geometrik sapmaların kesin nedenini belirleyemez.",
+        ),
+        (
+            "VERDICT_IS_A_CONSTRAINT_CHECK",
+            "GO / GO-WITH-RISK / NO-GO kararı yalnızca tanımlı kısıtların "
+            "kontrolüdür; bir güvenlik sertifikası ya da uçuş onayı değildir.",
         ),
     ),
     "C-GUIDE": (
@@ -189,6 +198,7 @@ def _build_envelope(
 
     facts: list[GuideFact] = []
     lexicon: list[str] = []
+    verdict: Optional[VerdictStatement] = None
 
     warnings: list[EnvelopeWarning] = []
     if capability == "C-GUIDE":
@@ -198,6 +208,18 @@ def _build_envelope(
     elif capability == "C-SUMMARY":
         plan = payload.get("plan") or {}
         registry = plan_registry(plan, provenance)
+        # The report screen's verdict, decided from the same plan by the same
+        # rules (app.report, mirrored by report.ts and pinned by
+        # test_report_verdict). Its reasons become mandatory warnings and its
+        # numbers become registered metrics, because the reasons themselves
+        # carry no digits -- see app/report.py's module docstring.
+        decision = decide_verdict_from_snapshot(plan)
+        registry.extend(verdict_registry(plan, decision, provenance))
+        verdict = VerdictStatement(
+            code=decision.verdict, sentence=verdict_sentence(decision.verdict)
+        )
+        # Before the scope note below, so the worst finding stays first.
+        warnings.extend(verdict_warnings(decision))
     elif capability in ("C-POINT", "C-DECOMPOSE"):
         registry = cell_registry(payload, provenance)
         for item in payload.get("limitations") or []:
@@ -241,6 +263,7 @@ def _build_envelope(
         facts=facts,
         lexicon=lexicon,
         warnings=warnings,
+        verdict=verdict,
         provenance_summary=[provenance],
         compute_ms=round((time.perf_counter() - started) * 1000.0, 1),
         backend_version=str((grids.get("metadata") or {}).get("cost_model") or ""),
@@ -277,6 +300,13 @@ def _verbalizer_input(
         ],
         "provenance_summary": [p.source for p in envelope.provenance_summary],
     }
+    # Emitted only for the route summary, so every other briefing is
+    # byte-for-byte what it was.
+    if envelope.verdict is not None:
+        briefing["verdict"] = {
+            "code": envelope.verdict.code,
+            "sentence": envelope.verdict.sentence,
+        }
     # Emitted only when K1 selected some, so an analysis briefing is byte-for-
     # byte what it was. These are the ONLY product statements the model gets.
     if envelope.facts:

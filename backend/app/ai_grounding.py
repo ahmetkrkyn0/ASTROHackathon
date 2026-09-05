@@ -265,6 +265,10 @@ _COUNTED_NOUNS = (
     # an explicit display_alt, so the legitimate phrasing survives and an
     # unregistered one does not.
     "rover", "öncelik", "görünüm",
+    # Nouns the mission report's verdict counts. "şarj" and "mola" both appear
+    # because the recharge count is read either way in Turkish, and "düğüm"
+    # arrives with the truncated-execution reason.
+    "düğüm", "şarj", "mola",
 )
 
 # Units a spelled-out quantity would be followed by. Closed vocabulary: the
@@ -578,6 +582,12 @@ def deterministic_fallback(envelope: AnalysisEnvelope) -> str:
     facts = list(getattr(envelope, "facts", ()) or ())
     head = _FALLBACK_HEAD if envelope.numeric_registry else _FALLBACK_HEAD_FACTS
     lines: list[str] = [head if (envelope.numeric_registry or facts) else _FALLBACK_HEAD]
+    # The verdict leads, ahead of the head line's list. A blocked draft is
+    # exactly when the operator most needs the disposition, and it is a
+    # deterministic sentence with no quantity in it.
+    verdict = getattr(envelope, "verdict", None)
+    if verdict is not None:
+        lines.insert(0, verdict.sentence)
     # K1's own canonical sentences. Safe by construction for the same reason
     # the displays are: the operator is shown exactly what the registry holds,
     # with nothing generated in between.

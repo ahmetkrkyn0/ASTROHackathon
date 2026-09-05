@@ -28,6 +28,7 @@ export interface SanitizedPlan {
   distance?: Quantity
   energy?: Quantity
   max_continuous_shadow?: Quantity
+  shadow_limit?: Quantity
   min_battery?: Quantity
   final_battery?: Quantity
   elapsed?: Quantity
@@ -36,7 +37,13 @@ export interface SanitizedPlan {
   total_recharges?: number
   critical_steps_count?: number
   high_or_above_steps_count?: number
+  peak_power_exceeded_steps?: number
   stranded?: boolean
+  stranded_at_step?: number
+  // boolean | null on the backend, where null means the rover has no shadow
+  // limit. Copied only when it is a real boolean, so an absent limit stays
+  // absent rather than arriving as a false that reads like a measurement.
+  shadow_limit_exceeded?: boolean
   metrics?: Record<string, unknown>
   edges_rejected?: Record<string, number>
   execution?: Record<string, unknown>
@@ -74,6 +81,8 @@ export function sanitizePlanForAi(plan: PlanResponse | null): SanitizedPlan | nu
   if (energy) out.energy = energy
   const shadow = quantity(summary?.max_continuous_shadow_h, 'h')
   if (shadow) out.max_continuous_shadow = shadow
+  const shadowLimit = quantity(summary?.shadow_limit_h, 'h')
+  if (shadowLimit) out.shadow_limit = shadowLimit
   const minBattery = quantity(summary?.min_battery_pct, '%')
   if (minBattery) out.min_battery = minBattery
   const finalBattery = quantity(summary?.final_battery_pct, '%')
@@ -91,7 +100,16 @@ export function sanitizePlanForAi(plan: PlanResponse | null): SanitizedPlan | nu
   if (typeof summary?.high_or_above_steps_count === 'number') {
     out.high_or_above_steps_count = summary.high_or_above_steps_count
   }
+  if (typeof summary?.peak_power_exceeded_steps === 'number') {
+    out.peak_power_exceeded_steps = summary.peak_power_exceeded_steps
+  }
   if (typeof summary?.stranded === 'boolean') out.stranded = summary.stranded
+  if (typeof summary?.stranded_at_step === 'number') {
+    out.stranded_at_step = summary.stranded_at_step
+  }
+  if (typeof summary?.shadow_limit_exceeded === 'boolean') {
+    out.shadow_limit_exceeded = summary.shadow_limit_exceeded
+  }
 
   if (metrics) {
     const picked: Record<string, unknown> = {}
@@ -123,10 +141,15 @@ export function sanitizePlanForAi(plan: PlanResponse | null): SanitizedPlan | nu
   }
 
   if (plan.execution) {
+    // The node counts travel because a truncated-execution verdict has to be
+    // able to state both sides of "40 of 90 nodes are drivable"; without them
+    // the backend registers the finding with no quantity to name.
     out.execution = {
       stranded: plan.execution.stranded,
       truncated: plan.execution.truncated,
       reason: plan.execution.reason,
+      planned_nodes: plan.execution.planned_nodes,
+      executable_nodes: plan.execution.executable_nodes,
     }
   }
 

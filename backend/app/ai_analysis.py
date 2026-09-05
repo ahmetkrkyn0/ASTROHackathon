@@ -27,6 +27,7 @@ from typing import Any, Literal, Mapping, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from .ai_evidence import Quantity
+from .report import BATTERY_WATCH_PCT, VerdictResult
 
 ValiditySource = Literal["MEASURED", "MODEL", "DERIVED", "SYNTHETIC"]
 Severity = Literal["info", "caution", "critical"]
@@ -178,6 +179,23 @@ class GuideFact(BaseModel):
     text: str = Field(min_length=1)
 
 
+class VerdictStatement(BaseModel):
+    """The route's disposition, as one sanctioned sentence.
+
+    Not a ``Metric``, because it is not a number; not a ``GuideFact``, because
+    those are product statements and an analysis briefing carries none by
+    design. K4 is told to state ``code`` verbatim -- the label is the claim, and
+    softening a NO-GO into "drivable with care" is the failure this field
+    exists to make impossible to reach by accident.
+
+    The reason list is deliberately NOT duplicated here: the reasons travel as
+    mandatory warnings, which no explanation level may drop.
+    """
+
+    code: Literal["GO", "GO-WITH-RISK", "NO-GO"]
+    sentence: str = Field(min_length=1)
+
+
 class ErrorInfo(BaseModel):
     code: str
     message: str
@@ -200,6 +218,9 @@ class AnalysisEnvelope(BaseModel):
     # scan. Bounded by construction and empty unless K1 filled it.
     lexicon: list[str] = Field(default_factory=list)
     warnings: list[EnvelopeWarning] = Field(default_factory=list)
+    # The mission report's disposition. None for every capability but the route
+    # summary, so their briefing is byte-for-byte what it was.
+    verdict: Optional[VerdictStatement] = None
     provenance_summary: list[Provenance] = Field(default_factory=list)
     compute_ms: float = 0.0
     backend_version: str = ""
@@ -280,6 +301,9 @@ _PLAN_QUANTITIES: tuple[tuple[str, str, str], ...] = (
     ("final_battery", "Varıştaki batarya", "%"),
     ("max_slope", "En dik eğim", "deg"),
     ("max_continuous_shadow", "En uzun kesintisiz gölge", "h"),
+    # The rover's own limit, so a breached-shadow verdict can state both sides
+    # of the comparison instead of only the figure that breached it.
+    ("shadow_limit", "Rover gölge limiti", "h"),
 )
 
 _PLAN_COUNTS: tuple[tuple[str, str], ...] = (
@@ -287,12 +311,19 @@ _PLAN_COUNTS: tuple[tuple[str, str], ...] = (
     ("total_recharges", "Şarj sayısı"),
     ("critical_steps_count", "Kritik adım sayısı"),
     ("high_or_above_steps_count", "Yüksek riskli adım sayısı"),
+    ("peak_power_exceeded_steps", "Tepe güç bütçesi aşılan adım sayısı"),
 )
 
 # The grouping K4 is told about, so ordering survives a metric it does not
 # recognise. A key absent from here carries no section and is secondary by
 # omission rather than by K4 guessing.
 _SUMMARY_SECTIONS: dict[str, str] = {
+    # The verdict leads, because it is the answer the rest of the summary
+    # supports. Its members are registered only when a fired reason cites one.
+    "stranded_at_step": "verdict",
+    "execution_planned_nodes": "verdict",
+    "execution_executable_nodes": "verdict",
+    "battery_watch_threshold": "verdict",
     "distance": "route",
     "elapsed": "route",
     "waypoint_count": "route",
@@ -300,8 +331,10 @@ _SUMMARY_SECTIONS: dict[str, str] = {
     "min_battery": "energy",
     "final_battery": "energy",
     "total_recharges": "energy",
+    "peak_power_exceeded_steps": "energy",
     "max_slope": "terrain",
     "max_continuous_shadow": "terrain",
+    "shadow_limit": "terrain",
     "critical_steps_count": "terrain",
     "high_or_above_steps_count": "terrain",
 }
@@ -372,6 +405,73 @@ def plan_registry(
                     precision=0,
                 )
             )
+    return metrics
+
+
+def _count_metric(
+    value: Any, key: str, label: str, provenance: "Provenance"
+) -> Optional[Metric]:
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    return make_metric(
+        key=key, label=label, value=value, unit=DIMENSIONLESS,
+        provenance=provenance, precision=0,
+    )
+
+
+def verdict_registry(
+    plan: Mapping[str, Any], result: VerdictResult, provenance: "Provenance"
+) -> list[Metric]:
+    """Register the quantities the FIRED verdict reasons cite, and no others.
+
+    Four keys live only here; everything else a reason cites is already a plan
+    metric. The narrowing matters: registering the step a route was stranded at
+    on a route that finished would hand K4 a number with no sentence to put it
+    in, and every registered display is one more string K5 stops looking at.
+    """
+    cited = {key for reason in result.reasons for key in reason.metric_keys}
+    metrics: list[Metric] = []
+
+    if "stranded_at_step" in cited:
+        metric = _count_metric(
+            plan.get("stranded_at_step"),
+            "stranded_at_step",
+            "Enerjinin bittiği adım",
+            provenance,
+        )
+        if metric is not None:
+            metrics.append(metric)
+
+    execution = plan.get("execution")
+    steps = execution if isinstance(execution, Mapping) else {}
+    for field, key, label in (
+        ("planned_nodes", "execution_planned_nodes", "Planlanan düğüm sayısı"),
+        ("executable_nodes", "execution_executable_nodes", "Sürülebilir düğüm sayısı"),
+    ):
+        if key not in cited:
+            continue
+        metric = _count_metric(steps.get(field), key, label, provenance)
+        if metric is not None:
+            metrics.append(metric)
+
+    if "battery_watch_threshold" in cited:
+        # A report policy constant, not a rover spec, and its provenance says
+        # so: an L3 answer that cites this number should not imply the rover's
+        # datasheet set it.
+        metrics.append(
+            make_metric(
+                key="battery_watch_threshold",
+                label="Görev raporu batarya izleme eşiği",
+                value=BATTERY_WATCH_PCT,
+                unit="%",
+                provenance=Provenance(
+                    source="MODEL",
+                    note="LunaPath görev raporu karar eşiği",
+                ),
+                precision=0,
+            )
+        )
+
     return metrics
 
 
@@ -449,6 +549,38 @@ def compare_registry(
             except (TypeError, ValueError):
                 continue
     return metrics
+
+
+# A blocking finding is critical, a soft one is a caution, and an all-clear is
+# neither: emitting a warning that says nothing is wrong would make the channel
+# mean "here is a note" instead of "you must state this".
+_VERDICT_SEVERITY: dict[str, Severity] = {
+    "blocking": "critical",
+    "warning": "caution",
+}
+
+
+def verdict_warnings(result: VerdictResult) -> list[EnvelopeWarning]:
+    """The verdict's reasons, as warnings K4 may not drop or soften.
+
+    Warnings rather than facts, for two reasons. An analysis briefing carries
+    no facts by design, and a reason is exactly what a warning is for: a
+    finding the operator must be told about, which N-14 forbids any explanation
+    level from suppressing.
+    """
+    warnings: list[EnvelopeWarning] = []
+    for reason in result.reasons:
+        severity = _VERDICT_SEVERITY.get(reason.severity)
+        if severity is None:
+            continue
+        warnings.append(
+            EnvelopeWarning(
+                code=f"VERDICT_{reason.code}",
+                severity=severity,
+                message=reason.text,
+            )
+        )
+    return warnings
 
 
 def constraint_warnings(compare: Mapping[str, Any]) -> list[EnvelopeWarning]:
