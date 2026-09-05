@@ -144,14 +144,18 @@ sağlayıcı olarak `stub` seçilirse gerçek model hiç çağrılmaz.
    npm run dev
    ```
 
-   Arayüz üç aşamalı ve her biri adresinde görünür, yani geri tuşu aşamalar
-   arasında gezer ve yenileme bulunduğunuz aşamaya döner:
+   Arayüzün her ekranı adresinde görünür, yani geri tuşu ekranlar arasında
+   gezer ve yenileme bulunduğunuz ekrana döner:
 
-   | Adres | Aşama |
+   | Adres | Ekran |
    | --- | --- |
    | `/` | Açılış |
    | `/?stage=hangar` | Filo hangarı — rover ve rota öncelikleri |
-   | `/?stage=planner` | Kokpit — harita, planlama, analiz |
+   | `/?stage=planner` | Kokpit, PLAN — harita ve rota planlama |
+   | `/?stage=analysis` | Kokpit, ANALYZE — üretilmiş rotanın analizi |
+
+   Rota durumu adreste taşınmaz, bu yüzden `/?stage=analysis` adresi yeni bir
+   sekmede açıldığında analiz edilecek rota olmaz ve arayüz PLAN'a döner.
 
    Eski `?app` kısayolu doğrudan kokpiti açmaya devam eder.
 

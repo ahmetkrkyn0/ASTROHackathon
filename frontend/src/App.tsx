@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import LandingPage from './LandingPage'
 import FleetSelectionView from './components/Fleet/FleetSelectionView'
-import { type AppPhase, hrefForPhase, phaseFromHref } from './shell/phaseUrl'
+import {
+  type AppPhase,
+  hrefForLocation,
+  locationFromHref,
+  phaseFromHref,
+} from './shell/phaseUrl'
 import MapCanvas, {
   type ClickMode,
   DOWNSAMPLE,
@@ -126,7 +131,11 @@ export default function App() {
   const [planningEngaged, setPlanningEngaged] = useState(false)
 
   // Workstation mode: the two working modes of the design, PLAN and ANALYZE.
-  const [missionMode, setMissionMode] = useState<MissionMode>('plan')
+  // Seeded from the address like the phase, so ?stage=analysis opens on the
+  // analysis rather than opening on plan and then jumping.
+  const [missionMode, setMissionMode] = useState<MissionMode>(() =>
+    typeof window === 'undefined' ? 'plan' : locationFromHref(window.location.href).mode,
+  )
   const [isSolving, setIsSolving] = useState(false)
 
   // Rail and HUD collapse states
@@ -273,15 +282,45 @@ export default function App() {
    */
   useEffect(() => {
     const currentHref = window.location.href
-    if (phaseFromHref(currentHref) === phase) return
-    window.history.pushState({ phase }, '', hrefForPhase(phase, currentHref))
-  }, [phase])
+    const shown = locationFromHref(currentHref)
+    if (shown.phase === phase && shown.mode === missionMode) return
+    window.history.pushState(
+      { phase, mode: missionMode },
+      '',
+      hrefForLocation({ phase, mode: missionMode }, currentHref),
+    )
+  }, [phase, missionMode])
 
   useEffect(() => {
-    const onPopState = () => setPhase(phaseFromHref(window.location.href))
+    const onPopState = () => {
+      const { phase: nextPhase, mode } = locationFromHref(window.location.href)
+      setPhase(nextPhase)
+      setMissionMode(mode)
+    }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
+
+  /**
+   * Analysis with nothing to analyse falls back to planning.
+   *
+   * ?stage=analysis is linkable and survives a reload, but the mission it
+   * described does not: route state is deliberately not in the address, so a
+   * fresh load of that link arrives with planResult still null. The ANALYZE
+   * tab is disabled in that state for exactly this reason -- the address is
+   * simply the one way in that can't be disabled.
+   *
+   * The mode is corrected rather than the panels being left empty, and the
+   * effect above then rewrites the address to match, so what is on screen and
+   * what the URL claims never disagree. Guarded on `isSolving` because a solve
+   * in flight is about to produce the route this is missing; without it,
+   * handlePlan's optimistic switch to analyze would be undone mid-flight.
+   */
+  useEffect(() => {
+    if (missionMode === 'analyze' && !planResult && !isSolving) {
+      setMissionMode('plan')
+    }
+  }, [missionMode, planResult, isSolving])
 
   // Landing hands over to the hangar, not to the map: a rover is chosen
   // before there is a surface to drive it on.
