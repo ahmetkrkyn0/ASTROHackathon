@@ -346,8 +346,11 @@ _DENIAL = (
     r"|\b\w*m[ae]d[ıi]\w*\b"                 # yapmadı, edilmedi
     r"|\b\w*m[ae]y[ae]cak\w*\b"              # yapmayacak, olmayacak
     r"|\bdeğil\w*"
-    r"|\byok\b|\bhayır\b"
-    r"|\bkapsam\s*dışı"
+    # yok + copula/suffix (yoktur, yoktu, yoksa), but never "yokuş" -- uphill is
+    # a noun that turns up in ordinary route prose, and it was the reason this
+    # entry was anchored to the bare form in the first place.
+    r"|\byok(?!u\u015f)\w*\b|\bhayır\b"
+    r"|\bkapsam\w*\s*dışı"
     r"|\btasarlanmamış\w*"
     r"|\b(?:does|do|is|are)\s+not\b|\bnot\s+an?\b"
 )

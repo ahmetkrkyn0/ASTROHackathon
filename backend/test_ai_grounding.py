@@ -322,6 +322,13 @@ def test_legitimate_engineering_prose_is_not_blocked(draft):
         "Hayır, gerçek zamanlı engel kaçınma yok.",
         "Bu yazılım rover üzerinde çalışmıyor.",
         "Bu, alanında en iyi çözüm olduğunu iddia etmiyor.",
+        # Caught in a live draft: "yok" takes the copula, and the entry had been
+        # anchored to the bare form to keep it off "yokuş" (uphill). A lookahead
+        # does that job without excluding the way the word is actually written.
+        "Kayıtta otonom navigasyon işlevine dair doğrulanmış bir bilgi yoktur.",
+        "Gerçek zamanlı engel kaçınma yoktu.",
+        # The noun takes a suffix too, which the fixed phrase could not span.
+        "Otonom navigasyon bu ürünün kapsamı dışındadır.",
     ],
 )
 def test_a_denial_of_a_forbidden_claim_is_never_the_thing_that_is_blocked(draft):
@@ -342,6 +349,10 @@ def test_a_denial_of_a_forbidden_claim_is_never_the_thing_that_is_blocked(draft)
         "Bu alanda tek çözümdür.",
         # No negation anywhere in the clause, so nothing exempts it.
         "Otonom sürüş modülü hazır.",
+        # "yokuş" is uphill, a noun that belongs in ordinary route prose. It must
+        # not read as a denial, which is why the yok entry carries a lookahead
+        # rather than matching any word that starts with those three letters.
+        "Rota yokuşta otonom navigasyon gerektirir.",
     ],
 )
 def test_the_denial_exemption_is_not_a_universal_escape_hatch(draft):
