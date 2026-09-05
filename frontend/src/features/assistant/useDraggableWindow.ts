@@ -64,6 +64,24 @@ export function clampOffset(
  */
 const DRAG_THRESHOLD = 4
 
+/**
+ * Whether a press that landed on `target` should start a drag.
+ *
+ * Pure and exported because the version inlined in the handler had a bug that
+ * no test could reach: it asked `closest('button, ...')` without excluding the
+ * handle, and the launcher IS a button -- so every press on it matched, and
+ * the one control that most needed dragging could not be dragged at all.
+ *
+ * The rule is "a control BELOW the handle takes its own click". The chat
+ * header holds "Yeni sohbet" and minimize and must not swallow them; a handle
+ * that is itself a control is still a handle.
+ */
+export function shouldStartDrag(target: Element | null, handle: Element): boolean {
+  if (!target) return false
+  const control = target.closest('button, a, input, textarea, select')
+  return control === null || control === handle
+}
+
 export interface DraggableOptions {
   /**
    * Selector for the element that actually moves, when it is not the handle
@@ -139,11 +157,10 @@ export function useDraggableWindow(
       // header carries "Yeni sohbet" and the minimize button, and a drag
       // beginning on either of those is a click the operator meant.
       if (event.button !== 0) return
-      if ((event.target as HTMLElement).closest('button, a, input, textarea, select')) {
-        return
-      }
 
       const handle = event.currentTarget as HTMLElement
+
+      if (!shouldStartDrag(event.target as Element, handle)) return
       // The handle moves itself unless the caller named an ancestor.
       elementRef.current = moves ? handle.closest(moves) : handle
       if (!elementRef.current) return

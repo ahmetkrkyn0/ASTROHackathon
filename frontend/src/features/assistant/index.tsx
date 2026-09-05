@@ -99,57 +99,73 @@ export function Assistant() {
           toggle()
         }}
       >
-        {/* The mark: a route solved around an obstacle, start to goal.
+        {/* The mark: an orbiter surveying the lunar surface.
 
-            LunaPath does not run on the rover -- the README is explicit that
-            it is a ground-layer tool planning globally from orbital data, with
-            no onboard perception. An antenna talking to a vehicle was the
-            wrong metaphor and a speech bubble was no metaphor at all. What
-            this product does, in one line, is find a way across a surface
-            under competing costs, and the route is what the assistant talks
-            about in both of its modes.
+            LunaPath plans from ORBITAL data and does not run on the rover --
+            the README's scope section is explicit that there is no onboard
+            perception, and that LiDAR enters only as a line in the energy
+            budget. So the spacecraft in the mark is the one the product
+            actually depends on: a satellite over the limb of the Moon with
+            its sensor footprint on the surface below. That beam is where the
+            DEM this entire cockpit reasons about comes from.
 
-            The composition carries the meaning rather than decorating it. The
-            crater sits ON the straight line between the two endpoints, so the
-            path bending over it reads as a decision the solver made and not as
-            an ornamental curve. Endpoints are the map's own vocabulary: start
-            a filled node, goal an open ring, distinguished by shape so they do
-            not depend on position or colour. The crater is drawn at 45%
-            opacity because it is the terrain being reasoned about, not the
-            answer.
+            The silhouette is built to survive 22px, which is where it is
+            actually drawn. The panels are TALLER than the bus and separated
+            from it by a mast gap: an earlier pass had them the same height
+            and butted against the body, and bus, masts and panels merged into
+            one horizontal bar with no satellite in it. Stepping the height is
+            what puts notches in the outline. The beam is open at the bottom
+            so it reads as a footprint rather than a closed triangle, and the
+            limb is at 42% because it is the thing being surveyed, not the
+            subject.
 
-            Verified by rendering at 22px, the size it is actually drawn: all
-            three elements stay separable. */}
+            Verified by rendering at 22px: bus, both masts, both panels, the
+            beam and the limb all stay separable. */}
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          {/* The obstacle, on the direct line the route cannot take. */}
-          <ellipse
-            cx="12"
-            cy="11.9"
-            rx="3.5"
-            ry="2.6"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            opacity="0.45"
-          />
-          {/* The solved path, bowing clear of it. */}
+          {/* The lunar limb. */}
           <path
-            d="M4.4 7.2C8 2.6 17.4 5 19.6 16.6"
+            d="M2.2 18.6a9.8 3.4 0 0 1 19.6 0"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            opacity="0.42"
+          />
+          {/* Sensor footprint, widening to the surface. */}
+          <path
+            d="M12 7.8L7.8 16.6M12 7.8l4.2 8.8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
             strokeLinecap="round"
           />
-          {/* Start: filled node. */}
-          <circle cx="4.4" cy="7.2" r="2" fill="currentColor" stroke="none" />
-          {/* Goal: open ring. */}
-          <circle
-            cx="19.6"
-            cy="16.6"
-            r="2.5"
+          {/* Bus. */}
+          <rect x="10.85" y="4.8" width="2.3" height="3" fill="currentColor" />
+          {/* Masts, holding the panels off the body. */}
+          <path
+            d="M10.85 6.3H8.9M13.15 6.3h1.95"
+            stroke="currentColor"
+            strokeWidth="1.1"
+            strokeLinecap="round"
+          />
+          {/* Solar panels, taller than the bus so the outline steps. */}
+          <rect
+            x="6.5"
+            y="4"
+            width="2.4"
+            height="4.6"
             fill="none"
             stroke="currentColor"
-            strokeWidth="1.5"
+            strokeWidth="1.2"
+          />
+          <rect
+            x="15.1"
+            y="4"
+            width="2.4"
+            height="4.6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
           />
         </svg>
         {unread && <span className="chat-launcher-dot" aria-hidden="true" />}
