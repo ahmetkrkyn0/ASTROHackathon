@@ -1,3 +1,5 @@
+import { useCallback } from 'react'
+import { useAskAssistant } from '../../intent/AssistantAskContext'
 import { useMission } from '../../mission/MissionContext'
 import { useMissionRuntime } from '../../mission/MissionRuntimeContext'
 import { MissionReportModal } from './MissionReportModal'
@@ -18,6 +20,25 @@ export function MissionReport() {
   const { planResult } = useMission()
   const { routePlaybackStep, payloadW, heaterW } = useMissionRuntime()
   const { isOpen, open, close } = useMissionReport(planResult, routePlaybackStep)
+  const requestAsk = useAskAssistant()
+
+  /**
+   * Hand the question to the assistant and get out of its way.
+   *
+   * Closing is not a courtesy: the report is registered after the assistant in
+   * the same globalOverlay slot, registration order is paint order, so a
+   * full-screen report covers the panel the question just landed in.
+   *
+   * Nothing is sent. The channel writes the composer; the operator still picks
+   * an explanation level and presses Gönder.
+   */
+  const askAssistant = useCallback(
+    (question: string) => {
+      requestAsk(question, 'mission-report')
+      close()
+    },
+    [close, requestAsk],
+  )
 
   if (!planResult) return null
 
@@ -37,6 +58,7 @@ export function MissionReport() {
           payloadW={payloadW}
           heaterW={heaterW}
           onClose={close}
+          onAskAssistant={askAssistant}
         />
       )}
     </>

@@ -129,6 +129,20 @@ export function decideVerdict(plan: PlanResponse): VerdictResult {
   }
 }
 
+/**
+ * What the report asks the assistant, per verdict.
+ *
+ * Fixed strings rather than a generated sentence: the question is placed in the
+ * composer for the operator to send, so it has to read like something a person
+ * would type, and a test pins all three by value.
+ */
+export const ASSISTANT_QUESTION: Record<Verdict, string> = {
+  GO: 'Görev raporundaki karar özetini açıkla: GO kararı hangi bulgulara dayanıyor?',
+  'GO-WITH-RISK':
+    'Görev raporundaki karar özetini açıkla: GO-WITH-RISK kararının risk bulguları neler?',
+  'NO-GO': 'Görev raporundaki karar özetini açıkla: bu rota neden NO-GO?',
+}
+
 export const VERDICT_COLOR: Record<Verdict, string> = {
   GO: 'var(--risk-low)',
   'GO-WITH-RISK': 'var(--risk-med)',

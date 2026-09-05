@@ -7,6 +7,7 @@ import {
   type AiChatResponse,
   type ExplanationLevel,
 } from '../../api/assistant'
+import type { AssistantAsk } from '../../intent/types'
 import { windowMessages, type AiMissionSnapshot } from './aiContext'
 import type { AssistantMode } from './useAssistant'
 
@@ -247,6 +248,14 @@ interface ChatPanelProps {
    * nothing else: a hidden panel still sends, still waits, still receives.
    */
   isVisible?: boolean
+  /**
+   * A question another feature wants asked, or null.
+   *
+   * It is placed in the composer and nothing else happens: no request is made,
+   * `send` is not called, and the level gate still holds. The panel suggests
+   * what to ask; the operator asks it.
+   */
+  ask?: AssistantAsk | null
   /** Rendered as a header control when the panel lives in a floating shell. */
   onMinimize?: () => void
   /** A reply arrived while hidden. Used for one dot, nothing more. */
@@ -257,6 +266,7 @@ export default function ChatPanel({
   mission,
   mode,
   isVisible = true,
+  ask = null,
   onMinimize,
   onAnswerWhileHidden,
 }: ChatPanelProps) {
@@ -284,6 +294,10 @@ export default function ChatPanel({
   // can change while the request is in flight, so the flag is read late.
   const visibleRef = useRef(isVisible)
   const modeRef = useRef(mode)
+  // Which ask has already reached the composer, and whether the caret still
+  // owes it a move. Refs, not state: neither changes what is rendered.
+  const appliedAskIdRef = useRef(0)
+  const focusAfterAskRef = useRef(false)
 
   useEffect(() => {
     visibleRef.current = isVisible
@@ -331,12 +345,37 @@ export default function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVisible])
 
+  /**
+   * An ask from another feature fills the composer.
+   *
+   * Declared after the visibility effect so its focus request wins when both
+   * fire on the same open. It writes the draft and marks the caret as owed;
+   * the auto-grow effect below does the focusing, because that is the one
+   * effect guaranteed to run after the new draft is in the DOM.
+   *
+   * Nothing is sent. Whether this question is asked, at which level, is still
+   * the operator's decision.
+   */
+  useEffect(() => {
+    if (!ask || ask.id === appliedAskIdRef.current) return
+    appliedAskIdRef.current = ask.id
+    focusAfterAskRef.current = true
+    setDraft(ask.question)
+  }, [ask])
+
   // Auto-grow, and shrink back when the draft is cleared or reset.
   useEffect(() => {
     const node = composerRef.current
     if (!node) return
     node.style.height = 'auto'
     node.style.height = `${Math.min(node.scrollHeight, COMPOSER_MAX_PX)}px`
+    if (!focusAfterAskRef.current) return
+    focusAfterAskRef.current = false
+    if (node.disabled) return
+    node.focus()
+    // The caret goes to the end: the question is a starting point the operator
+    // may extend, not a fixed string.
+    node.setSelectionRange(node.value.length, node.value.length)
   }, [draft])
 
   useEffect(() => {

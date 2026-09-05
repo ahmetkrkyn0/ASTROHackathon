@@ -38,7 +38,10 @@ frontend/src/
 │
 ├─ mission/           MissionContext.tsx  types.ts  selectors.ts  geo.ts
 ├─ api/               client.ts  assistant.ts   (one file per endpoint family)
+├─ net/               typed fetchers for the newer endpoint families
+├─ grid/              grid frame: pixel <-> projected metres
 ├─ overlay/           types.ts  OverlayContext.tsx  useOverlays.ts  draw2d.ts
+├─ intent/            one cross-feature channel -- see §14
 ├─ shell/             FeatureHost.tsx  slots.tsx  shell.css
 └─ features/
    ├─ registry.ts
@@ -48,14 +51,18 @@ frontend/src/
 **Dependency direction is binding.**
 
 ```
-features  ->  mission, api, overlay        (allowed)
-shell, registry  ->  feature entrypoints   (allowed)
-App  ->  providers, slots                  (allowed)
+features  ->  mission, api, net, grid, overlay, intent   (allowed)
+shell, registry  ->  feature entrypoints                 (allowed)
+App  ->  providers, slots                                (allowed)
 
 mission  ->  features                      FORBIDDEN
 overlay  ->  features                      FORBIDDEN
 api      ->  features                      FORBIDDEN
+intent   ->  features                      FORBIDDEN
 ```
+
+`net/` and `grid/` were already peers that features import; they are written
+down here because the list read as exhaustive and was not.
 
 A feature is imported from outside **only** through its `index.tsx`. Nothing
 reaches into `features/<name>/` internals.
@@ -364,3 +371,48 @@ do we.
 - No 3-D overlay renderer. The command contract is designed for one; `draw3d.ts`
   comes when a feature needs it.
 - No test framework was added.
+
+---
+
+## 14. Cross-feature intent
+
+One channel, `intent/`, and it exists for one problem: the mission report has to
+be able to hand the assistant a question, and every other route was worse.
+
+- **`MissionActions`** publishes writers for mission state. An `askAssistant`
+  there would make `mission/` the owner of an inter-feature message bus wearing
+  the mission's name, against §12 row 7 ("`mission/` stays state and coordinates
+  only").
+- **`shell/`** is imported *by* nothing below it: `shell → registry → features`
+  is the direction, and a channel there reverses it.
+- **A `CustomEvent` or `window` bus** is invisible to the type system, and with
+  no jsdom (§13) nothing could test it.
+
+### The contract
+
+`AssistantAsk` carries `{ id, question, origin }` and nothing else. Two hooks,
+split the way `useMission()` and `useMissionActions()` are:
+
+| Hook | Who calls it | What it gets |
+|---|---|---|
+| `useAskAssistant()` | the producing feature | a function taking `(question, origin)` |
+| `useAssistantAsk()` | the assistant | the pending ask, or null |
+
+Four properties are load-bearing, and each is pinned by
+`backend/test_frontend_ask_assistant_contract.py`:
+
+1. **Text only.** Nothing in `intent/` may fetch, and the assistant's `send()`
+   guard (`!question || pending || !levelChosen`) is untouched. A feature can
+   suggest a question; only the operator asks it.
+2. **One-way.** There is no `consume` or `clear`. The consumer tracks the last
+   id it applied, so a producer cannot replay, retract, or observe delivery.
+3. **`id`, not text.** The operator asking the same thing twice is two asks.
+4. **A closed `origin` union.** A new producer is a deliberate edit to
+   `intent/types.ts`.
+
+### The amendment rule
+
+This folder holds **one** ask type. A second channel — a different message, a
+different consumer — is an amendment to this section, not another file dropped
+in `intent/`. That is what keeps it from becoming the service-locator
+`features/registry.ts` refuses to be.

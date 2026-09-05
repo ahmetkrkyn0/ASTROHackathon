@@ -13,6 +13,7 @@ import {
 } from './charts'
 import { fmt } from './format'
 import {
+  ASSISTANT_QUESTION,
   BATTERY_WATCH_PCT,
   RISK_LEVELS,
   VERDICT_COLOR,
@@ -28,17 +29,22 @@ interface Props {
   payloadW: number
   heaterW: number
   onClose: () => void
+  /** Puts a question in the assistant's composer. Sends nothing. */
+  onAskAssistant: (question: string) => void
 }
 
-const Section: React.FC<{ label: string; note?: string; children: React.ReactNode }> = ({
-  label,
-  note,
-  children,
-}) => (
+const Section: React.FC<{
+  label: string
+  note?: string
+  /** A control belonging to this section, right-aligned in its header. */
+  action?: React.ReactNode
+  children: React.ReactNode
+}> = ({ label, note, action, children }) => (
   <section className="lp-report-card">
     <header className="lp-report-card-head">
       <span className="lp-meta-label">{label}</span>
       {note && <span className="lp-report-card-note">{note}</span>}
+      {action && <span className="lp-report-card-action">{action}</span>}
     </header>
     {children}
   </section>
@@ -56,7 +62,13 @@ const Section: React.FC<{ label: string; note?: string; children: React.ReactNod
  * in mission state, so the report cannot disagree with the route the operator
  * just watched.
  */
-export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, onClose }) => {
+export const MissionReportModal: React.FC<Props> = ({
+  plan,
+  payloadW,
+  heaterW,
+  onClose,
+  onAskAssistant,
+}) => {
   const closeRef = useRef<HTMLButtonElement>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
 
@@ -179,7 +191,18 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
 
         <div className="lp-report-body">
           {/* ── Karar özeti ─────────────────────────────────────────── */}
-          <Section label="KARAR ÖZETİ">
+          <Section
+            label="KARAR ÖZETİ"
+            action={
+              <button
+                type="button"
+                className="lp-report-ask"
+                onClick={() => onAskAssistant(ASSISTANT_QUESTION[view.verdict.verdict])}
+              >
+                Asistana sor
+              </button>
+            }
+          >
             <ul className="lp-report-reasons">
               {view.verdict.reasons.map((reason) => (
                 <li key={reason.code}>

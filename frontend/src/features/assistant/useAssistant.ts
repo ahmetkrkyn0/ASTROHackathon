@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAssistantAsk } from '../../intent/AssistantAskContext'
+import type { AssistantAsk } from '../../intent/types'
 import { selectStableAnalysisCell } from '../../mission/selectors'
 import type { MissionValue } from '../../mission/types'
 import { buildMissionSnapshot, type AiMissionSnapshot } from './aiContext'
@@ -21,6 +23,15 @@ export interface AssistantShell {
   close: () => void
   markUnread: () => void
   missionSnapshot: AiMissionSnapshot
+  /**
+   * A question another feature wants asked, or null.
+   *
+   * Read-only, and it reaches the composer -- never the wire. The panel still
+   * refuses to send until the operator picks an explanation level and presses
+   * Gönder, which is what keeps "a feature can suggest" apart from "a feature
+   * can ask on the operator's behalf".
+   */
+  ask: AssistantAsk | null
 }
 
 /**
@@ -132,6 +143,22 @@ export function useAssistant(mission: MissionValue): AssistantShell {
     if (hasPlan && !had) open()
   }, [missionSnapshot.currentPlan, open])
 
+  /**
+   * An ask from another feature opens the window.
+   *
+   * Opening is all it does: the question lands in the composer and stops
+   * there. Keyed on the id rather than the text, so the operator asking the
+   * same thing twice is two asks, and guarded by a ref so a re-render with the
+   * same ask still pending cannot reopen a window the operator minimized.
+   */
+  const ask = useAssistantAsk()
+  const openedAskRef = useRef<number>(0)
+  useEffect(() => {
+    if (ask === null || ask.id === openedAskRef.current) return
+    openedAskRef.current = ask.id
+    open()
+  }, [ask, open])
+
   return {
     isOpen,
     unread,
@@ -141,5 +168,6 @@ export function useAssistant(mission: MissionValue): AssistantShell {
     close,
     markUnread,
     missionSnapshot,
+    ask,
   }
 }

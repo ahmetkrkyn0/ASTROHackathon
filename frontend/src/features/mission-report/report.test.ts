@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PlanExecution, PlanResponse, SimSummary, Waypoint } from '../../api'
 import {
+  ASSISTANT_QUESTION,
   VERDICT_REASON_CODES,
   decideVerdict,
   energySplit,
@@ -212,4 +213,13 @@ describe('verdict parity cases', () => {
       expect(result.reasons.map((reason) => reason.code)).toEqual(one.codes)
     })
   }
+})
+
+describe('ASSISTANT_QUESTION', () => {
+  it('asks a different question per verdict and names the verdict in two of them', () => {
+    const questions = Object.values(ASSISTANT_QUESTION)
+    expect(new Set(questions).size).toBe(3)
+    expect(ASSISTANT_QUESTION['NO-GO']).toContain('NO-GO')
+    expect(ASSISTANT_QUESTION['GO-WITH-RISK']).toContain('GO-WITH-RISK')
+  })
 })

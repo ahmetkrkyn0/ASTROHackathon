@@ -28,6 +28,7 @@ import {
 import TopBar, { type MissionMode } from './components/TopBar/TopBar'
 
 // Modular shell: App knows the slots, never the features.
+import { AssistantAskProvider } from './intent/AssistantAskProvider'
 import { MissionProvider } from './mission/MissionProvider'
 import { MissionRuntimeProvider } from './mission/MissionRuntimeProvider'
 import type { MissionActions, MissionRuntime, MissionValue } from './mission/types'
@@ -526,6 +527,7 @@ export default function App() {
     >
       <MissionRuntimeProvider value={missionRuntimeValue}>
       <OverlayProvider>
+      <AssistantAskProvider>
       <SpaceBackdrop
         stage={phase === 'landing' ? 'ambient' : 'deck'}
         frozen={planningEngaged}
@@ -789,6 +791,7 @@ export default function App() {
           </aside>
         )}
       </div>
+      </AssistantAskProvider>
       </OverlayProvider>
       </MissionRuntimeProvider>
     </MissionProvider>

@@ -167,6 +167,30 @@
   text-align: right;
 }
 
+/* Pushed to the right edge whether or not the section also carries a note,
+   because a control that moves when the copy changes reads as a different
+   control. */
+.lp-report-card-action {
+  margin-left: auto;
+}
+
+.lp-report-ask {
+  padding: 6px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lp-report-ask:hover {
+  border-color: var(--line-accent-hover);
+  color: var(--text);
+}
+
 .lp-report-empty {
   margin: 0;
   font-size: 12px;

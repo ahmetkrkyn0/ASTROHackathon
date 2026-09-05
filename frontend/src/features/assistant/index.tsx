@@ -28,6 +28,7 @@ export function Assistant() {
     close,
     markUnread,
     missionSnapshot,
+    ask,
   } = useAssistant(mission)
 
   // The window id and its class names are published contracts and do NOT vary
@@ -77,6 +78,7 @@ export function Assistant() {
           mission={missionSnapshot}
           mode={mode}
           isVisible={isOpen}
+          ask={ask}
           onMinimize={close}
           onAnswerWhileHidden={markUnread}
         />
