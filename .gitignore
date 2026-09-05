@@ -60,3 +60,6 @@ lunapath/data/processed/dem_clone_horizons_meta.json
 lunapath/data/processed/roughness_meta.json
 lunapath/data/processed/psr_meta.json
 lunapath/data/processed/roughness_baselines.npz
+# D2: MoonPlanBench occupancy maps (Chancán et al. 2025, CC BY-NC-SA 4.0) and
+# their provenance JSON (scripts/build_moonplanbench_cache.py); never committed.
+lunapath/data/benchmarks/
