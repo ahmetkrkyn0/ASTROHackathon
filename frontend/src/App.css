@@ -339,6 +339,30 @@ body {
   overflow: hidden;
 }
 
+/* ── Scrollbars ─────────────────────────────────────────────────────────────
+   Hidden everywhere, not disabled. The platform scrollbar is a wide light
+   gutter that lands on top of flat dark panels and reads as a seam in the
+   layout rather than a control; nothing else in this interface is drawn by
+   the OS. Scrolling itself is untouched -- wheel, trackpad, drag, keyboard
+   and programmatic scrollTo all still work, the track just isn't painted.
+
+   Both properties are needed: `scrollbar-width` covers Firefox and the
+   ::-webkit- pseudo-element covers Chrome, Edge and Safari. The panels that
+   already hid their own (.rail-scroll, .telemetry-scroll, ...) are now saying
+   the same thing twice, which is harmless -- but a panel that *styled* one
+   had to go, because a class beats `*` on specificity and would have kept
+   painting its scrollbar. .chat-log was the only such case. */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 /* ── Backdrop ───────────────────────────────────────────────────────────────
    Fixed behind everything, and inert: the console owns every interaction.
 

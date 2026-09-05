@@ -292,15 +292,6 @@
   padding-right: 4px;
 }
 
-.chat-log::-webkit-scrollbar {
-  width: 6px;
-}
-
-.chat-log::-webkit-scrollbar-thumb {
-  background: rgba(29, 36, 50, 0.4);
-  border-radius: var(--radius);
-}
-
 .chat-intro {
   display: flex;
   flex-direction: column;
