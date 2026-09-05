@@ -152,6 +152,53 @@
   flex-shrink: 0;
 }
 
+/* The header doubles as the window's drag handle.
+
+   `touch-action: none` is what makes a touch drag work at all: without it the
+   browser claims the gesture for scrolling and the pointermove events stop
+   arriving. user-select stops a drag across the title from painting a text
+   selection behind the window as it moves. */
+.chat-header.is-draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.chat-window.is-dragging .chat-header.is-draggable {
+  cursor: grabbing;
+}
+
+/* No transition on the transform while dragging: the offset is already
+   following the pointer every frame, and easing it adds a lag between the
+   cursor and the window that reads as the panel being heavy. */
+.chat-window.is-dragging {
+  transition: none;
+}
+
+.chat-header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-reset-position {
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(186, 175, 245, 0.4);
+  background: rgba(186, 175, 245, 0.1);
+  color: var(--lavender-bright);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.chat-reset-position:hover {
+  border-color: var(--lavender);
+  background: rgba(186, 175, 245, 0.2);
+}
+
 .chat-minimize {
   flex-shrink: 0;
   width: 26px;

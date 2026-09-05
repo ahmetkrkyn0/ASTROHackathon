@@ -1,6 +1,7 @@
 import { useMission } from '../../mission/MissionContext'
 import ChatPanel from './ChatPanel'
 import { useAssistant } from './useAssistant'
+import { useDraggableWindow } from './useDraggableWindow'
 import './assistant.css'
 
 /**
@@ -29,6 +30,9 @@ export function Assistant() {
     markUnread,
     missionSnapshot,
   } = useAssistant(mission)
+
+  // Only draggable while it is open; a hidden window has nothing to move.
+  const { offset, isDragging, handleProps, reset } = useDraggableWindow(isOpen)
 
   // The window id and its class names are published contracts and do NOT vary
   // with mode: shell.css keys the toast stack off `.chat-window.is-open`, and
@@ -102,11 +106,19 @@ export function Assistant() {
         {unread && <span className="chat-launcher-dot" aria-hidden="true" />}
       </button>
 
+      {/* The drag offset is a transform on top of whatever assistant.css has
+          positioned: the stylesheet keeps owning where the window rests, and
+          this only says how far the operator has moved it from there. */}
       <div
         id={CHAT_WINDOW_ID}
-        className={`chat-window ${isOpen ? 'is-open' : ''}`}
+        className={`chat-window ${isOpen ? 'is-open' : ''} ${isDragging ? 'is-dragging' : ''}`}
         role="dialog"
         aria-label={label}
+        style={
+          offset.x || offset.y
+            ? { transform: `translate(${offset.x}px, ${offset.y}px)` }
+            : undefined
+        }
       >
         <ChatPanel
           mission={missionSnapshot}
@@ -114,6 +126,8 @@ export function Assistant() {
           isVisible={isOpen}
           onMinimize={close}
           onAnswerWhileHidden={markUnread}
+          dragHandleProps={handleProps}
+          onResetPosition={offset.x || offset.y ? reset : undefined}
         />
       </div>
     </>
