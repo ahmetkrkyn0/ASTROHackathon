@@ -364,11 +364,12 @@ export async function fetchBackendLidarScan(
  */
 export function buildLidarScanFromBackend(
   origin: THREE.Vector3,
-  verticalScale: number,
+  terrain: TerrainField,
   backendPoints: ReadonlyArray<readonly [number, number, number]>,
   rockMeshes: THREE.Mesh[],
   scanSeed = 1,
 ): LidarScanResult {
+  const verticalScale = terrain.verticalScale
   const positions: number[] = []
   const random = seededRandom(scanSeed)
   const detectedRockIds = new Set<string>()
@@ -401,10 +402,34 @@ export function buildLidarScanFromBackend(
     const measuredDistance = applySensorNoise(rawDistance, random)
     if (measuredDistance === null) continue
     const scale = measuredDistance / rawDistance
+    const pointX = origin.x + eastM * scale
+    const pointZ = origin.z - northM * scale
+    // The backend ray-marches its own copy of the DEM (see virtual_lidar.py)
+    // to compute upM; even a tiny divergence from the frontend's own
+    // heightfield -- a different resolution step, a rounding difference in
+    // bilinear sampling -- reads as points floating above or sinking into
+    // the rendered ground, since the two are computed by entirely separate
+    // code paths in different languages. Snapping the point's height back
+    // onto sampleTerrainHeight (the exact function that places every rock
+    // and the terrain net, and that ultimately draws the mesh itself)
+    // guarantees the point cloud can never visually diverge from the
+    // ground it is supposed to be scanning. The backend's own upM survives
+    // only in rawDistance/measuredDistance (used for range stats and this
+    // return's azimuth-nearest comparison), never in what gets rendered.
+    // sampleTerrainHeight is bilinear; the rendered mesh triangulates each
+    // grid cell into two flat triangles instead, which is a slightly
+    // different surface (they agree at the four cell corners, not
+    // necessarily in between) -- a few cm of drift at a saddle-shaped cell,
+    // worse right at a crater rim or other sharp local feature. The lift
+    // below is a deliberate safety margin against that residual, not a
+    // magic constant: big enough that a point on the wrong side of that
+    // gap still reads as "on the surface", small enough to stay invisible
+    // against a 60 m scan and metres of real relief.
+    const groundY = sampleTerrainHeight(terrain, pointX, pointZ)
     const point = new THREE.Vector3(
-      origin.x + eastM * scale,
-      origin.y + upM * verticalScale * scale,
-      origin.z - northM * scale,
+      pointX,
+      groundY !== null ? groundY + 0.15 : origin.y + upM * verticalScale * scale,
+      pointZ,
     )
     terrainReturns++
     const azimuth = Math.atan2(eastM, northM)

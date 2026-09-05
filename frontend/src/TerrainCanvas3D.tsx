@@ -613,6 +613,30 @@ function buildTerrainNetPositions(
   return new Float32Array(verts)
 }
 
+// The app's own risk legend (App.tsx LEGEND_ITEMS: Safe/Caution/High/
+// Critical), reused here so a close rock reads with the same urgency the
+// rest of the UI already assigns to "close/risky" -- one colour language,
+// not a second one invented just for this overlay.
+const ROCK_DISTANCE_STOPS: Array<[number, number, number]> = [
+  [0xee, 0x5a, 0x52], // Critical -- nearest
+  [0xf0, 0x9a, 0x4a], // High
+  [0xe8, 0xc8, 0x5a], // Caution
+  [0x4f, 0xd0, 0x8a], // Safe -- farthest
+]
+
+function rockDistanceColor(distance: number, maxRangeM: number): string {
+  const t = THREE.MathUtils.clamp(distance / maxRangeM, 0, 1) * (ROCK_DISTANCE_STOPS.length - 1)
+  const i0 = Math.floor(t)
+  const i1 = Math.min(ROCK_DISTANCE_STOPS.length - 1, i0 + 1)
+  const f = t - i0
+  const a = ROCK_DISTANCE_STOPS[i0]
+  const b = ROCK_DISTANCE_STOPS[i1]
+  const r = Math.round(a[0] + (b[0] - a[0]) * f)
+  const g = Math.round(a[1] + (b[1] - a[1]) * f)
+  const bch = Math.round(a[2] + (b[2] - a[2]) * f)
+  return `rgb(${r}, ${g}, ${bch})`
+}
+
 function createRoverModel(): {
   group: THREE.Group
   lidarHead: THREE.Group
@@ -1285,8 +1309,12 @@ export default function TerrainCanvas3D({
         el.style.top = `${item.top}px`
         el.style.width = `${item.w}px`
         el.style.height = `${item.h}px`
+        const color = rockDistanceColor(item.distance, LIDAR_CONFIG.maxRangeM)
+        el.style.borderColor = color
+        el.style.boxShadow = `0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 8px ${color}`
         const label = el.firstElementChild as HTMLSpanElement
         label.textContent = `ROCK ${item.distance.toFixed(1)} m`
+        label.style.background = color
       })
     }
 
@@ -1815,7 +1843,7 @@ export default function TerrainCanvas3D({
         if (cancelled) return
         scan = buildLidarScanFromBackend(
           state.lidarOrigin,
-          terrain.verticalScale,
+          terrain,
           backendScan.points,
           rockMeshes,
           scanSeed,
