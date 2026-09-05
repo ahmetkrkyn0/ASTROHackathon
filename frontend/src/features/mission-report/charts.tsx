@@ -28,9 +28,9 @@ export interface Point {
 const PAD = { top: 14, right: 16, bottom: 26, left: 48 }
 
 /** --fs-micro, the interface floor. No chart label is smaller than this. */
-const TICK_SIZE = 11
+const TICK_SIZE = 12
 /** Threshold annotations sit at the same rung; they are labels, not readings. */
-const NOTE_SIZE = 11
+const NOTE_SIZE = 12
 
 /**
  * Axis furniture, through the tokens rather than copied out of them.
@@ -476,7 +476,7 @@ export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel
           x={64}
           y={78}
           textAnchor="middle"
-          fontSize={11}
+          fontSize={12}
           fill="var(--text-dim-2)"
           letterSpacing="0.08em"
           fontFamily="var(--font-data)"

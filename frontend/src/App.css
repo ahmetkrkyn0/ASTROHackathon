@@ -118,16 +118,21 @@
   /* The bottom of the ramp is set by WCAG AA, not by taste. Measured against
      --bg-card (#0c1018), the old values were --text-dim 4.22:1, --text-dim-2
      3.35:1 and --text-dimmest 2.54:1 -- all under the 4.5:1 AA needs for text,
-     and none of them qualifies for the large-text exception because they are
-     used at 11px. --text-dim-2 alone appears 51 times, including the chart
-     axis labels.
+     and none of them qualifies for the large-text exception -- that starts at
+     18.66px, and nothing in this ramp is drawn near it. --text-dim-2 alone
+     appears 46 times, including the chart axis labels.
 
      New values, same hue and the same three-step separation, lifted until each
-     clears 4.5:1: 5.51, 5.07 and 4.63. Nothing below --text-dimmest exists,
-     and --text-dimmest is now the floor rather than a decorative grey. */
+     clears 4.5:1 on every ground: 5.35, 4.95 and 4.61 at worst. Nothing below
+     --text-dimmest exists, and --text-dimmest is the floor rather than a
+     decorative grey. */
   --text-dim: #808a9d;
   --text-dim-2: #7b8497;
-  --text-dimmest: #737d90;
+  /* #737d90 cleared 4.5:1 on every ground except --bg-raised, where it landed
+     at 4.48 -- the floor of the ramp failing on the lightest surface it can
+     be drawn on. Same hue and saturation, two steps up, so the ramp keeps its
+     shape and the bottom rung now clears AA everywhere: 4.61 at worst. */
+  --text-dimmest: #757f92;
 
   /* Accents. One colour, one meaning -- section 7 of the design doc. */
   /* Both of these were at 100% saturation, which the dark-mode guidance
@@ -191,12 +196,24 @@
      shouted: half-pixel steps are invisible as hierarchy but very visible as
      inconsistency.
 
-     11px is the FLOOR. Nothing in the interface is smaller, including the
+     12px is the FLOOR. Nothing in the interface is smaller, including the
      uppercase micro-labels, which are the hardest thing on the screen to read
      -- caps have no ascenders or descenders to help the eye, and 0.2em
-     tracking pulls them further apart. A 9px tracked cap label is below what
-     any enterprise or mission-control system ships. */
-  --fs-micro: 11px;
+     tracking pulls them further apart.
+
+     The floor was 11px, with --fs-small at 12px one step above it. Those two
+     carried 213 of the 307 declarations in the file -- 69% of the interface
+     -- and a 1px gap is not a step: it is invisible as hierarchy and visible
+     only as inconsistency, which is the same disease the twenty-size cockpit
+     had, in miniature. So micro joins small at 12px. The token stays, because
+     it still says which text is a micro-label, and because 119 call sites
+     asking for --fs-micro are 119 places that would otherwise have to be
+     edited to say --fs-small; what it no longer does is claim a size step
+     that the eye cannot see.
+
+     A real step below 12px is not available: 11px was already the floor for
+     tracked caps, and going down rather than up is the wrong direction. */
+  --fs-micro: 12px;
   --fs-small: 12px;
   --fs-body: 13px;
   --fs-strong: 15px;
@@ -722,9 +739,6 @@ select {
   letter-spacing: var(--track-normal);
 }
 
-.landing-sep {
-  color: #39414f;
-}
 
 .landing-dataset {
   color: var(--text-dimmest);
@@ -822,7 +836,11 @@ select {
   border-radius: var(--radius);
   border: 1px solid rgba(227, 213, 72, 0.45);
   background: linear-gradient(135deg, rgba(227, 213, 72, 0.96), rgba(224, 142, 42, 0.92));
-  color: rgba(227, 213, 72, 0.08);
+  /* Dark ink on the amber fill. It was rgba(227, 213, 72, 0.08) -- the fill's
+     own colour at 8% -- which measured 1.03:1 against the button it sits on:
+     the label was invisible, not dim. #0a0c14 is the ink the other filled
+     surfaces use and measures 8.85:1 here. */
+  color: #0a0c14;
   font-family: var(--font-body);
   font-size: var(--fs-body);
   font-weight: 700;
@@ -1166,7 +1184,10 @@ select {
 }
 
 .rover-card-head span {
-  color: rgba(143, 160, 192, 0.74);
+  /* Was rgba(143, 160, 192, 0.74) at 11px, which lands at 4.43:1 -- under AA,
+     and 11px does not qualify for the large-text exception. The ramp already
+     has a value for this job, and .rover-card-specs span beside it uses it. */
+  color: var(--text-muted-2);
 }
 
 .rover-card-specs span {
@@ -1430,7 +1451,9 @@ select {
 .primary-btn {
   background: linear-gradient(135deg, rgba(227, 213, 72, 0.96), rgba(224, 142, 42, 0.92));
   border: 1px solid rgba(227, 213, 72, 0.45);
-  color: rgba(227, 213, 72, 0.08);
+  /* Dark ink, for the reason given on .cinematic-cta: the label used to be
+     the fill's own colour at 8% alpha and measured 1.03:1. */
+  color: #0a0c14;
   font-weight: 700;
 }
 
@@ -1635,7 +1658,10 @@ select {
 /* Choosing a layer or a dimension is reading, not spending -- cyan. */
 .map-switch button.is-active {
   background: var(--umbra);
-  color: rgba(79, 216, 240, 0.10);
+  /* --umbra is --cyan, and the label was rgba(79, 216, 240, 0.10) -- the same
+     cyan at 10% over itself, which measures 1.00:1. The active tab's text was
+     the background. Dark ink reads 11.54:1 on it. */
+  color: #0a0c14;
   font-weight: 700;
 }
 
@@ -2276,11 +2302,14 @@ select {
 .payload-note,
 .payload-empty {
   margin: 0;
-  color: var(--text-muted);
+  /* --text-dim-2 rather than --text-muted at opacity 0.72. The ramp is
+     already tuned against these grounds, and dimming one of its values again
+     lands somewhere the ramp does not go: 3.73:1, under AA. Saying "one step
+     quieter" with the step below is what the ramp is for. */
+  color: var(--text-dim-2);
   font-family: var(--font-body);
   font-size: var(--fs-small);
   line-height: 1.45;
-  opacity: 0.72;
 }
 
 .payload-inputs {
