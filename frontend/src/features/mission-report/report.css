@@ -116,6 +116,31 @@
   letter-spacing: var(--track-caps);
 }
 
+/* Export sits beside the close button, not buried in the body: it is
+   something you do to the whole report, at the moment you have finished
+   reading it. Both are named for what they produce -- "Save as PDF" and
+   "Download data" -- rather than for the mechanism. */
+.lp-report-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.lp-report-action {
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+.lp-report-action:hover {
+  border-color: var(--line-accent-hover);
+  color: var(--text);
+}
+
 .lp-report-close {
   padding: 8px 14px;
   background: var(--bg-raised);
@@ -499,4 +524,143 @@
   color: var(--text-2);
   border-bottom: 1px solid var(--line-inner);
   white-space: nowrap;
+}
+
+/* ── Print ──────────────────────────────────────────────────────────────────
+   Exporting the report means printing it, and the browser's PDF writer is the
+   most capable one on the machine. No dependency, and the charts stay vector
+   because they are SVG -- a rasterised export would blur every axis label.
+
+   The screen design cannot go to paper unchanged. It is built for a dark
+   cockpit: near-black surfaces, hairlines that only read against them, and
+   text tuned for emitted light. On paper that is a page of ink with white
+   letters knocked out of it, which wastes toner and reads badly. So print
+   inverts the ground and lets the risk colours carry through, since they are
+   the only colour that means something.
+
+   `color-adjust: exact` on the risk marks only: their hue IS the reading, and
+   a browser that drops backgrounds to save ink would drop the finding with
+   them. */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  /* The cockpit behind the modal has no business on the page. */
+  body > *:not(.lp-report-scrim) {
+    display: none !important;
+  }
+
+  .lp-report-scrim {
+    position: static;
+    display: block;
+    padding: 0;
+    background: none;
+  }
+
+  .lp-report-modal {
+    width: 100%;
+    max-width: none;
+    height: auto;
+    border: none;
+    box-shadow: none;
+    background: #fff;
+    color: #111;
+  }
+
+  .lp-report-body {
+    overflow: visible;
+    padding: 0;
+    gap: 10px;
+  }
+
+  .lp-report-header {
+    background: none;
+    border-bottom: 1.5pt solid #111;
+    padding: 0 0 8pt;
+  }
+
+  .lp-report-title,
+  .lp-report-subtitle,
+  .lp-report-figure,
+  .lp-report-kpi .lp-kpi-val,
+  .lp-report-table td,
+  .lp-report-dl dd {
+    color: #111;
+  }
+
+  .lp-meta-label,
+  .lp-report-card-note,
+  .lp-report-table th,
+  .lp-report-dl dt,
+  .lp-kpi-label,
+  .lp-gauge-note,
+  .lp-donut-tile-share {
+    color: #555;
+  }
+
+  .lp-report-card,
+  .lp-report-kpi,
+  .lp-donut-tile {
+    background: none;
+    border-color: #bbb;
+  }
+
+  .lp-report-kpis,
+  .lp-donut-legend {
+    background: none;
+    border-color: #bbb;
+  }
+
+  .lp-report-card-head,
+  .lp-report-dl dt,
+  .lp-report-dl dd,
+  .lp-report-table td {
+    border-color: #ddd;
+  }
+
+  /* The verdict is the one thing a reader must not miss on paper either. */
+  .lp-report-verdict {
+    border-width: 2pt;
+    font-weight: 700;
+  }
+
+  /* Colour that carries a reading survives the browser's ink-saving. */
+  .lp-stacked-seg,
+  .lp-hbar-fill,
+  .lp-gauge-fill,
+  .lp-legend-swatch,
+  .lp-reason-dot,
+  .lp-report-verdict,
+  .lp-chart,
+  .lp-donut {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Charts were sized against a measured pixel width; on paper they get the
+     column instead. */
+  .lp-chart {
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Nothing that only works by being clicked. */
+  .lp-report-close,
+  .lp-report-toggle,
+  .lp-report-actions,
+  .lp-report-launcher {
+    display: none !important;
+  }
+
+  /* A card split across a page break loses the pairing of chart and caption. */
+  .lp-report-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .lp-report-row {
+    grid-template-columns: 1fr 1fr;
+  }
 }

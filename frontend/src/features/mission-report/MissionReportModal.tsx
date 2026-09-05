@@ -11,6 +11,7 @@ import {
   StackedBar,
   type Point,
 } from './charts'
+import { downloadCsv } from './exportCsv'
 import { fmt } from './format'
 import {
   RISK_LEVELS,
@@ -61,6 +62,40 @@ const Section: React.FC<{ label: string; note?: string; children: React.ReactNod
 export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, onClose }) => {
   const closeRef = useRef<HTMLButtonElement>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [printing, setPrinting] = useState(false)
+
+  /**
+   * Printing has to show the whole report, including the detail the operator
+   * left collapsed.
+   *
+   * The technical section is conditionally rendered, so the print stylesheet
+   * cannot reveal it -- there is nothing in the DOM to reveal. Opening it and
+   * printing on the next frame is the difference between exporting the report
+   * and exporting the half of it that happened to be on screen.
+   */
+  const handlePrint = () => {
+    setDetailsOpen(true)
+    setPrinting(true)
+  }
+
+  useEffect(() => {
+    if (!printing) {
+      return
+    }
+    // Two frames: one for React to commit the opened section, one for layout
+    // and the chart width observers to settle before the page is captured.
+    let inner = 0
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        window.print()
+        setPrinting(false)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(outer)
+      cancelAnimationFrame(inner)
+    }
+  }, [printing])
 
   // Esc closes, and focus starts on the close button. Deliberately not a focus
   // trap: the modal covers the viewport and the cockpit behind it is inert to
@@ -168,6 +203,18 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
             >
               {view.verdict.verdict}
             </span>
+            <div className="lp-report-actions">
+              <button type="button" className="lp-report-action" onClick={handlePrint}>
+                Save as PDF
+              </button>
+              <button
+                type="button"
+                className="lp-report-action"
+                onClick={() => downloadCsv(plan)}
+              >
+                Download data
+              </button>
+            </div>
             <button
               type="button"
               ref={closeRef}
@@ -182,7 +229,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
 
         <div className="lp-report-body">
           {/* ── Decision summary ───────────────────────────────────── */}
-          <Section label="DECISION SUMMARY">
+          <Section label="Decision summary">
             <ul className="lp-report-reasons">
               {view.verdict.reasons.map((reason) => (
                 <li key={reason}>
@@ -205,7 +252,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
 
           {/* ── Battery ───────────────────────────────────────────── */}
           <Section
-            label="BATTERY PROFILE"
+            label="Battery profile"
             note={
               view.recharges.length > 0
                 ? `${view.recharges.length} recharge stops (dashed green)`
@@ -235,7 +282,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
 
           {/* ── Slope + risk ───────────────────────────────────────── */}
           <div className="lp-report-row">
-            <Section label="SLOPE DISTRIBUTION" note={`Steepest step ${fmt(summary.max_slope_deg)}°`}>
+            <Section label="Slope distribution" note={`Steepest step ${fmt(summary.max_slope_deg)}°`}>
               <HBars
                 rows={view.bins.map((bin) => ({
                   label: `${bin.bin_low_deg}–${bin.bin_high_deg}°`,
@@ -253,7 +300,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
               />
             </Section>
 
-            <Section label="RISK DISTRIBUTION" note="Risk level per step">
+            <Section label="Risk distribution" note="Risk level per step">
               <StackedBar
                 segments={RISK_LEVELS.map((level) => ({
                   label: level,
@@ -267,7 +314,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
           {/* ── Thermal + shadow ───────────────────────────────────── */}
           <div className="lp-report-row">
             <Section
-              label="THERMAL ENVELOPE"
+              label="Thermal envelope"
               note={`${fmt(metrics.min_surface_temp_c, 0)}°C … ${fmt(metrics.max_surface_temp_c, 0)}°C`}
             >
               <LineArea
@@ -293,9 +340,9 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
               />
             </Section>
 
-            <Section label="SHADOW EXPOSURE" note="Continuous shadow against the rover limit">
+            <Section label="Shadow exposure" note="Continuous shadow against the rover limit">
               <LimitGauge
-                label="CONTINUOUS SHADOW"
+                label="Continuous shadow"
                 value={summary.max_continuous_shadow_h}
                 limit={summary.shadow_limit_h}
                 unit="h"
@@ -316,12 +363,12 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
 
           {/* ── Enerji ──────────────────────────────────────────────── */}
           <Section
-            label="ENERGY BREAKDOWN"
+            label="Energy breakdown"
             note="Drive energy from the simulation; payload and heater from the operator setting"
           >
             <Donut
               centerValue={`${fmt(energyTotal, 0)}`}
-              centerLabel="TOTAL Wh"
+              centerLabel="Total Wh"
               slices={[
                 { label: 'Drive', value: view.energy.driveWh, color: 'var(--lavender)' },
                 { label: 'Payload', value: view.energy.payloadWh, color: 'var(--cyan)' },
@@ -344,7 +391,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
 
           {detailsOpen && (
             <>
-              <Section label="TERRAIN CUT" note="Elevation, painted by step risk">
+              <Section label="Terrain cut" note="Elevation, painted by step risk">
                 <SegmentedProfile
                   title="Elevation against distance"
                   points={view.elevation}
@@ -356,7 +403,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
               </Section>
 
               <div className="lp-report-row">
-                <Section label="PLANNER EVIDENCE" note="A* really did apply constraints">
+                <Section label="Planner evidence" note="A* really did apply constraints">
                   <dl className="lp-report-dl">
                     <div>
                       <dt>Nodes expanded</dt>
@@ -387,7 +434,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
                   </dl>
                 </Section>
 
-                <Section label="MILESTONES">
+                <Section label="Milestones">
                   <div className="lp-report-table-wrap">
                     <table className="lp-report-table">
                       <thead>
