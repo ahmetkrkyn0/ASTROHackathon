@@ -82,6 +82,17 @@ interface ToastItem {
   message: string
   detail?: string
   tone: 'warning' | 'error'
+  /**
+   * An optional way to carry out what the message asks for.
+   *
+   * The unreachable-cell warning told the operator to "select an adjacent
+   * terrain cell with manageable slope" while the default Surface layer shows
+   * no traversability at all -- correct advice that could not be followed on
+   * the screen that gave it. `actionLabel` is the id only; App supplies the
+   * handler, because the toast builder is a pure function and must stay one.
+   */
+  actionLabel?: string
+  actionId?: 'show-traversability'
 }
 
 const LEGEND_ITEMS = [
@@ -301,6 +312,16 @@ export default function App() {
     }
   }, [bootstrapState, selectedRoverId, weights])
 
+  /**
+   * Which endpoint was placed last, so it can be taken back.
+   *
+   * There was no undo at all: the only recovery was Clear, which wiped BOTH
+   * endpoints, so one mis-click cost the operator the step they had got
+   * right. A single slot is enough -- the task has exactly two placements and
+   * a full history would be a stack nobody has a use for.
+   */
+  const lastPlacementRef = useRef<'start' | 'goal' | null>(null)
+
   const handleCellClick = useCallback(
     (row: number, col: number) => {
       setPlanResult(null)
@@ -310,13 +331,61 @@ export default function App() {
       if (clickMode === 'start') {
         setStart([row, col])
         setClickMode('goal')
+        lastPlacementRef.current = 'start'
       } else if (clickMode === 'goal') {
         setGoal([row, col])
         setClickMode('idle')
+        lastPlacementRef.current = 'goal'
       }
     },
     [clickMode],
   )
+
+  const handleUndoPlacement = useCallback(() => {
+    const last = lastPlacementRef.current
+    if (!last) {
+      return
+    }
+
+    // Undoing an endpoint invalidates any route drawn from it, exactly as
+    // placing one does.
+    setPlanResult(null)
+    setPlanError(null)
+    setRoutePlaybackStep(null)
+
+    if (last === 'goal') {
+      setGoal(null)
+      setClickMode('goal')
+      lastPlacementRef.current = 'start'
+    } else {
+      setStart(null)
+      setGoal(null)
+      setClickMode('start')
+      lastPlacementRef.current = null
+    }
+  }, [])
+
+  // Ctrl+Z / Cmd+Z, the binding every user already has for this. Ignored
+  // while a text field has focus so it cannot steal undo from the assistant's
+  // composer or a numeric input.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'z' || !(event.ctrlKey || event.metaKey) || event.shiftKey) {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+        return
+      }
+      if (!lastPlacementRef.current) {
+        return
+      }
+      event.preventDefault()
+      handleUndoPlacement()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handleUndoPlacement])
 
   const handleRoverSelect = useCallback(
     (rover: RoverEntry) => {
@@ -502,6 +571,7 @@ export default function App() {
       setClickMode,
       planRoute: handlePlan,
       resetMission: handleReset,
+      undoPlacement: handleUndoPlacement,
       setMissionMode,
       setPlaybackStep: setRoutePlaybackStep,
       setPayloadW,
@@ -510,7 +580,7 @@ export default function App() {
       setDimension,
       toggleHud,
     }),
-    [handlePlan, handleReset, handleRoverSelect, toggleHud],
+    [handlePlan, handleReset, handleRoverSelect, handleUndoPlacement, toggleHud],
   )
 
   const missionRuntimeValue: MissionRuntime = useMemo(
@@ -775,6 +845,18 @@ export default function App() {
                   <strong className="toast-title">{toast.title}</strong>
                   <p className="toast-message">{toast.message}</p>
                   {toast.detail && <p className="toast-detail">{toast.detail}</p>}
+                  {toast.actionId === 'show-traversability' && (
+                    <button
+                      type="button"
+                      className="toast-action"
+                      onClick={() => {
+                        setViewMode('traversability')
+                        dismissToast(toast.id)
+                      }}
+                    >
+                      {toast.actionLabel}
+                    </button>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -852,8 +934,10 @@ function buildToastNotice(source: 'layer' | 'plan', detail: string): Omit<ToastI
       tone: 'warning',
       title: 'Selected point is unavailable',
       message:
-        'That cell cannot be traversed by the rover envelope. Select an adjacent terrain cell with manageable slope.',
+        'That cell cannot be traversed by the rover envelope. Switch to the traversability layer to see which cells are drivable, then pick one.',
       detail: normalizedDetail,
+      actionLabel: 'Show traversable cells',
+      actionId: 'show-traversability',
     }
   }
 

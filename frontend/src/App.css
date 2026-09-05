@@ -36,9 +36,19 @@
   --text-3: #98a1b4;
   --text-muted: #8b94a6;
   --text-muted-2: #7b8497;
-  --text-dim: #6d7789;
-  --text-dim-2: #5d677c;
-  --text-dimmest: #4c5566;
+  /* The bottom of the ramp is set by WCAG AA, not by taste. Measured against
+     --bg-card (#0c1018), the old values were --text-dim 4.22:1, --text-dim-2
+     3.35:1 and --text-dimmest 2.54:1 -- all under the 4.5:1 AA needs for text,
+     and none of them qualifies for the large-text exception because they are
+     used at 11px. --text-dim-2 alone appears 51 times, including the chart
+     axis labels.
+
+     New values, same hue and the same three-step separation, lifted until each
+     clears 4.5:1: 5.51, 5.07 and 4.63. Nothing below --text-dimmest exists,
+     and --text-dimmest is now the floor rather than a decorative grey. */
+  --text-dim: #808a9d;
+  --text-dim-2: #7b8497;
+  --text-dimmest: #737d90;
 
   /* Accents. One colour, one meaning -- section 7 of the design doc. */
   --lavender: #b3a5ff;
@@ -144,6 +154,35 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* Content for assistive technology only: present in the accessibility tree,
+   absent from the visual design. `display: none` would remove it from both. */
+.lp-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Focus visibility (WCAG 2.4.7) ────────────────────────────────────────
+   One rule for the whole application. There were five :focus declarations in
+   7,138 lines of CSS, so most of the 42 buttons fell back to the browser's
+   default ring -- which on this near-black ground is close to invisible.
+
+   :focus-visible, not :focus, so a pointer click does not paint a ring the
+   mouse user never asked for; the keyboard user gets one everywhere. The
+   offset keeps the ring off the control's own 1px border, and the components
+   that already define their own focus treatment still win on specificity. */
+:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
+  border-radius: var(--radius);
 }
 
 html,
@@ -4155,12 +4194,42 @@ select {
 
 .lp-panel-action-row {
   display: grid;
-  /* Content-sized, not a fixed 68px: the Clear button's label has to fit at
-     whatever the type scale says, and a hard column width silently clipped it
-     when the scale moved. */
-  grid-template-columns: auto minmax(0, 1fr);
+  /* Two recovery controls on one row, the primary action on its own below.
+     Three side by side did not fit a 250px rail -- "Generate Route" was
+     clipped by "Clear" -- and the split is the better hierarchy anyway: Undo
+     and Clear undo things, Generate Route is the task. */
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-top: 14px;
+}
+
+/* Panel hints: the reason a control is unavailable, and the warning that the
+   drawn route no longer matches the sliders. Both were previously carried by
+   a `title` attribute or by nothing at all. */
+.lp-panel-plan-row {
+  margin-top: 8px;
+}
+
+.lp-panel-plan-row .lp-panel-plan-btn {
+  width: 100%;
+}
+
+.lp-panel-hint {
+  margin: 8px 0 0;
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.lp-panel-hint.is-stale {
+  color: var(--risk-med);
+}
+
+.lp-profile-desc {
+  margin: 8px 0 0;
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 
 .lp-panel-clear-btn {

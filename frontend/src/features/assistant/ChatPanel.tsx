@@ -575,7 +575,15 @@ export default function ChatPanel({
       <header className="chat-header">
         <div className="chat-identity">
           <p className="panel-kicker">{identity.kicker}</p>
-          <h2 className="panel-title">{identity.title}</h2>
+          <h2 className="panel-title">
+            {identity.title}
+            {/* The rest of the cockpit is English; this panel is not. Saying so
+                on the panel is the interim measure -- see features/assistant/
+                index.tsx for why the translation is its own work item. */}
+            <span className="chat-lang-tag" title="This assistant answers in Turkish">
+              TR
+            </span>
+          </h2>
         </div>
         <div className="chat-header-actions">
           <span className="chat-readonly" title="Asistan görevi okur; rotayı değiştirmez">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import type { PlanWeights } from '../../api'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
 import type { ProfileConstraints } from '../../net/types'
@@ -37,6 +37,7 @@ export const MissionSetupPanel: React.FC = () => {
     setClickMode: onSetClickMode,
     planRoute: onPlanRoute,
     resetMission: onReset,
+    undoPlacement: onUndoPlacement,
   } = useMissionActions()
   const hasRoute = Boolean(planResult)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -49,6 +50,46 @@ export const MissionSetupPanel: React.FC = () => {
       [key]: val,
     })
   }
+
+  /**
+   * The weights the route on screen was actually solved with.
+   *
+   * planRoute reads the current weights, so the moment a new planResult
+   * arrives those weights are by definition the ones that produced it.
+   * Snapshotting them here is what lets the panel tell the operator that the
+   * sliders and the drawn route no longer agree -- before this, moving a
+   * slider changed nothing visible and nothing said so, so the effect of the
+   * change could not be synthesised from the screen.
+   */
+  const plannedWeightsRef = useRef<PlanWeights | null>(null)
+  useEffect(() => {
+    if (planResult) {
+      plannedWeightsRef.current = weights
+    } else {
+      plannedWeightsRef.current = null
+    }
+    // Deliberately keyed on the response identity alone: adding `weights`
+    // would re-snapshot on every slider move and the comparison below could
+    // never be true.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planResult])
+
+  const routeIsStale =
+    hasRoute &&
+    plannedWeightsRef.current !== null &&
+    (Object.keys(weights) as Array<keyof PlanWeights>).some(
+      (key) => weights[key] !== plannedWeightsRef.current?.[key],
+    )
+
+  // F3: the reason the plan button is unavailable, as text rather than as a
+  // `title`. A disabled button is not focusable and its tooltip is not
+  // announced, so the hint reached only the user who could already see the
+  // map and hover it.
+  const planBlockedReason = !start
+    ? 'Select a Start point on the terrain first.'
+    : !goal
+      ? 'Select a Goal point on the terrain to enable routing.'
+      : null
 
   return (
     <div className="lp-panel-content">
@@ -186,6 +227,19 @@ export const MissionSetupPanel: React.FC = () => {
 
         {/* Action Controls directly in the Left Dashboard */}
         <div className="lp-panel-action-row">
+          {/* Undo sits beside Clear rather than replacing it: they answer two
+              different questions. Ctrl+Z does the same thing, but a shortcut
+              nobody can see is not a recovery path for the operator who has
+              just made their first mistake. */}
+          <button
+            type="button"
+            className="lp-panel-clear-btn"
+            onClick={onUndoPlacement}
+            disabled={isSolving || (!start && !goal)}
+            title="Undo the last point placed (Ctrl+Z)"
+          >
+            Undo
+          </button>
           <button
             type="button"
             className="lp-panel-clear-btn"
@@ -195,16 +249,31 @@ export const MissionSetupPanel: React.FC = () => {
           >
             Clear
           </button>
+        </div>
+
+        <div className="lp-panel-plan-row">
           <button
             type="button"
             className="lp-panel-plan-btn"
             onClick={onPlanRoute}
             disabled={!start || !goal || isSolving}
-            title={!start || !goal ? 'Select both Start and Goal on the terrain map' : 'Generate optimal rover route'}
           >
-            {isSolving ? 'Computing Route...' : 'Generate Route'}
+            {isSolving
+              ? 'Computing Route...'
+              : routeIsStale
+                ? 'Re-plan with new weights'
+                : 'Generate Route'}
           </button>
         </div>
+
+        {planBlockedReason && <p className="lp-panel-hint">{planBlockedReason}</p>}
+
+        {routeIsStale && (
+          <p className="lp-panel-hint is-stale" role="status">
+            Route priorities changed. The route on the map still reflects the
+            previous weights.
+          </p>
+        )}
       </section>
 
       {/* ── 3. ROUTE PRIORITIES SLIDERS ── */}
@@ -244,6 +313,14 @@ export const MissionSetupPanel: React.FC = () => {
                 )
               })}
             </div>
+
+            {/* `title` alone reached neither touch nor keyboard, so the one
+                sentence that distinguishes four profiles was invisible to a
+                user who had not hovered each chip in turn. The backend
+                already sends it. */}
+            {activeProfile?.description && (
+              <p className="lp-profile-desc">{activeProfile.description}</p>
+            )}
 
             {activeProfile && (
               <div className="lp-profile-constraints">

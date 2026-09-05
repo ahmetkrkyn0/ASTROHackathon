@@ -196,6 +196,14 @@ export interface MissionActions {
   planRoute: () => void
   /** Clears endpoints, route and error. Keeps the selected rover. */
   resetMission: () => void
+  /**
+   * Takes back the last endpoint placed, leaving the other one alone.
+   *
+   * Distinct from resetMission, which clears both. A single mis-click used to
+   * cost the operator the placement they had got right, because Clear was the
+   * only way back. No-op when nothing has been placed yet.
+   */
+  undoPlacement: () => void
   setMissionMode: (mode: MissionMode) => void
   /**
    * The playback cursor; null shows the route at rest.

@@ -9,6 +9,15 @@ export const RouteSolvingOverlay: React.FC = () => {
 
   return (
     <div className="lp-solving-overlay">
+      {/* The overlay was a purely visual account of a computation that runs
+          for seconds: a screen-reader user pressed Generate Route and heard
+          nothing until the result landed. One sentence, not the whole card --
+          announcing the kicker, the title, the detail and three tags would be
+          three seconds of speech for one fact. */}
+      <p className="lp-visually-hidden" role="status" aria-live="polite">
+        Computing route for {roverName}. This may take a few seconds.
+      </p>
+
       {/* Scanning laser beam effect */}
       <div className="lp-scan-sweep" />
 

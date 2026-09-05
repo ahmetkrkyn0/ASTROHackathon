@@ -75,8 +75,12 @@ export function TimeAxisPanel({
           kernels loaded the field arrives carrying the whole CSPICE error
           banner, and a toolkit dump in the dock is an environment error shown
           to an operator, which section 29 rules out. */}
+      {/* Stated as a fact, not as a warning. There is nothing the operator can
+          do about a static cube, and a caution colour that is always on and
+          never resolves is how an interface teaches that its warnings can be
+          ignored. The warning tone is reserved for what needs acting on. */}
       {manifest && !timeVarying ? (
-        <p className="lp-time-note lp-time-warn">
+        <p className="lp-time-note">
           No time series — this cube does not vary with time, so it is not
           animated.
           {shadowReason ? ` ${shadowReason}` : ''}

@@ -106,6 +106,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   // shape. Zero before the first fetch lands, and drawOverlays draws
   // nothing at zero -- there is no base map to be out of register with yet.
   const gridRows = elevationGrid?.length ?? 0
+  const gridCols = elevationGrid?.[0]?.length ?? 0
 
   const stopAnimation = useCallback(() => {
     if (animationTimerRef.current !== null) {
@@ -248,6 +249,79 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     setHoverCell(null)
   }, [])
 
+  /**
+   * Placing an endpoint from the keyboard.
+   *
+   * Until this existed the application's primary task -- put a Start and a
+   * Goal on the terrain -- could only be done with a mouse: the canvas had a
+   * click handler and nothing else, so keyboard and screen-reader users could
+   * not use LunaPath at all (WCAG 2.1.1, Level A).
+   *
+   * The cursor is `hoverCell`, deliberately the same state the pointer writes.
+   * That state already draws the crosshair on the canvas and already feeds the
+   * LAT/LON/ALT readout through onHoverCellChange, so driving it from the
+   * keyboard makes both follow the keys with no second code path to keep in
+   * register -- and no second definition of where "here" is.
+   *
+   * Shift multiplies the step because a 500-cell grid is 500 keypresses wide
+   * at one cell per press, which is a working alternative in name only.
+   */
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+      if (gridRows === 0 || gridCols === 0) {
+        return
+      }
+
+      const step = event.shiftKey ? 10 : 1
+      const delta: Record<string, [number, number]> = {
+        ArrowUp: [-step, 0],
+        ArrowDown: [step, 0],
+        ArrowLeft: [0, -step],
+        ArrowRight: [0, step],
+      }
+      const move = delta[event.key]
+
+      if (move) {
+        // The arrows scroll the page by default, which would drag the map out
+        // of view on the first keypress.
+        event.preventDefault()
+        setHoverCell((current) => {
+          const [row, col] = current ?? [Math.floor(gridRows / 2), Math.floor(gridCols / 2)]
+          return [
+            Math.min(gridRows - 1, Math.max(0, row + move[0])),
+            Math.min(gridCols - 1, Math.max(0, col + move[1])),
+          ]
+        })
+        return
+      }
+
+      if (event.key === 'Enter' || event.key === ' ') {
+        // Space scrolls too, and on a focused element it is the conventional
+        // partner to Enter for "activate".
+        event.preventDefault()
+        if (clickMode === 'idle' || !hoverCell) {
+          return
+        }
+        onCellClick(hoverCell[0], hoverCell[1])
+      }
+    },
+    [clickMode, gridCols, gridRows, hoverCell, onCellClick],
+  )
+
+  /**
+   * Focus has to land somewhere visible.
+   *
+   * Tabbing to a map whose cursor is null would show nothing at all and read
+   * as a dead control, so focus seeds the cursor at the centre of the grid --
+   * but only when the pointer has not already put it somewhere.
+   */
+  const handleFocus = useCallback(() => {
+    if (gridRows === 0 || gridCols === 0) {
+      return
+    }
+    setHoverCell((current) => current ?? [Math.floor(gridRows / 2), Math.floor(gridCols / 2)])
+  }, [gridCols, gridRows])
+
   const loading =
     viewMode === 'surface' ? !elevationGrid :
     viewMode === 'thermal' ? !thermalGrid :
@@ -275,6 +349,20 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
         onClick={handleClick}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        /* role="application" tells a screen reader to stop intercepting the
+           arrow keys and hand them to this element, which is what makes the
+           cursor movable at all. It is the right role precisely because the
+           arrows here mean "move the cursor over the terrain" and not "move
+           to the next item". */
+        tabIndex={0}
+        role="application"
+        aria-label={
+          clickMode === 'idle'
+            ? 'Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time.'
+            : `Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time. Press Enter to place ${clickMode === 'start' ? 'Start' : 'Goal'} at the cursor.`
+        }
         style={{
           width: '100%',
           height: '100%',
@@ -285,6 +373,10 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
           imageRendering: viewMode === 'traversability' || viewMode === 'cost' ? 'pixelated' : 'auto',
         }}
       />
+
+      <p className="lp-visually-hidden" aria-live="polite">
+        {hoverCell ? `Cursor at row ${hoverCell[0]}, column ${hoverCell[1]}.` : ''}
+      </p>
 
       {loading && (
         <div

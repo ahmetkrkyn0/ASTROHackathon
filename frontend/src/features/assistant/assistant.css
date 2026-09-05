@@ -884,3 +884,20 @@
   font-weight: 500;
   color: var(--text-2);
 }
+
+/* Declares the panel's language, because it differs from the rest of the
+   application. A badge rather than a sentence: it has to survive beside a
+   title in a 360px panel. */
+.chat-lang-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 5px;
+  vertical-align: middle;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  letter-spacing: var(--track-caps);
+  color: var(--text-muted);
+}

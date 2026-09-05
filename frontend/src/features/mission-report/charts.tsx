@@ -33,7 +33,10 @@ const TICK_SIZE = 11
 const NOTE_SIZE = 11
 
 const AXIS_LINE = '#161b27'
-const AXIS_TEXT = '#5d677c'
+/** --text-dim-2. Written out because SVG's fill takes no CSS variable here;
+    it must be changed together with the token, and it clears WCAG AA (5.07:1
+    on --bg-card) at the 11px these labels are drawn at. */
+const AXIS_TEXT = '#7b8497'
 
 /**
  * How much ink an area fill is allowed.

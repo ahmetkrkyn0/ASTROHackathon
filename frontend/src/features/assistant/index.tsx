@@ -34,6 +34,16 @@ export function Assistant() {
   // with mode: shell.css keys the toast stack off `.chat-window.is-open`, and
   // the launcher's aria-controls points at the id. Only the accessible name
   // follows the mode.
+  // The cockpit is English and the assistant is Turkish, which is a real
+  // inconsistency (HCI review F8). It is not fixed by swapping strings: the
+  // grounding layer that blocks fabricated numbers matches Turkish morphology
+  // (backend/app/ai_grounding.py -- suffix patterns, Turkish numeral words,
+  // `yüzde`), and 182 test lines pin that behaviour. Translating the surface
+  // alone would leave that guard matching a language the model no longer
+  // speaks, and it would fail open and silently.
+  //
+  // Until the AI layer is converted as one piece, the language is at least
+  // declared rather than sprung on the operator.
   const label = mode === 'planning' ? 'Görev Rehberi' : 'Analiz Asistanı'
 
   return (
@@ -42,8 +52,8 @@ export function Assistant() {
         type="button"
         ref={launcherRef}
         className={`chat-launcher ${isOpen ? 'is-open' : ''} ${unread ? 'has-unread' : ''}`}
-        aria-label={`${label} Aç`}
-        title={`${label} Aç`}
+        aria-label={`Open ${label} (Turkish-language assistant)`}
+        title={`Open ${label} — this assistant answers in Turkish`}
         aria-expanded={isOpen}
         aria-controls={CHAT_WINDOW_ID}
         onClick={toggle}

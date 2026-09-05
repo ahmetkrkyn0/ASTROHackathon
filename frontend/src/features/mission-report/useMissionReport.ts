@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PlanResponse } from '../../api'
 
+/**
+ * Whether the report has already introduced itself in this session.
+ *
+ * Module scope, not component state: the point is to survive the feature
+ * unmounting and remounting as the operator moves between plan and analyze.
+ */
+let hasAutoOpenedOnce = false
+
 export interface MissionReportState {
   isOpen: boolean
   open: () => void
@@ -54,7 +62,14 @@ export function useMissionReport(
       prev < last &&
       playbackStep === last
     ) {
-      setIsOpen(true)
+      // Only the FIRST arrival takes the screen. After that the operator knows
+      // the report exists and the launcher is enough: someone replaying a
+      // specific segment for the fifth time is being interrupted, not helped,
+      // by a modal that covers the map they are watching.
+      if (!hasAutoOpenedOnce) {
+        hasAutoOpenedOnce = true
+        setIsOpen(true)
+      }
     }
   }, [plan, playbackStep])
 
