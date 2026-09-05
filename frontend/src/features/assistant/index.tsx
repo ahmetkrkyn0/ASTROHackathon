@@ -48,6 +48,12 @@ export function Assistant() {
 
   return (
     <>
+      {/* Hidden while the window is open. The launcher is how you reach the
+          assistant, and once it is on screen the window has its own minimize
+          control -- leaving the button there kept a lit toggle underneath a
+          panel it could no longer be seen to control, and it crowded the
+          Mission Report button beside it. Kept mounted rather than unmounted
+          so close() can still return focus to it. */}
       <button
         type="button"
         ref={launcherRef}
@@ -58,16 +64,35 @@ export function Assistant() {
         aria-controls={CHAT_WINDOW_ID}
         onClick={toggle}
       >
+        {/* A rover antenna sending a beam, not a speech bubble. The bubble is
+            the generic web-chat mark and said nothing about what this is; the
+            mission speaks to a vehicle on a surface, so the icon is a dish on
+            a mast over a horizon, with the transmission arcs rising off it. */}
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          {/* Horizon */}
           <path
-            d="M4.5 5.5h15v10h-8.5L6.5 19v-3.5h-2z"
+            d="M3 19.5h18"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"
-            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          {/* Mast and dish */}
+          <path
+            d="M9 19.5l2.4-7.2"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
           />
           <path
-            d="M9 12.5v-2.5M12 12.5v-4.5M15 12.5v-1.5"
+            d="M8.4 11.2a3.4 3.4 0 0 1 6.1 1.9l-6.1-1.9z"
+            fill="currentColor"
+            stroke="none"
+          />
+          {/* Two transmission arcs */}
+          <path
+            d="M15.4 8.6a4.2 4.2 0 0 1 1.5 3.2M17.6 6.1a7.2 7.2 0 0 1 2.6 5.5"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"

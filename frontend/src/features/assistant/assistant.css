@@ -48,11 +48,21 @@
   outline-offset: 2px;
 }
 
-/* Open is a state of the same control, not a different one. */
+/* Open hides the launcher. Once the window is on screen it carries its own
+   minimize control, and the button was a lit toggle sitting under a panel it
+   could no longer be seen to operate -- while taking the space beside Mission
+   Report that button needs.
+
+   Hidden with opacity and pointer-events rather than `display: none` so the
+   element stays in the layout and keeps its ref: close() returns focus to the
+   launcher, and focusing a display:none element is a no-op that would drop
+   focus to <body>. aria-hidden is not set for the same reason -- a focused
+   element must never be inside an aria-hidden subtree. */
 .chat-launcher.is-open {
-  border-color: rgba(186, 175, 245, 0.55);
-  background: linear-gradient(180deg, rgba(50, 43, 87, 0.6), rgba(28, 28, 46, 0.95));
-  color: rgba(199, 205, 219, 0.96);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.9);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
 /* One dot, no count: an answer arrived while the window was hidden. */
