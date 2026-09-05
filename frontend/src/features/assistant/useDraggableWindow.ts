@@ -53,9 +53,35 @@ export function clampOffset(
   }
 }
 
+/**
+ * How far the pointer must travel before a press becomes a drag.
+ *
+ * Only matters for a handle that is ALSO a button -- the launcher opens the
+ * assistant on click and moves on drag, and without a threshold every click
+ * would end with a one-pixel move and `isDragging` true, which suppresses the
+ * click. 4px is under what a deliberate drag covers and over what a hand
+ * shake does.
+ */
+const DRAG_THRESHOLD = 4
+
+export interface DraggableOptions {
+  /**
+   * Selector for the element that actually moves, when it is not the handle
+   * itself. The chat window is dragged by its header; the launcher is its own
+   * handle and passes nothing.
+   */
+  moves?: string
+}
+
 export interface DraggableWindow {
   offset: WindowOffset
   isDragging: boolean
+  /**
+   * True from the moment a press passes DRAG_THRESHOLD until the next click
+   * has been suppressed. A handle that is also a button reads this to know
+   * the release ends a drag rather than a click.
+   */
+  didDragRef: React.MutableRefObject<boolean>
   /** Spread onto the drag handle. */
   handleProps: {
     onPointerDown: (event: React.PointerEvent) => void
@@ -75,7 +101,11 @@ export interface DraggableWindow {
  * except by knowing the reset gesture exists, and a control that can be lost
  * is a control that will be.
  */
-export function useDraggableWindow(enabled: boolean): DraggableWindow {
+export function useDraggableWindow(
+  enabled: boolean,
+  options: DraggableOptions = {},
+): DraggableWindow {
+  const { moves } = options
   const [offset, setOffset] = useState<WindowOffset>(ZERO)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -83,6 +113,7 @@ export function useDraggableWindow(enabled: boolean): DraggableWindow {
   // pointermove and none of them should cause a render on its own.
   const originRef = useRef({ pointerX: 0, pointerY: 0, offsetX: 0, offsetY: 0 })
   const elementRef = useRef<HTMLElement | null>(null)
+  const didDragRef = useRef(false)
 
   const clamp = useCallback(
     (next: WindowOffset): WindowOffset => {
@@ -113,8 +144,11 @@ export function useDraggableWindow(enabled: boolean): DraggableWindow {
       }
 
       const handle = event.currentTarget as HTMLElement
-      elementRef.current = handle.closest('.chat-window')
+      // The handle moves itself unless the caller named an ancestor.
+      elementRef.current = moves ? handle.closest(moves) : handle
       if (!elementRef.current) return
+
+      didDragRef.current = false
 
       originRef.current = {
         pointerX: event.clientX,
@@ -125,7 +159,7 @@ export function useDraggableWindow(enabled: boolean): DraggableWindow {
       handle.setPointerCapture(event.pointerId)
       setIsDragging(true)
     },
-    [enabled, offset.x, offset.y],
+    [enabled, moves, offset.x, offset.y],
   )
 
   // Move and release are bound to the window rather than to the handle so a
@@ -136,12 +170,14 @@ export function useDraggableWindow(enabled: boolean): DraggableWindow {
 
     const onMove = (event: PointerEvent) => {
       const origin = originRef.current
-      setOffset(
-        clamp({
-          x: origin.offsetX + (event.clientX - origin.pointerX),
-          y: origin.offsetY + (event.clientY - origin.pointerY),
-        }),
-      )
+      const dx = event.clientX - origin.pointerX
+      const dy = event.clientY - origin.pointerY
+
+      // Below the threshold this is still a click that has not been released.
+      if (!didDragRef.current && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+      didDragRef.current = true
+
+      setOffset(clamp({ x: origin.offsetX + dx, y: origin.offsetY + dy }))
     }
     const onUp = () => setIsDragging(false)
 
@@ -169,5 +205,5 @@ export function useDraggableWindow(enabled: boolean): DraggableWindow {
 
   const reset = useCallback(() => setOffset(ZERO), [])
 
-  return { offset, isDragging, handleProps: { onPointerDown }, reset }
+  return { offset, isDragging, didDragRef, handleProps: { onPointerDown }, reset }
 }

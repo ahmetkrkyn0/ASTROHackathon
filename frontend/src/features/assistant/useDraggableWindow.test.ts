@@ -58,4 +58,39 @@ describe('clampOffset', () => {
     // Zero must survive a clamp, or "Yerine al" could not put the window back.
     expect(clampOffset({ x: 0, y: 0 }, BASE, VIEW)).toEqual({ x: 0, y: 0 })
   })
+
+  describe('the launcher, which is smaller than KEEP_VISIBLE', () => {
+    // 46px square at right:16 / bottom:56 on the same 1440x900 screen. The
+    // element is narrower than the margin the clamp keeps on screen, which is
+    // the case that would break a clamp written as "keep KEEP_VISIBLE px of
+    // the element inside" rather than in terms of its edges.
+    const LAUNCHER = { left: 1378, top: 798, width: 46 }
+
+    it('never lets the button leave the viewport on any edge', () => {
+      const corners = [
+        { x: -5000, y: 0 },
+        { x: 5000, y: 0 },
+        { x: 0, y: -5000 },
+        { x: 0, y: 5000 },
+      ]
+
+      for (const corner of corners) {
+        const { x, y } = clampOffset(corner, LAUNCHER, VIEW)
+        const left = LAUNCHER.left + x
+        const top = LAUNCHER.top + y
+
+        expect(left + LAUNCHER.width).toBeGreaterThanOrEqual(0)
+        expect(left).toBeLessThanOrEqual(VIEW.width)
+        expect(top).toBeGreaterThanOrEqual(0)
+        expect(top).toBeLessThanOrEqual(VIEW.height)
+      }
+    })
+
+    it('keeps the whole button on screen at the left edge', () => {
+      // KEEP_VISIBLE (64) exceeds the button's width (46), so the left clamp
+      // lands it fully inside rather than half off.
+      const { x } = clampOffset({ x: -5000, y: 0 }, LAUNCHER, VIEW)
+      expect(LAUNCHER.left + x).toBeGreaterThanOrEqual(0)
+    })
+  })
 })

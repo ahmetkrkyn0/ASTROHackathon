@@ -32,7 +32,19 @@ export function Assistant() {
   } = useAssistant(mission)
 
   // Only draggable while it is open; a hidden window has nothing to move.
-  const { offset, isDragging, handleProps, reset } = useDraggableWindow(isOpen)
+  const { offset, isDragging, handleProps, reset } = useDraggableWindow(isOpen, {
+    moves: '.chat-window',
+  })
+
+  /**
+   * The launcher moves too, and is its own handle.
+   *
+   * Enabled while it is CLOSED, which is the only time it is on screen. It is
+   * a button as well as a handle, so the hook's threshold decides which a
+   * press was: under 4px of travel the click goes through and opens the
+   * assistant, past it the button moves and the click is suppressed below.
+   */
+  const launcherDrag = useDraggableWindow(!isOpen)
 
   // The window id and its class names are published contracts and do NOT vary
   // with mode: shell.css keys the toast stack off `.chat-window.is-open`, and
@@ -61,12 +73,31 @@ export function Assistant() {
       <button
         type="button"
         ref={launcherRef}
-        className={`chat-launcher ${isOpen ? 'is-open' : ''} ${unread ? 'has-unread' : ''}`}
+        className={`chat-launcher ${isOpen ? 'is-open' : ''} ${unread ? 'has-unread' : ''} ${
+          launcherDrag.isDragging ? 'is-dragging' : ''
+        }`}
         aria-label={`Open ${label} (Turkish-language assistant)`}
-        title={`Open ${label} — this assistant answers in Turkish`}
+        title={`Open ${label} — this assistant answers in Turkish. Drag to move it.`}
         aria-expanded={isOpen}
         aria-controls={CHAT_WINDOW_ID}
-        onClick={toggle}
+        style={
+          launcherDrag.offset.x || launcherDrag.offset.y
+            ? {
+                transform: `translate(${launcherDrag.offset.x}px, ${launcherDrag.offset.y}px)`,
+              }
+            : undefined
+        }
+        {...launcherDrag.handleProps}
+        onClick={() => {
+          // A drag ends with a click event the browser fires anyway. Opening
+          // the assistant because the operator moved its button would be a
+          // second thing happening for one gesture.
+          if (launcherDrag.didDragRef.current) {
+            launcherDrag.didDragRef.current = false
+            return
+          }
+          toggle()
+        }}
       >
         {/* The mark: a route solved around an obstacle, start to goal.
 

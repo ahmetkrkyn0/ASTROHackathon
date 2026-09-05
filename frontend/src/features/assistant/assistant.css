@@ -27,9 +27,20 @@
   background: rgba(14, 19, 32, 0.94);
   box-shadow: var(--shadow-pop);
   color: rgba(199, 205, 219, 0.86);
-  cursor: pointer;
+  cursor: grab;
+  /* The launcher is its own drag handle. touch-action is what lets a touch
+     drag reach the handler at all -- without it the browser claims the
+     gesture for scrolling and pointermove stops firing. */
+  touch-action: none;
   transition: border-color 0.16s ease, color 0.16s ease, transform 0.16s ease,
     box-shadow 0.16s ease;
+}
+
+.chat-launcher.is-dragging {
+  cursor: grabbing;
+  /* No easing on the transform while it follows the pointer, or the button
+     lags behind the cursor and reads as heavy. */
+  transition: none;
 }
 
 .chat-launcher svg {
@@ -37,10 +48,14 @@
   height: 22px;
 }
 
+/* No lift on hover any more: the drag offset is a transform on this element,
+   and a hover rule setting transform would throw the button back to its
+   resting place the moment the pointer was over it. Colour carries the hover
+   instead, which is what the rest of the cockpit does. */
 .chat-launcher:hover {
   border-color: var(--accent-lavender);
-  transform: translateY(-2px);
   color: var(--text);
+  background: rgba(28, 34, 54, 0.96);
 }
 
 .chat-launcher:focus-visible {
@@ -61,8 +76,12 @@
 .chat-launcher.is-open {
   opacity: 0;
   pointer-events: none;
-  transform: scale(0.9);
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  /* No transform here. Once the launcher has been dragged it carries an inline
+     translate, which wins over this rule -- so a scale written here would be
+     silently dropped for any operator who has moved the button, and applied
+     for everyone else. One behaviour for both is worth more than a shrink
+     nobody is looking at: the button is on its way to invisible either way. */
+  transition: opacity 0.15s ease;
 }
 
 /* One dot, no count: an answer arrived while the window was hidden. */
