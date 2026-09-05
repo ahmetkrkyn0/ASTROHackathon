@@ -197,7 +197,17 @@ def _mask_displays(text: str, displays: Sequence[str]) -> str:
         # narrower guard, not a looser check -- the digit lookahead, the
         # decimal-point lookahead and the leading guard are unchanged, and the
         # tolerance is still zero.
-        trailing = r"(?![\d,])(?!\.\d)" if display[-1].isdigit() else r"(?!\d)(?!\.\d)"
+        #
+        # For a digit-terminated display that guard is `(?!,\d)`, not `(?!,)`.
+        # Blocking every following comma was the same punctuation bug one step
+        # further in: a summary that enumerates counts writes "Kritik adım
+        # sayısı 0, yüksek riskli adım sayısı 0", the first 0 is followed by a
+        # comma, and it went unmasked while the second one -- ending the
+        # sentence -- was masked. One registered value survived out of two
+        # identical ones, and the answer was blocked. A comma only continues a
+        # number when a digit follows it, so that is the only case still
+        # guarded; "495,2" is protected exactly as before.
+        trailing = r"(?!\d)(?!,\d)(?!\.\d)" if display[-1].isdigit() else r"(?!\d)(?!\.\d)"
         pattern = re.compile(
             r"(?<![\d,])(?<!\d\.)" + re.escape(display) + _SUFFIX + trailing
         )
@@ -313,6 +323,32 @@ _MASKED = re.escape(_SENTINEL)
 
 # Patterns run over the folded, MASKED text, so a registered value or a
 # whitelisted name can never trip one lexically.
+#
+# A denial of a forbidden claim is what the honesty rules ASK for, so it must
+# never be the thing that gets blocked. Turkish marks negation
+# morphologically -- the -ma/-me suffix in front of the tense marker -- and
+# enumerating verbs missed the commonest form of all: a yes/no question
+# ("otonom navigasyon yapıyor mu?") is answered with the progressive negative
+# ("yapmıyor"), while the exemptions listed only the aorist ("yapmaz"). That
+# blocked 3 of 8 live calls to exactly that question.
+#
+# Matching the morpheme rather than a verb list is what makes it hold for the
+# next denial nobody thought to enumerate. Every entry still requires a real
+# negation, and "yok" is anchored so it cannot fire on "yokuş" (uphill),
+# which appears in ordinary route prose.
+_DENIAL = (
+    r"\b\w*m[ıiuü]yor\w*\b"                  # yapmıyor, sunmuyor, desteklemiyor
+    r"|\b\w*m[ae]z\b"                        # yapmaz, içermez, hedeflemez
+    r"|\b\w*m[ae]d[ıi]\w*\b"                 # yapmadı, edilmedi
+    r"|\b\w*m[ae]y[ae]cak\w*\b"              # yapmayacak, olmayacak
+    r"|\bdeğil\w*"
+    r"|\byok\b|\bhayır\b"
+    r"|\bkapsam\s*dışı"
+    r"|\btasarlanmamış\w*"
+    r"|\b(?:does|do|is|are)\s+not\b|\bnot\s+an?\b"
+)
+
+
 FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
     ClaimRule(
         code="N-6",
@@ -322,10 +358,9 @@ FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
             r"|\b(gerçek\s*zamanlı|anlık|yerel)\s+engel\s*kaçın"
             r"|\bautonomous\s+(navigation|driving)\b"
         ),
-        exempt=_p(
-            r"\b(değildir|değil|yapmaz|sunmaz|içermez|kapsam\s*dışı|tasarlanmamış)"
-            r"|\bnot\s+an?\b"
-        ),
+        # Every entry the old list held is subsumed by _DENIAL, which also
+        # covers the progressive negative the old list missed.
+        exempt=_p(_DENIAL),
     ),
     ClaimRule(
         code="N-7",
@@ -396,9 +431,11 @@ FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
             r"|\bworld'?s\s+first\b|\bstate[- ]of[- ]the[- ]art\b"
         ),
         exempt=_p(
+            # The noun exemptions are specific to this rule; the denial
+            # vocabulary is shared.
             r"\bilk\s+(adım|kesit|sürüm|bakışta|olarak|etap)"
             r"|\btek\s+(değişken\w*|başına|yön\w*|kaynak)"
-            r"|\bdeğil\w*"
+            r"|" + _DENIAL
         ),
     ),
     ClaimRule(
@@ -410,7 +447,7 @@ FORBIDDEN_CLAIMS: tuple[ClaimRule, ...] = (
             r"|\brover\s+üzerinde\s+çalış"
             r"|\bflight[- ]software\b|\bspace[- ]qualified\b"
         ),
-        exempt=_p(r"\b(değildir|değil|tasarlanmamış\w*|hedeflemez)\b"),
+        exempt=_p(_DENIAL),
     ),
     ClaimRule(
         code="N-11",

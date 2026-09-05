@@ -306,6 +306,50 @@ def test_legitimate_engineering_prose_is_not_blocked(draft):
     assert verdict.ok, f"{draft} -> {[v.code for v in verdict.violations]}"
 
 
+@pytest.mark.parametrize(
+    "draft",
+    [
+        # The progressive negative, which is how Turkish answers a yes/no
+        # question -- "otonom navigasyon yapıyor mu?" -> "yapmıyor". The
+        # exemptions used to list only the aorist ("yapmaz"), so the honest
+        # answer to the one question a user is most likely to ask about scope
+        # was blocked: 3 of 8 live calls before the exemption matched the
+        # negation morpheme instead of a list of verbs.
+        "LunaPath otonom navigasyon ve engel kaçınma yapmıyor.",
+        "Sistem otonom navigasyonu desteklemiyor.",
+        "Kapsamda otonom sürüş içermiyor.",
+        "Otonom navigasyon yapmayacak.",
+        "Hayır, gerçek zamanlı engel kaçınma yok.",
+        "Bu yazılım rover üzerinde çalışmıyor.",
+        "Bu, alanında en iyi çözüm olduğunu iddia etmiyor.",
+    ],
+)
+def test_a_denial_of_a_forbidden_claim_is_never_the_thing_that_is_blocked(draft):
+    """The honesty rules ask for these sentences; K5 must not refuse them."""
+    verdict = validate_draft(draft, _envelope(), EMPTY)
+    assert verdict.ok, f"{draft} -> {diagnostic(verdict)}"
+
+
+@pytest.mark.parametrize(
+    "draft",
+    [
+        # The exemption widened the denial vocabulary, not the rule's reach.
+        "LunaPath otonom navigasyon yapar ve engel kaçınma sağlar.",
+        "Gerçek zamanlı engel kaçınma sağlıyoruz.",
+        "The system performs autonomous navigation.",
+        "Bu yazılım rover üzerinde çalışır.",
+        "Sertifikalı uçuş yazılımıdır.",
+        "Bu alanda tek çözümdür.",
+        # No negation anywhere in the clause, so nothing exempts it.
+        "Otonom sürüş modülü hazır.",
+    ],
+)
+def test_the_denial_exemption_is_not_a_universal_escape_hatch(draft):
+    verdict = validate_draft(draft, _envelope(), EMPTY)
+    assert not verdict.ok, draft
+    assert any(v.code.startswith("N-") for v in verdict.violations), draft
+
+
 def test_the_safety_rule_keys_on_the_adjective_not_the_compound_noun():
     # guvenli(?!k) is the whole trick: guvenlik marji is exempt for free.
     assert validate_draft("Güvenlik faktörü 2 kat.", _envelope(

@@ -93,7 +93,12 @@ def format_display(value: float, unit: str, precision: Optional[int] = None) -> 
 # Wh/kWh are deliberately absent: _mask_aliases is case-insensitive, and case is
 # exactly what keeps "Wh" from being loosened into "wh".
 _UNIT_ALIAS_FORMS: dict[str, tuple[str, ...]] = {
-    "%": ("%{n}",),
+    # Both orders. Turkish writes "%67,9" and the canonical display is "67,9 %",
+    # but a model also writes the suffix form with no space -- and "67,9%"
+    # matched neither, so a correct answer was blocked over a space. The alias
+    # embeds the canonical digits verbatim and swallows the percent sign with
+    # them, so it authorises no bare digit and leaves no % for the leftover scan.
+    "%": ("%{n}", "{n}%"),
     "deg": ("{n}°", "{n} derece"),
     "degC": ("{n} °C", "{n}°C", "{n} derece"),
     "h": ("{n} saat",),

@@ -257,6 +257,57 @@ def test_a_registered_display_followed_by_a_comma_is_still_registered():
     assert verdict.ok, diagnostic(verdict)
 
 
+def test_a_registered_count_followed_by_a_comma_is_still_registered():
+    """The same punctuation bug one step further in, found in a live answer.
+
+    A summary that enumerates counts writes "Kritik adım sayısı 0, yüksek
+    riskli adım sayısı 0". Both zeros are the same registered display, but the
+    first is followed by a comma and used to go unmasked while the second one --
+    ending the sentence -- was masked. One of two identical registered values
+    survived, and a faithful answer was blocked. Measured at 4 blocks in 20 live
+    calls before the guard was narrowed to `(?!,\\d)`.
+    """
+    envelope = AnalysisEnvelope(
+        capability="C-SUMMARY",
+        ok=True,
+        numeric_registry=[
+            make_metric(
+                key="critical_steps_count",
+                label="Kritik adım sayısı",
+                value=0,
+                unit=DIMENSIONLESS,
+                provenance=PROV,
+                precision=0,
+            ),
+            make_metric(
+                key="high_or_above_steps_count",
+                label="Yüksek riskli adım sayısı",
+                value=0,
+                unit=DIMENSIONLESS,
+                provenance=PROV,
+                precision=0,
+            ),
+        ],
+    )
+    verdict = validate_draft(
+        "Kritik adım sayısı 0, yüksek riskli adım sayısı 0.",
+        envelope,
+        _tokens(envelope),
+    )
+    assert verdict.ok, diagnostic(verdict)
+
+
+def test_the_percent_suffix_without_a_space_is_a_registered_rendering():
+    """"67,9%" matched neither the canonical "67,9 %" nor the "%67,9" alias, so
+    a correct answer was refused over a space."""
+    verdict = validate_draft(
+        "Minimum batarya 34,2% seviyesine iniyor.",
+        _summary_env(),
+        _tokens(_summary_env()),
+    )
+    assert verdict.ok, diagnostic(verdict)
+
+
 def test_a_dimensionless_display_still_guards_its_comma():
     """495 really can be the head of 495,2, so that guard stays."""
     envelope = AnalysisEnvelope(
