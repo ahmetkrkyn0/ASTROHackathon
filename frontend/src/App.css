@@ -4359,155 +4359,6 @@ select {
   cursor: not-allowed;
 }
 
-/* ── Slide-Over Fleet Drawer (Left Docked) ── */
-.lp-slide-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(5, 7, 13, 0.6);
-  z-index: 150;
-  display: flex;
-  justify-content: flex-start;
-  align-items: stretch;
-}
-
-.lp-slide-drawer {
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border-line);
-  width: 480px;
-  max-width: 90vw;
-  height: 100vh;
-  padding: 24px;
-  box-shadow: var(--shadow-float);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  animation: lpSlideInLeft 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.lp-drawer-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 6px;
-}
-
-.lp-drawer-title {
-  margin: 2px 0 0;
-  font-size: var(--fs-display);
-  font-weight: 700;
-  color: var(--text);
-}
-
-.lp-drawer-close {
-  background: transparent;
-  border: 1px solid rgba(199, 205, 219, 0.1);
-  color: var(--text-muted);
-  font-size: var(--fs-strong);
-  cursor: pointer;
-  padding: 6px 10px;
-  border-radius: var(--radius);
-  transition: all 0.15s ease;
-}
-
-.lp-drawer-close:hover {
-  background: rgba(199, 205, 219, 0.08);
-  color: var(--text);
-}
-
-.lp-drawer-subtitle {
-  font-size: var(--fs-body);
-  line-height: 1.5;
-  color: var(--text-muted);
-  margin: 0 0 16px;
-}
-
-.lp-drawer-rover-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-bottom: 30px;
-}
-
-.lp-drawer-rover-card {
-  background: rgba(13, 18, 32, 0.85);
-  border: 1px solid var(--border-line);
-  border-radius: var(--radius);
-  padding: 16px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.lp-drawer-rover-card:hover {
-  border-color: rgba(186, 175, 245, 0.35);
-  background: rgba(17, 24, 42, 0.95);
-}
-
-.lp-drawer-rover-card.is-selected {
-  border-color: var(--lavender);
-  background: rgba(186, 175, 245, 0.06);
-}
-
-.lp-drawer-card-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.lp-drawer-card-badges {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.lp-highlight-badge {
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  color: var(--cyan-text);
-  background: rgba(14, 165, 233, 0.12);
-  padding: 2px 6px;
-  border-radius: var(--radius);
-}
-
-.lp-drawer-card-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(199, 205, 219, 0.06);
-}
-
-.lp-default-weights-note {
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  color: var(--text-dim-2);
-}
-
-.lp-assign-btn {
-  background: rgba(186, 175, 245, 0.14);
-  border: 1px solid rgba(186, 175, 245, 0.3);
-  color: var(--text);
-  font-family: var(--font-display);
-  font-size: var(--fs-body);
-  font-weight: 600;
-  padding: 7px 12px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  align-self: flex-start;
-  transition: all 0.15s ease;
-}
-
-.lp-assign-btn:hover {
-  background: rgba(186, 175, 245, 0.25);
-}
-
-.lp-assign-btn.is-assigned {
-  background: rgba(95, 227, 176, 0.15);
-  border-color: rgba(95, 227, 176, 0.4);
-  color: var(--mint);
-}
-
 /* ── Minimizable Telemetry HUD Overlay on Canvas ── */
 .lp-hud-card {
   min-width: 220px;
@@ -4664,10 +4515,33 @@ select {
    STAGE 01: DEDICATED ROVER FLEET HANGAR STYLES
    ════════════════════════════════════════════════════════════════════════════ */
 
+/* The hangar is its own screen: fixed over the backdrop and above the shell,
+   which is still laid out behind it while hidden. */
+.fleet-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 131;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.fleet-screen-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  font-family: var(--font-data);
+  font-size: var(--fs-strong);
+  color: var(--text-muted);
+  background: var(--void);
+  text-align: center;
+}
+
 .lp-fleet-view {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 64px);
+  min-height: 100vh;
   padding: 28px 40px 48px;
   background: radial-gradient(circle at 50% 10%, var(--bg-raised) 0%, var(--bg-card) 60%, var(--void) 100%);
   overflow-y: auto;

@@ -1,9 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef } from 'react'
 import type { PlanWeights } from '../../api'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
 import type { ProfileConstraints } from '../../net/types'
 import { useMissionProfiles } from './useMissionProfiles'
-import RoverSelectDrawer from './RoverSelectDrawer'
 
 const WEIGHT_CONTROLS: Array<{
   key: keyof PlanWeights
@@ -29,18 +28,17 @@ const CONSTRAINT_CONTROLS: Array<{
 ]
 
 export const MissionSetupPanel: React.FC = () => {
-  const { rover: selectedRover, rovers, weights, start, goal, planResult, clickMode, isSolving } =
+  const { rover: selectedRover, weights, start, goal, planResult, clickMode, isSolving } =
     useMission()
   const {
-    selectRover: onSelectRover,
     setWeights: onWeightsChange,
     setClickMode: onSetClickMode,
     planRoute: onPlanRoute,
     resetMission: onReset,
     undoPlacement: onUndoPlacement,
+    openFleetSelect: onOpenFleetSelect,
   } = useMissionActions()
   const hasRoute = Boolean(planResult)
-  const [drawerOpen, setDrawerOpen] = useState(false)
   const { profiles, activeId, applyProfile, loading: profilesLoading } = useMissionProfiles()
   const activeProfile = activeId && profiles ? profiles[activeId] : null
 
@@ -93,14 +91,6 @@ export const MissionSetupPanel: React.FC = () => {
 
   return (
     <div className="lp-panel-content">
-      <RoverSelectDrawer
-        isOpen={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        rovers={rovers}
-        selectedRoverId={selectedRover?.id ?? ''}
-        onSelectRover={onSelectRover}
-      />
-
       {/* ── 1. VEHICLE ASSIGNMENT & QUICK SELECTOR TABS ── */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
@@ -108,8 +98,8 @@ export const MissionSetupPanel: React.FC = () => {
           <button
             type="button"
             className="lp-text-action-btn"
-            onClick={() => setDrawerOpen(true)}
-            title="Browse the fleet and pick a different rover"
+            onClick={onOpenFleetSelect}
+            title="Return to the fleet hangar and pick a different rover"
           >
             Change Rover
           </button>

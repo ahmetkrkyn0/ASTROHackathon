@@ -94,10 +94,10 @@ export interface MissionValue {
    */
   rover: RoverEntry | null
   /**
-   * The complete rover catalogue fetched by App, for the mission setup selector.
+   * The complete rover catalogue fetched by App, for the fleet hangar.
    *
    * This is distinct from `rover`: the selected entry gives one rover's
-   * specifications, while the setup panel needs the whole list to let the
+   * specifications, while the hangar stage needs the whole list to let the
    * operator change that selection without another fetch.
    */
   rovers: RoverEntry[]
@@ -189,6 +189,14 @@ export interface MissionRuntime {
 export interface MissionActions {
   /** Also adopts the rover's default weights, as the hangar does. */
   selectRover: (rover: RoverEntry) => void
+  /**
+   * Returns to the fleet hangar stage, where a rover is chosen.
+   *
+   * The catalogue is a full screen rather than a panel, so a control that
+   * changes the rover asks the shell to switch stage instead of opening
+   * anything of its own.
+   */
+  openFleetSelect: () => void
   setWeights: (weights: PlanWeights) => void
   /** Arms the next map click to place start, goal, or nothing. */
   setClickMode: (mode: ClickMode) => void

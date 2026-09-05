@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import LandingPage from './LandingPage'
+import FleetSelectionView from './components/Fleet/FleetSelectionView'
 import MapCanvas, {
   type ClickMode,
   DOWNSAMPLE,
@@ -53,7 +54,7 @@ const DEFAULT_WEIGHTS: PlanWeights = {
 const DEFAULT_POINT: [number, number] = [250, 250]
 const TOAST_DURATION_MS = 5200
 type BootstrapState = 'loading' | 'ready' | 'error'
-type AppPhase = 'landing' | 'app'
+type AppPhase = 'landing' | 'fleet' | 'app'
 
 interface FocusTelemetry {
   row: number
@@ -267,8 +268,18 @@ export default function App() {
     void init()
   }, [])
 
+  // Landing hands over to the hangar, not to the map: a rover is chosen
+  // before there is a surface to drive it on.
   const handleEnterMission = useCallback(() => {
+    setPhase('fleet')
+  }, [])
+
+  const handleDeployToMap = useCallback(() => {
     setPhase('app')
+  }, [])
+
+  const handleOpenFleetSelect = useCallback(() => {
+    setPhase('fleet')
   }, [])
 
   useEffect(() => {
@@ -580,6 +591,7 @@ export default function App() {
   const missionActions: MissionActions = useMemo(
     () => ({
       selectRover: handleRoverSelect,
+      openFleetSelect: handleOpenFleetSelect,
       setWeights,
       setClickMode,
       planRoute: handlePlan,
@@ -593,7 +605,7 @@ export default function App() {
       setDimension,
       toggleHud,
     }),
-    [handlePlan, handleReset, handleRoverSelect, handleUndoPlacement, toggleHud],
+    [handlePlan, handleReset, handleRoverSelect, handleOpenFleetSelect, handleUndoPlacement, toggleHud],
   )
 
   const missionRuntimeValue: MissionRuntime = useMemo(
@@ -610,11 +622,35 @@ export default function App() {
       <MissionRuntimeProvider value={missionRuntimeValue}>
       <OverlayProvider>
       <SpaceBackdrop
-        stage={phase === 'landing' ? 'ambient' : 'deck'}
+        stage={phase === 'app' ? 'deck' : 'ambient'}
         frozen={planningEngaged}
       />
 
       {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
+
+      {/* Stage 01: the hangar. A full screen of its own between the landing
+          sequence and the cockpit -- the rover is picked here, with its specs
+          and the route weights in view, before any terrain is shown. */}
+      {phase === 'fleet' && (
+        <div className="fleet-screen">
+          {rovers.length > 0 ? (
+            <FleetSelectionView
+              rovers={rovers}
+              selectedRover={selectedRover}
+              onSelectRover={handleRoverSelect}
+              weights={weights}
+              onWeightsChange={setWeights}
+              onDeployToMap={handleDeployToMap}
+            />
+          ) : (
+            <div className="fleet-screen-loading">
+              {bootstrapState === 'error'
+                ? layerError ?? 'The rover catalogue could not be loaded.'
+                : 'Loading rover catalogue…'}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className={`app-shell ${appIsVisible ? 'is-visible' : 'is-hidden'}`}>
         {/* Modern Mission Control TopBar with PLAN / ANALYZE Switcher */}
@@ -629,8 +665,9 @@ export default function App() {
           onToggleSystems={() => setSystemsOpen((v) => !v)}
         />
 
-        {/* The cockpit. Rover selection is a drawer off the left rail, not a
-            stage of its own -- the mission shell never gets replaced. */}
+        {/* The cockpit. Rover selection lives in the hangar stage; "Change
+            Rover" in the left rail returns there rather than opening a modal
+            over the map. */}
         <main
             className={`content-grid ${!leftOpen ? 'left-collapsed' : ''} ${!rightOpen ? 'right-collapsed' : ''}`}
           >
