@@ -322,6 +322,31 @@
   border-radius: var(--radius);
 }
 
+/* -- What a control looks like ---------------------------------------------
+   A button has to read as a button before it is hovered.
+
+   Several did not. .lp-systems-toggle, .lp-dim-btn, .lp-rover-tab, .lp-hud-btn
+   and .toast-dismiss all rested as bare --text-muted or --text-dim-2 on no
+   background, with either no border or one measuring about 1.2:1 against the
+   surface -- under the 3:1 WCAG 1.4.11 asks of a border that is the only thing
+   identifying a control.
+
+   Against their neighbours the problem is sharper than a threshold: those
+   labels sat at 5.2-6.2:1 while the ordinary prose beside them is 12:1, so on
+   several panels the one element that could be pressed was the one drawn most
+   faintly. Everything they said about being interactive, they said on hover --
+   a channel that does not exist on touch, and does not exist before the
+   pointer arrives.
+
+   A resting control now carries three signals instead of none: a faint fill,
+   a --line-button edge -- the token the palette already documents as the one
+   that clears 3:1 because it "draws buttons and inputs", measured at 3.04:1
+   over the new fill -- and a label at --text-2, the same weight as the text
+   around it. Hover is spent on getting brighter rather than on appearing at
+   all. Filled buttons are unaffected; they were never ambiguous. And
+   cursor: pointer is necessary but never sufficient -- it is invisible until
+   the pointer is already there. */
+
 html,
 body,
 #root {
@@ -1428,10 +1453,11 @@ select {
 }
 
 .toast-dismiss {
-  padding: 0;
+  padding: 3px 8px;
   background: transparent;
-  border: none;
-  color: var(--text-muted);
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
   font-family: var(--font-label);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
@@ -2562,17 +2588,18 @@ select {
   border: 1px solid transparent;
   border-radius: var(--radius);
   padding: 5px 9px;
-  color: var(--text-dim-2);
+  color: var(--text-2);
   cursor: pointer;
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
-  transition: color 140ms ease, border-color 140ms ease;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
 }
 
 .lp-systems-toggle:hover {
-  color: var(--text-2);
-  border-color: var(--line-card);
+  color: var(--text);
+  border-color: var(--line-button);
+  background: rgba(199, 205, 219, 0.06);
 }
 
 .lp-systems-toggle.is-active {
@@ -2625,9 +2652,9 @@ select {
 }
 
 .lp-dim-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
   font-family: var(--font-data);
   font-size: var(--fs-small);
   font-weight: 600;
@@ -4263,9 +4290,9 @@ select {
 }
 
 .lp-rover-tab {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-muted);
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
   font-family: var(--font-data);
   font-size: var(--fs-small);
   font-weight: 600;
@@ -4505,9 +4532,9 @@ select {
 }
 
 .lp-hud-btn {
-  background: transparent;
-  border: 1px solid rgba(199, 205, 219, 0.1);
-  color: var(--text-muted);
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
   font-size: var(--fs-micro);
   line-height: 1;
   padding: 2px 5px;
