@@ -17,7 +17,7 @@
   border-radius: var(--radius);
   color: var(--lavender);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.04em;
   cursor: pointer;
 }
@@ -75,16 +75,16 @@
 .lp-report-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
 }
 
 .lp-report-subtitle {
   font-family: var(--font-data);
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-dim-2);
 }
 
 .lp-report-header-right {
@@ -98,9 +98,9 @@
   border: 1px solid;
   border-radius: var(--radius);
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
 }
 
 .lp-report-close {
@@ -110,7 +110,7 @@
   border-radius: var(--radius);
   color: var(--text-2);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -162,8 +162,8 @@
 
 .lp-report-card-note {
   font-family: var(--font-body);
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 10px;
+  color: var(--text-dim-2);
   text-align: right;
 }
 
@@ -188,9 +188,9 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-2);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .lp-reason-dot {
@@ -219,10 +219,15 @@
 
 /* ── Charts ─────────────────────────────────────────────────────────────── */
 
+.lp-chart-wrap {
+  /* The measured box. min-width:0 keeps a grid column from being widened by
+     the SVG instead of the SVG being narrowed by the column. */
+  width: 100%;
+  min-width: 0;
+}
+
 .lp-chart {
   display: block;
-  width: 100%;
-  height: auto;
 }
 
 .lp-hbars {
@@ -233,7 +238,7 @@
 
 .lp-hbar-row {
   display: grid;
-  grid-template-columns: 64px 1fr 52px 34px;
+  grid-template-columns: 58px 1fr 46px 30px;
   align-items: center;
   gap: 10px;
 }
@@ -242,8 +247,8 @@
 .lp-hbar-val,
 .lp-hbar-count {
   font-family: var(--font-data);
-  font-size: 11px;
-  color: var(--text-3);
+  font-size: 10px;
+  color: var(--text-muted-2);
 }
 
 .lp-hbar-val {
@@ -257,7 +262,7 @@
 }
 
 .lp-hbar-track {
-  height: 10px;
+  height: 7px;
   background: var(--bg-inset);
   border: 1px solid var(--line-inner);
 }
@@ -275,7 +280,7 @@
 
 .lp-stacked-bar {
   display: flex;
-  height: 18px;
+  height: 12px;
   background: var(--bg-inset);
   border: 1px solid var(--line-inner);
   overflow: hidden;
@@ -299,18 +304,19 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--text-muted);
 }
 
 .lp-stacked-legend strong {
   font-family: var(--font-data);
+  font-size: 11px;
   color: var(--text);
   font-weight: 500;
 }
 
 .lp-legend-swatch {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   flex: none;
 }
 
@@ -322,14 +328,49 @@
 }
 
 .lp-donut {
-  width: 150px;
-  height: 150px;
+  width: 128px;
+  height: 128px;
   flex: none;
 }
 
 .lp-donut-legend {
+  flex: 1;
+  min-width: 240px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1px;
+  background: var(--line-inner);
+  border: 1px solid var(--line-inner);
+}
+
+.lp-donut-tile {
+  display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-inset);
+}
+
+.lp-donut-tile .lp-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-donut-tile-val {
+  font-family: var(--font-data);
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.lp-donut-tile-share {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--text-dim-2);
 }
 
 /* ── Gauge ──────────────────────────────────────────────────────────────── */
@@ -348,8 +389,15 @@
   gap: 10px;
 }
 
+.lp-gauge-val {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .lp-gauge-track {
-  height: 10px;
+  height: 7px;
   background: var(--bg-inset);
   border: 1px solid var(--line-inner);
 }
@@ -359,8 +407,8 @@
 }
 
 .lp-gauge-note {
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 10px;
+  color: var(--text-dim-2);
 }
 
 /* ── Details ────────────────────────────────────────────────────────────── */
@@ -371,9 +419,9 @@
   background: transparent;
   border: 1px solid var(--line-button);
   border-radius: var(--radius);
-  color: var(--text-3);
+  color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -398,16 +446,16 @@
   margin: 0;
   padding: 6px 0;
   border-bottom: 1px solid var(--line-inner);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .lp-report-dl dt {
-  color: var(--text-3);
+  color: var(--text-muted);
 }
 
 .lp-report-dl dd {
   font-family: var(--font-data);
-  color: var(--text);
+  color: var(--text-2);
   text-align: right;
 }
 
@@ -425,9 +473,10 @@
 .lp-report-table th {
   text-align: left;
   padding: 6px 8px;
-  color: var(--text-dim);
+  color: var(--text-dim-2);
+  font-size: 9px;
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   border-bottom: 1px solid var(--line-card);
   white-space: nowrap;
 }

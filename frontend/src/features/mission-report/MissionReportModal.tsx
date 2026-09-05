@@ -228,6 +228,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
               ]}
               formatY={(v) => `%${v.toFixed(0)}`}
               formatX={(v) => `${v.toFixed(1)}km`}
+              height={200}
             />
           </Section>
 
@@ -287,6 +288,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
                 ]}
                 formatY={(v) => `${v.toFixed(0)}°`}
                 formatX={(v) => `${v.toFixed(1)}km`}
+                height={168}
               />
             </Section>
 
@@ -306,6 +308,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
                 yMax={1}
                 formatY={(v) => v.toFixed(1)}
                 formatX={(v) => `${v.toFixed(1)}km`}
+                height={120}
               />
             </Section>
           </div>
@@ -345,6 +348,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
                   colors={view.elevationColors}
                   formatY={(v) => `${v.toFixed(0)}m`}
                   formatX={(v) => `${v.toFixed(1)}km`}
+                  height={200}
                 />
               </Section>
 
