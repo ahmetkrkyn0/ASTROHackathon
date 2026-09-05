@@ -121,19 +121,47 @@ describe('selectSystemsFeatures', () => {
 })
 
 describe('FEATURES', () => {
-  it('shows mission context in the right rail during both cockpit modes', () => {
-    // Removing this registration, giving it a mode list, or putting it in a
-    // different rail silently takes the operator's context away from one of
-    // the two modes that need it.
+  it('shows mission context in the right rail, in analyze only', () => {
+    // It used to run in both modes. Plan now gets the wider map instead, so
+    // the guard is that it still reaches analyze -- moving it to another rail
+    // or dropping the registration would take the operator's context away
+    // from the mode that reads it.
     const missionContext = FEATURES.find((feature) => feature.id === 'mission-context')
 
     expect(missionContext?.slot).toBe('rightRail')
-    expect(Object.prototype.hasOwnProperty.call(missionContext ?? {}, 'modes')).toBe(false)
-    expect(selectFeatures(FEATURES, 'rightRail', 'plan').map((feature) => feature.id)).toContain(
-      'mission-context',
-    )
     expect(selectFeatures(FEATURES, 'rightRail', 'analyze').map((feature) => feature.id)).toContain(
       'mission-context',
+    )
+    expect(selectFeatures(FEATURES, 'rightRail', 'plan').map((feature) => feature.id)).not.toContain(
+      'mission-context',
+    )
+  })
+
+  it('gives each mode one rail and no more', () => {
+    // The cockpit's layout is derived from this, not stated anywhere else:
+    // App.tsx renders each <aside> and its grid track only when the rail is
+    // non-empty. Plan owns the left rail, analyze the right, and a feature
+    // registered into the empty one would quietly restore a column and take
+    // that width off the map.
+    expect(selectFeatures(FEATURES, 'leftRail', 'plan').length).toBeGreaterThan(0)
+    expect(selectFeatures(FEATURES, 'rightRail', 'plan')).toHaveLength(0)
+
+    expect(selectFeatures(FEATURES, 'rightRail', 'analyze').length).toBeGreaterThan(0)
+    expect(selectFeatures(FEATURES, 'leftRail', 'analyze')).toHaveLength(0)
+  })
+
+  it('keeps the retired snapshot panel out of both modes', () => {
+    // modes: [] is how it is retired without being deleted. An empty array
+    // and an omitted `modes` are opposites -- omitted means every mode -- so
+    // this is the one registration where dropping the field would put a
+    // locked read-only panel back in both rails at once.
+    const snapshot = FEATURES.find((feature) => feature.id === 'mission-snapshot')
+    expect(snapshot?.modes).toEqual([])
+    expect(selectFeatures(FEATURES, 'leftRail', 'plan').map((f) => f.id)).not.toContain(
+      'mission-snapshot',
+    )
+    expect(selectFeatures(FEATURES, 'leftRail', 'analyze').map((f) => f.id)).not.toContain(
+      'mission-snapshot',
     )
   })
 

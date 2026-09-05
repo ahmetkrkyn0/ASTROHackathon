@@ -100,7 +100,7 @@ export const LayerDropdown: React.FC = () => {
             onClick={() => setIsOpen((prev) => !prev)}
             aria-expanded={isOpen}
           >
-            <span className="lp-layer-label-hint">LAYER</span>
+            <span className="lp-layer-label-hint">Layer</span>
             <strong className="lp-layer-current-name">{activeOption.label}</strong>
             <span className="lp-dropdown-chevron" aria-hidden="true">
               {isOpen ? '▴' : '▾'}

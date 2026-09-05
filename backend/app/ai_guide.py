@@ -455,7 +455,7 @@ _COUNT_WORDS: dict[int, str] = {
 def short_name(name: str) -> str:
     """The catalogue name without its parenthetical qualifier.
 
-    "LPR-1 (Varsayilan)" is what the catalogue publishes; "LPR-1" is what a
+    "LPR-1 (Default)" is what the catalogue publishes; "LPR-1" is what a
     sentence contains. Both have to be whitelisted, or the bare form's digit
     survives the mask and blocks an otherwise correct answer.
     """

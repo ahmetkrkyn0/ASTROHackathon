@@ -3,32 +3,49 @@
    modal, it never blurs it. Same three rules as the rest of the cockpit --
    flat surfaces, 2px radius, mono for measured data only. */
 
+/* In the top bar, not floating over the map.
+
+   It used to sit at right:74 / bottom:56, beside the assistant launcher, and
+   the two read as a stack of buttons in the corner of the terrain -- with the
+   report vanishing under the chat window whenever that was open, which is why
+   it had been pushed sideways in the first place. The bar is where the
+   cockpit's other application-level control already lives (Systems), so this
+   belongs beside it rather than in a second, invented place.
+
+   In the bar's flow, not positioned into it: the button is portalled into an
+   anchor the bar renders, so it is laid out by .lp-topbar-right like every
+   other control there. A fixed offset would have had to be re-measured every
+   time the readouts beside it changed length. */
 .lp-report-launcher {
-  position: fixed;
-  right: 24px;
-  bottom: 96px;
-  z-index: 190;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 14px;
-  background: var(--bg-card);
-  border: 1px solid var(--line-accent);
+  padding: 0 12px;
+  background: rgba(186, 175, 245, 0.1);
+  border: 1px solid var(--line-accent-hover);
   border-radius: var(--radius);
-  color: var(--lavender);
+  color: var(--lavender-bright);
   font-family: var(--font-body);
-  font-size: 12px;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: var(--track-normal);
   cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
 }
 
 .lp-report-launcher:hover {
-  border-color: var(--line-accent-hover);
-  background: var(--bg-raised);
+  background: rgba(186, 175, 245, 0.2);
+  border-color: var(--lavender);
+}
+
+.lp-report-launcher:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
 }
 
 .lp-report-launcher-icon {
-  font-size: 13px;
+  font-size: var(--fs-strong);
 }
 
 .lp-report-scrim {
@@ -75,16 +92,24 @@
 .lp-report-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: var(--fs-value);
   font-weight: 600;
   color: var(--text);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
 }
 
+/* A sentence, not three facts joined by punctuation. The numbers stay in the
+   data face because they are measurements; the words around them do not. */
 .lp-report-subtitle {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+}
+
+.lp-report-figure {
   font-family: var(--font-data);
-  font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-2);
 }
 
 .lp-report-header-right {
@@ -98,9 +123,34 @@
   border: 1px solid;
   border-radius: var(--radius);
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-small);
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--track-caps);
+}
+
+/* Export sits beside the close button, not buried in the body: it is
+   something you do to the whole report, at the moment you have finished
+   reading it. Both are named for what they produce -- "Save as PDF" and
+   "Download data" -- rather than for the mechanism. */
+.lp-report-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.lp-report-action {
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+.lp-report-action:hover {
+  border-color: var(--line-accent-hover);
+  color: var(--text);
 }
 
 .lp-report-close {
@@ -110,7 +160,7 @@
   border-radius: var(--radius);
   color: var(--text-2);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-small);
   cursor: pointer;
 }
 
@@ -162,8 +212,8 @@
 
 .lp-report-card-note {
   font-family: var(--font-body);
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
   text-align: right;
 }
 
@@ -193,7 +243,7 @@
 
 .lp-report-empty {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--text-dim);
 }
 
@@ -212,9 +262,9 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--text-2);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .lp-reason-dot {
@@ -243,10 +293,15 @@
 
 /* ── Charts ─────────────────────────────────────────────────────────────── */
 
+.lp-chart-wrap {
+  /* The measured box. min-width:0 keeps a grid column from being widened by
+     the SVG instead of the SVG being narrowed by the column. */
+  width: 100%;
+  min-width: 0;
+}
+
 .lp-chart {
   display: block;
-  width: 100%;
-  height: auto;
 }
 
 .lp-hbars {
@@ -257,7 +312,7 @@
 
 .lp-hbar-row {
   display: grid;
-  grid-template-columns: 64px 1fr 52px 34px;
+  grid-template-columns: 58px 1fr 46px 30px;
   align-items: center;
   gap: 10px;
 }
@@ -266,8 +321,8 @@
 .lp-hbar-val,
 .lp-hbar-count {
   font-family: var(--font-data);
-  font-size: 11px;
-  color: var(--text-3);
+  font-size: var(--fs-micro);
+  color: var(--text-muted-2);
 }
 
 .lp-hbar-val {
@@ -281,7 +336,7 @@
 }
 
 .lp-hbar-track {
-  height: 10px;
+  height: 7px;
   background: var(--bg-inset);
   border: 1px solid var(--line-inner);
 }
@@ -299,7 +354,7 @@
 
 .lp-stacked-bar {
   display: flex;
-  height: 18px;
+  height: 12px;
   background: var(--bg-inset);
   border: 1px solid var(--line-inner);
   overflow: hidden;
@@ -322,19 +377,20 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  color: var(--text-3);
+  font-size: var(--fs-small);
+  color: var(--text-muted);
 }
 
 .lp-stacked-legend strong {
   font-family: var(--font-data);
+  font-size: var(--fs-small);
   color: var(--text);
   font-weight: 500;
 }
 
 .lp-legend-swatch {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   flex: none;
 }
 
@@ -346,14 +402,49 @@
 }
 
 .lp-donut {
-  width: 150px;
-  height: 150px;
+  width: 128px;
+  height: 128px;
   flex: none;
 }
 
 .lp-donut-legend {
+  flex: 1;
+  min-width: 240px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1px;
+  background: var(--line-inner);
+  border: 1px solid var(--line-inner);
+}
+
+.lp-donut-tile {
+  display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-inset);
+}
+
+.lp-donut-tile .lp-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-donut-tile-val {
+  font-family: var(--font-data);
+  font-size: var(--fs-strong);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.lp-donut-tile-share {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
 }
 
 /* ── Gauge ──────────────────────────────────────────────────────────────── */
@@ -372,8 +463,15 @@
   gap: 10px;
 }
 
+.lp-gauge-val {
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .lp-gauge-track {
-  height: 10px;
+  height: 7px;
   background: var(--bg-inset);
   border: 1px solid var(--line-inner);
 }
@@ -383,8 +481,8 @@
 }
 
 .lp-gauge-note {
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
 }
 
 /* ── Details ────────────────────────────────────────────────────────────── */
@@ -395,9 +493,9 @@
   background: transparent;
   border: 1px solid var(--line-button);
   border-radius: var(--radius);
-  color: var(--text-3);
+  color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-small);
   cursor: pointer;
 }
 
@@ -422,16 +520,16 @@
   margin: 0;
   padding: 6px 0;
   border-bottom: 1px solid var(--line-inner);
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .lp-report-dl dt {
-  color: var(--text-3);
+  color: var(--text-muted);
 }
 
 .lp-report-dl dd {
   font-family: var(--font-data);
-  color: var(--text);
+  color: var(--text-2);
   text-align: right;
 }
 
@@ -443,15 +541,16 @@
   width: 100%;
   border-collapse: collapse;
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .lp-report-table th {
   text-align: left;
   padding: 6px 8px;
-  color: var(--text-dim);
+  color: var(--text-dim-2);
+  font-size: var(--fs-micro);
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
   border-bottom: 1px solid var(--line-card);
   white-space: nowrap;
 }
@@ -461,4 +560,178 @@
   color: var(--text-2);
   border-bottom: 1px solid var(--line-inner);
   white-space: nowrap;
+}
+
+/* ── Print ──────────────────────────────────────────────────────────────────
+   Exporting the report means printing it, and the browser's PDF writer is the
+   most capable one on the machine. No dependency, and the charts stay vector
+   because they are SVG -- a rasterised export would blur every axis label.
+
+   The screen design cannot go to paper unchanged. It is built for a dark
+   cockpit: near-black surfaces, hairlines that only read against them, and
+   text tuned for emitted light. On paper that is a page of ink with white
+   letters knocked out of it, which wastes toner and reads badly. So print
+   inverts the ground and lets the risk colours carry through, since they are
+   the only colour that means something.
+
+   `color-adjust: exact` on the risk marks only: their hue IS the reading, and
+   a browser that drops backgrounds to save ink would drop the finding with
+   them. */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  /* The cockpit behind the modal has no business on the page. */
+  body > *:not(.lp-report-scrim) {
+    display: none !important;
+  }
+
+  .lp-report-scrim {
+    position: static;
+    display: block;
+    padding: 0;
+    background: none;
+  }
+
+  .lp-report-modal {
+    width: 100%;
+    max-width: none;
+    height: auto;
+    border: none;
+    box-shadow: none;
+    background: #fff;
+    color: #111;
+
+    /* Retone the document by its tokens, not element by element.
+       Listing selectors only reaches what someone remembered to list, and it
+       reached none of the SVG: chart labels are drawn with fill="var(--text)"
+       and so were still painting near-white onto white paper. Redefining the
+       scale here catches every reference at once, in the charts and in the
+       markup alike.
+
+       Deliberately absent: --risk-*, --cyan and the rest of the semantic
+       palette. Those carry a reading rather than a rank, which is why the
+       rules below spend ink keeping them exact. */
+    --text: #111;
+    --text-2: #111;
+    --text-3: #333;
+    --text-muted: #555;
+    --text-muted-2: #555;
+    --text-dim: #555;
+    --text-dim-2: #555;
+    --text-dimmest: #666;
+    /* Grid and hairlines. #161b27 is a whisper on the console and a hard
+       black rule on paper. */
+    --line: #ddd;
+    --border-line: #ddd;
+  }
+
+  /* The unfilled part of a bar is the remainder, and on screen it is a dark
+     inset. Printed as-is it became a solid black block wider than the reading
+     it was meant to frame. */
+  .lp-hbar-track,
+  .lp-stacked-bar,
+  .lp-gauge-track {
+    background: #eee;
+  }
+
+  .lp-report-body {
+    overflow: visible;
+    padding: 0;
+    gap: 10px;
+  }
+
+  .lp-report-header {
+    background: none;
+    border-bottom: 1.5pt solid #111;
+    padding: 0 0 8pt;
+  }
+
+  .lp-report-title,
+  .lp-report-subtitle,
+  .lp-report-figure,
+  .lp-report-kpi .lp-kpi-val,
+  .lp-report-table td,
+  .lp-report-dl dd {
+    color: #111;
+  }
+
+  .lp-meta-label,
+  .lp-report-card-note,
+  .lp-report-table th,
+  .lp-report-dl dt,
+  .lp-kpi-label,
+  .lp-gauge-note,
+  .lp-donut-tile-share {
+    color: #555;
+  }
+
+  .lp-report-card,
+  .lp-report-kpi,
+  .lp-donut-tile {
+    background: none;
+    border-color: #bbb;
+  }
+
+  .lp-report-kpis,
+  .lp-donut-legend {
+    background: none;
+    border-color: #bbb;
+  }
+
+  .lp-report-card-head,
+  .lp-report-dl dt,
+  .lp-report-dl dd,
+  .lp-report-table td {
+    border-color: #ddd;
+  }
+
+  /* The verdict is the one thing a reader must not miss on paper either. */
+  .lp-report-verdict {
+    border-width: 2pt;
+    font-weight: 700;
+  }
+
+  /* Colour that carries a reading survives the browser's ink-saving. */
+  .lp-stacked-seg,
+  .lp-stacked-bar,
+  .lp-hbar-fill,
+  .lp-hbar-track,
+  .lp-gauge-fill,
+  .lp-gauge-track,
+  .lp-legend-swatch,
+  .lp-reason-dot,
+  .lp-report-verdict,
+  .lp-chart,
+  .lp-donut {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Charts were sized against a measured pixel width; on paper they get the
+     column instead. */
+  .lp-chart {
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Nothing that only works by being clicked. */
+  .lp-report-close,
+  .lp-report-toggle,
+  .lp-report-actions,
+  .lp-report-launcher {
+    display: none !important;
+  }
+
+  /* A card split across a page break loses the pairing of chart and caption. */
+  .lp-report-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .lp-report-row {
+    grid-template-columns: 1fr 1fr;
+  }
 }

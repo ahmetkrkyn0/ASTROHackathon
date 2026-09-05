@@ -9,6 +9,15 @@ export const RouteSolvingOverlay: React.FC = () => {
 
   return (
     <div className="lp-solving-overlay">
+      {/* The overlay was a purely visual account of a computation that runs
+          for seconds: a screen-reader user pressed Generate Route and heard
+          nothing until the result landed. One sentence, not the whole card --
+          announcing the kicker, the title, the detail and three tags would be
+          three seconds of speech for one fact. */}
+      <p className="lp-visually-hidden" role="status" aria-live="polite">
+        Computing route for {roverName}. This may take a few seconds.
+      </p>
+
       {/* Scanning laser beam effect */}
       <div className="lp-scan-sweep" />
 
@@ -18,7 +27,7 @@ export const RouteSolvingOverlay: React.FC = () => {
           <span className="lp-radar-spinner" />
           <div className="lp-solving-title-group">
             <span className="lp-solving-kicker">A* PATHFINDER · KINEMATIC SOLVER</span>
-            <h3 className="lp-solving-title">COMPUTING ROUTE SOLUTION</h3>
+            <h3 className="lp-solving-title">Computing route</h3>
           </div>
         </div>
         <p className="lp-solving-detail">
@@ -36,7 +45,7 @@ export const RouteSolvingOverlay: React.FC = () => {
               GOAL: [{goal[0]}, {goal[1]}]
             </span>
           )}
-          <span className="lp-solving-tag lp-solving-tag--active">OPTIMIZING PATH</span>
+          <span className="lp-solving-tag lp-solving-tag--active">Optimising path</span>
         </div>
       </div>
     </div>

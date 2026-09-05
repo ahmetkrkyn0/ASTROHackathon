@@ -4,16 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LunaPath | Mission Control</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Archivo for the interface, Archivo Narrow for labels in the fixed-width
+         rails, Azeret Mono for measured values only. Inter is gone: it is the
+         default face of generated interfaces, and this is a mission console.
+         All three are served from public/fonts and declared in App.css, so a
+         network the demo cannot reach costs nothing. -->
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       html, body, #root { min-height: 100%; }
-      body { background: #05070d; color: #e7eaf1; font-family: 'Inter', system-ui, 'Segoe UI', sans-serif; }
+      body { background: #05070d; color: #e7eaf1; font-family: 'Archivo', system-ui, 'Segoe UI', sans-serif; }
     </style>
   </head>
   <body>

@@ -26,10 +26,14 @@ export function timeAxisOverlays(
   field: SeriesField,
   manifest: SeriesManifest | null,
   plan4d: Plan4DResponse | null,
+  fieldVisible: boolean,
 ): OverlayCommand[] {
   const commands: OverlayCommand[] = []
 
-  if (cube && manifest) {
+  // The route is drawn whenever there is one; the field only when it has been
+  // asked for. They are separate answers: the 4D route is the result of a
+  // request the operator made, the field is a layer over the terrain.
+  if (fieldVisible && cube && manifest) {
     const entry = manifest.fields[field]
     // The manifest's own min/max across the WHOLE cube, not this slice's:
     // a per-slice domain would re-normalise the colours every frame and the
@@ -52,7 +56,15 @@ export function timeAxisOverlays(
       cols: cube.cols,
       values,
       ramp: { min, max, colors: RAMP_STOPS[field] },
-      style: { opacity: 0.6 },
+      // 0.35, down from 0.6. The shadow ramp runs white to black, so at 0.6
+      // this did not read as a field painted over the terrain -- it read as
+      // the lighting being switched off. The hillshade underneath is what
+      // makes the surface legible as terrain at all, and a field laid over it
+      // has to let it through. Lowering the alpha was not enough on its own,
+      // which is why the layer is now off until asked for: even at 0.35 it
+      // darkened shadowed ground by about 50 levels, across the whole map,
+      // for an operator who had only switched to ANALYZE to read a route.
+      style: { opacity: 0.35 },
     })
   }
 
@@ -63,7 +75,11 @@ export function timeAxisOverlays(
       kind: 'polyline',
       id: 'time-axis-route',
       points: plan4d.path_pixels.map(([row, col]) => ({ row, col })),
-      style: { color: '#e8c85a', widthPx: 2.5, opacity: 0.95 },
+      // Lavender, not the ramp's amber. A yellow line on this map means
+      // MEDIUM risk everywhere else, and the time-expanded route is not a
+      // risk reading at all -- it is a second plan. Borrowing a ramp colour
+      // for it made the map say something it did not mean.
+      style: { color: '#baaff5', widthPx: 2.5, opacity: 0.95 },
     })
   }
 

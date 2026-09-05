@@ -14,6 +14,81 @@
    Legacy names (--surface-*, --glass*, --terminator, --umbra, --primary) are
    kept as aliases onto the new values so every rule written against them
    retones with the palette instead of being edited one at a time. */
+/* ── Type ───────────────────────────────────────────────────────────────────
+   Self-hosted, because a demo cannot depend on reaching fonts.googleapis.com.
+   On a dead or captive network the Google-hosted version failed silently and
+   the whole interface fell back to system-ui, which is the one moment the
+   typography has to hold.
+
+   All three are variable fonts, one file per subset rather than one per
+   weight: `font-weight: 300 800` is a range the file actually covers, so a
+   rule asking for 300 or 800 now gets a drawn cut instead of a weight the
+   browser fakes. latin-ext carries the Turkish letters and is fetched only
+   when a glyph needs it.
+
+   Downloaded from Google Fonts (Archivo v25, Archivo Narrow v35, Azeret Mono
+   v21) with `fonts/README.md` recording how. */
+
+/* Archivo -- latin */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/archivo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Archivo -- latin-ext */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/archivo-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Archivo Narrow -- latin */
+@font-face {
+  font-family: 'Archivo Narrow';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/archivo-narrow-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Archivo Narrow -- latin-ext */
+@font-face {
+  font-family: 'Archivo Narrow';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/archivo-narrow-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Azeret Mono -- latin */
+@font-face {
+  font-family: 'Azeret Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/azeret-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Azeret Mono -- latin-ext */
+@font-face {
+  font-family: 'Azeret Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/azeret-mono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 :root {
   /* Ground. Four steps, all opaque: page, rail/panel, card, card inset. */
   --void: #05070d;
@@ -26,7 +101,11 @@
   --line: #161b27;
   --line-card: #1d2432;
   --line-inner: #1a202c;
-  --line-button: #262f40;
+  /* 3.30:1 against --bg-card. WCAG 1.4.11 asks 3:1 of any border that is the
+     only thing identifying a control, and at #262f40 this was 1.42. The
+     purely decorative lines above are exempt and keep their weight; this one
+     draws buttons and inputs. */
+  --line-button: #58658a;
   --line-accent: #322b57;
   --line-accent-hover: #4a4276;
 
@@ -36,25 +115,69 @@
   --text-3: #98a1b4;
   --text-muted: #8b94a6;
   --text-muted-2: #7b8497;
-  --text-dim: #6d7789;
-  --text-dim-2: #5d677c;
-  --text-dimmest: #4c5566;
+  /* The bottom of the ramp is set by WCAG AA, not by taste. Measured against
+     --bg-card (#0c1018), the old values were --text-dim 4.22:1, --text-dim-2
+     3.35:1 and --text-dimmest 2.54:1 -- all under the 4.5:1 AA needs for text,
+     and none of them qualifies for the large-text exception -- that starts at
+     18.66px, and nothing in this ramp is drawn near it. --text-dim-2 alone
+     appears 46 times, including the chart axis labels.
+
+     New values, same hue and the same three-step separation, lifted until each
+     clears 4.5:1 on every ground: 5.35, 4.95 and 4.61 at worst. Nothing below
+     --text-dimmest exists, and --text-dimmest is the floor rather than a
+     decorative grey. */
+  --text-dim: #808a9d;
+  --text-dim-2: #7b8497;
+  /* #737d90 cleared 4.5:1 on every ground except --bg-raised, where it landed
+     at 4.48 -- the floor of the ramp failing on the lightest surface it can
+     be drawn on. Same hue and saturation, two steps up, so the ramp keeps its
+     shape and the bottom rung now clears AA everywhere: 4.61 at worst. */
+  --text-dimmest: #757f92;
 
   /* Accents. One colour, one meaning -- section 7 of the design doc. */
-  --lavender: #b3a5ff;
+  /* Both of these were at 100% saturation, which the dark-mode guidance
+     advises against: on a near-black ground a fully saturated accent is the
+     most tiring thing on the screen. Same hue and lightness, saturation
+     brought inside the band the other accents already occupy (58-85%).
+     Contrast is unchanged or slightly better. */
+  --lavender: #baaff5;
   --lavender-bright: #cfc7ff;
   --mint: #5fe3b0;
   --mint-text: #93dcc4;
   --cyan: #4fd8f0;
   --cyan-text: #8fe6f5;
-  --coral: #ff7a5c;
+  --coral: #ed856e;
   --coral-text: #ffa48d;
 
-  /* Risk ramp: safe, caution, high, critical. Readings, not decoration. */
-  --risk-low: #4fd08a;
-  --risk-med: #e8c85a;
-  --risk-high: #f09a4a;
-  --risk-crit: #ee5a52;
+  /* Risk ramp: safe, caution, high, critical. Readings, not decoration.
+
+     Re-derived from a constrained search over 800,000 candidates, because the
+     old green/yellow/orange/red ramp was not readable. Measured separation of
+     its weakest pair, across normal vision and the three dichromacies, was
+     15.4 on a 0-100 scale -- under 25 is "the same colour". `low` and `crit`,
+     the one distinction this product exists to draw, fell from 95.5 to 24.8
+     under deuteranopia, which affects about 6% of men.
+
+     What changed and why:
+       - `low` left the green band for blue (H211). Green sits beside red
+         under protan/deutan simulation; blue does not. This alone lifts
+         low/crit from 24.8 to 69.8.
+       - `crit` moved off the orange-red boundary toward true red (H5).
+       - The warm trio was spread as far as a four-step traffic-light ramp
+         allows.
+
+     Weakest pair is now 27.8 (was 15.4). All four clear WCAG AA on --bg-card
+     (5.15 to 12.58), and `low` stays 45.2 from --cyan so a safe segment is
+     not mistaken for the shadow layer it is drawn over.
+
+     27.8 is better, not sufficient: a four-step ramp on one colour channel has
+     a mathematical ceiling (42.6 measured, under this metaphor). That is why
+     the map route also carries a dash pattern -- colour is never the only
+     channel. See riskToDash in colormap.ts. */
+  --risk-low: #4a8fd8;
+  --risk-med: #e3d548;
+  --risk-high: #d69770;
+  --risk-crit: #ed4b3d;
 
   --radius: 2px;
 
@@ -65,9 +188,75 @@
   --shadow-pop: 0 12px 28px rgba(0, 0, 0, 0.55);
   --shadow-float: 0 20px 46px rgba(0, 0, 0, 0.6);
 
-  --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-data: 'IBM Plex Mono', 'Cascadia Code', monospace;
+  /* ── Type scale ────────────────────────────────────────────────────────
+     Seven steps, and nothing outside them. The cockpit had grown twenty
+     distinct font sizes across 306 declarations -- 8, 9, 9.5, 10, 10.5, 11,
+     11.5, 12 ... -- with two thirds of them packed between 9px and 11px. That
+     is not a scale, and it is why some readings were unreadable while others
+     shouted: half-pixel steps are invisible as hierarchy but very visible as
+     inconsistency.
+
+     12px is the FLOOR. Nothing in the interface is smaller, including the
+     uppercase micro-labels, which are the hardest thing on the screen to read
+     -- caps have no ascenders or descenders to help the eye, and 0.2em
+     tracking pulls them further apart.
+
+     The floor was 11px, with --fs-small at 12px one step above it. Those two
+     carried 213 of the 307 declarations in the file -- 69% of the interface
+     -- and a 1px gap is not a step: it is invisible as hierarchy and visible
+     only as inconsistency, which is the same disease the twenty-size cockpit
+     had, in miniature. So micro joins small at 12px. The token stays, because
+     it still says which text is a micro-label, and because 119 call sites
+     asking for --fs-micro are 119 places that would otherwise have to be
+     edited to say --fs-small; what it no longer does is claim a size step
+     that the eye cannot see.
+
+     A real step below 12px is not available: 11px was already the floor for
+     tracked caps, and going down rather than up is the wrong direction. */
+  --fs-micro: 12px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-strong: 15px;
+  --fs-value: 16px;
+  --fs-title: 18px;
+  --fs-display: 24px;
+  /* The landing headline only. It is the one place a display size is the
+     content rather than a label for it. */
+  --fs-hero: 30px;
+
+  /* ── Tracking ──────────────────────────────────────────────────────────
+     Five steps, matching the type scale's discipline. There were twenty-two
+     values here, which is the same disease as twenty font sizes: 0.13em and
+     0.14em are not two decisions, they are one decision made twice.
+
+     Tracking is INVERSELY related to size, and that is why these came down
+     when the sizes went up. The old 0.18-0.22em on uppercase labels was
+     compensating for 9px type; at 11px the same tracking is just wide, and it
+     is what pushed "MISSION SETUP" and "MISSION CONTEXT" onto two lines in a
+     fixed-width rail. */
+  --track-tight: 0.02em;
+  --track-normal: 0.04em;
+  --track-label: 0.06em;
+  --track-caps: 0.08em;
+  /* The landing eyebrow only, where the line is short and the width is the
+     point. */
+  --track-hero: 0.24em;
+
+  /* Three roles, three faces, and each one earns its place.
+
+     Archivo is a grotesque built for dense, high-performance settings; it
+     replaces Inter, which is the default face of generated interfaces and had
+     no argument for it beyond being reached for. Archivo Narrow is not a
+     stylistic flourish -- the rails are a fixed 250px and labels kept breaking
+     to two lines, so the condensed cut buys real horizontal room. Azeret Mono
+     is for MEASURED VALUES ONLY: coordinates, telemetry, identifiers,
+     timestamps. Never for a label. A monospace face on small labels is
+     decoration pretending to be engineering, and it was applied to 86 rules
+     here before this. */
+  --font-body: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-label: 'Archivo Narrow', 'Archivo', system-ui, sans-serif;
+  --font-data: 'Azeret Mono', ui-monospace, 'Cascadia Code', monospace;
 
   /* ── Aliases ──────────────────────────────────────────────────────────── */
   --surface-dim: var(--void);
@@ -90,7 +279,7 @@
   /* The lit/shadowed axis the old deck encoded. Kept as an axis, retuned onto
      the canvas: sun reads warm, permanent shadow reads cold cyan. */
   --terminator: var(--risk-med);
-  --terminator-dim: rgba(232, 200, 90, 0.14);
+  --terminator-dim: rgba(227, 213, 72, 0.14);
   --umbra: var(--cyan);
   --umbra-dim: rgba(79, 216, 240, 0.14);
 
@@ -104,11 +293,80 @@
   box-sizing: border-box;
 }
 
+/* Content for assistive technology only: present in the accessibility tree,
+   absent from the visual design. `display: none` would remove it from both. */
+.lp-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Focus visibility (WCAG 2.4.7) ────────────────────────────────────────
+   One rule for the whole application. There were five :focus declarations in
+   7,138 lines of CSS, so most of the 42 buttons fell back to the browser's
+   default ring -- which on this near-black ground is close to invisible.
+
+   :focus-visible, not :focus, so a pointer click does not paint a ring the
+   mouse user never asked for; the keyboard user gets one everywhere. The
+   offset keeps the ring off the control's own 1px border, and the components
+   that already define their own focus treatment still win on specificity. */
+:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+/* -- What a control looks like ---------------------------------------------
+   A button has to read as a button before it is hovered.
+
+   Several did not. .lp-systems-toggle, .lp-dim-btn, .lp-rover-tab, .lp-hud-btn
+   and .toast-dismiss all rested as bare --text-muted or --text-dim-2 on no
+   background, with either no border or one measuring about 1.2:1 against the
+   surface -- under the 3:1 WCAG 1.4.11 asks of a border that is the only thing
+   identifying a control.
+
+   Against their neighbours the problem is sharper than a threshold: those
+   labels sat at 5.2-6.2:1 while the ordinary prose beside them is 12:1, so on
+   several panels the one element that could be pressed was the one drawn most
+   faintly. Everything they said about being interactive, they said on hover --
+   a channel that does not exist on touch, and does not exist before the
+   pointer arrives.
+
+   A resting control now carries three signals instead of none: a faint fill,
+   a --line-button edge -- the token the palette already documents as the one
+   that clears 3:1 because it "draws buttons and inputs", measured at 3.04:1
+   over the new fill -- and a label at --text-2, the same weight as the text
+   around it. Hover is spent on getting brighter rather than on appearing at
+   all. Filled buttons are unaffected; they were never ambiguous. And
+   cursor: pointer is necessary but never sufficient -- it is invisible until
+   the pointer is already there. */
+
 html,
 body,
 #root {
   min-height: 100%;
   height: 100%;
+}
+
+/* The root element inherits nothing, so without this it computes to the
+   browser's default serif -- invisible in practice, but it means the document
+   has no typeface until <body> supplies one. */
+html {
+  font-family: var(--font-body);
+}
+
+/* <code> falls back to the browser's monospace otherwise, which is a third
+   mono face nobody chose. */
+code,
+kbd,
+samp {
+  font-family: var(--font-data);
 }
 
 body {
@@ -121,6 +379,30 @@ body {
   font-family: var(--font-body);
   line-height: 1.5;
   overflow: hidden;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────────
+   Hidden everywhere, not disabled. The platform scrollbar is a wide light
+   gutter that lands on top of flat dark panels and reads as a seam in the
+   layout rather than a control; nothing else in this interface is drawn by
+   the OS. Scrolling itself is untouched -- wheel, trackpad, drag, keyboard
+   and programmatic scrollTo all still work, the track just isn't painted.
+
+   Both properties are needed: `scrollbar-width` covers Firefox and the
+   ::-webkit- pseudo-element covers Chrome, Edge and Safari. The panels that
+   already hid their own (.rail-scroll, .telemetry-scroll, ...) are now saying
+   the same thing twice, which is harmless -- but a panel that *styled* one
+   had to go, because a class beats `*` on specificity and would have kept
+   painting its scrollbar. .chat-log was the only such case. */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 /* ── Backdrop ───────────────────────────────────────────────────────────────
@@ -214,7 +496,7 @@ body {
   height: 38vh;
   background: radial-gradient(
     120% 100% at 50% 100%,
-    rgba(232, 200, 90, 0.14),
+    rgba(227, 213, 72, 0.14),
     transparent 70%
   );
 }
@@ -325,18 +607,17 @@ select {
 .loading-brand {
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 600;
-  letter-spacing: 0.3em;
+  letter-spacing: var(--track-hero);
   text-transform: uppercase;
 }
 
 .landing-brand-sub {
   color: var(--text-dim-2);
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .landing-status {
@@ -344,9 +625,11 @@ select {
   align-items: center;
   gap: 22px;
   color: var(--text-dim);
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  /* Prose, so the label face. The coordinate inside it is still a measurement
+     and keeps the data face on its own span. */
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
 }
 
 .landing-link {
@@ -379,10 +662,9 @@ select {
 .loading-copy,
 .loading-percent {
   color: var(--lavender);
-  font-family: var(--font-data);
-  font-size: 11px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
 }
 
 .landing-kicker {
@@ -406,7 +688,7 @@ select {
   margin: 26px 0 0;
   max-width: 520px;
   color: var(--text-3);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 300;
   line-height: 1.65;
   text-wrap: pretty;
@@ -433,9 +715,9 @@ select {
   color: #0a0c14;
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
   transition: background 140ms ease;
 }
 
@@ -454,10 +736,9 @@ select {
 
 .landing-hint {
   color: var(--text-dim-2);
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 /* ── Capability footer ── */
@@ -471,25 +752,24 @@ select {
   flex-wrap: wrap;
 }
 
+/* Three parallel capabilities, spaced as a list rather than glued together
+   with middle dots. A '·' between items is punctuation doing a layout job. */
 .landing-capabilities {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 28px;
   color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
 }
 
-.landing-sep {
-  color: #39414f;
-}
 
 .landing-dataset {
   color: var(--text-dimmest);
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.14em;
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
 }
 
 /* One orchestrated entrance rather than effects scattered over the page: the
@@ -579,14 +859,17 @@ select {
 .cinematic-cta {
   min-height: 44px;
   border-radius: var(--radius);
-  border: 1px solid rgba(232, 200, 90, 0.45);
-  background: linear-gradient(135deg, rgba(232, 200, 90, 0.96), rgba(224, 142, 42, 0.92));
-  color: rgba(232, 200, 90, 0.08);
+  border: 1px solid rgba(227, 213, 72, 0.45);
+  background: linear-gradient(135deg, rgba(227, 213, 72, 0.96), rgba(224, 142, 42, 0.92));
+  /* Dark ink on the amber fill. It was rgba(227, 213, 72, 0.08) -- the fill's
+     own colour at 8% -- which measured 1.03:1 against the button it sits on:
+     the label was invisible, not dim. #0a0c14 is the ink the other filled
+     surfaces use and measures 8.85:1 here. */
+  color: #0a0c14;
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: var(--track-label);
   cursor: pointer;
   transition: background 0.2s ease, opacity 0.2s ease;
 }
@@ -599,7 +882,7 @@ select {
 }
 
 .cinematic-cta:not(:disabled):hover {
-  background: linear-gradient(135deg, rgba(240, 154, 74, 0.98), rgba(236, 154, 52, 0.95));
+  background: linear-gradient(135deg, rgba(214, 151, 112, 0.98), rgba(236, 154, 52, 0.95));
 }
 
 
@@ -659,9 +942,9 @@ select {
 .brand-mark {
   color: var(--primary-container);
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
-  letter-spacing: 0.32em;
+  letter-spacing: var(--track-hero);
 }
 
 .topbar-status {
@@ -673,34 +956,40 @@ select {
 .status-line {
   color: var(--primary-container);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
 }
 
 .status-line-muted {
-  color: rgba(139, 148, 166, 0.72);
+  color: var(--text-muted);
 }
 
+/* Three tracks declared, but the two modes each use two of them: plan runs
+   left + map, analyze runs map + right. The base template stays three-wide so
+   there is one place the widths are written, and the modifiers below drop
+   whichever track has no rail to put in it -- a template with more tracks than
+   children leaves the surplus as empty surface beside the map. */
 .content-grid {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr) 288px;
+  grid-template-columns: 300px minmax(0, 1fr) 340px;
   overflow: hidden;
-  transition: grid-template-columns 0.3s ease;
 }
 
-.content-grid.left-collapsed {
-  grid-template-columns: 34px minmax(0, 1fr) 288px;
+/* Plan: 300px, up from 264. The rail holds two full-width picker buttons
+   whose labels carry coordinates ("START 259, 252"), a four-row sequence
+   list, and a 2x2 spec grid -- all of which were wrapping at 264. */
+.content-grid.no-right-rail {
+  grid-template-columns: 300px minmax(0, 1fr);
 }
 
-.content-grid.right-collapsed {
-  grid-template-columns: 264px minmax(0, 1fr) 34px;
-}
-
-.content-grid.left-collapsed.right-collapsed {
-  grid-template-columns: 34px minmax(0, 1fr) 34px;
+/* Analyze: 340px, up from 288. This rail now carries the whole analysis on
+   its own -- route metrics, the profile comparison and the cost readout --
+   with no left rail sharing the reporting. */
+.content-grid.no-left-rail {
+  grid-template-columns: minmax(0, 1fr) 340px;
 }
 
 .left-rail,
@@ -713,7 +1002,6 @@ select {
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease;
   /* Scroll the rail as one column. Was overflow:hidden, which clipped every
      stacked feature past the fold once the registry put more than one panel
      here; the panels no longer scroll individually (see .lp-panel-content). */
@@ -725,35 +1013,8 @@ select {
   border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease;
   overflow-y: auto;
   overflow-x: hidden;
-}
-
-.left-rail.is-collapsed,
-.right-rail.is-collapsed {
-  overflow: visible;
-}
-
-.rail-toggle {
-  width: 100%;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--line);
-  color: var(--text-muted);
-  font-size: 18px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.18s ease, color 0.18s ease;
-}
-
-.rail-toggle:hover {
-  background: rgba(179, 165, 255, 0.08);
-  color: var(--primary-container);
 }
 
 .rail-scroll,
@@ -805,13 +1066,13 @@ select {
   display: grid;
   place-items: center;
   background:
-    linear-gradient(135deg, rgba(179, 165, 255, 0.2), rgba(179, 165, 255, 0.04)),
+    linear-gradient(135deg, rgba(186, 175, 245, 0.2), rgba(186, 175, 245, 0.04)),
     var(--surface-lowest);
-  border: 1px solid rgba(179, 165, 255, 0.18);
+  border: 1px solid rgba(186, 175, 245, 0.18);
   color: var(--primary-container);
   font-family: var(--font-data);
-  font-size: 12px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-body);
+  letter-spacing: var(--track-caps);
 }
 
 .panel-kicker,
@@ -823,25 +1084,25 @@ select {
 .map-data-label,
 .panel-kicker {
   margin: 0 0 4px;
-  color: rgba(139, 148, 166, 0.58);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  color: var(--text-muted-2);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .panel-title {
   margin: 0;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: var(--track-normal);
 }
 
 .panel-description,
 .section-note,
 .card-meta {
   color: rgba(199, 205, 219, 0.72);
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.6;
 }
 
@@ -851,9 +1112,9 @@ select {
 
 .eyebrow {
   margin: 0 0 12px;
-  color: rgba(139, 148, 166, 0.5);
-  font-size: 10px;
-  letter-spacing: 0.13em;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .eyebrow.tight {
@@ -875,23 +1136,23 @@ select {
   background: rgba(8, 11, 18, 0.72);
   color: rgba(228, 225, 237, 0.8);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
 .status-pill--idle {
-  color: rgba(139, 148, 166, 0.76);
+  color: var(--text-muted);
 }
 
 .status-pill--ready,
 .status-pill--safe {
-  border-color: rgba(79, 208, 138, 0.24);
+  border-color: rgba(74, 143, 216, 0.24);
   color: var(--safe);
 }
 
 .status-pill--critical {
-  border-color: rgba(238, 90, 82, 0.26);
+  border-color: rgba(237, 75, 61, 0.26);
   color: var(--critical);
 }
 
@@ -921,7 +1182,7 @@ select {
   background: var(--surface-lowest);
   border: 1px solid rgba(29, 36, 50, 0.34);
   border-radius: var(--radius);
-  color: rgba(139, 148, 166, 0.82);
+  color: var(--text-muted);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
@@ -947,25 +1208,27 @@ select {
 
 .rover-card-head strong {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 .rover-card-head span,
 .rover-card-specs span {
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
 }
 
 .rover-card-head span {
-  color: rgba(143, 160, 192, 0.74);
+  /* Was rgba(143, 160, 192, 0.74) at 11px, which lands at 4.43:1 -- under AA,
+     and 11px does not qualify for the large-text exception. The ramp already
+     has a value for this job, and .rover-card-specs span beside it uses it. */
+  color: var(--text-muted-2);
 }
 
 .rover-card-specs span {
-  color: rgba(139, 148, 166, 0.58);
+  color: var(--text-muted-2);
 }
 
 .rover-summary-grid {
@@ -981,7 +1244,7 @@ select {
   background: transparent;
   border: none;
   border-left: 3px solid transparent;
-  color: rgba(139, 148, 166, 0.76);
+  color: var(--text-muted);
   text-align: left;
   cursor: pointer;
   transition: background 0.18s ease, color 0.18s ease;
@@ -992,22 +1255,21 @@ select {
 }
 
 .profile-button.is-active {
-  background: rgba(179, 165, 255, 0.1);
+  background: rgba(186, 175, 245, 0.1);
   color: var(--primary-container);
 }
 
 .profile-name {
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
 }
 
 .profile-id {
-  color: rgba(139, 148, 166, 0.54);
+  color: var(--text-dimmest);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1023,27 +1285,27 @@ select {
 .map-switch button {
   min-height: 42px;
   border-radius: var(--radius);
-  letter-spacing: 0.08em;
+  letter-spacing: var(--track-label);
 }
 
 .coord-chip {
   padding: 0 12px;
   background: var(--surface-lowest);
   border: 1px solid rgba(29, 36, 50, 0.34);
-  color: rgba(139, 148, 166, 0.82);
+  color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 700;
   cursor: pointer;
 }
 
 .coord-chip.is-start {
-  border-color: rgba(79, 208, 138, 0.4);
+  border-color: rgba(74, 143, 216, 0.4);
   color: var(--safe);
 }
 
 .coord-chip.is-goal {
-  border-color: rgba(238, 90, 82, 0.4);
+  border-color: rgba(237, 75, 61, 0.4);
   color: var(--critical);
 }
 
@@ -1062,17 +1324,17 @@ select {
 .coord-label {
   display: block;
   margin-bottom: 5px;
-  color: rgba(139, 148, 166, 0.48);
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .coord-value {
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-tight);
 }
 
 .slider-stack {
@@ -1096,14 +1358,13 @@ select {
 
 .slider-name,
 .slider-value {
-  font-family: var(--font-data);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-label);
 }
 
 .slider-name {
-  color: rgba(139, 148, 166, 0.6);
+  color: var(--text-muted-2);
 }
 
 .slider-value {
@@ -1120,9 +1381,9 @@ select {
 .alert-card {
   padding: 12px;
   background: rgba(147, 0, 10, 0.18);
-  border: 1px solid rgba(240, 154, 74, 0.22);
+  border: 1px solid rgba(214, 151, 112, 0.22);
   color: var(--coral-text);
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.5;
 }
 
@@ -1147,18 +1408,18 @@ select {
   gap: 14px;
   padding: 14px 14px 14px 16px;
   border-radius: var(--radius);
-  border: 1px solid rgba(240, 154, 74, 0.2);
+  border: 1px solid rgba(214, 151, 112, 0.2);
   background: rgba(14, 15, 24, 0.94);
   box-shadow: var(--shadow-float);
   pointer-events: auto;
 }
 
 .toast-card--warning {
-  border-color: rgba(240, 154, 74, 0.28);
+  border-color: rgba(214, 151, 112, 0.28);
 }
 
 .toast-card--error {
-  border-color: rgba(238, 90, 82, 0.28);
+  border-color: rgba(237, 75, 61, 0.28);
 }
 
 .toast-copy {
@@ -1171,35 +1432,35 @@ select {
 .toast-title {
   color: var(--coral-text);
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 .toast-message {
   margin: 0;
   color: rgba(240, 233, 239, 0.88);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   line-height: 1.55;
 }
 
 .toast-detail {
-  color: rgba(139, 148, 166, 0.68);
+  color: var(--text-muted-2);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.05em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
   line-height: 1.45;
 }
 
 .toast-dismiss {
-  padding: 0;
+  padding: 3px 8px;
   background: transparent;
-  border: none;
-  color: rgba(139, 148, 166, 0.74);
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
   cursor: pointer;
 }
 
@@ -1220,20 +1481,22 @@ select {
 .ghost-btn {
   background: var(--surface-high);
   border: 1px solid rgba(139, 148, 166, 0.2);
-  color: rgba(139, 148, 166, 0.86);
+  color: var(--text-3);
   font-weight: 600;
 }
 
 /* The one action that spends energy, in the colour that means energy. */
 .primary-btn {
-  background: linear-gradient(135deg, rgba(232, 200, 90, 0.96), rgba(224, 142, 42, 0.92));
-  border: 1px solid rgba(232, 200, 90, 0.45);
-  color: rgba(232, 200, 90, 0.08);
+  background: linear-gradient(135deg, rgba(227, 213, 72, 0.96), rgba(224, 142, 42, 0.92));
+  border: 1px solid rgba(227, 213, 72, 0.45);
+  /* Dark ink, for the reason given on .cinematic-cta: the label used to be
+     the fill's own colour at 8% alpha and measured 1.03:1. */
+  color: #0a0c14;
   font-weight: 700;
 }
 
 .primary-btn:not(:disabled):hover {
-  background: linear-gradient(135deg, rgba(240, 154, 74, 0.98), rgba(236, 154, 52, 0.95));
+  background: linear-gradient(135deg, rgba(214, 151, 112, 0.98), rgba(236, 154, 52, 0.95));
 }
 
 .primary-btn:disabled {
@@ -1336,7 +1599,7 @@ select {
 
 .route-control-inline .section-note {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .route-control-inline .coord-chip-grid {
@@ -1345,7 +1608,7 @@ select {
 
 .route-control-inline .coord-chip {
   min-height: 36px;
-  font-size: 10px;
+  font-size: var(--fs-micro);
 }
 
 .route-control-actions {
@@ -1358,7 +1621,7 @@ select {
 .route-control-actions .ghost-btn,
 .route-control-actions .primary-btn {
   min-height: 36px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   padding: 0 12px;
 }
 
@@ -1385,16 +1648,16 @@ select {
 }
 
 .map-data-label {
-  color: rgba(139, 148, 166, 0.48);
-  font-size: 10px;
-  letter-spacing: 0.18em;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .map-data-value {
   color: var(--text);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .map-status-tag {
@@ -1403,8 +1666,8 @@ select {
   gap: 8px;
   color: var(--primary-container);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1423,17 +1686,20 @@ select {
   padding: 0 12px;
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(139, 148, 166, 0.72);
+  color: var(--text-muted);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 700;
 }
 
 /* Choosing a layer or a dimension is reading, not spending -- cyan. */
 .map-switch button.is-active {
   background: var(--umbra);
-  color: rgba(79, 216, 240, 0.10);
+  /* --umbra is --cyan, and the label was rgba(79, 216, 240, 0.10) -- the same
+     cyan at 10% over itself, which measures 1.00:1. The active tab's text was
+     the background. Dark ink reads 11.54:1 on it. */
+  color: #0a0c14;
   font-weight: 700;
 }
 
@@ -1448,8 +1714,8 @@ select {
   display: block;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 13px;
-  letter-spacing: 0.02em;
+  font-size: var(--fs-strong);
+  letter-spacing: var(--track-tight);
 }
 
 .telemetry-header {
@@ -1496,17 +1762,17 @@ select {
 }
 
 .telemetry-label {
-  color: rgba(139, 148, 166, 0.48);
-  font-size: 9px;
-  letter-spacing: 0.18em;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .telemetry-value {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: currentColor;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 .battery-card,
@@ -1530,10 +1796,9 @@ select {
 }
 
 .card-meta {
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
   white-space: nowrap;
 }
 
@@ -1576,17 +1841,16 @@ select {
 
 .battery-copy strong {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: var(--fs-hero);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 .battery-copy span {
-  color: rgba(139, 148, 166, 0.48);
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  color: var(--text-dimmest);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .risk-head {
@@ -1607,9 +1871,9 @@ select {
 }
 
 .risk-state {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1637,24 +1901,22 @@ select {
 
 .risk-count-card span {
   display: block;
-  color: rgba(139, 148, 166, 0.48);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .risk-count-card strong {
   display: block;
   margin-top: 6px;
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
 }
 
 .waypoint-meta {
-  color: rgba(139, 148, 166, 0.52);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .milestone-stats {
@@ -1672,11 +1934,10 @@ select {
 
 .milestone-stat span {
   display: block;
-  color: rgba(139, 148, 166, 0.48);
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  color: var(--text-dimmest);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .milestone-stat strong {
@@ -1684,7 +1945,7 @@ select {
   margin-top: 6px;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: var(--fs-value);
   font-weight: 600;
 }
 
@@ -1713,42 +1974,37 @@ select {
 }
 
 .waypoint-index {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .waypoint-detail {
-  color: rgba(139, 148, 166, 0.66);
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  color: var(--text-muted-2);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .waypoint-status {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
 @media (max-width: 1180px) {
   .content-grid {
-    grid-template-columns: 230px minmax(0, 1fr) 276px;
+    grid-template-columns: 264px minmax(0, 1fr) 300px;
   }
 
-  .content-grid.left-collapsed {
-    grid-template-columns: 40px minmax(0, 1fr) 276px;
+  .content-grid.no-right-rail {
+    grid-template-columns: 264px minmax(0, 1fr);
   }
 
-  .content-grid.right-collapsed {
-    grid-template-columns: 230px minmax(0, 1fr) 40px;
-  }
-
-  .content-grid.left-collapsed.right-collapsed {
-    grid-template-columns: 34px minmax(0, 1fr) 34px;
+  .content-grid.no-left-rail {
+    grid-template-columns: minmax(0, 1fr) 300px;
   }
 }
 
@@ -1761,16 +2017,17 @@ select {
     max-width: 100%;
   }
 
+  /* One column, whichever rails are present. The modifiers carry a class and
+     so outrank a bare `.content-grid` at the same media width -- listing them
+     here is what stops a 300px track surviving into the stacked layout. */
   .content-grid,
-  .content-grid.left-collapsed,
-  .content-grid.right-collapsed,
-  .content-grid.left-collapsed.right-collapsed {
+  .content-grid.no-left-rail,
+  .content-grid.no-right-rail {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 1fr) auto auto;
   }
 
-  .left-rail,
-  .left-rail.is-collapsed {
+  .left-rail {
     order: 2;
     border-right: none;
     border-top: 1px solid rgba(29, 36, 50, 0.26);
@@ -1781,20 +2038,10 @@ select {
     min-height: 50vh;
   }
 
-  .right-rail,
-  .right-rail.is-collapsed {
+  .right-rail {
     order: 3;
     border-left: none;
     border-top: 1px solid rgba(29, 36, 50, 0.26);
-  }
-
-  .rail-toggle {
-    display: none;
-  }
-
-  .left-rail.is-collapsed,
-  .right-rail.is-collapsed {
-    overflow: auto;
   }
 
   .map-stage {
@@ -1851,8 +2098,8 @@ select {
 
   .landing-brand-mark,
   .loading-brand {
-    font-size: 17px;
-    letter-spacing: 0.24em;
+    font-size: var(--fs-title);
+    letter-spacing: var(--track-hero);
   }
 
   .landing-brand-sub,
@@ -1860,8 +2107,8 @@ select {
   .landing-hint,
   .loading-copy,
   .loading-percent {
-    font-size: 9px;
-    letter-spacing: 0.14em;
+    font-size: var(--fs-micro);
+    letter-spacing: var(--track-caps);
   }
 
   .landing-copy h1 {
@@ -1871,7 +2118,7 @@ select {
   .landing-description {
     margin-top: 18px;
     max-width: 100%;
-    font-size: 13.5px;
+    font-size: var(--fs-strong);
     line-height: 1.6;
   }
 
@@ -1903,8 +2150,8 @@ select {
   }
 
   .brand-mark {
-    font-size: 16px;
-    letter-spacing: 0.22em;
+    font-size: var(--fs-value);
+    letter-spacing: var(--track-caps);
   }
 
   .rover-card-head,
@@ -2004,8 +2251,8 @@ select {
   align-items: center;
   justify-content: center;
   color: rgba(199, 205, 219, 0.72);
-  font-size: 0.85rem;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-strong);
+  letter-spacing: var(--track-normal);
   pointer-events: none;
 }
 
@@ -2030,11 +2277,11 @@ select {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  color: rgba(139, 148, 166, 0.82);
+  color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
 }
 
 .terrain3d-controls input[type='range'] {
@@ -2073,7 +2320,7 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   color: rgba(199, 205, 219, 0.9);
   cursor: pointer;
 }
@@ -2084,7 +2331,7 @@ select {
 }
 
 .terrain3d-note {
-  font-size: 0.68rem;
+  font-size: var(--fs-small);
   line-height: 1.35;
   color: rgba(199, 205, 219, 0.6);
 }
@@ -2102,11 +2349,14 @@ select {
 .payload-note,
 .payload-empty {
   margin: 0;
-  color: var(--text-muted);
+  /* --text-dim-2 rather than --text-muted at opacity 0.72. The ramp is
+     already tuned against these grounds, and dimming one of its values again
+     lands somewhere the ramp does not go: 3.73:1, under AA. Saying "one step
+     quieter" with the step below is what the ramp is for. */
+  color: var(--text-dim-2);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
-  opacity: 0.72;
 }
 
 .payload-inputs {
@@ -2122,10 +2372,9 @@ select {
   gap: 4px 6px;
   color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: var(--track-label);
 }
 
 .payload-inputs input {
@@ -2137,8 +2386,8 @@ select {
   border-radius: var(--radius);
   color: var(--text);
   font-family: var(--font-data);
-  font-size: 13px;
-  letter-spacing: 0.02em;
+  font-size: var(--fs-strong);
+  letter-spacing: var(--track-tight);
 }
 
 .payload-inputs input:focus-visible {
@@ -2172,9 +2421,9 @@ select {
 .payload-readout strong {
   color: var(--umbra);
   font-family: var(--font-data);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 /* ── LUNAPATH MISSION CONTROL WORKSTATION DESIGN SYSTEM ────────────── */
@@ -2228,9 +2477,9 @@ select {
   color: var(--text);
   cursor: pointer;
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 600;
-  letter-spacing: 0.28em;
+  letter-spacing: var(--track-hero);
 }
 
 /* The segmented control. The active half is the only filled surface in the
@@ -2249,9 +2498,9 @@ select {
   color: var(--text-3);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 400;
-  letter-spacing: 0.14em;
+  letter-spacing: var(--track-caps);
   transition: background 140ms ease, color 140ms ease;
 }
 
@@ -2273,8 +2522,8 @@ select {
 .lp-route-required {
   color: var(--text-dim-2);
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.14em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   white-space: nowrap;
 }
 
@@ -2283,8 +2532,16 @@ select {
   align-items: center;
   gap: 24px;
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.13em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+}
+
+/* Mission Report's anchor. `display: contents` so the empty div is not a flex
+   item -- otherwise .lp-topbar-right's 24px gap would be spent on a zero-width
+   box whenever there is no route and the report renders nothing. With it, the
+   portalled button becomes the flex item directly. */
+.lp-topbar-report-slot {
+  display: contents;
 }
 
 .lp-topbar-meta {
@@ -2331,17 +2588,18 @@ select {
   border: 1px solid transparent;
   border-radius: var(--radius);
   padding: 5px 9px;
-  color: var(--text-dim-2);
+  color: var(--text-2);
   cursor: pointer;
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.13em;
-  transition: color 140ms ease, border-color 140ms ease;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
 }
 
 .lp-systems-toggle:hover {
-  color: var(--text-2);
-  border-color: var(--line-card);
+  color: var(--text);
+  border-color: var(--line-button);
+  background: rgba(199, 205, 219, 0.06);
 }
 
 .lp-systems-toggle.is-active {
@@ -2353,10 +2611,9 @@ select {
 .lp-meta-label {
   color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 500;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-status-pill {
@@ -2395,11 +2652,11 @@ select {
 }
 
 .lp-dim-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 5px 12px;
   border-radius: var(--radius);
@@ -2408,9 +2665,9 @@ select {
 }
 
 .lp-dim-btn.is-active {
-  background: rgba(179, 165, 255, 0.2);
+  background: rgba(186, 175, 245, 0.2);
   color: var(--text);
-  border: 1px solid rgba(179, 165, 255, 0.4);
+  border: 1px solid rgba(186, 175, 245, 0.4);
 }
 
 .lp-layer-menu-wrapper {
@@ -2436,21 +2693,21 @@ select {
 }
 
 .lp-layer-label-hint {
-  font-family: var(--font-data);
-  font-size: 10px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
-  letter-spacing: 0.1em;
+  letter-spacing: var(--track-caps);
 }
 
 .lp-layer-current-name {
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-2);
 }
 
 .lp-dropdown-chevron {
   color: var(--accent-lavender);
-  font-size: 12px;
+  font-size: var(--fs-body);
   margin-left: 2px;
 }
 
@@ -2476,11 +2733,10 @@ select {
 }
 
 .lp-layer-group-header {
-  font-family: var(--font-data);
-  font-size: 10px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
   color: var(--accent-lavender);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
   padding: 4px 8px;
   border-bottom: 1px solid rgba(199, 205, 219, 0.05);
   margin-bottom: 4px;
@@ -2505,26 +2761,53 @@ select {
 }
 
 .lp-layer-item.is-selected {
-  background: rgba(179, 165, 255, 0.14);
+  background: rgba(186, 175, 245, 0.14);
 }
 
 .lp-layer-item-name {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text);
 }
 
+/* The option's name. It had no colour rule at all, so it inherited the
+   button's user-agent default -- pure black -- and rendered at 1.07:1 on this
+   panel: the least readable text in the application, and it was the primary
+   label of every row. Its own description underneath was legible, so the
+   hierarchy read inverted.
+
+   `--text-2` rather than `--text`: the selected row below takes the brighter
+   one, and the difference is how the menu shows which layer is active. */
+.lp-layer-item-title {
+  display: block;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.lp-layer-item.is-selected .lp-layer-item-title {
+  color: var(--text);
+}
+
+/* Same omission, same cause. */
+.lp-layer-check {
+  color: var(--lavender);
+  font-size: var(--fs-body);
+}
+
 .lp-layer-item-desc {
   display: block;
-  font-size: 10px;
-  color: var(--text-dim-2);
+  font-size: var(--fs-micro);
+  /* --text-muted, not --text-dim-2: the row's hover wash lifts the background
+     and pushed the dimmer token to 4.23:1, under AA, exactly when the pointer
+     is on the row being read. */
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
 .lp-check-mark {
   color: var(--accent-lavender);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 700;
 }
 
@@ -2578,22 +2861,22 @@ select {
 }
 
 .lp-solving-kicker {
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   color: var(--accent-cyan);
 }
 
 .lp-solving-title {
   margin: 2px 0 0;
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 700;
   color: var(--text);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-solving-detail {
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   color: var(--text-muted);
   margin: 0 0 14px;
@@ -2607,7 +2890,7 @@ select {
 
 .lp-solving-tag {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   padding: 3px 8px;
   background: rgba(199, 205, 219, 0.05);
   border: 1px solid var(--border-line);
@@ -2651,27 +2934,10 @@ select {
 }
 
 .lp-section-explainer {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: var(--text-dim-2);
   margin: 0;
-}
-
-.lp-text-action-btn {
-  background: transparent;
-  border: none;
-  color: var(--accent-lavender);
-  font-family: var(--font-data);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius);
-  transition: background 140ms ease;
-}
-
-.lp-text-action-btn:hover {
-  background: rgba(179, 165, 255, 0.12);
 }
 
 /* Selected Rover Card */
@@ -2692,26 +2958,26 @@ select {
 .lp-rover-avatar-box {
   width: 32px;
   height: 32px;
-  background: rgba(179, 165, 255, 0.14);
-  border: 1px solid rgba(179, 165, 255, 0.3);
+  background: rgba(186, 175, 245, 0.14);
+  border: 1px solid rgba(186, 175, 245, 0.3);
   border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--accent-lavender);
-  font-size: 14px;
+  font-size: var(--fs-strong);
 }
 
 .lp-rover-card-name {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-strong);
   font-weight: 700;
   color: var(--text);
 }
 
 .lp-rover-model-code {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -2737,7 +3003,7 @@ select {
 .lp-spec-label,
 .lp-mono-label {
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 400;
   color: var(--text-muted-2);
   text-transform: none;
@@ -2749,7 +3015,7 @@ select {
 .lp-spec-val,
 .lp-mono-val {
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 400;
   color: var(--text);
   text-align: right;
@@ -2767,23 +3033,33 @@ select {
   border-radius: var(--radius);
 }
 
+/* Label over value, not label beside value. Side by side, "MISSION PROFILE"
+   and a profile name do not fit one 250px rail line at 11px: the caption
+   wrapped to "MISSION / PROFILE", and truncating the name instead traded a
+   layout bug for an information one -- "Balanced Recon" became "Balanced R…".
+   Stacking is the same shape the KPI tiles already use, and both read whole. */
 .lp-profile-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.lp-profile-caption,
+.lp-profile-active-tag {
+  white-space: nowrap;
 }
 
 .lp-profile-caption {
-  font-family: var(--font-data);
-  font-size: 9px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
 }
 
 .lp-profile-active-tag {
-  font-family: var(--font-data);
-  font-size: 10px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-2);
 }
@@ -2808,7 +3084,7 @@ select {
   border: 1px solid var(--border-line);
   background: rgba(16, 22, 36, 0.7);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 500;
   cursor: pointer;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
@@ -2850,25 +3126,24 @@ select {
 }
 
 .lp-constraint-label {
-  font-family: var(--font-data);
-  font-size: 9px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-constraint-value {
   font-family: var(--font-data);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   color: var(--text-2);
   font-weight: 600;
 }
 
 .lp-constraint-badge {
   font-family: var(--font-data);
-  font-size: 8px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
   padding: 2px 5px;
   border-radius: var(--radius);
   width: fit-content;
@@ -2885,8 +3160,8 @@ select {
 /* Verified only after simulation: a returned plan can exceed it. */
 .lp-constraint-badge.is-verified {
   color: var(--risk-med);
-  background: rgba(232, 200, 90, 0.1);
-  border: 1px solid rgba(232, 200, 90, 0.28);
+  background: rgba(227, 213, 72, 0.1);
+  border: 1px solid rgba(227, 213, 72, 0.28);
 }
 
 /* Priority Sliders */
@@ -2909,14 +3184,14 @@ select {
 }
 
 .lp-slider-label {
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 500;
   color: var(--text-2);
 }
 
 .lp-slider-number {
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--accent-lavender);
   font-weight: 600;
 }
@@ -2960,14 +3235,14 @@ select {
   border-top: 1px solid var(--line);
   border-radius: 0;
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: var(--fs-small);
 }
 
 .lp-seq-num {
   flex: none;
   color: var(--text-dimmest);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 400;
 }
 
@@ -2995,8 +3270,8 @@ select {
   color: var(--text-2);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 11.5px;
-  letter-spacing: 0.06em;
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-label);
   transition: border-color 140ms ease, color 140ms ease;
 }
 
@@ -3021,21 +3296,21 @@ select {
   border-color: rgba(95, 227, 176, 0.4);
   color: var(--mint-text);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .lp-pick-btn.is-set-goal {
-  border-color: rgba(255, 122, 92, 0.4);
+  border-color: rgba(237, 133, 110, 0.4);
   color: var(--coral-text);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .lp-seq-status {
   flex: none;
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   padding: 0;
   background: none;
   color: var(--text-dim-2);
@@ -3081,7 +3356,7 @@ select {
 
 .lp-modal-title {
   margin: 2px 0 0;
-  font-size: 20px;
+  font-size: var(--fs-display);
   font-weight: 700;
   color: var(--text);
 }
@@ -3090,7 +3365,7 @@ select {
   background: transparent;
   border: none;
   color: var(--text-dim-2);
-  font-size: 18px;
+  font-size: var(--fs-title);
   cursor: pointer;
   padding: 4px;
 }
@@ -3100,7 +3375,7 @@ select {
 }
 
 .lp-modal-subtitle {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--text-muted);
   margin: 0 0 20px;
 }
@@ -3140,16 +3415,16 @@ select {
 
 .lp-agency-badge {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--accent-lavender);
-  background: rgba(179, 165, 255, 0.12);
+  background: rgba(186, 175, 245, 0.12);
   padding: 2px 6px;
   border-radius: var(--radius);
 }
 
 .lp-active-pill {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--accent-mint);
   font-weight: 700;
   background: rgba(95, 227, 176, 0.15);
@@ -3166,19 +3441,19 @@ select {
 
 .lp-rover-name {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 700;
   color: var(--text);
 }
 
 .lp-rover-id-code {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
 .lp-rover-desc {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.4;
   color: var(--text-muted);
   margin: 0 0 12px;
@@ -3205,11 +3480,11 @@ select {
   width: 100%;
   padding: 8px;
   border-radius: var(--radius);
-  background: rgba(179, 165, 255, 0.12);
-  border: 1px solid rgba(179, 165, 255, 0.25);
+  background: rgba(186, 175, 245, 0.12);
+  border: 1px solid rgba(186, 175, 245, 0.25);
   color: var(--accent-lavender);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   cursor: pointer;
   transition: all 140ms ease;
@@ -3229,7 +3504,7 @@ select {
 /* Mission Context (Right Rail Plan Mode) */
 .lp-live-badge {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   padding: 2px 6px;
   border-radius: var(--radius);
   background: rgba(95, 227, 176, 0.15);
@@ -3238,7 +3513,7 @@ select {
 }
 
 .lp-panel-desc-text {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: var(--text-muted);
   margin: 0;
@@ -3257,15 +3532,15 @@ select {
 }
 
 .lp-layer-card-tag {
-  font-family: var(--font-data);
-  font-size: 9px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
   color: var(--accent-lavender);
-  letter-spacing: 0.1em;
+  letter-spacing: var(--track-caps);
   margin-bottom: 2px;
 }
 
 .lp-layer-card-title {
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text);
 }
@@ -3285,7 +3560,7 @@ select {
 }
 
 .lp-no-route-icon {
-  font-size: 24px;
+  font-size: var(--fs-display);
   color: var(--accent-lavender);
   opacity: 0.7;
   margin-bottom: 8px;
@@ -3293,14 +3568,19 @@ select {
 
 .lp-no-route-title {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 700;
   color: var(--text-2);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
+  /* Without this the heading broke as "NO ROUTE ANALYSIS / YET", leaving one
+     word orphaned on its own line. `balance` lets the browser even out the
+     lines instead of filling the first one greedily; where it is unsupported
+     the heading simply wraps as before. */
+  text-wrap: balance;
 }
 
 .lp-no-route-text {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: var(--text-dim-2);
   margin: 0 0 14px;
@@ -3317,7 +3597,7 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-dim-2);
   background: rgba(5, 7, 13, 0.4);
   padding: 6px 8px;
@@ -3335,10 +3615,10 @@ select {
 
 /* Analysis Mode Left Rail (Snapshot) */
 .lp-status-pill.is-locked {
-  background: rgba(179, 165, 255, 0.12);
+  background: rgba(186, 175, 245, 0.12);
   color: var(--accent-lavender);
   font-weight: 700;
-  font-size: 9px;
+  font-size: var(--fs-micro);
   padding: 2px 6px;
   border-radius: var(--radius);
 }
@@ -3350,19 +3630,19 @@ select {
   gap: 8px;
   width: 100%;
   padding: 10px;
-  background: rgba(179, 165, 255, 0.14);
-  border: 1px solid rgba(179, 165, 255, 0.35);
+  background: rgba(186, 175, 245, 0.14);
+  border: 1px solid rgba(186, 175, 245, 0.35);
   border-radius: var(--radius);
   color: var(--text);
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   cursor: pointer;
   transition: all 160ms ease;
 }
 
 .lp-replan-btn:hover {
-  background: rgba(179, 165, 255, 0.25);
+  background: rgba(186, 175, 245, 0.25);
 }
 
 .lp-snapshot-card {
@@ -3381,7 +3661,7 @@ select {
 
 .lp-code-tag {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--accent-lavender);
 }
 
@@ -3389,7 +3669,7 @@ select {
   display: flex;
   gap: 8px;
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3432,13 +3712,13 @@ select {
 
 .lp-point-type {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
 .lp-point-coord {
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--text-2);
 }
 
@@ -3455,7 +3735,7 @@ select {
 .lp-readonly-row {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .lp-readonly-name {
@@ -3471,19 +3751,19 @@ select {
 /* Tier 1 / 2 / 3 Analysis Hierarchy */
 .lp-tier-1-section {
   background: rgba(14, 20, 34, 0.7);
-  border: 1px solid rgba(179, 165, 255, 0.25);
+  border: 1px solid rgba(186, 175, 245, 0.25);
   border-radius: var(--radius);
   padding: 14px;
 }
 
 .lp-overall-risk-badge {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   padding: 2px 8px;
   border-radius: var(--radius);
   border: 1px solid;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--track-label);
 }
 
 .lp-decision-kpi-grid {
@@ -3503,22 +3783,22 @@ select {
 }
 
 .lp-kpi-label {
-  font-family: var(--font-data);
-  font-size: 9px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-kpi-val {
   font-family: var(--font-data);
-  font-size: 14px;
+  font-size: var(--fs-strong);
   color: var(--text);
   font-weight: 700;
 }
 
 .lp-kpi-sub {
-  font-family: var(--font-data);
-  font-size: 9px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3558,7 +3838,7 @@ select {
   display: flex;
   justify-content: space-between;
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3592,7 +3872,7 @@ select {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-muted);
   position: relative;
 }
@@ -3604,7 +3884,7 @@ select {
   padding: 6px 24px 6px 8px;
   color: var(--text);
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 
 .lp-unit-tag {
@@ -3612,7 +3892,7 @@ select {
   right: 8px;
   bottom: 7px;
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3678,14 +3958,14 @@ select {
 }
 
 .lp-milestone-title {
-  font-family: var(--font-data);
-  font-size: 11px;
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
   color: var(--text);
 }
 
 .lp-milestone-coord {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3693,7 +3973,7 @@ select {
   display: flex;
   gap: 8px;
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-muted);
 }
 
@@ -3718,8 +3998,8 @@ select {
   border-radius: var(--radius);
   color: var(--text-2);
   font-family: var(--font-body);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-label);
   padding: 5px 11px;
   cursor: pointer;
   white-space: nowrap;
@@ -3799,14 +4079,14 @@ select {
 
 .lp-stat-name {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dimmest);
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track-caps);
 }
 
 .lp-stat-val {
   font-family: var(--font-data);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-2);
   font-weight: 400;
   white-space: nowrap;
@@ -3862,11 +4142,11 @@ select {
 @keyframes lpPulseBorderGoal {
   0%, 100% {
     border-color: var(--coral);
-    box-shadow: 0 0 0 0 rgba(255, 122, 92, 0.4);
+    box-shadow: 0 0 0 0 rgba(237, 133, 110, 0.4);
   }
   50% {
     border-color: var(--coral);
-    box-shadow: 0 0 0 4px rgba(255, 122, 92, 0.15);
+    box-shadow: 0 0 0 4px rgba(237, 133, 110, 0.15);
   }
 }
 
@@ -3936,7 +4216,7 @@ select {
 
 .lp-systems-title {
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: var(--fs-display);
   font-weight: 800;
   color: var(--text);
   margin: 0;
@@ -3953,7 +4233,7 @@ select {
   border: 1px solid rgba(199, 205, 219, 0.12);
   border-radius: var(--radius);
   color: var(--text-2);
-  font-size: 14px;
+  font-size: var(--fs-strong);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -3965,7 +4245,7 @@ select {
 
 .lp-systems-subtitle {
   font-family: var(--font-body);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-muted);
   margin: 12px 0 20px;
@@ -4010,11 +4290,11 @@ select {
 }
 
 .lp-rover-tab {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-muted);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 6px 2px;
   border-radius: var(--radius);
@@ -4030,8 +4310,8 @@ select {
 
 .lp-rover-tab.is-active {
   color: var(--text);
-  background: rgba(179, 165, 255, 0.16);
-  border-color: rgba(179, 165, 255, 0.4);
+  background: rgba(186, 175, 245, 0.16);
+  border-color: rgba(186, 175, 245, 0.4);
 }
 
 /* ── Sequence & Action Buttons in Planning Panel ── */
@@ -4043,8 +4323,8 @@ select {
 }
 
 .lp-seq-sub {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
   margin-top: 1px;
 }
@@ -4054,8 +4334,8 @@ select {
   background: none;
   border: 1px solid var(--line-button);
   color: var(--text-muted);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 6px 10px;
   border-radius: var(--radius);
@@ -4083,31 +4363,64 @@ select {
 }
 
 .lp-seq-action-btn.is-picking-goal {
-  background: rgba(255, 122, 92, 0.15);
+  background: rgba(237, 133, 110, 0.15);
   border-color: var(--coral);
   color: var(--coral);
   animation: lpPulseBorderGoal 1.5s infinite;
 }
 
 .lp-seq-action-btn.is-set-goal {
-  background: rgba(255, 122, 92, 0.1);
-  border-color: rgba(255, 122, 92, 0.4);
+  background: rgba(237, 133, 110, 0.1);
+  border-color: rgba(237, 133, 110, 0.4);
   color: var(--coral);
 }
 
 .lp-panel-action-row {
   display: grid;
-  grid-template-columns: 68px 1fr;
+  /* Two recovery controls on one row, the primary action on its own below.
+     Three side by side did not fit a 250px rail -- "Generate Route" was
+     clipped by "Clear" -- and the split is the better hierarchy anyway: Undo
+     and Clear undo things, Generate Route is the task. */
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-top: 14px;
+}
+
+/* Panel hints: the reason a control is unavailable, and the warning that the
+   drawn route no longer matches the sliders. Both were previously carried by
+   a `title` attribute or by nothing at all. */
+.lp-panel-plan-row {
+  margin-top: 8px;
+}
+
+.lp-panel-plan-row .lp-panel-plan-btn {
+  width: 100%;
+}
+
+.lp-panel-hint {
+  margin: 8px 0 0;
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.lp-panel-hint.is-stale {
+  color: var(--risk-med);
+}
+
+.lp-profile-desc {
+  margin: 8px 0 0;
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 
 .lp-panel-clear-btn {
   background: none;
   border: 1px solid var(--line-button);
   color: var(--text-muted);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 10px 10px;
   border-radius: var(--radius);
@@ -4117,8 +4430,8 @@ select {
 
 .lp-panel-clear-btn:hover:not(:disabled) {
   color: var(--coral);
-  border-color: rgba(255, 122, 92, 0.4);
-  background: rgba(255, 122, 92, 0.08);
+  border-color: rgba(237, 133, 110, 0.4);
+  background: rgba(237, 133, 110, 0.08);
 }
 
 .lp-panel-clear-btn:disabled {
@@ -4126,14 +4439,40 @@ select {
   cursor: not-allowed;
 }
 
+/* The way back to the hangar, under the rover card it changes. Ghost, like
+   Undo and Clear: it leaves the cockpit, which is not the thing to press
+   here. Full width because it acts on the card above it rather than sitting
+   in a row of peers, and lavender on hover -- the accent means navigation
+   here, where the two buttons above it mean discard. */
+.lp-change-vehicle-btn {
+  width: 100%;
+  margin-top: 10px;
+  background: none;
+  border: 1px solid var(--line-button);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  padding: 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.lp-change-vehicle-btn:hover {
+  color: var(--primary-container);
+  border-color: rgba(186, 175, 245, 0.4);
+  background: rgba(186, 175, 245, 0.08);
+}
+
 .lp-panel-plan-btn {
   background: var(--lavender);
   border: 0;
   color: #0a0c14;
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
   padding: 10px 12px;
   border-radius: var(--radius);
   cursor: pointer;
@@ -4155,155 +4494,6 @@ select {
   color: var(--text-dim-2);
   box-shadow: none;
   cursor: not-allowed;
-}
-
-/* ── Slide-Over Fleet Drawer (Left Docked) ── */
-.lp-slide-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(5, 7, 13, 0.6);
-  z-index: 150;
-  display: flex;
-  justify-content: flex-start;
-  align-items: stretch;
-}
-
-.lp-slide-drawer {
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border-line);
-  width: 480px;
-  max-width: 90vw;
-  height: 100vh;
-  padding: 24px;
-  box-shadow: var(--shadow-float);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  animation: lpSlideInLeft 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.lp-drawer-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 6px;
-}
-
-.lp-drawer-title {
-  margin: 2px 0 0;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.lp-drawer-close {
-  background: transparent;
-  border: 1px solid rgba(199, 205, 219, 0.1);
-  color: var(--text-muted);
-  font-size: 14px;
-  cursor: pointer;
-  padding: 6px 10px;
-  border-radius: var(--radius);
-  transition: all 0.15s ease;
-}
-
-.lp-drawer-close:hover {
-  background: rgba(199, 205, 219, 0.08);
-  color: var(--text);
-}
-
-.lp-drawer-subtitle {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  margin: 0 0 16px;
-}
-
-.lp-drawer-rover-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-bottom: 30px;
-}
-
-.lp-drawer-rover-card {
-  background: rgba(13, 18, 32, 0.85);
-  border: 1px solid var(--border-line);
-  border-radius: var(--radius);
-  padding: 16px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.lp-drawer-rover-card:hover {
-  border-color: rgba(179, 165, 255, 0.35);
-  background: rgba(17, 24, 42, 0.95);
-}
-
-.lp-drawer-rover-card.is-selected {
-  border-color: var(--lavender);
-  background: rgba(179, 165, 255, 0.06);
-}
-
-.lp-drawer-card-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.lp-drawer-card-badges {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.lp-highlight-badge {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  color: var(--cyan-text);
-  background: rgba(14, 165, 233, 0.12);
-  padding: 2px 6px;
-  border-radius: var(--radius);
-}
-
-.lp-drawer-card-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(199, 205, 219, 0.06);
-}
-
-.lp-default-weights-note {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  color: var(--text-dim-2);
-}
-
-.lp-assign-btn {
-  background: rgba(179, 165, 255, 0.14);
-  border: 1px solid rgba(179, 165, 255, 0.3);
-  color: var(--text);
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 7px 12px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  align-self: flex-start;
-  transition: all 0.15s ease;
-}
-
-.lp-assign-btn:hover {
-  background: rgba(179, 165, 255, 0.25);
-}
-
-.lp-assign-btn.is-assigned {
-  background: rgba(95, 227, 176, 0.15);
-  border-color: rgba(95, 227, 176, 0.4);
-  color: var(--mint);
 }
 
 /* ── Minimizable Telemetry HUD Overlay on Canvas ── */
@@ -4329,10 +4519,10 @@ select {
 }
 
 .lp-hud-title {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
   color: var(--text-muted);
 }
 
@@ -4342,10 +4532,10 @@ select {
 }
 
 .lp-hud-btn {
-  background: transparent;
-  border: 1px solid rgba(199, 205, 219, 0.1);
-  color: var(--text-muted);
-  font-size: 10px;
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
+  font-size: var(--fs-micro);
   line-height: 1;
   padding: 2px 5px;
   border-radius: var(--radius);
@@ -4373,18 +4563,18 @@ select {
 }
 
 .lp-hud-minimized:hover {
-  border-color: rgba(179, 165, 255, 0.4);
+  border-color: rgba(186, 175, 245, 0.4);
   transform: translateY(1px);
 }
 
 .lp-hud-min-dot {
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .lp-hud-min-coords,
 .lp-hud-min-alt {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
   font-weight: 600;
   color: var(--text-2);
 }
@@ -4394,7 +4584,7 @@ select {
 }
 
 .lp-hud-min-expand-icon {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-muted);
 }
 
@@ -4408,8 +4598,8 @@ select {
 }
 
 .lp-hud-pill {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
   font-weight: 600;
   padding: 2px 6px;
   border-radius: var(--radius);
@@ -4422,8 +4612,8 @@ select {
 }
 
 .lp-hud-pill.is-goal {
-  background: rgba(255, 122, 92, 0.15);
-  border: 1px solid rgba(255, 122, 92, 0.3);
+  background: rgba(237, 133, 110, 0.15);
+  border: 1px solid rgba(237, 133, 110, 0.3);
   color: var(--coral);
 }
 
@@ -4431,8 +4621,8 @@ select {
   background: rgba(199, 205, 219, 0.04);
   border: 1px solid rgba(199, 205, 219, 0.12);
   color: var(--text-muted);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 5px 10px;
   border-radius: var(--radius);
@@ -4449,23 +4639,46 @@ select {
 }
 
 .lp-hud-dock-btn.is-active {
-  background: rgba(179, 165, 255, 0.15);
-  border-color: rgba(179, 165, 255, 0.35);
+  background: rgba(186, 175, 245, 0.15);
+  border-color: rgba(186, 175, 245, 0.35);
   color: var(--text);
 }
 
 .lp-dock-icon {
-  font-size: 10px;
+  font-size: var(--fs-micro);
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
    STAGE 01: DEDICATED ROVER FLEET HANGAR STYLES
    ════════════════════════════════════════════════════════════════════════════ */
 
+/* The hangar is its own screen: fixed over the backdrop and above the shell,
+   which is still laid out behind it while hidden. */
+.fleet-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 131;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.fleet-screen-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  font-family: var(--font-data);
+  font-size: var(--fs-strong);
+  color: var(--text-muted);
+  background: var(--void);
+  text-align: center;
+}
+
 .lp-fleet-view {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 64px);
+  min-height: 100vh;
   padding: 28px 40px 48px;
   background: radial-gradient(circle at 50% 10%, var(--bg-raised) 0%, var(--bg-card) 60%, var(--void) 100%);
   overflow-y: auto;
@@ -4488,20 +4701,20 @@ select {
 }
 
 .lp-fleet-phase-badge {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
   font-weight: 700;
   color: var(--cyan);
   background: rgba(79, 216, 240, 0.12);
   border: 1px solid rgba(79, 216, 240, 0.35);
   padding: 3px 10px;
   border-radius: var(--radius);
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-fleet-site-badge {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
   font-weight: 600;
   color: var(--mint);
   background: rgba(95, 227, 176, 0.1);
@@ -4512,7 +4725,7 @@ select {
 
 .lp-fleet-headline {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: var(--fs-hero);
   font-weight: 800;
   color: var(--text);
   letter-spacing: -0.01em;
@@ -4521,7 +4734,7 @@ select {
 
 .lp-fleet-subhead {
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: var(--fs-strong);
   line-height: 1.6;
   color: var(--text-muted);
   margin: 0;
@@ -4616,10 +4829,10 @@ select {
 }
 
 .lp-card-agency {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
   padding: 3px 8px;
   border-radius: var(--radius);
   background: rgba(5, 7, 13, 0.85);
@@ -4627,8 +4840,8 @@ select {
 }
 
 .lp-card-active-pill {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
   font-weight: 700;
   color: var(--mint);
   background: rgba(95, 227, 176, 0.2);
@@ -4650,7 +4863,7 @@ select {
 
 .lp-card-highlight {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-2);
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
@@ -4673,21 +4886,21 @@ select {
 
 .lp-card-name {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
   color: var(--text);
   margin: 0;
 }
 
 .lp-card-code {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
   font-weight: 600;
   color: var(--cyan-text);
 }
 
 .lp-card-description {
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   color: var(--text-muted);
   margin: 0 0 12px;
@@ -4713,16 +4926,16 @@ select {
 }
 
 .lp-card-spec-k {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-dim-2);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-card-spec-v {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 13px;
+  font-family: var(--font-data);
+  font-size: var(--fs-strong);
   font-weight: 700;
   color: var(--text);
 }
@@ -4737,17 +4950,17 @@ select {
 }
 
 .lp-card-payload-title {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
   font-weight: 700;
   color: var(--cyan);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
   display: block;
   margin-bottom: 3px;
 }
 
 .lp-card-payload-text {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: var(--text-2);
   margin: 0;
@@ -4765,7 +4978,7 @@ select {
   border: 1px solid rgba(199, 205, 219, 0.12);
   color: var(--text-2);
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 600;
   padding: 9px 12px;
   border-radius: var(--radius);
@@ -4795,13 +5008,50 @@ select {
   border-radius: var(--radius);
   padding: 20px 28px;
   box-shadow: var(--shadow-float);
-  align-items: center;
+  /* Top, not centre: the priorities column is now several rows tall and the
+     deploy button should sit level with its heading, not float mid-way down
+     a block it does not belong to. */
+  align-items: flex-start;
   justify-content: space-between;
 }
 
-.lp-dock-weights-col {
+.lp-dock-priorities-col {
   flex: 1;
   min-width: 0;
+}
+
+/* Presets beside the weights rather than above them: this block came from a
+   250px rail where it could only stack, and stacked here it pushed the deploy
+   button off the first screen. */
+.lp-priorities {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.lp-priorities-weights {
+  min-width: 0;
+}
+
+/* Two by two rather than four across. Four in a row left the weights column
+   one line tall beside a presets column carrying chips, a caption and four
+   constraints, and the dock read as a block of controls with a hole under it.
+   Paired, the two columns finish at roughly the same height. */
+.lp-priorities .lp-priority-sliders {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px 24px;
+}
+
+.lp-priorities .lp-section-explainer {
+  margin: 0 0 12px;
+}
+
+@media (max-width: 1240px) {
+  .lp-priorities {
+    grid-template-columns: 1fr;
+  }
 }
 
 .lp-dock-section-title {
@@ -4812,52 +5062,16 @@ select {
 }
 
 .lp-dock-hint {
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-dim-2);
-  font-family: 'IBM Plex Mono', monospace;
-}
-
-.lp-dock-sliders-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  font-family: var(--font-data);
 }
 
 @media (max-width: 1100px) {
-  .lp-dock-sliders-row {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .lp-fleet-bottom-dock {
     flex-direction: column;
     align-items: stretch;
   }
-}
-
-.lp-dock-slider-cell {
-  background: rgba(5, 7, 13, 0.5);
-  border: 1px solid rgba(199, 205, 219, 0.06);
-  border-radius: var(--radius);
-  padding: 8px 12px;
-}
-
-.lp-dock-slider-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.lp-dock-slider-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-2);
-}
-
-.lp-dock-slider-val {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--cyan);
 }
 
 .lp-dock-action-col {
@@ -4877,44 +5091,62 @@ select {
 
 .lp-dock-rover-name {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 700;
   color: var(--mint);
 }
 
+/* The hangar's one filled surface, drawn exactly like the landing screen's:
+   solid lavender, dark ink, no border. Both buttons do the same job -- the
+   single thing on the screen you are meant to press -- so they say it the
+   same way.
+
+   It used to be a cyan-to-lavender gradient carrying --text, which failed on
+   three counts. The gradient was depth by fill, which the palette's own
+   header rules out. --cyan is a semantic colour here, spent on measured
+   readings, and a button is not a reading. And #e7eaf1 body text ran 1.40:1
+   over the cyan end and 1.65:1 over the lavender end -- the label was the
+   least readable thing in the hangar despite being its loudest element. The
+   dark ink reverses that to 9.8:1, and 12.3:1 on hover.
+
+   The lift-on-hover and the drop shadow go with it: nothing else in this
+   interface moves toward the cursor, and depth here is a hairline between
+   two flat greys, never a shadow. Hover retones instead, on the same
+   140ms background transition the landing button uses. The arrow keeps its
+   own nudge -- that one is the affordance, not decoration. */
 .lp-deploy-btn {
-  background: linear-gradient(135deg, var(--cyan) 0%, var(--lavender) 100%);
-  border: 1px solid rgba(199, 205, 219, 0.25);
-  color: var(--text);
+  background: var(--lavender);
+  border: 0;
+  color: #0a0c14;
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-tight);
   padding: 13px 26px;
   border-radius: var(--radius);
   cursor: pointer;
-  box-shadow: var(--shadow-pop);
   display: flex;
   align-items: center;
   gap: 10px;
-  transition: all 0.2s ease;
+  transition: background 140ms ease;
   white-space: nowrap;
 }
 
 .lp-deploy-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-pop);
-  background: linear-gradient(135deg, var(--cyan) 0%, var(--lavender) 100%);
+  background: var(--lavender-bright);
+}
+
+.lp-deploy-btn:active:not(:disabled) {
+  transform: scale(0.985);
 }
 
 .lp-deploy-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 .lp-deploy-arrow {
-  font-size: 17px;
+  font-size: var(--fs-title);
   transition: transform 0.2s ease;
 }
 
@@ -5024,7 +5256,7 @@ select {
 .lp-scale-copy {
   color: var(--text-muted-2);
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   white-space: nowrap;
 }
 
@@ -5044,9 +5276,19 @@ select {
 .lp-legend-label {
   color: var(--text-dimmest);
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.14em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   flex: none;
+}
+
+/* The legend swatch is a line, because what it documents is a line: the map
+   encodes risk in both the colour and the dash pattern, and a solid block
+   could only ever show half of that. */
+.lp-legend-line {
+  width: 22px;
+  height: 8px;
+  flex: none;
+  overflow: visible;
 }
 
 .lp-legend-item {
@@ -5054,7 +5296,7 @@ select {
   align-items: center;
   gap: 6px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   white-space: nowrap;
   flex: none;
 }

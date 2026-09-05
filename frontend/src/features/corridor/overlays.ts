@@ -53,7 +53,9 @@ export function corridorOverlays(
       kind: 'points',
       id: 'corridor-havens',
       points: fallback,
-      style: { color: '#4fd08a', radiusPx: 2.5, opacity: 0.7 },
+      // Havens are the safe fallback points; they read as risk-low, so they
+      // take that token's value rather than a copy of the old green.
+      style: { color: '#4a8fd8', radiusPx: 2.5, opacity: 0.7 },
     },
   ]
 }

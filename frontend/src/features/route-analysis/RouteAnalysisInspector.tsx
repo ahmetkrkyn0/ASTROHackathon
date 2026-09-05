@@ -80,7 +80,7 @@ export const RouteAnalysisInspector = () => {
       {/* ── TIER 1: DECISION SUMMARY ────────────────────────── */}
       <section className="lp-panel-section lp-tier-1-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">TIER 1 · MISSION DECISION SUMMARY</span>
+          <span className="lp-meta-label">Mission decision summary</span>
           <span
             className="lp-overall-risk-badge"
             style={{
@@ -94,14 +94,14 @@ export const RouteAnalysisInspector = () => {
 
         <div className="lp-decision-kpi-grid">
           <div className="lp-decision-kpi">
-            <span className="lp-kpi-label">DISTANCE</span>
+            <span className="lp-kpi-label">Distance</span>
             <strong className="lp-kpi-val">
               {summary?.total_distance_km ? `${summary.total_distance_km.toFixed(2)} km` : '--'}
             </strong>
           </div>
 
           <div className="lp-decision-kpi">
-            <span className="lp-kpi-label">END BATTERY</span>
+            <span className="lp-kpi-label">End battery</span>
             <strong
               className="lp-kpi-val"
               style={{ color: batteryToHex(activeBattery) }}
@@ -112,24 +112,24 @@ export const RouteAnalysisInspector = () => {
           </div>
 
           <div className="lp-decision-kpi">
-            <span className="lp-kpi-label">ROUTE SPEED</span>
+            <span className="lp-kpi-label">Route speed</span>
             <strong className="lp-kpi-val">{routeSpeedMs.toFixed(2)} m/s</strong>
           </div>
 
           <div className="lp-decision-kpi">
-            <span className="lp-kpi-label">EST. DURATION</span>
+            <span className="lp-kpi-label">Estimated duration</span>
             <strong className="lp-kpi-val">
               {totalHours > 0 ? `${totalHours.toFixed(1)} h` : '--'}
             </strong>
           </div>
 
           <div className="lp-decision-kpi">
-            <span className="lp-kpi-label">ROUTE NODES</span>
+            <span className="lp-kpi-label">Route nodes</span>
             <strong className="lp-kpi-val">{totalWaypoints}</strong>
           </div>
 
           <div className="lp-decision-kpi">
-            <span className="lp-kpi-label">RECHARGES</span>
+            <span className="lp-kpi-label">Recharges</span>
             <strong className="lp-kpi-val">{summary?.total_recharges ?? 0} stops</strong>
           </div>
         </div>
@@ -138,25 +138,25 @@ export const RouteAnalysisInspector = () => {
       {/* ── TIER 2: ENGINEERING ANALYSIS ────────────────────── */}
       <section className="lp-panel-section lp-tier-2-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">TIER 2 · ENGINEERING ANALYSIS</span>
+          <span className="lp-meta-label">Engineering analysis</span>
         </div>
 
         {/* Engineering Stats */}
         <div className="lp-eng-stat-grid">
           <div className="lp-eng-stat-cell">
-            <span className="lp-spec-label">STEEPEST SEGMENT</span>
+            <span className="lp-spec-label">Steepest segment</span>
             <strong className="lp-spec-val">
               {summary?.max_slope_deg ? `${summary.max_slope_deg.toFixed(1)}°` : '--'}
             </strong>
           </div>
           <div className="lp-eng-stat-cell">
-            <span className="lp-spec-label">PLANNER EFFORT</span>
+            <span className="lp-spec-label">Planner effort</span>
             <strong className="lp-spec-val">
               {metrics?.nodes_expanded ? `${metrics.nodes_expanded} nodes` : '--'}
             </strong>
           </div>
           <div className="lp-eng-stat-cell">
-            <span className="lp-spec-label">TOTAL ENERGY</span>
+            <span className="lp-spec-label">Total energy</span>
             <strong className="lp-spec-val">
               {summary?.total_energy_consumed_wh
                 ? `${summary.total_energy_consumed_wh.toFixed(0)} Wh`
@@ -164,7 +164,7 @@ export const RouteAnalysisInspector = () => {
             </strong>
           </div>
           <div className="lp-eng-stat-cell">
-            <span className="lp-spec-label">COMPUTE TIME</span>
+            <span className="lp-spec-label">Compute time</span>
             <strong className="lp-spec-val">
               {metrics?.computation_time_ms ? `${metrics.computation_time_ms.toFixed(0)} ms` : '< 50 ms'}
             </strong>
@@ -211,7 +211,7 @@ export const RouteAnalysisInspector = () => {
         {/* LiDAR Payload Overhead Calculator */}
         <div className="lp-payload-calculator">
           <div className="lp-slider-head">
-            <span className="lp-slider-label">LIDAR SENSOR PAYLOAD PRICING</span>
+            <span className="lp-slider-label">LiDAR payload cost</span>
             <span className="lp-slider-number">{payloadDrawW} W Draw</span>
           </div>
           <p className="lp-section-explainer">
@@ -248,15 +248,15 @@ export const RouteAnalysisInspector = () => {
 
           <div className="lp-payload-result-row">
             <div>
-              <span className="lp-mono-label">OVERHEAD</span>
+              <span className="lp-mono-label">Overhead</span>
               <strong className="lp-mono-val">{payloadOverheadWh.toFixed(0)} Wh</strong>
             </div>
             <div>
-              <span className="lp-mono-label">BATTERY TAX</span>
+              <span className="lp-mono-label">Battery cost</span>
               <strong className="lp-mono-val">{payloadOverheadPct.toFixed(1)}%</strong>
             </div>
             <div>
-              <span className="lp-mono-label">ARRIVES WITH</span>
+              <span className="lp-mono-label">Arrives with</span>
               <strong
                 className="lp-mono-val"
                 style={{ color: batteryToHex(payloadAdjustedBatteryPct) }}
@@ -271,7 +271,7 @@ export const RouteAnalysisInspector = () => {
       {/* ── TIER 3: DETAILED REVIEW / MILESTONES ─────────────── */}
       <section className="lp-panel-section lp-tier-3-section">
         <div className="lp-section-header-row">
-          <span className="lp-meta-label">TIER 3 · ROUTE MILESTONES TIMELINE</span>
+          <span className="lp-meta-label">Route milestones</span>
         </div>
 
         <div className="lp-milestones-timeline">

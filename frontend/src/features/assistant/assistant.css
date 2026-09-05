@@ -23,13 +23,24 @@
   place-items: center;
   padding: 0;
   border-radius: var(--radius);
-  border: 1px solid rgba(179, 165, 255, 0.4);
+  border: 1px solid rgba(186, 175, 245, 0.4);
   background: rgba(14, 19, 32, 0.94);
   box-shadow: var(--shadow-pop);
   color: rgba(199, 205, 219, 0.86);
-  cursor: pointer;
+  cursor: grab;
+  /* The launcher is its own drag handle. touch-action is what lets a touch
+     drag reach the handler at all -- without it the browser claims the
+     gesture for scrolling and pointermove stops firing. */
+  touch-action: none;
   transition: border-color 0.16s ease, color 0.16s ease, transform 0.16s ease,
     box-shadow 0.16s ease;
+}
+
+.chat-launcher.is-dragging {
+  cursor: grabbing;
+  /* No easing on the transform while it follows the pointer, or the button
+     lags behind the cursor and reads as heavy. */
+  transition: none;
 }
 
 .chat-launcher svg {
@@ -37,22 +48,40 @@
   height: 22px;
 }
 
+/* No lift on hover any more: the drag offset is a transform on this element,
+   and a hover rule setting transform would throw the button back to its
+   resting place the moment the pointer was over it. Colour carries the hover
+   instead, which is what the rest of the cockpit does. */
 .chat-launcher:hover {
   border-color: var(--accent-lavender);
-  transform: translateY(-2px);
   color: var(--text);
+  background: rgba(28, 34, 54, 0.96);
 }
 
 .chat-launcher:focus-visible {
-  outline: 2px solid rgba(179, 165, 255, 0.7);
+  outline: 2px solid rgba(186, 175, 245, 0.7);
   outline-offset: 2px;
 }
 
-/* Open is a state of the same control, not a different one. */
+/* Open hides the launcher. Once the window is on screen it carries its own
+   minimize control, and the button was a lit toggle sitting under a panel it
+   could no longer be seen to operate -- while taking the space beside Mission
+   Report that button needs.
+
+   Hidden with opacity and pointer-events rather than `display: none` so the
+   element stays in the layout and keeps its ref: close() returns focus to the
+   launcher, and focusing a display:none element is a no-op that would drop
+   focus to <body>. aria-hidden is not set for the same reason -- a focused
+   element must never be inside an aria-hidden subtree. */
 .chat-launcher.is-open {
-  border-color: rgba(179, 165, 255, 0.55);
-  background: linear-gradient(180deg, rgba(50, 43, 87, 0.6), rgba(28, 28, 46, 0.95));
-  color: rgba(199, 205, 219, 0.96);
+  opacity: 0;
+  pointer-events: none;
+  /* No transform here. Once the launcher has been dragged it carries an inline
+     translate, which wins over this rule -- so a scale written here would be
+     silently dropped for any operator who has moved the button, and applied
+     for everyone else. One behaviour for both is worth more than a shrink
+     nobody is looking at: the button is on its way to invisible either way. */
+  transition: opacity 0.15s ease;
 }
 
 /* One dot, no count: an answer arrived while the window was hidden. */
@@ -70,9 +99,10 @@
 .chat-window {
   position: fixed;
   right: 16px;
-  /* Sits above the launcher rather than on top of it: the launcher's own
-     56px offset clear of the status strip, plus its 46px, plus the gap. */
-  bottom: 114px;
+  /* The launcher hides while this is open, so the window no longer has to
+     clear it -- it sits where the launcher was, 56px clear of the status
+     strip, rather than 114px up with an empty gap beneath it. */
+  bottom: 56px;
   z-index: 100;
   display: flex;
   flex-direction: column;
@@ -141,6 +171,53 @@
   flex-shrink: 0;
 }
 
+/* The header doubles as the window's drag handle.
+
+   `touch-action: none` is what makes a touch drag work at all: without it the
+   browser claims the gesture for scrolling and the pointermove events stop
+   arriving. user-select stops a drag across the title from painting a text
+   selection behind the window as it moves. */
+.chat-header.is-draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.chat-window.is-dragging .chat-header.is-draggable {
+  cursor: grabbing;
+}
+
+/* No transition on the transform while dragging: the offset is already
+   following the pointer every frame, and easing it adds a lag between the
+   cursor and the window that reads as the panel being heavy. */
+.chat-window.is-dragging {
+  transition: none;
+}
+
+.chat-header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-reset-position {
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(186, 175, 245, 0.4);
+  background: rgba(186, 175, 245, 0.1);
+  color: var(--lavender-bright);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.chat-reset-position:hover {
+  border-color: var(--lavender);
+  background: rgba(186, 175, 245, 0.2);
+}
+
 .chat-minimize {
   flex-shrink: 0;
   width: 26px;
@@ -151,7 +228,7 @@
   border-radius: var(--radius);
   border: 1px solid rgba(29, 36, 50, 0.4);
   background: rgba(8, 11, 18, 0.7);
-  color: rgba(139, 148, 166, 0.75);
+  color: var(--text-muted);
   cursor: pointer;
   transition: border-color 0.16s ease, color 0.16s ease;
 }
@@ -162,12 +239,12 @@
 }
 
 .chat-minimize:hover {
-  border-color: rgba(179, 165, 255, 0.45);
+  border-color: rgba(186, 175, 245, 0.45);
   color: var(--text);
 }
 
 .chat-identity .panel-title {
-  font-size: 15px;
+  font-size: var(--fs-value);
 }
 
 .chat-header-actions {
@@ -181,11 +258,10 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(139, 148, 166, 0.55);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-dimmest);
   white-space: nowrap;
 }
 
@@ -194,7 +270,7 @@
   height: 6px;
   border-radius: 50%;
   background: var(--safe);
-  box-shadow: 0 0 0 3px rgba(79, 208, 138, 0.12);
+  box-shadow: 0 0 0 3px rgba(74, 143, 216, 0.12);
 }
 
 .chat-new {
@@ -202,16 +278,16 @@
   border-radius: var(--radius);
   border: 1px solid rgba(29, 36, 50, 0.4);
   background: rgba(8, 11, 18, 0.7);
-  color: rgba(139, 148, 166, 0.8);
+  color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   cursor: pointer;
   white-space: nowrap;
   transition: border-color 0.16s ease, color 0.16s ease;
 }
 
 .chat-new:hover:not(:disabled) {
-  border-color: rgba(179, 165, 255, 0.45);
+  border-color: rgba(186, 175, 245, 0.45);
   color: var(--text);
 }
 
@@ -230,16 +306,15 @@
 }
 
 .chat-level-label {
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-  color: rgba(139, 148, 166, 0.5);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-dimmest);
 }
 
 .chat-level-flag {
   font-style: normal;
-  color: rgba(179, 165, 255, 0.9);
+  color: rgba(186, 175, 245, 0.9);
 }
 
 .chat-levels {
@@ -257,8 +332,8 @@
   background: transparent;
   color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   cursor: pointer;
   transition: background 0.14s ease, color 0.14s ease;
 }
@@ -268,7 +343,7 @@
 }
 
 .chat-level-option.is-active {
-  background: rgba(179, 165, 255, 0.14);
+  background: rgba(186, 175, 245, 0.14);
   color: var(--lavender-bright);
 }
 
@@ -276,7 +351,7 @@
    visual default never passes for a choice they made. */
 .chat-level-option.is-suggested {
   border-style: dashed;
-  border-color: rgba(179, 165, 255, 0.34);
+  border-color: rgba(186, 175, 245, 0.34);
 }
 
 /* ── Conversation viewport ──────────────────────────────────────────────── */
@@ -294,15 +369,6 @@
   padding-right: 4px;
 }
 
-.chat-log::-webkit-scrollbar {
-  width: 6px;
-}
-
-.chat-log::-webkit-scrollbar-thumb {
-  background: rgba(29, 36, 50, 0.4);
-  border-radius: var(--radius);
-}
-
 .chat-intro {
   display: flex;
   flex-direction: column;
@@ -313,16 +379,16 @@
 .chat-intro-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: var(--fs-strong);
   font-weight: 600;
   color: rgba(199, 205, 219, 0.92);
 }
 
 .chat-intro-copy {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.55;
-  color: rgba(139, 148, 166, 0.62);
+  color: var(--text-muted-2);
 }
 
 .chat-suggestions {
@@ -339,7 +405,7 @@
   background: none;
   color: var(--text-3);
   font-family: var(--font-body);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.14s ease, color 0.14s ease;
@@ -358,13 +424,13 @@
 .chat-intro-note,
 .chat-intro-blocked {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.5;
-  color: rgba(139, 148, 166, 0.55);
+  color: var(--text-dimmest);
 }
 
 .chat-intro-blocked {
-  color: rgba(179, 165, 255, 0.82);
+  color: rgba(186, 175, 245, 0.82);
 }
 
 /* ── Messages ───────────────────────────────────────────────────────────── */
@@ -382,7 +448,7 @@
   align-self: flex-end;
   max-width: 88%;
   padding: 8px 12px;
-  border: 1px solid rgba(179, 165, 255, 0.24);
+  border: 1px solid rgba(186, 175, 245, 0.24);
   background: rgba(38, 38, 60, 0.55);
 }
 
@@ -405,28 +471,26 @@
 }
 
 .chat-role {
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(139, 148, 166, 0.52);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-dimmest);
 }
 
 .chat-context {
   padding: 0;
   border: 0;
   background: none;
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
   color: var(--text-dim-2);
 }
 
 .chat-text {
   margin: 0;
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   line-height: 1.6;
   color: rgba(199, 205, 219, 0.92);
   /* Plain text, wrapped honestly: no markdown renderer is loaded, so
@@ -436,13 +500,13 @@
 }
 
 .chat-text.is-secondary {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: rgba(199, 205, 219, 0.74);
 }
 
 .chat-error-title {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.5;
   color: rgba(199, 205, 219, 0.92);
@@ -453,23 +517,23 @@
 .chat-notice {
   padding: 8px 10px;
   border-radius: var(--radius);
-  border: 1px solid rgba(240, 154, 74, 0.32);
+  border: 1px solid rgba(214, 151, 112, 0.32);
   border-left-width: 3px;
-  border-left-color: rgba(240, 154, 74, 0.75);
+  border-left-color: rgba(214, 151, 112, 0.75);
   background: rgba(42, 36, 20, 0.35);
 }
 
 .chat-notice-title {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.45;
-  color: rgba(240, 154, 74, 0.95);
+  color: rgba(214, 151, 112, 0.95);
 }
 
 .chat-notice-copy {
   margin: 4px 0 0;
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.5;
   color: rgba(199, 205, 219, 0.78);
 }
@@ -496,17 +560,16 @@
   border-left-width: 3px;
   background: rgba(20, 21, 30, 0.6);
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.5;
 }
 
 .chat-warning-tag {
   flex-shrink: 0;
   padding-top: 1px;
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
 }
 
 .chat-warning-copy {
@@ -522,12 +585,12 @@
 }
 
 .chat-warning.is-caution {
-  border-left-color: rgba(240, 154, 74, 0.8);
+  border-left-color: rgba(214, 151, 112, 0.8);
   background: rgba(42, 36, 20, 0.32);
 }
 
 .chat-warning.is-caution .chat-warning-tag {
-  color: rgba(240, 154, 74, 0.95);
+  color: rgba(214, 151, 112, 0.95);
 }
 
 .chat-warning.is-critical {
@@ -542,11 +605,10 @@
 /* ── Limitations and evidence ───────────────────────────────────────────── */
 
 .chat-block-title {
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-  color: rgba(139, 148, 166, 0.48);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-dimmest);
 }
 
 .chat-limitations {
@@ -559,7 +621,7 @@
   margin: 0;
   padding-left: 16px;
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.5;
   color: rgba(199, 205, 219, 0.72);
 }
@@ -582,7 +644,7 @@
 
 .chat-evidence-label {
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: rgba(199, 205, 219, 0.8);
 }
@@ -591,16 +653,15 @@
   padding: 2px 7px;
   border-radius: var(--radius);
   border: 1px solid rgba(29, 36, 50, 0.4);
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(139, 148, 166, 0.7);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  color: var(--text-muted-2);
   white-space: nowrap;
 }
 
 .chat-pedigree.is-measurement {
-  border-color: rgba(79, 208, 138, 0.4);
+  border-color: rgba(74, 143, 216, 0.4);
   color: rgba(140, 240, 190, 0.9);
 }
 
@@ -622,15 +683,15 @@
   align-items: center;
   gap: 7px;
   font-family: var(--font-body);
-  font-size: 12.5px;
-  color: rgba(179, 165, 255, 0.88);
+  font-size: var(--fs-body);
+  color: rgba(186, 175, 245, 0.88);
 }
 
 .chat-stage-note {
   margin: 0;
   font-family: var(--font-body);
-  font-size: 11px;
-  color: rgba(139, 148, 166, 0.55);
+  font-size: var(--fs-small);
+  color: var(--text-dimmest);
 }
 
 .chat-dots {
@@ -713,17 +774,17 @@
   background: rgba(8, 11, 18, 0.72);
   color: rgba(199, 205, 219, 0.92);
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   line-height: 1.5;
 }
 
 .chat-input:focus {
   outline: none;
-  border-color: rgba(179, 165, 255, 0.55);
+  border-color: rgba(186, 175, 245, 0.55);
 }
 
 .chat-input:focus-visible {
-  box-shadow: 0 0 0 3px rgba(179, 165, 255, 0.16);
+  box-shadow: 0 0 0 3px rgba(186, 175, 245, 0.16);
 }
 
 .chat-input:disabled {
@@ -740,18 +801,18 @@
 
 .chat-hint {
   font-family: var(--font-body);
-  font-size: 10.5px;
-  color: rgba(139, 148, 166, 0.5);
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
 }
 
 .chat-send {
   padding: 7px 16px;
   border-radius: var(--radius);
-  border: 1px solid rgba(179, 165, 255, 0.42);
+  border: 1px solid rgba(186, 175, 245, 0.42);
   background: rgba(50, 43, 87, 0.5);
   color: rgba(199, 205, 219, 0.95);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-body);
   cursor: pointer;
   transition: background 0.16s ease;
 }
@@ -766,7 +827,7 @@
 }
 
 .chat-panel button:focus-visible {
-  outline: 2px solid rgba(179, 165, 255, 0.7);
+  outline: 2px solid rgba(186, 175, 245, 0.7);
   outline-offset: 2px;
 }
 
@@ -821,10 +882,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
   color: var(--chat-muted, var(--text-muted));
 }
 
@@ -844,19 +904,18 @@
    Scoped to .chat-panel: .panel-title and .panel-kicker are shared with the
    rail panels, which want their own sizes. */
 .chat-panel .panel-title {
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 500;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
 }
 
 .chat-panel .panel-kicker {
   order: 2;
   margin: 5px 0 0;
   color: var(--text-dim-2);
-  font-family: var(--font-data);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .chat-identity {
@@ -874,7 +933,7 @@
 
 .chat-intro-copy,
 .chat-intro-title {
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.65;
   color: var(--text-3);
 }
@@ -883,4 +942,21 @@
   font-family: var(--font-body);
   font-weight: 500;
   color: var(--text-2);
+}
+
+/* Declares the panel's language, because it differs from the rest of the
+   application. A badge rather than a sentence: it has to survive beside a
+   title in a 360px panel. */
+.chat-lang-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 5px;
+  vertical-align: middle;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  letter-spacing: var(--track-caps);
+  color: var(--text-muted);
 }

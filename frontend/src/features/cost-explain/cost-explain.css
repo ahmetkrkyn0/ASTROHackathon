@@ -13,28 +13,28 @@
 }
 
 .lp-cost-cell {
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .lp-cost-verdict {
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 700;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
 .lp-cost-impassable {
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: var(--risk-crit);
 }
 
 .lp-cost-reason {
   margin: 0 0 10px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.5;
   color: var(--risk-crit);
 }
@@ -49,13 +49,13 @@
 }
 
 .lp-cost-label {
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-2);
   display: flex;
   flex-direction: column;
 }
 
-.lp-cost-weight { font-size: 9px; color: var(--text-dim-2); font-style: normal; }
+.lp-cost-weight { font-size: var(--fs-micro); color: var(--text-dim-2); font-style: normal; }
 
 .lp-cost-track {
   height: 7px;
@@ -69,10 +69,10 @@
   45deg, var(--risk-crit) 0 5px, rgba(248, 113, 113, 0.45) 5px 10px); }
 
 .lp-cost-value {
-  font-size: 11px;
+  font-size: var(--fs-small);
   text-align: right;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
-.lp-cost-note { margin: 0; font-size: 11px; color: var(--text-muted); }
+.lp-cost-note { margin: 0; font-size: var(--fs-small); color: var(--text-muted); }

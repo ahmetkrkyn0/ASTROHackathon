@@ -72,52 +72,52 @@ export function decideVerdict(plan: PlanResponse): VerdictResult {
   if (s.stranded) {
     blocking.push({
       code: 'STRANDED',
-      text: `Rover ${s.stranded_at_step ?? '?'}. adımda enerjisiz kaldı — rota tamamlanamıyor.`,
+      text: `Rover ran out of energy at step ${s.stranded_at_step ?? '?'} — the route cannot be completed.`,
     })
   }
   if (plan.execution?.truncated) {
     blocking.push({
       code: 'EXECUTION_TRUNCATED',
       text:
-        `Rota kesildi: ${plan.execution.executable_nodes}/${plan.execution.planned_nodes} düğüm sürülebilir` +
+        `Route truncated: ${plan.execution.executable_nodes}/${plan.execution.planned_nodes} nodes are drivable` +
         (plan.execution.reason ? ` (${plan.execution.reason}).` : '.'),
     })
   }
   if (s.shadow_limit_exceeded) {
     blocking.push({
       code: 'SHADOW_LIMIT_EXCEEDED',
-      text: `Kesintisiz gölge ${s.max_continuous_shadow_h.toFixed(1)} s, rover limiti ${s.shadow_limit_h?.toFixed(1)} s.`,
+      text: `Continuous shadow ${s.max_continuous_shadow_h.toFixed(1)} h against a rover limit of ${s.shadow_limit_h?.toFixed(1)} h.`,
     })
   }
   if (s.critical_steps_count > 0) {
     blocking.push({
       code: 'CRITICAL_STEPS',
-      text: `${s.critical_steps_count} adım CRITICAL risk seviyesinde.`,
+      text: `${s.critical_steps_count} steps at CRITICAL risk.`,
     })
   }
 
   if (s.high_or_above_steps_count > 0) {
     warnings.push({
       code: 'HIGH_RISK_STEPS',
-      text: `${s.high_or_above_steps_count} adım HIGH veya üzeri riskte.`,
+      text: `${s.high_or_above_steps_count} steps at HIGH risk or above.`,
     })
   }
   if (s.min_battery_pct < BATTERY_WATCH_PCT) {
     warnings.push({
       code: 'BATTERY_WATCH',
-      text: `Pil en düşük %${s.min_battery_pct.toFixed(1)} seviyesine indi.`,
+      text: `Battery fell to ${s.min_battery_pct.toFixed(1)}% at its lowest.`,
     })
   }
   if (s.peak_power_exceeded_steps > 0) {
     warnings.push({
       code: 'PEAK_POWER_EXCEEDED',
-      text: `${s.peak_power_exceeded_steps} adımda tepe güç bütçesi aşıldı.`,
+      text: `Peak power budget exceeded on ${s.peak_power_exceeded_steps} steps.`,
     })
   }
   if (s.total_recharges > 0) {
     warnings.push({
       code: 'RECHARGES_REQUIRED',
-      text: `Rota ${s.total_recharges} şarj molası gerektiriyor.`,
+      text: `The route needs ${s.total_recharges} recharge stops.`,
     })
   }
 
@@ -125,16 +125,17 @@ export function decideVerdict(plan: PlanResponse): VerdictResult {
   if (warnings.length > 0) return { verdict: 'GO-WITH-RISK', reasons: warnings }
   return {
     verdict: 'GO',
-    reasons: [{ code: 'NO_VIOLATION', text: 'Sürüş kısıtlarının hiçbiri ihlal edilmedi.' }],
+    reasons: [{ code: 'NO_VIOLATION', text: 'No driving constraint was violated.' }],
   }
 }
 
 /**
  * What the report asks the assistant, per verdict.
  *
- * Fixed strings rather than a generated sentence: the question is placed in the
- * composer for the operator to send, so it has to read like something a person
- * would type, and a test pins all three by value.
+ * Turkish, while the rest of the report is English, and deliberately: the
+ * assistant answers only in Turkish (VERBALIZER_PROMPT), so a Turkish question
+ * keeps the exchange in one language. The operator sees it in the composer
+ * before sending, and a test pins all three by value.
  */
 export const ASSISTANT_QUESTION: Record<Verdict, string> = {
   GO: 'Görev raporundaki karar özetini açıkla: GO kararı hangi bulgulara dayanıyor?',
@@ -271,15 +272,15 @@ export function milestones(waypoints: Waypoint[]): Milestone[] {
   // Endpoints are claimed FIRST, and the order is the whole fix: on a route
   // that drains monotonically -- which is most of them -- the lowest battery
   // IS the last waypoint, and letting the extreme claim that step left the
-  // table with no row called HEDEF at all.
-  add(0, 'BAŞLANGIÇ')
-  add(waypoints.length - 1, 'HEDEF')
+  // table with no row called GOAL at all.
+  add(0, 'START')
+  add(waypoints.length - 1, 'GOAL')
 
   if (waypoints.length > 8) {
     for (const [frac, label] of [
-      [0.25, '%25'],
-      [0.5, '%50'],
-      [0.75, '%75'],
+      [0.25, '25%'],
+      [0.5, '50%'],
+      [0.75, '75%'],
     ] as const) {
       add(Math.floor(waypoints.length * frac), label)
     }
@@ -291,8 +292,8 @@ export function milestones(waypoints: Waypoint[]): Milestone[] {
     if (wp.slope_deg > waypoints[steepest].slope_deg) steepest = i
     if (wp.battery_pct < waypoints[weakest].battery_pct) weakest = i
   })
-  add(steepest, 'EN DİK')
-  add(weakest, 'EN DÜŞÜK PİL')
+  add(steepest, 'STEEPEST')
+  add(weakest, 'LOWEST BATTERY')
 
   return [...picked.entries()]
     .sort((a, b) => a[0] - b[0])

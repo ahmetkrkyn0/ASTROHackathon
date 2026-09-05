@@ -13,7 +13,7 @@
   border: 1px solid rgba(79, 216, 240, 0.4);
   background: rgba(79, 216, 240, 0.12);
   color: var(--cyan-text);
-  font-size: 11px;
+  font-size: var(--fs-small);
   padding: 5px 10px;
   cursor: pointer;
 }
@@ -24,11 +24,29 @@
 .lp-time-slider { flex: 1; accent-color: var(--cyan); }
 
 .lp-time-clock {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
   min-width: 60px;
   text-align: right;
+}
+
+/* The field's on/off, beside the picker that says which field. Disabled the
+   select rather than hiding it: which layer would be drawn is worth reading
+   even when none is. */
+.lp-time-layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lp-time-layer-toggle input {
+  accent-color: var(--lavender);
+  cursor: pointer;
 }
 
 .lp-time-field {
@@ -36,13 +54,18 @@
   border: 1px solid rgba(139, 148, 166, 0.24);
   border-radius: var(--radius);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: var(--fs-small);
   padding: 4px 6px;
 }
 
-.lp-time-note { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+.lp-time-field:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lp-time-note { margin: 8px 0 0; font-size: var(--fs-small); line-height: 1.5; color: var(--text-muted); }
 .lp-time-warn { color: var(--risk-med); }
 .lp-time-note code { color: var(--text-2); }
 
-.lp-time-verdict { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--text-2); }
+.lp-time-verdict { margin: 8px 0 0; font-size: var(--fs-body); line-height: 1.5; color: var(--text-2); }
 .lp-time-verdict strong { color: var(--risk-med); }

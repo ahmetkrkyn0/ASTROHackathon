@@ -90,16 +90,24 @@ export interface FeatureRegistration {
  * those tasks independently reviewable.
  */
 export const FEATURES: readonly FeatureRegistration[] = [
-  // No modes: App.tsx used to render this panel in both plan and analyze branches.
-  { id: 'mission-context', slot: 'rightRail', Component: MissionContextFeature },
+  // Analyze only, though App.tsx once rendered it in both branches. It is a
+  // readout -- sector, resolution, extent, and whatever the pointer is over --
+  // and while a route is being placed the operator is looking at the map, not
+  // at a column describing it. Restricting it is what empties the right rail
+  // in plan, which is the point: plan gets the wider map.
+  { id: 'mission-context', slot: 'rightRail', Component: MissionContextFeature, modes: ['analyze'] },
   // Plan only: meaningful after the hangar's rover selection is complete.
   { id: 'mission-setup', slot: 'leftRail', Component: MissionSetup, modes: ['plan'] },
-  // analyze only. App.tsx rendered this as the else-branch of
-  // `missionMode === 'plan' ? MissionSetupPanel : MissionSnapshotPanel`, and
-  // fleet replaces the whole cockpit, so analyze was the only stage it ever
-  // appeared in. Leaving modes off would put it beside the setup panel in
-  // plan -- the exact quiet mistake the filter exists to make explicit.
-  { id: 'mission-snapshot', slot: 'leftRail', Component: MissionSnapshot, modes: ['analyze'] },
+  // Registered for no mode, which is how a feature is retired without being
+  // deleted. It was analyze's left rail: a locked read-only echo of the rover,
+  // the two endpoints and the four weights -- all of it already reported by
+  // the right rail's analysis, and none of it editable here. Analyze now runs
+  // with the left rail gone entirely and the map that much wider.
+  //
+  // Its one control, "Edit & Replan", was `setMissionMode('plan')` and nothing
+  // else -- exactly what the top bar's PLAN tab does. That tab is enabled
+  // throughout analyze, so removing this panel takes no route back with it.
+  { id: 'mission-snapshot', slot: 'leftRail', Component: MissionSnapshot, modes: [] },
   { id: 'route-analysis', slot: 'rightRail', Component: RouteAnalysis, modes: ['analyze'] },
   // analyze only, from App.tsx's `missionMode === 'analyze' && planResult`
   // guard. Only the mode half becomes a registration: the bar already
@@ -139,9 +147,10 @@ export const FEATURES: readonly FeatureRegistration[] = [
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation, group: 'systems' },
   { id: 'corridor', slot: 'rightRail', Component: CorridorFeature, group: 'systems' },
   { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop, group: 'systems' },
-  // No modes: the cost of the cell under the pointer is worth reading while a
-  // route is being placed and while one is being reviewed.
-  { id: 'cost-explain', slot: 'rightRail', Component: CostExplain },
+  // Analyze only. The cost under the pointer is worth reading in both modes,
+  // but it is the last primary occupant of the right rail, and leaving it
+  // registered in plan would keep a 288px column open for one hover readout.
+  { id: 'cost-explain', slot: 'rightRail', Component: CostExplain, modes: ['analyze'] },
   // Floating, not railed: the assistant opens over the mission and has to
   // keep working with both rails collapsed.
   { id: 'assistant', slot: 'globalOverlay', Component: Assistant },

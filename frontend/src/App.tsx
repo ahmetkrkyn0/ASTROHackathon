@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import LandingPage from './LandingPage'
+import FleetSelectionView from './components/Fleet/FleetSelectionView'
+import {
+  type AppPhase,
+  hrefForLocation,
+  locationFromHref,
+  phaseFromHref,
+} from './shell/phaseUrl'
 import MapCanvas, {
   type ClickMode,
   DOWNSAMPLE,
   type MapCanvasHandle,
   type MapViewMode,
 } from './MapCanvas'
+import { riskToDashArray, riskToHex } from './colormap'
 import SpaceBackdrop from './SpaceBackdrop'
 import TerrainCanvas3D from './TerrainCanvas3D'
 import {
@@ -33,6 +41,7 @@ import { MissionProvider } from './mission/MissionProvider'
 import { MissionRuntimeProvider } from './mission/MissionRuntimeProvider'
 import type { MissionActions, MissionRuntime, MissionValue } from './mission/types'
 import { OverlayProvider } from './overlay/OverlayProvider'
+import { FEATURES, selectFeatures } from './features/registry'
 import SystemsDrawer from './shell/SystemsDrawer'
 import {
   BottomDock,
@@ -53,7 +62,6 @@ const DEFAULT_WEIGHTS: PlanWeights = {
 const DEFAULT_POINT: [number, number] = [250, 250]
 const TOAST_DURATION_MS = 5200
 type BootstrapState = 'loading' | 'ready' | 'error'
-type AppPhase = 'landing' | 'app'
 
 interface FocusTelemetry {
   row: number
@@ -83,36 +91,56 @@ interface ToastItem {
   message: string
   detail?: string
   tone: 'warning' | 'error'
+  /**
+   * An optional way to carry out what the message asks for.
+   *
+   * The unreachable-cell warning told the operator to "select an adjacent
+   * terrain cell with manageable slope" while the default Surface layer shows
+   * no traversability at all -- correct advice that could not be followed on
+   * the screen that gave it. `actionLabel` is the id only; App supplies the
+   * handler, because the toast builder is a pure function and must stay one.
+   */
+  actionLabel?: string
+  actionId?: 'show-traversability'
 }
 
+/**
+ * The risk legend, derived rather than transcribed.
+ *
+ * These four hexes used to be written out here, and they had drifted: the
+ * legend taught green for "Safe" while the map drew a safe segment in cyan --
+ * a colour distance of 62, so the legend was describing something the map
+ * never rendered. Reading riskToHex makes that class of drift impossible.
+ *
+ * The swatch shows the dash pattern too, because the map now carries risk in
+ * the line's pattern as well as its colour, and a legend that showed only
+ * colour would document half the encoding.
+ */
 const LEGEND_ITEMS = [
-  { label: 'Safe', color: '#4fd08a' },
-  { label: 'Caution', color: '#e8c85a' },
-  { label: 'High', color: '#f09a4a' },
-  { label: 'Critical', color: '#ee5a52' },
-]
+  { label: 'Safe', level: 'LOW' },
+  { label: 'Caution', level: 'MEDIUM' },
+  { label: 'High', level: 'HIGH' },
+  { label: 'Critical', level: 'CRITICAL' },
+] as const
 
 export default function App() {
-  // Phase and lifecycle: defaults to landing or direct to app if specified in URL
-  const [phase, setPhase] = useState<AppPhase>(() => {
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href)
-      if (url.searchParams.has('app') || url.hash.includes('planner')) {
-        return 'app'
-      }
-    }
-    return 'landing'
-  })
+  // Phase and lifecycle. The address names the stage, so a reload comes back to
+  // it instead of restarting the landing sequence.
+  const [phase, setPhase] = useState<AppPhase>(() =>
+    typeof window === 'undefined' ? 'landing' : phaseFromHref(window.location.href),
+  )
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>('loading')
   const [planningEngaged, setPlanningEngaged] = useState(false)
 
   // Workstation mode: the two working modes of the design, PLAN and ANALYZE.
-  const [missionMode, setMissionMode] = useState<MissionMode>('plan')
+  // Seeded from the address like the phase, so ?stage=analysis opens on the
+  // analysis rather than opening on plan and then jumping.
+  const [missionMode, setMissionMode] = useState<MissionMode>(() =>
+    typeof window === 'undefined' ? 'plan' : locationFromHref(window.location.href).mode,
+  )
   const [isSolving, setIsSolving] = useState(false)
 
   // Rail and HUD collapse states
-  const [leftOpen, setLeftOpen] = useState(true)
-  const [rightOpen, setRightOpen] = useState(true)
   const [hudOpen, setHudOpen] = useState(true)
   const [hudMinimized, setHudMinimized] = useState(false)
   const [systemsOpen, setSystemsOpen] = useState(false)
@@ -244,8 +272,68 @@ export default function App() {
     void init()
   }, [])
 
+  /**
+   * Keep the address and the stage in step, in both directions.
+   *
+   * The push is guarded by comparing the address against the phase rather than
+   * by a flag: after a Back the browser has already rewritten the URL, so the
+   * two agree and nothing is pushed. That is what stops the listener below and
+   * this effect from feeding each other an endless history.
+   */
+  useEffect(() => {
+    const currentHref = window.location.href
+    const shown = locationFromHref(currentHref)
+    if (shown.phase === phase && shown.mode === missionMode) return
+    window.history.pushState(
+      { phase, mode: missionMode },
+      '',
+      hrefForLocation({ phase, mode: missionMode }, currentHref),
+    )
+  }, [phase, missionMode])
+
+  useEffect(() => {
+    const onPopState = () => {
+      const { phase: nextPhase, mode } = locationFromHref(window.location.href)
+      setPhase(nextPhase)
+      setMissionMode(mode)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  /**
+   * Analysis with nothing to analyse falls back to planning.
+   *
+   * ?stage=analysis is linkable and survives a reload, but the mission it
+   * described does not: route state is deliberately not in the address, so a
+   * fresh load of that link arrives with planResult still null. The ANALYZE
+   * tab is disabled in that state for exactly this reason -- the address is
+   * simply the one way in that can't be disabled.
+   *
+   * The mode is corrected rather than the panels being left empty, and the
+   * effect above then rewrites the address to match, so what is on screen and
+   * what the URL claims never disagree. Guarded on `isSolving` because a solve
+   * in flight is about to produce the route this is missing; without it,
+   * handlePlan's optimistic switch to analyze would be undone mid-flight.
+   */
+  useEffect(() => {
+    if (missionMode === 'analyze' && !planResult && !isSolving) {
+      setMissionMode('plan')
+    }
+  }, [missionMode, planResult, isSolving])
+
+  // Landing hands over to the hangar, not to the map: a rover is chosen
+  // before there is a surface to drive it on.
   const handleEnterMission = useCallback(() => {
+    setPhase('fleet')
+  }, [])
+
+  const handleDeployToMap = useCallback(() => {
     setPhase('app')
+  }, [])
+
+  const handleOpenFleetSelect = useCallback(() => {
+    setPhase('fleet')
   }, [])
 
   useEffect(() => {
@@ -302,6 +390,16 @@ export default function App() {
     }
   }, [bootstrapState, selectedRoverId, weights])
 
+  /**
+   * Which endpoint was placed last, so it can be taken back.
+   *
+   * There was no undo at all: the only recovery was Clear, which wiped BOTH
+   * endpoints, so one mis-click cost the operator the step they had got
+   * right. A single slot is enough -- the task has exactly two placements and
+   * a full history would be a stack nobody has a use for.
+   */
+  const lastPlacementRef = useRef<'start' | 'goal' | null>(null)
+
   const handleCellClick = useCallback(
     (row: number, col: number) => {
       setPlanResult(null)
@@ -311,13 +409,61 @@ export default function App() {
       if (clickMode === 'start') {
         setStart([row, col])
         setClickMode('goal')
+        lastPlacementRef.current = 'start'
       } else if (clickMode === 'goal') {
         setGoal([row, col])
         setClickMode('idle')
+        lastPlacementRef.current = 'goal'
       }
     },
     [clickMode],
   )
+
+  const handleUndoPlacement = useCallback(() => {
+    const last = lastPlacementRef.current
+    if (!last) {
+      return
+    }
+
+    // Undoing an endpoint invalidates any route drawn from it, exactly as
+    // placing one does.
+    setPlanResult(null)
+    setPlanError(null)
+    setRoutePlaybackStep(null)
+
+    if (last === 'goal') {
+      setGoal(null)
+      setClickMode('goal')
+      lastPlacementRef.current = 'start'
+    } else {
+      setStart(null)
+      setGoal(null)
+      setClickMode('start')
+      lastPlacementRef.current = null
+    }
+  }, [])
+
+  // Ctrl+Z / Cmd+Z, the binding every user already has for this. Ignored
+  // while a text field has focus so it cannot steal undo from the assistant's
+  // composer or a numeric input.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'z' || !(event.ctrlKey || event.metaKey) || event.shiftKey) {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+        return
+      }
+      if (!lastPlacementRef.current) {
+        return
+      }
+      event.preventDefault()
+      handleUndoPlacement()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handleUndoPlacement])
 
   const handleRoverSelect = useCallback(
     (rover: RoverEntry) => {
@@ -439,6 +585,22 @@ export default function App() {
   }, [hoverPoint, routePlaybackStep, waypoints])
 
   const missionStatus = layerError ? 'ATTN' : isSolving ? 'SOLVING' : planResult ? 'LOCKED' : 'NOMINAL'
+  // What each rail has to show in this mode. Asked of the registry rather
+  // than hardcoded per mode, so registering a feature for a rail is the only
+  // thing needed to bring its column back.
+  //
+  // Plan and analyze now use opposite halves of the cockpit: plan owns the
+  // left rail and no right one, analyze the right and no left. Neither is
+  // stated here -- both fall out of what FEATURES declares.
+  const leftRailFeatures = useMemo(
+    () => selectFeatures(FEATURES, 'leftRail', missionMode),
+    [missionMode],
+  )
+  const rightRailFeatures = useMemo(
+    () => selectFeatures(FEATURES, 'rightRail', missionMode),
+    [missionMode],
+  )
+
   const appIsVisible = phase === 'app'
 
   // Exactly the fields MissionValue declares and no more: an extra one is a
@@ -499,10 +661,12 @@ export default function App() {
   const missionActions: MissionActions = useMemo(
     () => ({
       selectRover: handleRoverSelect,
+      openFleetSelect: handleOpenFleetSelect,
       setWeights,
       setClickMode,
       planRoute: handlePlan,
       resetMission: handleReset,
+      undoPlacement: handleUndoPlacement,
       setMissionMode,
       setPlaybackStep: setRoutePlaybackStep,
       setPayloadW,
@@ -511,7 +675,7 @@ export default function App() {
       setDimension,
       toggleHud,
     }),
-    [handlePlan, handleReset, handleRoverSelect, toggleHud],
+    [handlePlan, handleReset, handleRoverSelect, handleOpenFleetSelect, handleUndoPlacement, toggleHud],
   )
 
   const missionRuntimeValue: MissionRuntime = useMemo(
@@ -529,11 +693,33 @@ export default function App() {
       <OverlayProvider>
       <AssistantAskProvider>
       <SpaceBackdrop
-        stage={phase === 'landing' ? 'ambient' : 'deck'}
+        stage={phase === 'app' ? 'deck' : 'ambient'}
         frozen={planningEngaged}
       />
 
       {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
+
+      {/* Stage 01: the hangar. A full screen of its own between the landing
+          sequence and the cockpit -- the rover is picked here, with its specs
+          and the route weights in view, before any terrain is shown. */}
+      {phase === 'fleet' && (
+        <div className="fleet-screen">
+          {rovers.length > 0 ? (
+            <FleetSelectionView
+              rovers={rovers}
+              selectedRover={selectedRover}
+              onSelectRover={handleRoverSelect}
+              onDeployToMap={handleDeployToMap}
+            />
+          ) : (
+            <div className="fleet-screen-loading">
+              {bootstrapState === 'error'
+                ? layerError ?? 'The rover catalogue could not be loaded.'
+                : 'Loading rover catalogue…'}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className={`app-shell ${appIsVisible ? 'is-visible' : 'is-hidden'}`}>
         {/* Modern Mission Control TopBar with PLAN / ANALYZE Switcher */}
@@ -548,24 +734,33 @@ export default function App() {
           onToggleSystems={() => setSystemsOpen((v) => !v)}
         />
 
-        {/* The cockpit. Rover selection is a drawer off the left rail, not a
-            stage of its own -- the mission shell never gets replaced. */}
+        {/* The cockpit. Rover selection lives in the hangar stage; "Change
+            vehicle", under the rover card that prompts the thought, returns
+            there rather than opening a modal over the map. */}
         <main
-            className={`content-grid ${!leftOpen ? 'left-collapsed' : ''} ${!rightOpen ? 'right-collapsed' : ''}`}
+            className={[
+              'content-grid',
+              leftRailFeatures.length === 0 ? 'no-left-rail' : '',
+              rightRailFeatures.length === 0 ? 'no-right-rail' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
           >
-            {/* ── LEFT RAIL: MISSION SETUP (PLAN) vs MISSION SNAPSHOT (ANALYZE) ── */}
-            <aside className={`left-rail ${!leftOpen ? 'is-collapsed' : ''}`}>
-              <button
-                type="button"
-                className="rail-toggle rail-toggle--left"
-                onClick={() => setLeftOpen((v) => !v)}
-                aria-label={leftOpen ? 'Collapse left panel' : 'Expand left panel'}
-              >
-                {leftOpen ? '\u2039' : '\u203A'}
-              </button>
+            {/* ── LEFT RAIL: MISSION SETUP, IN PLAN ──
+                Rendered only when the registry has something for it, exactly
+                like the right rail below. In analyze it has nothing, so the
+                column goes with it.
 
-              {leftOpen && <LeftRailSlot />}
-          </aside>
+                Neither rail collapses any more. They each used to carry a
+                40px strip for that, which spent the top of the panel plus a
+                hairline on a control for a problem nobody had -- the rails
+                hold what the cockpit is driven from, and a folded rail leaves
+                a map you cannot plan on. */}
+            {leftRailFeatures.length > 0 && (
+              <aside className="left-rail">
+                <LeftRailSlot />
+              </aside>
+            )}
 
           {/* ── CENTER STAGE: 2D/3D TERRAIN WORKBENCH ───────────────────────── */}
           <section className="center-stage">
@@ -591,7 +786,7 @@ export default function App() {
                     <div className="lp-hud-header">
                       <div className="lp-hud-title-group">
                         <span className="lp-pulse-dot" />
-                        <span className="lp-hud-title">SURFACE TELEMETRY</span>
+                        <span className="lp-hud-title">Surface telemetry</span>
                       </div>
                       <div className="lp-hud-actions">
                         <button
@@ -719,18 +914,17 @@ export default function App() {
           </section>
 
           {/* ── RIGHT RAIL: MISSION CONTEXT (PLAN) vs ROUTE ANALYSIS (ANALYZE) ── */}
-          <aside className={`right-rail ${!rightOpen ? 'is-collapsed' : ''}`}>
-            <button
-              type="button"
-              className="rail-toggle rail-toggle--right"
-              onClick={() => setRightOpen((v) => !v)}
-              aria-label={rightOpen ? 'Collapse right panel' : 'Expand right panel'}
-            >
-              {rightOpen ? '\u203A' : '\u2039'}
-            </button>
-
-            <RightRailSlot />
-          </aside>
+          {/* The right rail exists only when something is registered for it.
+              In plan nothing is: it is a column of readouts, and the map is
+              what the operator is actually working in -- so plan gets the
+              288px back rather than an empty bordered gutter beside the
+              terrain. .content-grid names its third column, so leaving the
+              <aside> in place and empty would have kept the column. */}
+          {rightRailFeatures.length > 0 && (
+            <aside className="right-rail">
+              <RightRailSlot />
+            </aside>
+          )}
         </main>
 
         {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
@@ -747,7 +941,22 @@ export default function App() {
               <span className="lp-legend-label">RISK</span>
               {LEGEND_ITEMS.map((item) => (
                 <span key={item.label} className="lp-legend-item">
-                  <span className="lp-legend-swatch" style={{ background: item.color }} />
+                  <svg
+                    className="lp-legend-line"
+                    viewBox="0 0 22 8"
+                    aria-hidden="true"
+                    focusable="false"
+                  >
+                    <line
+                      x1="1"
+                      y1="4"
+                      x2="21"
+                      y2="4"
+                      stroke={riskToHex(item.level)}
+                      strokeWidth="2.4"
+                      strokeDasharray={riskToDashArray(item.level)}
+                    />
+                  </svg>
                   {item.label}
                 </span>
               ))}
@@ -777,6 +986,18 @@ export default function App() {
                   <strong className="toast-title">{toast.title}</strong>
                   <p className="toast-message">{toast.message}</p>
                   {toast.detail && <p className="toast-detail">{toast.detail}</p>}
+                  {toast.actionId === 'show-traversability' && (
+                    <button
+                      type="button"
+                      className="toast-action"
+                      onClick={() => {
+                        setViewMode('traversability')
+                        dismissToast(toast.id)
+                      }}
+                    >
+                      {toast.actionLabel}
+                    </button>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -855,8 +1076,10 @@ function buildToastNotice(source: 'layer' | 'plan', detail: string): Omit<ToastI
       tone: 'warning',
       title: 'Selected point is unavailable',
       message:
-        'That cell cannot be traversed by the rover envelope. Select an adjacent terrain cell with manageable slope.',
+        'That cell cannot be traversed by the rover envelope. Switch to the traversability layer to see which cells are drivable, then pick one.',
       detail: normalizedDetail,
+      actionLabel: 'Show traversable cells',
+      actionId: 'show-traversability',
     }
   }
 

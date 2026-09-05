@@ -260,6 +260,14 @@ interface ChatPanelProps {
   onMinimize?: () => void
   /** A reply arrived while hidden. Used for one dot, nothing more. */
   onAnswerWhileHidden?: () => void
+  /**
+   * Spread onto the header, which doubles as the window's drag handle. Absent
+   * when the panel is not in a floating shell -- a railed panel has nowhere to
+   * be dragged to.
+   */
+  dragHandleProps?: { onPointerDown: (event: React.PointerEvent) => void }
+  /** Present only once the window has actually been moved. */
+  onResetPosition?: () => void
 }
 
 export default function ChatPanel({
@@ -269,6 +277,8 @@ export default function ChatPanel({
   ask = null,
   onMinimize,
   onAnswerWhileHidden,
+  dragHandleProps,
+  onResetPosition,
 }: ChatPanelProps) {
   const identity = IDENTITY[mode]
   const [turns, setTurns] = useState<ChatTurn[]>([])
@@ -611,24 +621,54 @@ export default function ChatPanel({
 
   return (
     <section className="rail-section chat-panel" aria-label={identity.title}>
-      <header className="chat-header">
+      {/* The header is the drag handle. useDraggableWindow ignores a press
+          that starts on a button, so the two controls it carries still take
+          their own clicks. */}
+      <header
+        className={`chat-header ${dragHandleProps ? 'is-draggable' : ''}`}
+        {...dragHandleProps}
+      >
         <div className="chat-identity">
           <p className="panel-kicker">{identity.kicker}</p>
-          <h2 className="panel-title">{identity.title}</h2>
+          <h2 className="panel-title">
+            {identity.title}
+            {/* The rest of the cockpit is English; this panel is not. Saying so
+                on the panel is the interim measure -- see features/assistant/
+                index.tsx for why the translation is its own work item. */}
+            <span className="chat-lang-tag" title="This assistant answers in Turkish">
+              TR
+            </span>
+          </h2>
         </div>
         <div className="chat-header-actions">
           <span className="chat-readonly" title="Asistan görevi okur; rotayı değiştirmez">
             <span className="chat-readonly-dot" aria-hidden="true" />
             Salt okunur
           </span>
-          <button
-            type="button"
-            className="chat-new"
-            onClick={startNewChat}
-            disabled={turns.length === 0 && !pending}
-          >
-            Yeni sohbet
-          </button>
+          {/* One row, so the reset does not push the header into a third
+              line in a 394px window. It appears only once the window has
+              actually been moved: a panel dragged somewhere awkward is
+              otherwise put back by hand. */}
+          <div className="chat-header-buttons">
+            {onResetPosition && (
+              <button
+                type="button"
+                className="chat-reset-position"
+                onClick={onResetPosition}
+                title="Pencereyi eski yerine getir"
+              >
+                Yerine al
+              </button>
+            )}
+            <button
+              type="button"
+              className="chat-new"
+              onClick={startNewChat}
+              disabled={turns.length === 0 && !pending}
+            >
+              Yeni sohbet
+            </button>
+          </div>
         </div>
         {/* Minimize only. Clearing the conversation is "Yeni sohbet", which
             stays its own control -- the two must never be the same button. */}

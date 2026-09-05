@@ -8,26 +8,56 @@
  * These primitives take their colours from the caller, so a risk colour on a
  * chart is the same risk colour the map and the rail use.
  *
- * Every chart renders into a fixed viewBox and is stretched by CSS. Font sizes
- * are therefore in viewBox units, which is why they look small in the source:
- * a 10-unit label in a 640-wide box lands near 12px at the width the modal
- * gives it.
+ * Every chart draws in CSS PIXELS, not in a stretched viewBox. A viewBox that
+ * fills its column scales the text with it, which put the same tick label at
+ * 16px in the full-width cards and 7px in the two-up rows. Drawing in measured
+ * pixels means a font-size of 11 is 11px in every card, and the charts sit on
+ * the cockpit's type scale (--fs-micro upward) instead of inventing one per
+ * column width. SVG text takes a number, not a CSS variable, so the two
+ * constants below are the scale's floor written out.
  */
 import React from 'react'
 import { fmt } from './format'
+import { useChartWidth } from './useChartSize'
 
 export interface Point {
   x: number
   y: number
 }
 
-const PAD = { top: 10, right: 14, bottom: 22, left: 46 }
-const W = 640
-const H = 200
+const PAD = { top: 14, right: 16, bottom: 26, left: 48 }
 
-/** Grid lines and axis text share these, so a chart never invents its own. */
-const AXIS_COLOR = '#1d2432'
-const AXIS_TEXT = '#6d7789'
+/** --fs-micro, the interface floor. No chart label is smaller than this. */
+const TICK_SIZE = 12
+/** Threshold annotations sit at the same rung; they are labels, not readings. */
+const NOTE_SIZE = 12
+
+/**
+ * Axis furniture, through the tokens rather than copied out of them.
+ *
+ * These were written as literals -- '#161b27' and '#7b8497' -- on the belief
+ * that SVG's fill and stroke take no CSS variable. They do: every other
+ * colour in this file already arrives as var(--risk-high), var(--cyan) or
+ * var(--text), and the browser resolves all of them the same way.
+ *
+ * The copies were not merely redundant, they were unreachable. The report's
+ * print stylesheet re-colours the document by redefining these tokens, so a
+ * literal is a value no medium can retone: on paper the grid printed as a
+ * hard black rule and the tick labels came out at 3.76:1 on white. Through
+ * the token both follow the page they are drawn on.
+ */
+const AXIS_LINE = 'var(--line)'
+const AXIS_TEXT = 'var(--text-dim-2)'
+
+/**
+ * How much ink an area fill is allowed.
+ *
+ * Low on purpose. The stroke carries the reading; the fill only says which
+ * side of the line is "under". At the 0.13 it started from, a battery curve
+ * that stays near 100% painted two thirds of the report's largest card a
+ * saturated mint, and the eye read the block instead of the line.
+ */
+const FILL_OPACITY = 0.07
 
 interface Scale {
   sx: (v: number) => number
@@ -39,20 +69,22 @@ function makeScale(
   xMax: number,
   yMin: number,
   yMax: number,
+  width: number,
+  height: number,
 ): Scale {
-  // A flat series (every y identical) would divide by zero and put the line
-  // at NaN, which SVG renders as nothing at all -- a blank chart that looks
-  // like missing data rather than a constant value. Widen the range instead.
+  // A flat series (every y identical) would divide by zero and put the line at
+  // NaN, which SVG renders as nothing at all -- a blank chart that looks like
+  // missing data rather than a constant value. Widen the range instead.
   const xSpan = xMax - xMin || 1
   const ySpan = yMax - yMin || 1
   return {
-    sx: (v) => PAD.left + ((v - xMin) / xSpan) * (W - PAD.left - PAD.right),
-    sy: (v) => H - PAD.bottom - ((v - yMin) / ySpan) * (H - PAD.top - PAD.bottom),
+    sx: (v) => PAD.left + ((v - xMin) / xSpan) * (width - PAD.left - PAD.right),
+    sy: (v) => height - PAD.bottom - ((v - yMin) / ySpan) * (height - PAD.top - PAD.bottom),
   }
 }
 
 /** Round tick values so an axis reads -140, -120, -100 and not -142.6173. */
-function ticks(min: number, max: number, count = 4): number[] {
+function ticks(min: number, max: number, count: number): number[] {
   if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) return [min]
   const raw = (max - min) / count
   const mag = Math.pow(10, Math.floor(Math.log10(raw)))
@@ -62,32 +94,53 @@ function ticks(min: number, max: number, count = 4): number[] {
   return out
 }
 
+/**
+ * How many x labels fit without crowding.
+ *
+ * Derived from the measured width rather than fixed: the two-up cards are half
+ * the width of the full ones, and four labels that read cleanly at 1100px
+ * collide at 520px.
+ */
+function xTickCount(width: number): number {
+  return width > 820 ? 5 : width > 520 ? 4 : 3
+}
+
 interface FrameProps {
   scale: Scale
   yTicks: number[]
   xTicks: number[]
+  width: number
+  height: number
   formatY?: (v: number) => string
   formatX?: (v: number) => string
 }
 
-/** Horizontal gridlines, a baseline, and the two axis labellings. */
-const Frame: React.FC<FrameProps> = ({ scale, yTicks, xTicks, formatY, formatX }) => (
+/** Horizontal gridlines and the two axis labellings. */
+const Frame: React.FC<FrameProps> = ({
+  scale,
+  yTicks,
+  xTicks,
+  width,
+  height,
+  formatY,
+  formatX,
+}) => (
   <g aria-hidden="true">
     {yTicks.map((t) => (
       <g key={`y${t}`}>
         <line
           x1={PAD.left}
-          x2={W - PAD.right}
+          x2={width - PAD.right}
           y1={scale.sy(t)}
           y2={scale.sy(t)}
-          stroke={AXIS_COLOR}
+          stroke={AXIS_LINE}
           strokeWidth={1}
         />
         <text
-          x={PAD.left - 6}
+          x={PAD.left - 8}
           y={scale.sy(t) + 3}
           textAnchor="end"
-          fontSize={9}
+          fontSize={TICK_SIZE}
           fill={AXIS_TEXT}
           fontFamily="var(--font-data)"
         >
@@ -99,9 +152,9 @@ const Frame: React.FC<FrameProps> = ({ scale, yTicks, xTicks, formatY, formatX }
       <text
         key={`x${t}`}
         x={scale.sx(t)}
-        y={H - PAD.bottom + 13}
+        y={height - PAD.bottom + 15}
         textAnchor="middle"
-        fontSize={9}
+        fontSize={TICK_SIZE}
         fill={AXIS_TEXT}
         fontFamily="var(--font-data)"
       >
@@ -119,7 +172,6 @@ export interface RefLine {
 
 export interface Marker {
   x: number
-  label?: string
 }
 
 export interface LineAreaProps {
@@ -134,6 +186,7 @@ export interface LineAreaProps {
   formatY?: (v: number) => string
   formatX?: (v: number) => string
   title: string
+  height?: number
 }
 
 /**
@@ -153,8 +206,11 @@ export const LineArea: React.FC<LineAreaProps> = ({
   formatY,
   formatX,
   title,
+  height = 180,
 }) => {
-  if (points.length < 2) return <p className="lp-report-empty">Grafik için yeterli nokta yok.</p>
+  const [ref, width] = useChartWidth()
+
+  if (points.length < 2) return <p className="lp-report-empty">Not enough points to plot.</p>
 
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)
@@ -163,58 +219,67 @@ export const LineArea: React.FC<LineAreaProps> = ({
   const hi = yMax ?? Math.max(...ys, ...refYs)
   // A hair of headroom so the peak of the curve is not clipped by the frame.
   const padY = (hi - lo) * 0.08 || 1
-  const scale = makeScale(Math.min(...xs), Math.max(...xs), lo - padY, hi + padY)
+  const scale = makeScale(Math.min(...xs), Math.max(...xs), lo - padY, hi + padY, width, height)
 
   const line = points.map((p, i) => `${i ? 'L' : 'M'}${scale.sx(p.x)},${scale.sy(p.y)}`).join('')
-  const area = `${line}L${scale.sx(xs[xs.length - 1])},${H - PAD.bottom}L${scale.sx(xs[0])},${H - PAD.bottom}Z`
+  const area = `${line}L${scale.sx(xs[xs.length - 1])},${height - PAD.bottom}L${scale.sx(xs[0])},${height - PAD.bottom}Z`
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="lp-chart" role="img" aria-label={title}>
-      <Frame
-        scale={scale}
-        yTicks={ticks(lo - padY, hi + padY)}
-        xTicks={ticks(Math.min(...xs), Math.max(...xs))}
-        formatY={formatY}
-        formatX={formatX}
-      />
-      {fill && <path d={area} fill={color} fillOpacity={0.13} />}
-      <path d={line} fill="none" stroke={color} strokeWidth={1.6} strokeLinejoin="round" />
-      {refLines.map((r) => (
-        <g key={r.label}>
-          <line
-            x1={PAD.left}
-            x2={W - PAD.right}
-            y1={scale.sy(r.y)}
-            y2={scale.sy(r.y)}
-            stroke={r.color}
-            strokeWidth={1}
-            strokeDasharray="4 3"
-          />
-          <text
-            x={W - PAD.right}
-            y={scale.sy(r.y) - 4}
-            textAnchor="end"
-            fontSize={9}
-            fill={r.color}
-            fontFamily="var(--font-data)"
-          >
-            {r.label}
-          </text>
-        </g>
-      ))}
-      {markers.map((m, i) => (
-        <line
-          key={`${m.x}-${i}`}
-          x1={scale.sx(m.x)}
-          x2={scale.sx(m.x)}
-          y1={PAD.top}
-          y2={H - PAD.bottom}
-          stroke="var(--mint)"
-          strokeWidth={1}
-          strokeDasharray="2 2"
+    <div ref={ref} className="lp-chart-wrap">
+      <svg width={width} height={height} className="lp-chart" role="img" aria-label={title}>
+        <Frame
+          scale={scale}
+          yTicks={ticks(lo - padY, hi + padY, 3)}
+          xTicks={ticks(Math.min(...xs), Math.max(...xs), xTickCount(width))}
+          width={width}
+          height={height}
+          formatY={formatY}
+          formatX={formatX}
         />
-      ))}
-    </svg>
+        {fill && <path d={area} fill={color} fillOpacity={FILL_OPACITY} />}
+        <path d={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+        {refLines.map((r) => (
+          <g key={r.label}>
+            <line
+              x1={PAD.left}
+              x2={width - PAD.right}
+              y1={scale.sy(r.y)}
+              y2={scale.sy(r.y)}
+              stroke={r.color}
+              strokeWidth={1}
+              strokeDasharray="3 4"
+              // The threshold is context for the curve, never a second reading
+              // competing with it.
+              strokeOpacity={0.55}
+            />
+            <text
+              x={width - PAD.right}
+              y={scale.sy(r.y) - 5}
+              textAnchor="end"
+              fontSize={NOTE_SIZE}
+              fill={r.color}
+              fillOpacity={0.75}
+              fontFamily="var(--font-data)"
+            >
+              {r.label}
+            </text>
+          </g>
+        ))}
+        {markers.map((m, i) => (
+          <line
+            key={`${m.x}-${i}`}
+            x1={scale.sx(m.x)}
+            x2={scale.sx(m.x)}
+            y1={PAD.top}
+            y2={height - PAD.bottom}
+            stroke="var(--mint)"
+            strokeWidth={1}
+            strokeOpacity={0.4}
+            strokeDasharray="2 3"
+          />
+        ))}
+      </svg>
+    </div>
   )
 }
 
@@ -225,6 +290,7 @@ export interface SegmentedProfileProps {
   title: string
   formatY?: (v: number) => string
   formatX?: (v: number) => string
+  height?: number
 }
 
 /**
@@ -240,38 +306,45 @@ export const SegmentedProfile: React.FC<SegmentedProfileProps> = ({
   title,
   formatY,
   formatX,
+  height = 180,
 }) => {
-  if (points.length < 2) return <p className="lp-report-empty">Yükseklik verisi yok.</p>
+  const [ref, width] = useChartWidth()
+
+  if (points.length < 2) return <p className="lp-report-empty">No elevation data.</p>
 
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)
   const lo = Math.min(...ys)
   const hi = Math.max(...ys)
   const padY = (hi - lo) * 0.1 || 1
-  const scale = makeScale(Math.min(...xs), Math.max(...xs), lo - padY, hi + padY)
+  const scale = makeScale(Math.min(...xs), Math.max(...xs), lo - padY, hi + padY, width, height)
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="lp-chart" role="img" aria-label={title}>
-      <Frame
-        scale={scale}
-        yTicks={ticks(lo - padY, hi + padY)}
-        xTicks={ticks(Math.min(...xs), Math.max(...xs))}
-        formatY={formatY}
-        formatX={formatX}
-      />
-      {points.slice(0, -1).map((p, i) => (
-        <line
-          key={i}
-          x1={scale.sx(p.x)}
-          y1={scale.sy(p.y)}
-          x2={scale.sx(points[i + 1].x)}
-          y2={scale.sy(points[i + 1].y)}
-          stroke={colors[i] ?? colors[colors.length - 1]}
-          strokeWidth={2.2}
-          strokeLinecap="round"
+    <div ref={ref} className="lp-chart-wrap">
+      <svg width={width} height={height} className="lp-chart" role="img" aria-label={title}>
+        <Frame
+          scale={scale}
+          yTicks={ticks(lo - padY, hi + padY, 3)}
+          xTicks={ticks(Math.min(...xs), Math.max(...xs), xTickCount(width))}
+          width={width}
+          height={height}
+          formatY={formatY}
+          formatX={formatX}
         />
-      ))}
-    </svg>
+        {points.slice(0, -1).map((p, i) => (
+          <line
+            key={i}
+            x1={scale.sx(p.x)}
+            y1={scale.sy(p.y)}
+            x2={scale.sx(points[i + 1].x)}
+            y2={scale.sy(points[i + 1].y)}
+            stroke={colors[i] ?? colors[colors.length - 1]}
+            strokeWidth={1.8}
+            strokeLinecap="round"
+          />
+        ))}
+      </svg>
+    </div>
   )
 }
 
@@ -351,7 +424,9 @@ export interface Slice {
  * The energy split.
  *
  * A donut and not a pie: the hole carries the total, which is the number
- * anyone reads first, and the ring then says where it went.
+ * anyone reads first, and the ring then says where it went. The ring is thin
+ * for the same reason the area fills are faint -- one dominant slice at a
+ * heavy stroke turned the card into a large bright disc.
  */
 export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel: string }> = ({
   slices,
@@ -359,15 +434,15 @@ export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel
   centerLabel,
 }) => {
   const total = slices.reduce((sum, s) => sum + s.value, 0)
-  const R = 54
+  const R = 48
   const C = 2 * Math.PI * R
   let offset = 0
 
   return (
     <div className="lp-donut-block">
-      <svg viewBox="0 0 140 140" className="lp-donut" role="img" aria-label={centerLabel}>
-        <g transform="translate(70,70) rotate(-90)">
-          <circle r={R} fill="none" stroke="var(--line-card)" strokeWidth={14} />
+      <svg viewBox="0 0 128 128" className="lp-donut" role="img" aria-label={centerLabel}>
+        <g transform="translate(64,64) rotate(-90)">
+          <circle r={R} fill="none" stroke="var(--line-card)" strokeWidth={9} />
           {total > 0 &&
             slices.map((s) => {
               const len = (s.value / total) * C
@@ -378,7 +453,7 @@ export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel
                   r={R}
                   fill="none"
                   stroke={s.color}
-                  strokeWidth={14}
+                  strokeWidth={9}
                   strokeDasharray={dash}
                   strokeDashoffset={-offset}
                 />
@@ -387,19 +462,43 @@ export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel
               return el
             })}
         </g>
-        <text x={70} y={68} textAnchor="middle" fontSize={16} fill="var(--text)" fontFamily="var(--font-data)">
+        <text
+          x={64}
+          y={61}
+          textAnchor="middle"
+          fontSize={16}
+          fill="var(--text)"
+          fontFamily="var(--font-data)"
+        >
           {centerValue}
         </text>
-        <text x={70} y={82} textAnchor="middle" fontSize={8} fill="var(--text-dim)" letterSpacing="0.08em">
+        <text
+          x={64}
+          y={78}
+          textAnchor="middle"
+          fontSize={12}
+          fill="var(--text-dim-2)"
+          letterSpacing="0.08em"
+          fontFamily="var(--font-data)"
+        >
           {centerLabel}
         </text>
       </svg>
-      <ul className="lp-stacked-legend lp-donut-legend">
+      {/* Tiles, not a legend list. A three-line legend beside a 128px donut
+          left two thirds of a full-width card empty; the same tile grid the
+          decision summary uses fills it and carries the share as well as the
+          absolute figure. */}
+      <ul className="lp-donut-legend">
         {slices.map((s) => (
-          <li key={s.label}>
-            <span className="lp-legend-swatch" style={{ background: s.color }} />
-            {s.label}
-            <strong>{fmt(s.value)} Wh</strong>
+          <li key={s.label} className="lp-donut-tile">
+            <span className="lp-kpi-label">
+              <span className="lp-legend-swatch" style={{ background: s.color }} />
+              {s.label}
+            </span>
+            <strong className="lp-donut-tile-val">{fmt(s.value)} Wh</strong>
+            <span className="lp-donut-tile-share">
+              %{total > 0 ? fmt((s.value / total) * 100) : '--'}
+            </span>
           </li>
         ))}
       </ul>
@@ -426,7 +525,7 @@ export const LimitGauge: React.FC<{
     <div className="lp-gauge">
       <div className="lp-gauge-head">
         <span className="lp-kpi-label">{label}</span>
-        <strong className="lp-mono-val" style={{ color }}>
+        <strong className="lp-gauge-val" style={{ color }}>
           {fmt(value, 2)} / {limit === null ? '--' : fmt(limit, 1)} {unit}
         </strong>
       </div>
@@ -435,10 +534,10 @@ export const LimitGauge: React.FC<{
       </div>
       <span className="lp-gauge-note">
         {limit === null
-          ? 'Bu rover için gölge limiti tanımlı değil.'
+          ? 'No shadow limit is defined for this rover.'
           : exceeded
-            ? 'Limit aşıldı — rota bu haliyle güvenli değil.'
-            : `Limitin %${fmt(pct, 0)} kadarı kullanıldı.`}
+            ? 'Limit exceeded — the route is not safe as planned.'
+            : `${fmt(pct, 0)}% of the limit used.`}
       </span>
     </div>
   )

@@ -144,6 +144,21 @@ sağlayıcı olarak `stub` seçilirse gerçek model hiç çağrılmaz.
    npm run dev
    ```
 
+   Arayüzün her ekranı adresinde görünür, yani geri tuşu ekranlar arasında
+   gezer ve yenileme bulunduğunuz ekrana döner:
+
+   | Adres | Ekran |
+   | --- | --- |
+   | `/` | Açılış |
+   | `/?stage=hangar` | Filo hangarı — rover ve rota öncelikleri |
+   | `/?stage=planner` | Kokpit, PLAN — harita ve rota planlama |
+   | `/?stage=analysis` | Kokpit, ANALYZE — üretilmiş rotanın analizi |
+
+   Rota durumu adreste taşınmaz, bu yüzden `/?stage=analysis` adresi yeni bir
+   sekmede açıldığında analiz edilecek rota olmaz ve arayüz PLAN'a döner.
+
+   Eski `?app` kısayolu doğrudan kokpiti açmaya devam eder.
+
 3. **DEM → ızgara** (isteğe bağlı; önce uygun GeoTIFF’i `lunapath/data/raw` veya üst dizindeki `data/raw` içine koyun; varsayılan dosya adı script içinde tanımlıdır):
 
    ```bash

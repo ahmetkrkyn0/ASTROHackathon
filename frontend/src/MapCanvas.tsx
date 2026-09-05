@@ -17,6 +17,7 @@ import {
   lunarRegolithToRgb,
   magmaToRgb,
   riskToHex,
+  riskToDash,
   rdYlGnToRgb,
   shadeRegolith,
   thermalToRgb,
@@ -106,6 +107,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   // shape. Zero before the first fetch lands, and drawOverlays draws
   // nothing at zero -- there is no base map to be out of register with yet.
   const gridRows = elevationGrid?.length ?? 0
+  const gridCols = elevationGrid?.[0]?.length ?? 0
 
   const stopAnimation = useCallback(() => {
     if (animationTimerRef.current !== null) {
@@ -248,6 +250,79 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     setHoverCell(null)
   }, [])
 
+  /**
+   * Placing an endpoint from the keyboard.
+   *
+   * Until this existed the application's primary task -- put a Start and a
+   * Goal on the terrain -- could only be done with a mouse: the canvas had a
+   * click handler and nothing else, so keyboard and screen-reader users could
+   * not use LunaPath at all (WCAG 2.1.1, Level A).
+   *
+   * The cursor is `hoverCell`, deliberately the same state the pointer writes.
+   * That state already draws the crosshair on the canvas and already feeds the
+   * LAT/LON/ALT readout through onHoverCellChange, so driving it from the
+   * keyboard makes both follow the keys with no second code path to keep in
+   * register -- and no second definition of where "here" is.
+   *
+   * Shift multiplies the step because a 500-cell grid is 500 keypresses wide
+   * at one cell per press, which is a working alternative in name only.
+   */
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+      if (gridRows === 0 || gridCols === 0) {
+        return
+      }
+
+      const step = event.shiftKey ? 10 : 1
+      const delta: Record<string, [number, number]> = {
+        ArrowUp: [-step, 0],
+        ArrowDown: [step, 0],
+        ArrowLeft: [0, -step],
+        ArrowRight: [0, step],
+      }
+      const move = delta[event.key]
+
+      if (move) {
+        // The arrows scroll the page by default, which would drag the map out
+        // of view on the first keypress.
+        event.preventDefault()
+        setHoverCell((current) => {
+          const [row, col] = current ?? [Math.floor(gridRows / 2), Math.floor(gridCols / 2)]
+          return [
+            Math.min(gridRows - 1, Math.max(0, row + move[0])),
+            Math.min(gridCols - 1, Math.max(0, col + move[1])),
+          ]
+        })
+        return
+      }
+
+      if (event.key === 'Enter' || event.key === ' ') {
+        // Space scrolls too, and on a focused element it is the conventional
+        // partner to Enter for "activate".
+        event.preventDefault()
+        if (clickMode === 'idle' || !hoverCell) {
+          return
+        }
+        onCellClick(hoverCell[0], hoverCell[1])
+      }
+    },
+    [clickMode, gridCols, gridRows, hoverCell, onCellClick],
+  )
+
+  /**
+   * Focus has to land somewhere visible.
+   *
+   * Tabbing to a map whose cursor is null would show nothing at all and read
+   * as a dead control, so focus seeds the cursor at the centre of the grid --
+   * but only when the pointer has not already put it somewhere.
+   */
+  const handleFocus = useCallback(() => {
+    if (gridRows === 0 || gridCols === 0) {
+      return
+    }
+    setHoverCell((current) => current ?? [Math.floor(gridRows / 2), Math.floor(gridCols / 2)])
+  }, [gridCols, gridRows])
+
   const loading =
     viewMode === 'surface' ? !elevationGrid :
     viewMode === 'thermal' ? !thermalGrid :
@@ -275,16 +350,34 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
         onClick={handleClick}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        /* role="application" tells a screen reader to stop intercepting the
+           arrow keys and hand them to this element, which is what makes the
+           cursor movable at all. It is the right role precisely because the
+           arrows here mean "move the cursor over the terrain" and not "move
+           to the next item". */
+        tabIndex={0}
+        role="application"
+        aria-label={
+          clickMode === 'idle'
+            ? 'Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time.'
+            : `Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time. Press Enter to place ${clickMode === 'start' ? 'Start' : 'Goal'} at the cursor.`
+        }
         style={{
           width: '100%',
           height: '100%',
-          border: '1px solid rgba(179, 165, 255, 0.2)',
+          border: '1px solid rgba(186, 175, 245, 0.2)',
           background: '#05070d',
           boxShadow: '0 24px 64px rgba(0, 0, 0, 0.45)',
           cursor: clickMode === 'idle' ? 'default' : 'crosshair',
           imageRendering: viewMode === 'traversability' || viewMode === 'cost' ? 'pixelated' : 'auto',
         }}
       />
+
+      <p className="lp-visually-hidden" aria-live="polite">
+        {hoverCell ? `Cursor at row ${hoverCell[0]}, column ${hoverCell[1]}.` : ''}
+      </p>
 
       {loading && (
         <div
@@ -296,7 +389,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
             justifyContent: 'center',
             background: 'rgba(5, 7, 13, 0.86)',
             color: '#c8cddb',
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: "var(--font-data)",
             fontSize: 12,
             letterSpacing: '0.14em',
             textTransform: 'uppercase',
@@ -345,19 +438,64 @@ function redraw(
     ctx.shadowColor = 'rgba(0, 0, 0, 0.55)'
     ctx.shadowBlur = 12
 
+    // Runs of one risk level, not one path per segment.
+    //
+    // The segment between two waypoints is about a cell long, and a dash
+    // pattern restarted on every one of those would draw the same first dash
+    // every time -- four identical lines wearing four colours, which is the
+    // problem the pattern exists to solve. Stroking the whole run as a single
+    // path lets the pattern actually repeat and be recognised.
+    ctx.lineWidth = 2.8
+    let runStart = 1
     for (let index = 1; index <= drawUpTo; index += 1) {
-      const previous = waypoints[index - 1]
-      const current = waypoints[index]
-      
-      // Base cyan trajectory with risk color accenting
-      ctx.strokeStyle = current.risk_level === 'LOW' ? ROUTE_CYAN : riskToHex(current.risk_level)
-      ctx.lineWidth = 2.8
+      const level = waypoints[index].risk_level
+      const isLastSegment = index === drawUpTo
+      const runEnds = isLastSegment || waypoints[index + 1].risk_level !== level
+
+      if (!runEnds) {
+        continue
+      }
+
+      ctx.strokeStyle = riskToHex(level)
+      ctx.setLineDash(riskToDash(level))
       ctx.beginPath()
-      ctx.moveTo(previous.col, previous.row)
-      ctx.lineTo(current.col, current.row)
+      ctx.moveTo(waypoints[runStart - 1].col, waypoints[runStart - 1].row)
+      for (let step = runStart; step <= index; step += 1) {
+        ctx.lineTo(waypoints[step].col, waypoints[step].row)
+      }
       ctx.stroke()
+
+      // A severe stretch has to be findable, not just readable once found.
+      // The marker sits where the run begins and is drawn solid, so it
+      // survives whatever the dash pattern is doing.
+      if (level === 'HIGH' || level === 'CRITICAL') {
+        ctx.save()
+        ctx.setLineDash([])
+        ctx.fillStyle = riskToHex(level)
+        ctx.strokeStyle = '#05070d'
+        ctx.lineWidth = 1
+        const wp = waypoints[runStart - 1]
+        const size = level === 'CRITICAL' ? 4.6 : 3.8
+        ctx.beginPath()
+        // Triangle for CRITICAL, square for HIGH: two shapes nobody has to
+        // compare against a legend to tell apart.
+        if (level === 'CRITICAL') {
+          ctx.moveTo(wp.col, wp.row - size)
+          ctx.lineTo(wp.col + size, wp.row + size * 0.8)
+          ctx.lineTo(wp.col - size, wp.row + size * 0.8)
+          ctx.closePath()
+        } else {
+          ctx.rect(wp.col - size / 2, wp.row - size / 2, size, size)
+        }
+        ctx.fill()
+        ctx.stroke()
+        ctx.restore()
+      }
+
+      runStart = index + 1
     }
 
+    ctx.setLineDash([])
     ctx.restore()
 
     if (currentStep !== null && currentStep < waypoints.length) {
@@ -413,7 +551,7 @@ function drawHoverCrosshair(
   const y = row + 0.5
 
   ctx.save()
-  ctx.strokeStyle = 'rgba(179, 165, 255, 0.18)'
+  ctx.strokeStyle = 'rgba(186, 175, 245, 0.18)'
   ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(x, 0)
@@ -633,7 +771,7 @@ function drawMarker(
 
   ctx.shadowBlur = 0
   ctx.fillStyle = '#05070d'
-  ctx.font = 'bold 8px IBM Plex Mono, monospace'
+  ctx.font = 'bold 8px "Azeret Mono", ui-monospace, monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(label, col, row + 0.5)

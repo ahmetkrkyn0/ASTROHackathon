@@ -30,9 +30,9 @@ export function poseOverlays(
         // too uncertain to trust it, white otherwise.
         color:
           result?.recommended_action === 'stop_and_localize'
-            ? '#e8c85a'
+            ? '#e3d548'
             : result && result.fired_triggers.length > 0
-              ? '#ee5a52'
+              ? '#ed4b3d'
               : '#e7eaf1',
         radiusPx: 5,
       },
@@ -53,7 +53,9 @@ export function poseOverlays(
       kind: 'polyline',
       id: 'pose-deviation',
       points: [poseCell, metresToPixel(nearest[0], nearest[1], frame)],
-      style: { color: '#e8c85a', widthPx: 1.5, dash: [4, 3], opacity: 0.9 },
+      // Deviation from the corridor is a caution reading, so it takes the
+      // ramp's MEDIUM rather than a copy of the value that used to be there.
+      style: { color: '#e3d548', widthPx: 1.5, dash: [4, 3], opacity: 0.9 },
     })
   }
 

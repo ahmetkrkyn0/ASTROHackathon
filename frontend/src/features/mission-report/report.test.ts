@@ -101,8 +101,8 @@ describe('decideVerdict', () => {
 
   it('lists blocking reasons before warnings', () => {
     const result = decideVerdict(plan({ stranded: true, total_recharges: 2 }))
-    expect(result.reasons[0].text).toContain('enerjisiz')
-    expect(result.reasons[result.reasons.length - 1].text).toContain('şarj')
+    expect(result.reasons[0].text).toContain('ran out of energy')
+    expect(result.reasons[result.reasons.length - 1].text).toContain('recharge')
   })
 })
 
@@ -160,14 +160,15 @@ describe('milestones', () => {
 describe('milestones endpoint priority', () => {
   // The common case, not an edge case: a route that drains monotonically has
   // its lowest battery at the last waypoint, and the endpoint must still be
-  // the row called HEDEF.
-  it('keeps HEDEF on the last step when it is also the lowest battery', () => {
+  // the row called GOAL.
+  it('keeps GOAL on the last step when it is also the lowest battery', () => {
     const waypoints = Array.from({ length: 20 }, (_, i) => wp(i, { battery_pct: 100 - i }))
     const marks = milestones(waypoints)
-    expect(marks[marks.length - 1]).toMatchObject({ title: 'HEDEF', step: 19 })
-    expect(marks.some((m) => m.title === 'EN DÜŞÜK PİL')).toBe(false)
+    expect(marks[marks.length - 1]).toMatchObject({ title: 'GOAL', step: 19 })
+    expect(marks.some((m) => m.title === 'LOWEST BATTERY')).toBe(false)
   })
 })
+
 
 /**
  * The parity fixture, shared with backend/test_report_verdict.py.

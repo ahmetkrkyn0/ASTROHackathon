@@ -7,6 +7,8 @@ export function TimeAxisPanel({
   manifest,
   field,
   setField,
+  fieldVisible,
+  setFieldVisible,
   sliceIndex,
   setSliceIndex,
   playing,
@@ -20,6 +22,8 @@ export function TimeAxisPanel({
   manifest: SeriesManifest | null
   field: SeriesField
   setField: (next: SeriesField) => void
+  fieldVisible: boolean
+  setFieldVisible: (next: boolean) => void
   sliceIndex: number
   setSliceIndex: (next: number) => void
   playing: boolean
@@ -54,10 +58,25 @@ export function TimeAxisPanel({
 
         <span className="lp-time-clock">+{hours.toFixed(1)} h</span>
 
+        {/* The field is a layer, so it is switched on like one. It used to
+            paint itself over the terrain the moment ANALYZE mounted, which
+            made the same DEM look like a darker place than it had been one
+            tab earlier -- a measurement nobody had asked to see, arriving as
+            what looked like the lighting being turned off. */}
+        <label className="lp-time-layer-toggle">
+          <input
+            type="checkbox"
+            checked={fieldVisible}
+            onChange={(event) => setFieldVisible(event.target.checked)}
+          />
+          Layer
+        </label>
+
         <select
           className="lp-time-field"
           value={field}
           onChange={(event) => setField(event.target.value as SeriesField)}
+          disabled={!fieldVisible}
         >
           <option value="shadow">Shadow</option>
           <option value="surface_temp_c">Surface temp</option>
@@ -75,8 +94,12 @@ export function TimeAxisPanel({
           kernels loaded the field arrives carrying the whole CSPICE error
           banner, and a toolkit dump in the dock is an environment error shown
           to an operator, which section 29 rules out. */}
+      {/* Stated as a fact, not as a warning. There is nothing the operator can
+          do about a static cube, and a caution colour that is always on and
+          never resolves is how an interface teaches that its warnings can be
+          ignored. The warning tone is reserved for what needs acting on. */}
       {manifest && !timeVarying ? (
-        <p className="lp-time-note lp-time-warn">
+        <p className="lp-time-note">
           No time series — this cube does not vary with time, so it is not
           animated.
           {shadowReason ? ` ${shadowReason}` : ''}

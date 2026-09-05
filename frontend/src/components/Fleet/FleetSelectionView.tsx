@@ -1,12 +1,11 @@
 import React from 'react'
-import type { PlanWeights, RoverEntry } from '../../api'
+import type { RoverEntry } from '../../api'
+import RoutePriorities from '../../features/mission-setup/RoutePriorities'
 
 interface FleetSelectionViewProps {
   rovers: RoverEntry[]
   selectedRover: RoverEntry | null
   onSelectRover: (rover: RoverEntry) => void
-  weights: PlanWeights
-  onWeightsChange: (weights: PlanWeights) => void
   onDeployToMap: () => void
 }
 
@@ -95,39 +94,19 @@ function getRoverMeta(id: string): RoverDetailMeta {
   return ROVER_META.lpr_1
 }
 
-const WEIGHT_CONTROLS: Array<{
-  key: keyof PlanWeights
-  label: string
-  desc: string
-}> = [
-  { key: 'w_slope', label: 'Slope Safety', desc: 'Avoids steep inclines, cliff faces, and high-tilt zones' },
-  { key: 'w_energy', label: 'Energy Optimization', desc: 'Minimizes Watt-hour electrical drain from rover batteries' },
-  { key: 'w_shadow', label: 'Shadow Exposure', desc: 'Avoids permanently shadowed, light-deprived cold traps' },
-  { key: 'w_thermal', label: 'Cryogenic Thermal Risk', desc: 'Steers away from severe -200°C thermal shock zones' },
-]
-
 export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
   rovers,
   selectedRover,
   onSelectRover,
-  weights,
-  onWeightsChange,
   onDeployToMap,
 }) => {
-  const handleWeightChange = (key: keyof PlanWeights, val: number) => {
-    onWeightsChange({
-      ...weights,
-      [key]: val,
-    })
-  }
-
   return (
     <div className="lp-fleet-view">
       {/* ── Top Header Banner ── */}
       <header className="lp-fleet-header">
         <div className="lp-fleet-header-content">
           <div className="lp-fleet-badge-row">
-            <span className="lp-fleet-phase-badge">STAGE 01 · FLEET COMMAND</span>
+            <span className="lp-fleet-phase-badge">Fleet command</span>
             <span className="lp-fleet-site-badge">SITE 11 · LUNAR SOUTH POLE (89.5°S)</span>
           </div>
           <h1 className="lp-fleet-headline">Select Mission Exploration Rover</h1>
@@ -193,26 +172,26 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
                 {/* Key Technical Specifications Table */}
                 <div className="lp-card-specs-grid">
                   <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">BATTERY CAPACITY</span>
+                    <span className="lp-card-spec-k">Battery capacity</span>
                     <strong className="lp-card-spec-v">{rover.e_cap_wh.toFixed(0)} Wh</strong>
                   </div>
                   <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">MAX SPEED</span>
+                    <span className="lp-card-spec-k">Max speed</span>
                     <strong className="lp-card-spec-v">{rover.v_max_ms.toFixed(2)} m/s</strong>
                   </div>
                   <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">MAX CLIMB SLOPE</span>
+                    <span className="lp-card-spec-k">Max climb slope</span>
                     <strong className="lp-card-spec-v">{rover.slope_max_deg.toFixed(0)}°</strong>
                   </div>
                   <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">TOTAL MASS</span>
+                    <span className="lp-card-spec-k">Total mass</span>
                     <strong className="lp-card-spec-v">{rover.mass_kg.toFixed(0)} kg</strong>
                   </div>
                 </div>
 
                 {/* Scientific Payload Suite */}
                 <div className="lp-card-payload-box">
-                  <span className="lp-card-payload-title">SCIENCE & SENSOR SUITE</span>
+                  <span className="lp-card-payload-title">Science and sensor suite</span>
                   <p className="lp-card-payload-text">{meta.payload}</p>
                 </div>
               </div>
@@ -235,43 +214,27 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
         })}
       </div>
 
-      {/* ── Mission Parameters & Deployment Dock ── */}
+      {/* ── Mission Parameters & Deployment Dock ──
+          The rover is only half the decision; what the solver should optimise
+          for is the other half, and both are made here before the map opens.
+          RoutePriorities carries the presets, their constraints and the four
+          weights -- it reads the mission context directly, so nothing about
+          them passes through this component. */}
       <section className="lp-fleet-bottom-dock">
-        <div className="lp-dock-weights-col">
+        <div className="lp-dock-priorities-col">
           <div className="lp-dock-section-title">
-            <span className="lp-meta-label">ROUTE A* OPTIMIZATION WEIGHTS</span>
-            <span className="lp-dock-hint">Fine-tune cost heuristics for this rover's transit</span>
+            <span className="lp-meta-label">Route priorities</span>
+            <span className="lp-dock-hint">
+              What the A* solver optimises for on this rover's transit
+            </span>
           </div>
-
-          <div className="lp-dock-sliders-row">
-            {WEIGHT_CONTROLS.map(({ key, label, desc }) => {
-              const val = weights[key]
-              return (
-                <div key={key} className="lp-dock-slider-cell">
-                  <div className="lp-dock-slider-head">
-                    <span className="lp-dock-slider-label">{label}</span>
-                    <strong className="lp-dock-slider-val">{val.toFixed(2)}</strong>
-                  </div>
-                  <input
-                    type="range"
-                    className="lp-range-input"
-                    min={0}
-                    max={2}
-                    step={0.05}
-                    value={val}
-                    onChange={(e) => handleWeightChange(key, parseFloat(e.target.value))}
-                    title={desc}
-                  />
-                </div>
-              )
-            })}
-          </div>
+          <RoutePriorities />
         </div>
 
         {/* Big Deployment Action Button */}
         <div className="lp-dock-action-col">
           <div className="lp-dock-rover-summary">
-            <span className="lp-meta-label">DEPLOYMENT READY</span>
+            <span className="lp-meta-label">Ready to deploy</span>
             <strong className="lp-dock-rover-name">
               {selectedRover ? selectedRover.name : 'Choose a vehicle above'}
             </strong>

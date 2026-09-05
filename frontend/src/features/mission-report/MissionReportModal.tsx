@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { PlanResponse } from '../../api'
 import type { RouteStatistics } from '../../net/types'
 import { riskToHex } from '../../colormap'
@@ -11,6 +12,7 @@ import {
   StackedBar,
   type Point,
 } from './charts'
+import { downloadCsv } from './exportCsv'
 import { fmt } from './format'
 import {
   ASSISTANT_QUESTION,
@@ -71,6 +73,40 @@ export const MissionReportModal: React.FC<Props> = ({
 }) => {
   const closeRef = useRef<HTMLButtonElement>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [printing, setPrinting] = useState(false)
+
+  /**
+   * Printing has to show the whole report, including the detail the operator
+   * left collapsed.
+   *
+   * The technical section is conditionally rendered, so the print stylesheet
+   * cannot reveal it -- there is nothing in the DOM to reveal. Opening it and
+   * printing on the next frame is the difference between exporting the report
+   * and exporting the half of it that happened to be on screen.
+   */
+  const handlePrint = () => {
+    setDetailsOpen(true)
+    setPrinting(true)
+  }
+
+  useEffect(() => {
+    if (!printing) {
+      return
+    }
+    // Two frames: one for React to commit the opened section, one for layout
+    // and the chart width observers to settle before the page is captured.
+    let inner = 0
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        window.print()
+        setPrinting(false)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(outer)
+      cancelAnimationFrame(inner)
+    }
+  }, [printing])
 
   // Esc closes, and focus starts on the close button. Deliberately not a focus
   // trap: the modal covers the viewport and the cockpit behind it is inert to
@@ -135,40 +171,55 @@ export const MissionReportModal: React.FC<Props> = ({
   const energyTotal = view.energy.driveWh + view.energy.payloadWh + view.energy.heaterWh
 
   const kpis: Array<{ label: string; value: string; color?: string }> = [
-    { label: 'MESAFE', value: `${fmt(summary.total_distance_km, 2)} km` },
-    { label: 'SÜRE', value: `${fmt(summary.total_elapsed_hours, 1)} s` },
+    { label: 'DISTANCE', value: `${fmt(summary.total_distance_km, 2)} km` },
+    { label: 'Duration', value: `${fmt(summary.total_elapsed_hours, 1)} h` },
     {
-      label: 'BİTİŞ PİLİ',
-      value: `%${fmt(summary.final_battery_pct)}`,
+      label: 'End battery',
+      value: `${fmt(summary.final_battery_pct)}%`,
       color: summary.final_battery_pct < BATTERY_WATCH_PCT ? 'var(--risk-high)' : undefined,
     },
     {
-      label: 'EN DÜŞÜK PİL',
-      value: `%${fmt(summary.min_battery_pct)}`,
+      label: 'Lowest battery',
+      value: `${fmt(summary.min_battery_pct)}%`,
       color: summary.min_battery_pct < BATTERY_WATCH_PCT ? 'var(--risk-high)' : undefined,
     },
-    { label: 'HARCANAN ENERJİ', value: `${fmt(summary.total_energy_consumed_wh, 0)} Wh` },
-    { label: 'MAKS. EĞİM', value: `${fmt(summary.max_slope_deg)}°` },
-    { label: 'ŞARJ MOLASI', value: String(summary.total_recharges) },
-    { label: 'ROTA DÜĞÜMÜ', value: String(summary.waypoint_count) },
+    { label: 'Energy used', value: `${fmt(summary.total_energy_consumed_wh, 0)} Wh` },
+    { label: 'Max slope', value: `${fmt(summary.max_slope_deg)}°` },
+    { label: 'Recharges', value: String(summary.total_recharges) },
+    { label: 'Route nodes', value: String(summary.waypoint_count) },
   ]
 
-  return (
+  /**
+   * Portalled to <body>, and the print stylesheet is why.
+   *
+   * Printing this report means hiding everything that is not it, which
+   * `report.css` does with `body > *:not(.lp-report-scrim)`. Rendered in the
+   * globalOverlay slot the scrim sits inside `#root > .app-shell`, so that
+   * selector matched `#root` and hid the report along with the cockpit: every
+   * "Save as PDF" produced a blank A4 page.
+   *
+   * The portal also takes the report out from under `.app-shell`, which is
+   * `height: 100vh; overflow: hidden` -- ancestors that would have cropped a
+   * ten-card report to a single page. On screen nothing moves: the scrim is
+   * `position: fixed; inset: 0`, which looks the same from either parent.
+   */
+  return createPortal(
     <div className="lp-report-scrim" role="presentation">
       <div
         className="lp-report-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Görev raporu"
+        aria-label="Mission report"
       >
         <header className="lp-report-header">
           <div className="lp-report-title-block">
-            <span className="lp-meta-label">GÖREV RAPORU</span>
-            <h2 className="lp-report-title">Rota tamamlandı</h2>
-            <span className="lp-report-subtitle">
-              {plan.rover?.name ?? 'Rover'} · {summary.waypoint_count} düğüm ·{' '}
-              {fmt(summary.total_distance_km, 2)} km
-            </span>
+            <span className="lp-meta-label">Mission report</span>
+            <h2 className="lp-report-title">Route complete</h2>
+            <p className="lp-report-subtitle">
+              {plan.rover?.name ?? 'Rover'} drove{' '}
+              <span className="lp-report-figure">{fmt(summary.total_distance_km, 2)} km</span> over{' '}
+              <span className="lp-report-figure">{summary.waypoint_count}</span> waypoints.
+            </p>
           </div>
           <div className="lp-report-header-right">
             <span
@@ -177,29 +228,41 @@ export const MissionReportModal: React.FC<Props> = ({
             >
               {view.verdict.verdict}
             </span>
+            <div className="lp-report-actions">
+              <button type="button" className="lp-report-action" onClick={handlePrint}>
+                Save as PDF
+              </button>
+              <button
+                type="button"
+                className="lp-report-action"
+                onClick={() => downloadCsv(plan)}
+              >
+                Download data
+              </button>
+            </div>
             <button
               type="button"
               ref={closeRef}
               className="lp-report-close"
               onClick={onClose}
-              aria-label="Raporu kapat ve haritaya dön"
+              aria-label="Close the report and return to the map"
             >
-              Haritaya dön ✕
+              Back to map ✕
             </button>
           </div>
         </header>
 
         <div className="lp-report-body">
-          {/* ── Karar özeti ─────────────────────────────────────────── */}
+          {/* ── Decision summary ───────────────────────────────────── */}
           <Section
-            label="KARAR ÖZETİ"
+            label="Decision summary"
             action={
               <button
                 type="button"
                 className="lp-report-ask"
                 onClick={() => onAskAssistant(ASSISTANT_QUESTION[view.verdict.verdict])}
               >
-                Asistana sor
+                Ask the assistant
               </button>
             }
           >
@@ -223,38 +286,39 @@ export const MissionReportModal: React.FC<Props> = ({
             </div>
           </Section>
 
-          {/* ── Pil ─────────────────────────────────────────────────── */}
+          {/* ── Battery ───────────────────────────────────────────── */}
           <Section
-            label="PİL PROFİLİ"
+            label="Battery profile"
             note={
               view.recharges.length > 0
-                ? `${view.recharges.length} şarj molası (kesik yeşil çizgi)`
-                : 'Şarj molası yok'
+                ? `${view.recharges.length} recharge stops (dashed green)`
+                : 'No recharge stops'
             }
           >
             <LineArea
-              title="Mesafeye göre pil yüzdesi"
+              title="Battery percentage against distance"
               points={view.battery}
               color="var(--mint)"
               yMin={0}
               yMax={100}
               markers={view.recharges}
               refLines={[
-                { y: BATTERY_WATCH_PCT, label: 'REZERV %30', color: 'var(--risk-high)' },
+                { y: BATTERY_WATCH_PCT, label: 'RESERVE 30%', color: 'var(--risk-high)' },
                 {
                   y: summary.min_battery_pct,
-                  label: `MİN %${fmt(summary.min_battery_pct)}`,
+                  label: `MIN ${fmt(summary.min_battery_pct)}%`,
                   color: 'var(--text-dim)',
                 },
               ]}
-              formatY={(v) => `%${v.toFixed(0)}`}
+              formatY={(v) => `${v.toFixed(0)}%`}
               formatX={(v) => `${v.toFixed(1)}km`}
+              height={200}
             />
           </Section>
 
-          {/* ── Eğim + risk ─────────────────────────────────────────── */}
+          {/* ── Slope + risk ───────────────────────────────────────── */}
           <div className="lp-report-row">
-            <Section label="EĞİM DAĞILIMI" note={`En dik adım ${fmt(summary.max_slope_deg)}°`}>
+            <Section label="Slope distribution" note={`Steepest step ${fmt(summary.max_slope_deg)}°`}>
               <HBars
                 rows={view.bins.map((bin) => ({
                   label: `${bin.bin_low_deg}–${bin.bin_high_deg}°`,
@@ -272,7 +336,7 @@ export const MissionReportModal: React.FC<Props> = ({
               />
             </Section>
 
-            <Section label="RİSK DAĞILIMI" note="Adım başına risk seviyesi">
+            <Section label="Risk distribution" note="Risk level per step">
               <StackedBar
                 segments={RISK_LEVELS.map((level) => ({
                   label: level,
@@ -283,136 +347,141 @@ export const MissionReportModal: React.FC<Props> = ({
             </Section>
           </div>
 
-          {/* ── Termal + gölge ──────────────────────────────────────── */}
+          {/* ── Thermal + shadow ───────────────────────────────────── */}
           <div className="lp-report-row">
             <Section
-              label="TERMAL ZARF"
+              label="Thermal envelope"
               note={`${fmt(metrics.min_surface_temp_c, 0)}°C … ${fmt(metrics.max_surface_temp_c, 0)}°C`}
             >
               <LineArea
-                title="Mesafeye göre yüzey sıcaklığı"
+                title="Surface temperature against distance"
                 points={view.thermal}
                 color="var(--coral)"
                 fill={false}
                 refLines={[
                   {
                     y: metrics.min_surface_temp_c,
-                    label: `MİN ${fmt(metrics.min_surface_temp_c, 0)}°C`,
+                    label: `MIN ${fmt(metrics.min_surface_temp_c, 0)}°C`,
                     color: 'var(--cyan)',
                   },
                   {
                     y: metrics.max_surface_temp_c,
-                    label: `MAKS ${fmt(metrics.max_surface_temp_c, 0)}°C`,
+                    label: `MAX ${fmt(metrics.max_surface_temp_c, 0)}°C`,
                     color: 'var(--risk-med)',
                   },
                 ]}
                 formatY={(v) => `${v.toFixed(0)}°`}
                 formatX={(v) => `${v.toFixed(1)}km`}
+                height={168}
               />
             </Section>
 
-            <Section label="GÖLGE MARUZİYETİ" note="Kesintisiz gölge, rover limitine karşı">
+            <Section label="Shadow exposure" note="Continuous shadow against the rover limit">
               <LimitGauge
-                label="KESİNTİSİZ GÖLGE"
+                label="Continuous shadow"
                 value={summary.max_continuous_shadow_h}
                 limit={summary.shadow_limit_h}
-                unit="s"
+                unit="h"
                 exceeded={summary.shadow_limit_exceeded}
               />
               <LineArea
-                title="Mesafeye göre gölge oranı"
+                title="Shadow ratio against distance"
                 points={view.shadow}
                 color="var(--cyan)"
                 yMin={0}
                 yMax={1}
                 formatY={(v) => v.toFixed(1)}
                 formatX={(v) => `${v.toFixed(1)}km`}
+                height={120}
               />
             </Section>
           </div>
 
           {/* ── Enerji ──────────────────────────────────────────────── */}
           <Section
-            label="ENERJİ KIRILIMI"
-            note="Sürüş enerjisi simülasyondan; payload ve ısıtıcı operatör ayarından"
+            label="Energy breakdown"
+            note="Drive energy from the simulation; payload and heater from the operator setting"
           >
             <Donut
               centerValue={`${fmt(energyTotal, 0)}`}
-              centerLabel="TOPLAM Wh"
+              centerLabel="Total Wh"
               slices={[
-                { label: 'Sürüş', value: view.energy.driveWh, color: 'var(--lavender)' },
+                { label: 'Drive', value: view.energy.driveWh, color: 'var(--lavender)' },
                 { label: 'Payload', value: view.energy.payloadWh, color: 'var(--cyan)' },
-                { label: 'Isıtıcı', value: view.energy.heaterWh, color: 'var(--coral)' },
+                { label: 'Heater', value: view.energy.heaterWh, color: 'var(--coral)' },
               ]}
             />
           </Section>
 
-          {/* ── Detaylar ────────────────────────────────────────────── */}
+          {/* ── Details ────────────────────────────────────────────── */}
           <button
             type="button"
             className="lp-report-toggle"
             onClick={() => setDetailsOpen((open) => !open)}
             aria-expanded={detailsOpen}
           >
-            {detailsOpen ? '▾ Teknik detayları gizle' : '▸ Teknik detaylar (arazi kesiti, planlayıcı kanıtı, kilometre taşları)'}
+            {detailsOpen
+              ? '▾ Hide technical detail'
+              : '▸ Technical detail (terrain cut, planner evidence, milestones)'}
           </button>
 
           {detailsOpen && (
             <>
-              <Section label="ARAZİ KESİTİ" note="Yükseklik, adım riskiyle boyanmış">
+              <Section label="Terrain cut" note="Elevation, painted by step risk">
                 <SegmentedProfile
-                  title="Mesafeye göre yükseklik"
+                  title="Elevation against distance"
                   points={view.elevation}
                   colors={view.elevationColors}
                   formatY={(v) => `${v.toFixed(0)}m`}
                   formatX={(v) => `${v.toFixed(1)}km`}
+                  height={200}
                 />
               </Section>
 
               <div className="lp-report-row">
-                <Section label="PLANLAYICI KANITI" note="A* gerçekten kısıt uyguladı">
+                <Section label="Planner evidence" note="A* really did apply constraints">
                   <dl className="lp-report-dl">
                     <div>
-                      <dt>Genişletilen düğüm</dt>
+                      <dt>Nodes expanded</dt>
                       <dd>{metrics.nodes_expanded.toLocaleString('tr-TR')}</dd>
                     </div>
                     <div>
-                      <dt>Çözüm süresi</dt>
+                      <dt>Solve time</dt>
                       <dd>{fmt(metrics.computation_time_ms)} ms</dd>
                     </div>
                     <div>
-                      <dt>Toplam ağırlıklı maliyet</dt>
+                      <dt>Total weighted cost</dt>
                       <dd>{fmt(metrics.total_weighted_cost, 0)}</dd>
                     </div>
                     <div>
-                      <dt>Bariyer payı</dt>
+                      <dt>Barrier share</dt>
                       <dd>
                         {metrics.barrier_share === null
                           ? '--'
-                          : `%${fmt(metrics.barrier_share * 100)}`}
+                          : `${fmt(metrics.barrier_share * 100)}%`}
                       </dd>
                     </div>
                     {Object.entries(metrics.edges_rejected).map(([reason, count]) => (
                       <div key={reason}>
-                        <dt>Reddedilen kenar · {reason}</dt>
+                        <dt>Edges rejected · {reason}</dt>
                         <dd>{count}</dd>
                       </div>
                     ))}
                   </dl>
                 </Section>
 
-                <Section label="KİLOMETRE TAŞLARI">
+                <Section label="Milestones">
                   <div className="lp-report-table-wrap">
                     <table className="lp-report-table">
                       <thead>
                         <tr>
-                          <th>NOKTA</th>
-                          <th>ADIM</th>
+                          <th>Point</th>
+                          <th>Step</th>
                           <th>KM</th>
-                          <th>PİL</th>
-                          <th>EĞİM</th>
-                          <th>SICAKLIK</th>
-                          <th>RİSK</th>
+                          <th>Battery</th>
+                          <th>Slope</th>
+                          <th>Temp</th>
+                          <th>Risk</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -421,7 +490,7 @@ export const MissionReportModal: React.FC<Props> = ({
                             <td>{m.title}</td>
                             <td>{m.step}</td>
                             <td>{fmt(m.wp.distance_m / 1000, 2)}</td>
-                            <td>%{fmt(m.wp.battery_pct)}</td>
+                            <td>{fmt(m.wp.battery_pct)}%</td>
                             <td>{fmt(m.wp.slope_deg)}°</td>
                             <td>{fmt(m.wp.surface_temp_c, 0)}°C</td>
                             <td style={{ color: riskToHex(m.wp.risk_level) }}>{m.wp.risk_level}</td>
@@ -436,6 +505,7 @@ export const MissionReportModal: React.FC<Props> = ({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -1,4 +1,6 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { REPORT_LAUNCHER_SLOT_ID } from '../../components/TopBar/TopBar'
 import { useAskAssistant } from '../../intent/AssistantAskContext'
 import { useMission } from '../../mission/MissionContext'
 import { useMissionRuntime } from '../../mission/MissionRuntimeContext'
@@ -23,6 +25,19 @@ export function MissionReport() {
   const requestAsk = useAskAssistant()
 
   /**
+   * The bar's anchor, found after it has mounted.
+   *
+   * Read in an effect rather than during render: this feature and the top bar
+   * are siblings under .app-shell, and on the first pass the node may not
+   * exist yet. State rather than a ref because finding it has to cause the
+   * re-render that actually paints the button.
+   */
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    setSlot(document.getElementById(REPORT_LAUNCHER_SLOT_ID))
+  }, [])
+
+  /**
    * Hand the question to the assistant and get out of its way.
    *
    * Closing is not a courtesy: the report is registered after the assistant in
@@ -30,7 +45,7 @@ export function MissionReport() {
    * full-screen report covers the panel the question just landed in.
    *
    * Nothing is sent. The channel writes the composer; the operator still picks
-   * an explanation level and presses Gönder.
+   * an explanation level and presses send.
    */
   const askAssistant = useCallback(
     (question: string) => {
@@ -42,16 +57,26 @@ export function MissionReport() {
 
   if (!planResult) return null
 
+  const launcher = !isOpen && (
+    <button
+      type="button"
+      className="lp-report-launcher"
+      onClick={open}
+      title="Open the post-drive mission report"
+    >
+      <span className="lp-report-launcher-icon" aria-hidden="true">
+        ▤
+      </span>
+      Mission Report
+    </button>
+  )
+
   return (
     <>
-      {!isOpen && (
-        <button type="button" className="lp-report-launcher" onClick={open}>
-          <span className="lp-report-launcher-icon" aria-hidden="true">
-            ▤
-          </span>
-          Görev Raporu
-        </button>
-      )}
+      {/* Into the bar when its anchor is there, and in place if it is not --
+          a missing anchor should cost the button its position, not its
+          existence. */}
+      {slot && launcher ? createPortal(launcher, slot) : launcher}
       {isOpen && (
         <MissionReportModal
           plan={planResult}
