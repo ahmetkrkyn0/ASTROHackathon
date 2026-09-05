@@ -152,6 +152,27 @@ from .stress_test import (
     stress_test_route,
     wilson_interval,
 )
+from .survival import (
+    DEFAULT_SOC_BINS,
+    MAX_SOC_BINS,
+    MAX_SURVIVAL_HORIZON_HOURS,
+    MAX_SURVIVAL_STATES,
+    MIN_SOC_BINS,
+    SURVIVAL_VALIDITY,
+    SAFE_SETS,
+    SurvivalField,
+    auto_slices_per_bin,
+    bin_shadow_series,
+    build_survival_field,
+    cached_survival_field,
+    recovery_suggestion,
+    safe_soc_requirement,
+    survival_block,
+)
+from .constants import (
+    FAILURE_RATE_PER_KM_ASSUMED,
+    FAULT_RECOVERY_HOURS_ASSUMED,
+)
 from .terrain import (
     BINARY_LAYER_HEADERS,
     BINARY_MEDIA_TYPE,
@@ -503,6 +524,21 @@ class ReplanRequest(BaseModel):
         ),
     )
 
+    # The recovery policy's advice (B1): with an epoch and a goal the
+    # backend builds the survival field for the current block and reports
+    # the arg-min action from the rover's actual state of charge.
+    recovery_policy: bool = Field(
+        default=False,
+        description=(
+            "Compute the recovery policy from the rover's current block and "
+            "report its best action as recovery_suggestion. Needs utc; the "
+            "state of charge is state.actual_soc (fraction) or a full battery."
+        ),
+    )
+    survival_horizon_hours: Optional[float] = Field(default=None, gt=0.0, le=MAX_SURVIVAL_HORIZON_HOURS)
+    failure_rate_per_km: Optional[float] = Field(default=None, ge=0.0, le=50.0)
+    recovery_hours: Optional[float] = Field(default=None, gt=0.0, le=72.0)
+
     _check_state = field_validator("state")(_reject_non_finite_telemetry)
 
 
@@ -599,6 +635,63 @@ class Plan4DRequest(BaseModel):
         ),
     )
     risk_alpha: Optional[float] = _RISK_ALPHA_FIELD
+    # The chance constraint (B1). Omitted: the pre-B1 planner, bit for bit,
+    # and no dynamic programme is run. Given: the survival field is built
+    # for this goal and epoch, every fault branch of every move is closed
+    # with the recovery policy's P_safe, and a move that would push the
+    # execution failure probability over beta is refused.
+    max_failure_probability: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "beta: refuse any move after which the probability that this plan, "
+            "with the recovery policy as its fallback, ends in failure would "
+            "exceed beta. Builds the survival field (Lamarre et al.'s reach-avoid "
+            "value iteration) under the assumed fault model."
+        ),
+    )
+    report_survival: bool = Field(
+        default=False,
+        description=(
+            "Build the survival field and report the route's execution failure "
+            "probability and per-state P_safe without enforcing a beta."
+        ),
+    )
+    failure_rate_per_km: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=50.0,
+        description=(
+            "Poisson mobility fault rate per km driven -- an ASSUMPTION; the "
+            "default is Lamarre et al.'s 1 per 5 000 m (0.2). 0 makes the "
+            "field deterministic."
+        ),
+    )
+    recovery_hours: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        le=72.0,
+        description="Hours a fault pins the rover in place; default Lamarre et al.'s 10 h.",
+    )
+    survival_soc_bins: int = Field(default=DEFAULT_SOC_BINS, ge=MIN_SOC_BINS, le=MAX_SOC_BINS)
+    survival_safe_set: Literal["leg", "haven"] = Field(
+        default="leg",
+        description=(
+            "'leg': the goal block at the reserve charge plus every safe haven "
+            "at its hibernation charge; 'haven': the havens only (Lamarre's "
+            "target set; needs the A1 map, which on Site11 is empty for LPR-1)."
+        ),
+    )
+    survival_horizon_hours: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        le=MAX_SURVIVAL_HORIZON_HOURS,
+        description=(
+            "The field's horizon; default the plan's horizon plus the recovery "
+            "time plus the fastest drive to the goal."
+        ),
+    )
 
 
 class RiskSweepRequest(BaseModel):
@@ -672,6 +765,11 @@ class PerturbationOverrides(BaseModel):
     dsn_outage_mean_h: Optional[float] = Field(default=None, ge=0.0, le=336.0)
     sep_event_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     sep_event_mean_h: Optional[float] = Field(default=None, ge=0.0, le=336.0)
+    # Mobility faults (B1): Poisson per km driven, each a hold of the
+    # recovery time; the default injects none, and no rover publishes a
+    # rate (constants.FAILURE_MODEL_SOURCE).
+    fault_rate_per_km: Optional[float] = Field(default=None, ge=0.0, le=50.0)
+    fault_recovery_h: Optional[float] = Field(default=None, ge=0.0, le=72.0)
 
 
 class StressTestRequest(BaseModel):
@@ -855,6 +953,23 @@ def get_cell_telemetry(
             "one synodic month from here. Without it `safe_haven` is null."
         ),
     ),
+    survival: bool = Query(
+        default=False,
+        description=(
+            "Also compute the recovery policy (B1) for this cell: P_safe and "
+            "the best action from here at t_hours after start_utc with soc_pct "
+            "of charge. Needs start_utc and, for the leg safe set, goal_row/goal_col."
+        ),
+    ),
+    goal_row: Optional[int] = Query(default=None, ge=0),
+    goal_col: Optional[int] = Query(default=None, ge=0),
+    soc_pct: float = Query(default=1.0, gt=0.0, le=1.0),
+    t_hours: float = Query(default=0.0, ge=0.0, le=MAX_SURVIVAL_HORIZON_HOURS),
+    survival_horizon_hours: float = Query(default=24.0, gt=0.0, le=MAX_SURVIVAL_HORIZON_HOURS),
+    failure_rate_per_km: Optional[float] = Query(default=None, ge=0.0, le=50.0),
+    recovery_hours: Optional[float] = Query(default=None, gt=0.0, le=72.0),
+    safe_set: Literal["leg", "haven"] = Query(default="leg"),
+    coarsen: int = Query(default=4, ge=1, le=16),
 ):
     grids = _active_grids(request)
     metadata = grids["metadata"]
@@ -932,6 +1047,48 @@ def get_cell_telemetry(
             "h_max_shadow_h": float(haven_info["h_max_shadow_h"]),
         }
 
+    # The recovery policy for this cell (B1), on request: the field is
+    # cached per (rover, epoch, goal, options), so a hover pays for it once.
+    survival_card = None
+    survival_model: dict[str, Any] = {"model": "unavailable", "reason": "not requested (survival=false)"}
+    if survival:
+        if safe_set == "leg" and (goal_row is None or goal_col is None):
+            raise HTTPException(
+                status_code=422,
+                detail="survival=true with the leg safe set needs goal_row and goal_col",
+            )
+        goal = None if goal_row is None or goal_col is None else (int(goal_row), int(goal_col))
+        if goal is not None and not (0 <= goal[0] < rows and 0 <= goal[1] < cols):
+            raise HTTPException(status_code=422, detail=f"goal {goal} is outside the {rows}x{cols} grid.")
+        options = _SurvivalOptions(
+            rate_per_km=FAILURE_RATE_PER_KM_ASSUMED if failure_rate_per_km is None else float(failure_rate_per_km),
+            recovery_h=FAULT_RECOVERY_HOURS_ASSUMED if recovery_hours is None else float(recovery_hours),
+            safe_set=safe_set,
+        )
+        field, survival_model, _geometry, slice_hours = _survival_model_for_grids(
+            grids, rover["id"], start_utc, goal, coarsen, options, float(survival_horizon_hours)
+        )
+        if field is not None:
+            block = (row // coarsen, col // coarsen)
+            battery_wh = float(soc_pct) * float(rover["e_cap_wh"])
+            slice_index = int(round(float(t_hours) / slice_hours))
+            card = recovery_suggestion(field, block[0], block[1], battery_wh, coarsen, slice_index)
+            survival_card = {
+                "p_safe": card["p_safe_now"],
+                "p_safe_next": card["p_safe_next"],
+                "best_action": card["action"],
+                "best_action_name": card["action_name"],
+                "next_block": card["target_block"],
+                "next_pixel": card["target_pixel"],
+                "block": card["block"],
+                "coarsen": int(coarsen),
+                "soc_frac": round(float(soc_pct), 6),
+                "t_hours": float(t_hours),
+                "safe_set": field.safe_set,
+                "step_hours": round(field.step_hours, 6),
+                "horizon_hours": round(field.horizon_hours, 4),
+            }
+
     return {
         "row": row,
         "col": col,
@@ -970,6 +1127,11 @@ def get_cell_telemetry(
         # safe_haven_model when no epoch, horizon cube or kernels.
         "safe_haven": safe_haven,
         "safe_haven_model": haven_info,
+        # The recovery policy's verdict for this cell (B1): "from here, at
+        # this hour and charge, the best policy reaches safety with P_safe";
+        # null with the reason in survival_model unless survival=true.
+        "survival": survival_card,
+        "survival_model": survival_model,
     }
 
 
@@ -1212,6 +1374,44 @@ def replan(req: ReplanRequest, request: Request):
     state = _state_with_comm(req.state, window)
     evaluation = evaluate_triggers_detailed(state, get_rover(req.rover_id))
     fired = evaluation["fired"]
+
+    # The recovery policy's advice from the rover's current block (B1).
+    suggestion = None
+    survival_model: dict[str, Any] = {"model": "unavailable", "reason": "not requested (recovery_policy=false)"}
+    if req.recovery_policy:
+        grids = _current_grids()
+        if grids is None:
+            survival_model = {"model": "unavailable", "reason": "grids not loaded"}
+        elif not req.utc:
+            survival_model = {
+                "model": "unavailable",
+                "reason": "recovery_policy needs utc: the field is a function of the shadow series",
+            }
+        else:
+            metadata = grids["metadata"]
+            row, col = _to_pixel(req.current, "current", metadata)
+            goal = _to_pixel(req.goal, "goal", metadata)
+            rover = get_rover(req.rover_id)
+            options = _SurvivalOptions(
+                rate_per_km=(
+                    FAILURE_RATE_PER_KM_ASSUMED if req.failure_rate_per_km is None else float(req.failure_rate_per_km)
+                ),
+                recovery_h=FAULT_RECOVERY_HOURS_ASSUMED if req.recovery_hours is None else float(req.recovery_hours),
+            )
+            horizon = 24.0 if req.survival_horizon_hours is None else float(req.survival_horizon_hours)
+            field, survival_model, _geometry, _slice_hours = _survival_model_for_grids(
+                grids, req.rover_id, req.utc, goal, 4, options, horizon
+            )
+            if field is not None:
+                soc = state.get("actual_soc")
+                soc_frac = 1.0 if soc is None else min(1.0, max(0.0, float(soc)))
+                suggestion = recovery_suggestion(
+                    field, row // 4, col // 4, soc_frac * float(rover["e_cap_wh"]), 4, 0
+                )
+                suggestion["current_pixel"] = [int(row), int(col)]
+                suggestion["goal_pixel"] = [int(goal[0]), int(goal[1])]
+                suggestion["utc"] = req.utc
+
     if not fired and not req.force:
         # "skipped" is reported so an empty trigger list is never mistaken
         # for an all-clear: a telemetry packet missing actual_soc used to
@@ -1231,6 +1431,8 @@ def replan(req: ReplanRequest, request: Request):
                     "could not be evaluated -- telemetry fields are missing"
                 )
             ),
+            "recovery_suggestion": suggestion,
+            "survival_model": survival_model,
         }
 
     plan_request = PlanRequest(
@@ -1252,6 +1454,10 @@ def replan(req: ReplanRequest, request: Request):
         # computed here rather than supplied. (A4.)
         "comm_window": window,
         "plan": payload,
+        # The recovery policy's advice from the current block (B1): the
+        # arg-min action, where it leads and P_safe; null unless requested.
+        "recovery_suggestion": suggestion,
+        "survival_model": survival_model,
     }
 
 
@@ -1523,6 +1729,243 @@ def _coarse_time_to_haven(
     }
 
 
+#: Fine shadow snapshots built per call when extending a field's series.
+_SHADOW_EXTENSION_CHUNK = 64
+
+
+@dataclass(frozen=True)
+class _SurvivalOptions:
+    """What a caller may choose about the survival field (B1)."""
+
+    rate_per_km: float = FAILURE_RATE_PER_KM_ASSUMED
+    recovery_h: float = FAULT_RECOVERY_HOURS_ASSUMED
+    soc_bins: int = DEFAULT_SOC_BINS
+    safe_set: str = "leg"
+    horizon_hours: float | None = None
+    max_states: int = MAX_SURVIVAL_STATES
+
+
+def _shift_utc(start_utc: str, hours: float) -> str:
+    from datetime import timedelta
+
+    moment = _parse_start_utc(start_utc) + timedelta(hours=float(hours))
+    return moment.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _survival_field_for_plan(
+    grids_for_plan: dict,
+    rover_id: str,
+    rover: dict,
+    geometry: _CoarseGeometry,
+    coarsen: int,
+    start_utc: str | None,
+    slice_hours: float,
+    n_slices: int,
+    shadow_series: list,
+    shadow_provenance: dict,
+    goal_coarse: tuple[int, int] | None,
+    fastest_hours: float,
+    options: _SurvivalOptions,
+) -> tuple[SurvivalField | None, dict[str, Any]]:
+    """``(field, info)``: the recovery policy's field for this plan (B1), or
+    ``(None, info)`` with ``info["reason"]`` when it cannot be built.
+
+    The field lives on the planner's coarse grid. Its horizon is the plan's
+    plus the recovery time plus twice the fastest drive to the goal (so a
+    fault at the end of the plan can still recover and finish, with room for
+    the field's clock, which charges every move at least one bin), capped
+    at MAX_SURVIVAL_HORIZON_HOURS; its time bin is ``m`` planner slices with
+    ``m`` the smallest that keeps the field under ``max_states`` states.
+    The plan's own shadow series is reused for its slices and extended
+    past the plan with a shifted epoch (or the static field). The safe set
+    is the goal block (leg) and the A1 haven blocks, coarsened like
+    traversability. Cached per (grids, rover, epoch, geometry, goal,
+    options) -- two entries.
+    """
+    metadata = grids_for_plan["metadata"]
+    coarse_traversable = geometry.traversable
+    height, width = coarse_traversable.shape
+    if options.safe_set not in SAFE_SETS:
+        return None, {"model": "unavailable", "reason": f"unknown safe_set {options.safe_set!r}"}
+    if options.safe_set == "leg" and goal_coarse is None:
+        return None, {"model": "unavailable", "reason": "the leg safe set needs a goal block"}
+
+    # The safe haven map (A1), coarsened the way traversability is.
+    coarse_safe, _coarse_tts, haven_info = _coarse_time_to_haven(
+        grids_for_plan, rover_id, start_utc, rover, geometry, coarsen
+    )
+    if coarse_safe is None and options.safe_set == "haven":
+        return None, {
+            "model": "unavailable",
+            "reason": (
+                "the haven safe set needs the safe haven map and it is unavailable: "
+                f"{haven_info.get('reason', 'no reason given')}"
+            ),
+            "haven_model": dict(haven_info),
+        }
+
+    plan_horizon_h = float(n_slices) * float(slice_hours)
+    if options.horizon_hours is not None:
+        horizon_h = float(options.horizon_hours)
+    else:
+        horizon_h = plan_horizon_h + float(options.recovery_h) + max(2.0 * float(fastest_hours), float(slice_hours))
+    horizon_h = min(MAX_SURVIVAL_HORIZON_HOURS, max(horizon_h, float(slice_hours)))
+    n_slices_needed = int(math.ceil(horizon_h / float(slice_hours) - 1e-9))
+    m = auto_slices_per_bin(n_slices_needed, height * width, options.soc_bins, options.max_states)
+    n_bins = int(math.ceil(n_slices_needed / m))
+    n_total_slices = n_bins * m
+
+    key = (
+        str(metadata.get("processed_dir") or id(grids_for_plan)),
+        str(rover_id),
+        int(coarsen),
+        str(start_utc),
+        round(float(slice_hours), 9),
+        int(m),
+        int(n_bins),
+        int(options.soc_bins),
+        None if goal_coarse is None else (int(goal_coarse[0]), int(goal_coarse[1])),
+        options.safe_set,
+        float(options.rate_per_km),
+        float(options.recovery_h),
+        (height, width),
+        str(shadow_provenance.get("model")),
+    )
+
+    def _build() -> SurvivalField:
+        base_shadow = np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64)
+        # The plan's own slices, coarsened; then the extension past the plan,
+        # built in chunks and coarsened at once -- a fine 500 x 500 snapshot
+        # is 2 MB and a day of 2-minute slices would be over a gigabyte.
+        coarse_series = [coarsen_grid(snapshot, coarsen) for snapshot in shadow_series[:n_total_slices]]
+        missing = n_total_slices - len(coarse_series)
+        extension_provenance: dict[str, Any] = {"model": "none", "n_slices": 0}
+        if missing > 0:
+            if shadow_provenance.get("time_varying") and start_utc:
+                done = 0
+                while done < missing:
+                    chunk = min(_SHADOW_EXTENSION_CHUNK, missing - done)
+                    extension, extension_provenance = build_shadow_series(
+                        base_shadow,
+                        metadata,
+                        chunk,
+                        float(slice_hours),
+                        _shift_utc(start_utc, float(slice_hours) * len(coarse_series)),
+                    )
+                    coarse_series.extend(coarsen_grid(snapshot, coarsen) for snapshot in extension)
+                    done += chunk
+                extension_provenance = {k: v for k, v in extension_provenance.items() if k != "horizon_cache"}
+            else:
+                coarse_base = coarsen_grid(base_shadow, coarsen)
+                coarse_series.extend([coarse_base] * missing)
+                extension_provenance = {
+                    "model": "static",
+                    "time_varying": False,
+                    "reason": shadow_provenance.get("reason", "static shadow series"),
+                }
+            extension_provenance = {**extension_provenance, "n_slices": int(missing)}
+        shadow_bins = bin_shadow_series(coarse_series, m)
+        requirement = safe_soc_requirement(
+            coarse_traversable,
+            coarse_safe,
+            None if options.safe_set == "haven" else goal_coarse,
+            rover,
+            options.safe_set,
+        )
+        provenance = {
+            "shadow_model": {k: v for k, v in shadow_provenance.items() if k != "horizon_cache"},
+            "shadow_extension": extension_provenance,
+            "haven_model": {
+                k: v for k, v in haven_info.items() if k in ("model", "reason", "coarse_safe_haven_cells", "h_max_shadow_h")
+            },
+            "start_utc": start_utc,
+            "plan_horizon_hours": round(plan_horizon_h, 4),
+            "coarsen": int(coarsen),
+            "rover_id": rover_id,
+        }
+        return build_survival_field(
+            coarse_traversable,
+            geometry.elevation,
+            geometry.slope,
+            geometry.resolution_m,
+            rover,
+            shadow_bins,
+            float(slice_hours) * m,
+            m,
+            requirement,
+            n_soc_bins=int(options.soc_bins),
+            failure_rate_per_km=float(options.rate_per_km),
+            recovery_hours=float(options.recovery_h),
+            provenance=provenance,
+            safe_set=options.safe_set,
+        )
+
+    try:
+        field = cached_survival_field(key, _build)
+    except ValueError as exc:
+        return None, {"model": "unavailable", "reason": f"survival field unavailable ({exc})"}
+    info = {
+        **field.info(),
+        "shadow_model": field.provenance.get("shadow_model"),
+        "haven_model": field.provenance.get("haven_model"),
+    }
+    return field, info
+
+
+def _survival_model_for_grids(
+    grids: dict,
+    rover_id: str,
+    start_utc: str | None,
+    goal: tuple[int, int] | None,
+    coarsen: int,
+    options: _SurvivalOptions,
+    horizon_hours: float,
+) -> tuple[SurvivalField | None, dict[str, Any], _CoarseGeometry, float]:
+    """The field for a (start-less) query: cell cards, replans and the
+    layer endpoint. The time bin follows the rover's auto slice; the
+    horizon is the caller's. ``(field, info, geometry, slice_hours)``."""
+    rover = get_rover(rover_id)
+    grids_for_plan = grids_for_rover(grids, rover_id, PlanWeights().model_dump())
+    metadata = grids_for_plan["metadata"]
+    rows, cols = int(metadata["shape"][0]), int(metadata["shape"][1])
+    if rows % coarsen or cols % coarsen:
+        raise HTTPException(
+            status_code=422,
+            detail=f"grid {rows}x{cols} is not divisible by coarsen={coarsen}",
+        )
+    geometry = _coarse_geometry(grids_for_plan, coarsen)
+    slice_hours = auto_slice_hours(
+        grids_for_plan["slope"], grids_for_plan["traversable"], resolution_m=geometry.resolution_m, rover=rover
+    )
+    n_slices = max(2, int(math.ceil(float(horizon_hours) / slice_hours)))
+    if not start_utc:
+        return None, {
+            "model": "unavailable",
+            "reason": "no start epoch given; the field is a function of the shadow series and needs one",
+        }, geometry, slice_hours
+    base_shadow = np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64)
+    # Only the first chunk is built here (for the provenance); the field
+    # builder extends the series chunk by chunk on the coarse grid.
+    shadow_series, shadow_provenance = build_shadow_series(
+        base_shadow, metadata, min(n_slices, _SHADOW_EXTENSION_CHUNK), slice_hours, start_utc
+    )
+    goal_coarse = None if goal is None else (int(goal[0]) // coarsen, int(goal[1]) // coarsen)
+    if goal_coarse is not None and not bool(geometry.traversable[goal_coarse]):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"goal {tuple(goal)} falls in coarse block {goal_coarse} at coarsen={coarsen}, "
+                "which is not traversable."
+            ),
+        )
+    field, info = _survival_field_for_plan(
+        grids_for_plan, rover_id, rover, geometry, coarsen, start_utc, slice_hours, n_slices,
+        shadow_series, shadow_provenance, goal_coarse, 0.0,
+        dataclass_replace(options, horizon_hours=float(horizon_hours)),
+    )
+    return field, info, geometry, slice_hours
+
+
 def _corridor_refusal_sentence(block: dict[str, Any]) -> str:
     """One sentence for a 404 under require_continuous_illumination: the
     corridor's size and where the start and goal stand with respect to it,
@@ -1710,6 +2153,7 @@ def plan_4d(req: Plan4DRequest, request: Request):
             ),
         )
 
+    drive = None
     if req.horizon_hours is not None:
         n_slices = int(math.ceil(req.horizon_hours / slice_hours))
         if n_slices > MAX_PLAN_4D_SLICES:
@@ -1919,6 +2363,38 @@ def plan_4d(req: Plan4DRequest, request: Request):
             ),
         )
 
+    # The recovery policy's field (B1), only when asked for: the chance
+    # constraint needs it, and reporting alone may want it. Otherwise no
+    # dynamic programme runs and the planner is the pre-B1 one.
+    survival_requested = req.max_failure_probability is not None or req.report_survival
+    survival_field = None
+    survival_info: dict[str, Any] = {"model": "unavailable", "reason": "not requested"}
+    if survival_requested:
+        options = _SurvivalOptions(
+            rate_per_km=(
+                FAILURE_RATE_PER_KM_ASSUMED if req.failure_rate_per_km is None else float(req.failure_rate_per_km)
+            ),
+            recovery_h=(
+                FAULT_RECOVERY_HOURS_ASSUMED if req.recovery_hours is None else float(req.recovery_hours)
+            ),
+            soc_bins=int(req.survival_soc_bins),
+            safe_set=req.survival_safe_set,
+            horizon_hours=req.survival_horizon_hours,
+        )
+        fastest_h = float(move_count) * slice_hours if drive is None else float(drive[0])
+        survival_field, survival_info = _survival_field_for_plan(
+            grids_for_plan, req.rover_id, rover, geometry, req.coarsen, req.start_utc, slice_hours,
+            n_slices, shadow_series, shadow_provenance, coarse_goal, fastest_h, options,
+        )
+        if survival_field is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "the survival field (max_failure_probability / report_survival) could not "
+                    f"be built: {survival_info.get('reason')}"
+                ),
+            )
+
     result = astar_4d(
         cost_cube,
         wait_cube,
@@ -1944,6 +2420,8 @@ def plan_4d(req: Plan4DRequest, request: Request):
         corridor_cube=corridor.corridor,
         corridor_lit_run_cube=corridor.run,
         require_continuous_illumination=req.require_continuous_illumination,
+        survival_field=survival_field,
+        max_failure_probability=req.max_failure_probability,
     )
     if result["error"]:
         # move_count already accounted for the edge gates, so a failure here
@@ -2011,6 +2489,20 @@ def plan_4d(req: Plan4DRequest, request: Request):
                 + ("no Earthset in sight" if not math.isfinite(start_deadline)
                    else f"{start_deadline:.1f} h of Earth link left")
                 + "."
+            )
+        # And for the chance constraint (B1): how many moves it refused and
+        # how the start itself fares under the optimal recovery policy.
+        if req.max_failure_probability is not None:
+            refused = int(result["metrics"]["edges_rejected"].get("failure_probability", 0))
+            start_p = result["metrics"].get("start_recovery_prob")
+            detail += (
+                f" Chance constraint: {refused} moves were refused because the execution "
+                f"failure probability would exceed max_failure_probability={req.max_failure_probability}; "
+                "the optimal recovery policy from the start block succeeds with probability "
+                + ("unknown" if start_p is None else f"{float(start_p):.4f}")
+                + f" (safe set {survival_info.get('safe_set')}, fault rate "
+                f"{survival_info.get('failure_model', {}).get('rate_per_km')} per km, "
+                f"{survival_info.get('n_states')} states)."
             )
         # And for the corridor: how much of the lit volume survives pruning,
         # and where the start and the goal stand with respect to it.
@@ -2099,6 +2591,21 @@ def plan_4d(req: Plan4DRequest, request: Request):
         "path_time_to_haven_h": result["path_time_to_haven_h"],
         "path_hours_until_earthset": result["path_hours_until_earthset"],
         "path_haven_margin_h": result["path_haven_margin_h"],
+        # The recovery policy along the route (B1): execution survival so
+        # far and each state's own P_safe; None when no field was built.
+        "path_survival_prob": result["path_survival_prob"],
+        "path_recovery_prob": result["path_recovery_prob"],
+        "survival": {
+            **survival_block(
+                survival_field,
+                result,
+                req.max_failure_probability,
+                requested=survival_requested,
+                reason=survival_info.get("reason"),
+                shadow_model=survival_info.get("shadow_model"),
+            ),
+            **({"haven_model": survival_info.get("haven_model")} if survival_field is not None else {}),
+        },
         # Robustness of every formal safety requirement along this route
         # (D3): rho per requirement in hours / degC / pct / deg, the smallest
         # normalised margin, and the verdict of a runtime monitor.
@@ -4311,6 +4818,150 @@ def safe_haven_endpoint(
             "shape": [rows, cols],
             "nodata": "NaN",
         },
+    }
+
+
+_SURVIVAL_FIELDS: tuple[str, ...] = ("p_safe", "best_action")
+_SURVIVAL_UNITS: dict[str, str] = {"p_safe": "fraction", "best_action": "code"}
+
+
+@app.get("/api/survival")
+def survival_endpoint(
+    start_utc: str = Query(..., description="UTC instant the field's clock starts, e.g. '2026-09-28T00:00:00'."),
+    rover_id: str = DEFAULT_ROVER_ID,
+    goal_row: Optional[int] = Query(default=None, ge=0),
+    goal_col: Optional[int] = Query(default=None, ge=0),
+    horizon_hours: float = Query(24.0, gt=0.0, le=MAX_SURVIVAL_HORIZON_HOURS),
+    soc_pct: float = Query(1.0, gt=0.0, le=1.0),
+    t_hours: float = Query(0.0, ge=0.0, le=MAX_SURVIVAL_HORIZON_HOURS),
+    coarsen: int = Query(4, ge=1, le=16),
+    failure_rate_per_km: Optional[float] = Query(default=None, ge=0.0, le=50.0),
+    recovery_hours: Optional[float] = Query(default=None, gt=0.0, le=72.0),
+    safe_set: Literal["leg", "haven"] = Query("leg"),
+    soc_bins: int = Query(DEFAULT_SOC_BINS, ge=MIN_SOC_BINS, le=MAX_SOC_BINS),
+    format: str = Query("json", pattern="^(json|f32)$"),
+    field: str = Query("p_safe", pattern="^(p_safe|best_action)$"),
+):
+    """The recovery policy's field at one hour and charge (B1).
+
+    ``p_safe``: the probability that the best policy from each coarse block,
+    ``t_hours`` after ``start_utc`` with ``soc_pct`` of charge, reaches the
+    safe set before ``horizon_hours`` under the assumed fault model;
+    ``best_action``: its arg-min action code. Both on the coarse grid, in
+    the ``/api/layers`` wire format with ``X-Layer-Validity: MODEL``. The
+    leg safe set needs a goal; the haven set needs the A1 map (a 422 with
+    the reason otherwise, never a grid of zeros).
+    """
+    grids = _get_grids()
+    rover = get_rover(rover_id)
+    metadata = grids["metadata"]
+    rows, cols = int(metadata["shape"][0]), int(metadata["shape"][1])
+    goal = None if goal_row is None or goal_col is None else (int(goal_row), int(goal_col))
+    if safe_set == "leg" and goal is None:
+        raise HTTPException(status_code=422, detail="the leg safe set needs goal_row and goal_col")
+    if goal is not None and not (0 <= goal[0] < rows and 0 <= goal[1] < cols):
+        raise HTTPException(status_code=422, detail=f"goal {goal} is outside the {rows}x{cols} grid.")
+    options = _SurvivalOptions(
+        rate_per_km=FAILURE_RATE_PER_KM_ASSUMED if failure_rate_per_km is None else float(failure_rate_per_km),
+        recovery_h=FAULT_RECOVERY_HOURS_ASSUMED if recovery_hours is None else float(recovery_hours),
+        soc_bins=int(soc_bins),
+        safe_set=safe_set,
+    )
+    survival_field, info, geometry, slice_hours = _survival_model_for_grids(
+        grids, rover_id, start_utc, goal, coarsen, options, float(horizon_hours)
+    )
+    if survival_field is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"the survival field could not be built: {info.get('reason', 'no reason given')}",
+        )
+    if t_hours > survival_field.horizon_hours + 1e-9:
+        raise HTTPException(
+            status_code=422,
+            detail=f"t_hours={t_hours} lies past the field's {survival_field.horizon_hours:.2f} h horizon",
+        )
+    lo, hi = survival_field.bins_of_hours(float(t_hours))
+    hi = min(hi, survival_field.n_bins)
+    k = survival_field.soc_bin(float(soc_pct) * float(rover["e_cap_wh"]))
+    p_safe = np.minimum(survival_field.p_safe[lo, :, :, k], survival_field.p_safe[hi, :, :, k]).astype(np.float64)
+    p_safe = np.where(geometry.traversable, p_safe, np.nan)
+    best = survival_field.policy[lo, :, :, k].astype(np.float64)
+    best = np.where(geometry.traversable, best, np.nan)
+    data = {"p_safe": p_safe, "best_action": best}
+    resolution_m = float(metadata["resolution_m"]) * coarsen
+
+    if format == "f32":
+        layer = data[field]
+        return Response(
+            content=encode_layer_f32(layer),
+            media_type=BINARY_MEDIA_TYPE,
+            headers=binary_layer_headers(field, layer, coarsen, float(metadata["resolution_m"]), SURVIVAL_VALIDITY),
+        )
+
+    fields: dict[str, Any] = {}
+    for name in _SURVIVAL_FIELDS:
+        layer = data[name]
+        stats = layer_stats(layer)
+        query = {
+            "start_utc": start_utc,
+            "rover_id": rover_id,
+            "horizon_hours": horizon_hours,
+            "soc_pct": soc_pct,
+            "t_hours": t_hours,
+            "coarsen": coarsen,
+            "safe_set": safe_set,
+            "soc_bins": soc_bins,
+            "format": "f32",
+            "field": name,
+        }
+        if goal is not None:
+            query.update({"goal_row": goal[0], "goal_col": goal[1]})
+        if failure_rate_per_km is not None:
+            query["failure_rate_per_km"] = failure_rate_per_km
+        if recovery_hours is not None:
+            query["recovery_hours"] = recovery_hours
+        fields[name] = {
+            "units": _SURVIVAL_UNITS[name],
+            "min": stats["min"],
+            "max": stats["max"],
+            "nodata": stats["nodata"],
+            "binary_url": f"/api/survival?{urlencode(query)}",
+        }
+    finite = p_safe[np.isfinite(p_safe)]
+    summary = {
+        "traversable_blocks": int(finite.size),
+        "mean_p_safe": round(float(finite.mean()), 6) if finite.size else None,
+        "fraction_at_least_0_95": round(float(np.mean(finite >= 0.95)), 6) if finite.size else None,
+        "fraction_at_least_0_5": round(float(np.mean(finite >= 0.5)), 6) if finite.size else None,
+        "fraction_zero": round(float(np.mean(finite <= 0.0)), 6) if finite.size else None,
+        "time_bin": [int(lo), int(hi)],
+        "soc_bin": int(k),
+    }
+    return {
+        "rover_id": rover_id,
+        "rover_name": rover["name"],
+        "start_utc": start_utc,
+        "t_hours": float(t_hours),
+        "soc_pct": float(soc_pct),
+        "goal": None if goal is None else [goal[0], goal[1]],
+        "survival_model": info,
+        "summary": summary,
+        "grid": {
+            "rows": int(p_safe.shape[0]),
+            "cols": int(p_safe.shape[1]),
+            "resolution_m": resolution_m,
+            "coarsen": int(coarsen),
+            "downsample": int(coarsen),
+        },
+        "fields": fields,
+        "binary_format": {
+            "dtype": "float32",
+            "endian": "little",
+            "order": "row-major",
+            "shape": [int(p_safe.shape[0]), int(p_safe.shape[1])],
+            "nodata": "NaN",
+        },
+        "claim": survival_block(survival_field, None, None, requested=True)["claim"],
     }
 
 

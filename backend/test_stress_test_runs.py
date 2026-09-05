@@ -532,3 +532,88 @@ def test_a_single_run_is_a_valid_stress_test():
     assert one["rates"]["completion"]["count"] in (0, 1)
     assert one["metrics"]["duration_h"]["n"] == 1
     assert one["metrics"]["duration_h"]["std"] == 0.0
+
+
+# ── B1: Poisson mobility faults as an event window ────────────────────────────
+
+from dataclasses import replace as dataclass_replace  # noqa: E402
+
+from app.stress_test import SHERPA_DEFAULTS  # noqa: E402
+
+
+def test_no_fault_rate_keeps_sherpa_bit_identical():
+    rover, legs, sky = _row_case()
+    a = stress_test_route(legs, sky, rover, 1.0, n_runs=200, seed=3)
+    b = stress_test_route(
+        legs, sky, rover, 1.0, n_runs=200, seed=3,
+        perturbations=dataclass_replace(SHERPA_DEFAULTS, fault_rate_per_km=0.0),
+    )
+    a.pop("timing_ms")
+    b.pop("timing_ms")
+    assert a == b
+    assert a["faults"]["runs_with_fault"] == 0 and a["faults"]["rate_per_km"] == 0.0
+    assert a["faults"]["recovery_h"] == 10.0 and a["faults"]["source"].startswith("assumption:")
+    assert SHERPA_DEFAULTS.fault_rate_per_km == 0.0 and SHERPA_DEFAULTS.fault_recovery_h == 10.0
+
+
+def test_fault_count_is_poisson_in_route_distance():
+    rover, legs, sky = _row_case()
+    p = dataclass_replace(SHERPA_DEFAULTS, fault_rate_per_km=2.0, fault_recovery_h=0.5)
+    distance = float(legs.distance_m.sum())
+    samples = sample_perturbations(
+        np.random.default_rng(0), 5000, p, 1.0, legs.planned_duration_h, route_distance_m=distance
+    )
+    expected = 2.0 * distance / 1000.0
+    assert samples["fault_count"].mean() == pytest.approx(expected, rel=0.1)
+    assert samples["fault_positions_m"].shape[0] == 5000
+    assert np.nanmax(samples["fault_positions_m"]) <= distance
+    assert (np.isnan(samples["fault_positions_m"]).sum(axis=1) == samples["fault_positions_m"].shape[1] - samples["fault_count"]).all()
+    none = sample_perturbations(np.random.default_rng(0), 10, SHERPA_DEFAULTS, 1.0, 1.0, route_distance_m=distance)
+    assert none["fault_count"].sum() == 0 and none["fault_positions_m"].shape == (10, 1)
+
+
+def test_a_first_half_fault_holds_at_the_origin_and_a_second_half_fault_at_the_destination():
+    """Three 80 m moves with the slice equal to one move, so the plan has no
+    slack; cell 1 is lit and cell 2 dark. A fault at 100 m (first half of
+    the second leg) holds 2 h in lit cell 1 at idle power; one at 150 m
+    (second half) holds 2 h in dark cell 2 with the heater on."""
+    rover = _rover(p_solar_w=0.0)
+    h = _travel_h(rover)
+    states = [(0, 0, 0), (0, 1, 1), (0, 2, 2), (0, 3, 3)]
+    legs = _legs(states, rover, h)
+    sky = _static_sky([0.0, 0.0, 1.0, 0.0], 400, h)
+    base = simulate_runs(legs, sky, rover, _samples())
+
+    first = _samples()
+    first["fault_positions_m"] = np.array([[100.0]])
+    first["fault_count"] = np.array([1])
+    a = simulate_runs(legs, sky, rover, first, fault_recovery_h=2.0)
+    assert a.fault_count[0] == 1 and a.fault_hold_h[0] == pytest.approx(2.0)
+    assert a.duration_h[0] == pytest.approx(base.duration_h[0] + 2.0)
+    assert base.final_battery_wh[0] - a.final_battery_wh[0] == pytest.approx(rover["p_idle_w"] * 2.0)
+
+    second = _samples()
+    second["fault_positions_m"] = np.array([[150.0]])
+    second["fault_count"] = np.array([1])
+    b = simulate_runs(legs, sky, rover, second, fault_recovery_h=2.0)
+    assert b.duration_h[0] == pytest.approx(base.duration_h[0] + 2.0)
+    assert base.final_battery_wh[0] - b.final_battery_wh[0] == pytest.approx(rover["p_shadow_w"] * 2.0)
+    assert b.max_dark_h[0] > base.max_dark_h[0]
+    assert a.reached[0] and b.reached[0]
+
+
+def test_stress_test_route_reports_the_faults_it_injected():
+    rover, legs, sky = _row_case()
+    p = Perturbations(
+        start_delay_sigma_h=0.0, initial_soc_sigma=0.0, power_draw_sigma=0.0, speed_sigma=0.0,
+        fault_rate_per_km=5.0, fault_recovery_h=0.25,
+    )
+    out = stress_test_route(legs, sky, rover, 1.0, n_runs=400, seed=1, perturbations=p)
+    faults = out["faults"]
+    assert faults["rate_per_km"] == 5.0 and faults["recovery_h"] == 0.25
+    assert 0 < faults["runs_with_fault"] < 400
+    assert faults["mean_faults"] == pytest.approx(5.0 * legs.odometry_m / 1000.0, rel=0.25)
+    assert faults["mean_hold_h"] == pytest.approx(0.25 * faults["mean_faults"], rel=1e-6)
+    assert out["metrics"]["fault_hold_h"]["max"] >= 0.25
+    assert out["nominal"]["duration_h"] == pytest.approx(legs.planned_duration_h, abs=0.2)  # the nominal run has no fault
+    assert out["perturbations"]["fault_rate_per_km"] == 5.0

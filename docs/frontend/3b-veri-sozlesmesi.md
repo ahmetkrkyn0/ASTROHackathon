@@ -1265,6 +1265,162 @@ rota ort. pürüzlülük 0,75 → 0,66 m, mesafe aynı), LPR-1 gündüz çifti 0
 ağırlık panelinde beşinci sürgü `w_roughness`; `/api/psr-validation`'dan Jaccard'ı "PGDA ile
 %83 örtüşme" rozeti olarak — her sayının yanında `validity` (katman MEASURED, ölçek MODEL).
 
+## Kurtarma politikası ve şans-kısıtlı planlama — Toronto STARS reach-avoid formülasyonu (5 Eylül 2026 eki, B1)
+
+4-B planlayıcı artık "işler ters giderse" sorusuna **sayı** veriyor. Lamarre, Malhotra ve Kelly'nin
+(Acta Astronautica 2023, arXiv 2307.16786; IEEE AERO 2024, arXiv 2401.08558) formülasyonu LunaPath'in
+kendi kaba gridi, SPICE gölge serisi ve `cost_engine` enerji fiziği üzerinde kuruldu: durum
+`(zaman kutusu, kaba blok, SOC kutusu)`, eylemler planlayıcının 8 hamlesi + bekle, Poisson arıza modeli
+(km başına α, R saat yerinde toparlanma; sürüş iki yarı, üç sonuç), geriye doğru değer iterasyonu →
+`P_safe` (en iyi politikanın güvenli kümeye ulaşma olasılığı) ve **kurtarma politikası** (argmin eylem).
+Planlayıcı her etikette yürütme hayatta-kalma çarpanı taşır ve `max_failure_probability = β` verilince
+"görev başarısızlık olasılığı ≤ β" kısıtını uygular. Rapor:
+[recovery_policy_report.md](../research/recovery_policy_report.md).
+
+Kurallar:
+
+- **`max_failure_probability` ve `report_survival` verilmezse hiçbir şey değişmez:** DP koşmaz, planlayıcı
+  bit-eşittir (standart üç 4-B rota 41 / 116 / 8 hamle, 2-B SHA kilitleri testte), `survival.requested: false`.
+- **Arıza modeli VARSAYIMDIR:** hiçbir rover profili kaynaklı arıza oranı taşımıyor; varsayılan α = 0,2/km
+  (Lamarre'nin "1 arıza / 5 000 m"i), R = 10 h; her yanıtta `failure_model.source` `"assumption: …"` ile başlar.
+  α = 0 alanı deterministik yapar (`P_safe ∈ {0, 1}`).
+- **Güvenli küme Lamarre'den sapar ve bunu söyler:** varsayılan `leg` = hedef bloğu (SOC ≥ rezerv) ∪ haven
+  blokları (SOC ≥ rezerv + tam-gölge ev-içi gücü × `h_max_shadow_h`, kapasitede kapalı); `haven` = yalnız haven
+  (Lamarre'nin kümesi; Site11'de LPR-1 için her epokta **boş**, VIPER 30 May 2027'de 862 kaba blok). Karanlık
+  saati ve termal zarf DP durumunda **yoktur** (planlayıcının kendi gölge saati etiketi aynen çalışır).
+- **İddia sınırı:** `validity: MODEL`; `P_safe` ayrıklaştırılmış modelin en iyi politikasının olasılığıdır,
+  ölçülmüş oran değil; zaman kutusu plan diliminin `m` katıdır ve her eylem en az bir kutu sürer (kötümser);
+  Lamarre'nin sayıları (`quoted`) alıntıdır. Tahmin, politikayı izleyen Monte Carlo ile denetlenir (rapor § 4).
+- Alan 100 M durum tavanıyla otomatik kabalaştırılır (`field.slices_per_bin`; Site11'de LPR-1 65–68 M durum, ~100 s; VIPER 32 M, ~40 s), önbellekte 2 giriş; ufuk ≤ 168 h.
+
+### `POST /api/plan-4d` — yedi yeni istek alanı
+
+```json
+{"start": {"row": 358, "col": 494}, "goal": {"row": 206, "col": 426}, "rover_id": "lpr_1",
+ "start_utc": "2026-09-28T00:00:00", "max_failure_probability": 0.05,
+ "failure_rate_per_km": 0.2, "recovery_hours": 10.0, "survival_soc_bins": 16,
+ "survival_safe_set": "leg", "survival_horizon_hours": null, "report_survival": false}
+```
+
+| Alan | Anlam |
+|---|---|
+| `max_failure_probability` | β, `(0, 1)` açık aralık; dışı 422. Verilirse alan kurulur ve kısıt uygulanır; yürütme riski β'yı aşacak her hamle reddedilir (`edges_rejected.failure_probability`), başlangıçtan optimal politikanın riski bile β'yı aşıyorsa 404 (gerekçeli). |
+| `report_survival` | `true`: alanı kur ve raporla, kısıt uygulama (`applied: false`). |
+| `failure_rate_per_km` | α ≥ 0 (≤ 50); verilmezse 0,2 (varsayım). |
+| `recovery_hours` | R, `(0, 72]`; verilmezse 10. |
+| `survival_soc_bins` | SOC kutusu sayısı 8–40 (varsayılan 16); değer kutu **merkezleri** arasında doğrusal ara değerle okunur. |
+| `survival_safe_set` | `"leg"` (varsayılan) ya da `"haven"` (A1 haritası yoksa 422). |
+| `survival_horizon_hours` | Alanın ufku `(0, 168]`; verilmezse plan ufku + R + en hızlı kapılı sürüş saati. |
+
+### `POST /api/plan-4d` — `survival` bloğu (her zaman) ve iki yeni liste
+
+```json
+"path_survival_prob": [1.0, 0.9987, 0.9975, ...],
+"path_recovery_prob": [1.0, 1.0, 0.9998, ...],
+"survival": {
+  "requested": true, "applied": true, "beta": 0.05, "validity": "MODEL",
+  "model": "reach_avoid_value_iteration_v1", "safe_set": "leg",
+  "safe_set_definition": "goal block at the reserve charge, plus every safe haven block at its hibernation charge",
+  "failure_model": {"rate_per_km": 0.2, "recovery_h": 10.0, "source": "assumption: Lamarre, Malhotra, Kelly ...",
+                    "outcomes": "no fault / fault in the first half (hold at the origin) / fault in the second half (hold at the destination)"},
+  "field": {"step_hours": 0.1436, "slices_per_bin": 4, "n_bins": 118, "horizon_hours": 16.94, "n_soc_bins": 16,
+            "soc_bin_wh": 338.75, "grid": [125, 125], "n_states": 36875000, "nbytes": 185937500, "safe_cells": 1, "compute_s": 13.2},
+  "route": {"execution_failure_probability": 0.0123, "min_recovery_prob": 0.9871, "mean_recovery_prob": 0.9955,
+            "start_recovery_prob": 0.9931, "moves_refused": 0},
+  "shadow_model": {"model": "spice_horizon", "time_varying": true, "start_utc": "..."},
+  "haven_model": {"model": "spice_horizon", "coarse_safe_haven_cells": 0, "h_max_shadow_h": 50.0},
+  "scope": "...", "claim": "...", "quoted": {"states_experiment_3": 41500000, "aero_beta": 0.02, "...": "..."},
+  "references": [{"id": "lamarre_acta_2023", "...": "..."}, {"id": "lamarre_aero_2024"}, {"id": "gplanetary_nav"}]
+}
+```
+
+| Alan | Anlam |
+|---|---|
+| `path_survival_prob[i]` | Durum `i`'ye kadar yürütme hayatta-kalma çarpanı: her hamlede `surv' = surv · (p0 + p1·P_safe(f1) + p2·P_safe(f2))` (arıza dalları kurtarma politikasıyla kapatılır — AERO 2024 kuralı); bekleme değiştirmez. Alan yoksa `null`. |
+| `path_recovery_prob[i]` | Durumun **kendi** `P_safe`'i (o kutu, o blok, planlayıcının bataryası; komşu iki zaman kutusunun küçüğü, SOC'nin alt kutusu). |
+| `metrics.execution_failure_probability` | `1 − path_survival_prob[-1]`: bu planın, kurtarma politikası yedeğiyle, başarısızlıkla bitme olasılığı. `metrics.min_recovery_prob`, `metrics.start_recovery_prob`, `metrics.survival_enforced` yanında. |
+| `survival.requested / applied / beta` | Alan istendi mi, β uygulandı mı, hangi β. İstenmemişse yalnız `requested: false, applied: false, reason, validity, model`. |
+| `survival.field` | Zaman kutusu (h), kutu başına plan dilimi `m`, kutu sayısı, ufuk, SOC kutuları, durum sayısı, bayt, güvenli blok sayısı, DP süresi. |
+| `survival.route.moves_refused` | β yüzünden reddedilen hamle sayısı (200 yanıtta da olabilir: aramada başka yol bulundu). |
+| `survival.shadow_model / haven_model` | Alanın gölge serisi (statikse "uzay-zaman" iddiası yok) ve A1 haritasının provenance'ı. |
+| `survival.quoted`, `references`, `claim`, `scope` | Lamarre'nin alıntı sayıları; kaynaklar; iddia sınırı; kapsam. |
+
+404 metni (β bağlayıcı): `"... Chance constraint: N moves were refused because the execution failure probability
+would exceed max_failure_probability=β; the optimal recovery policy from the start block succeeds with probability
+P (safe set leg, fault rate 0.2 per km, S states)."`
+
+### `GET /api/cell-telemetry?row=&col=&start_utc=&survival=true&goal_row=&goal_col=&soc_pct=1.0&t_hours=0&survival_horizon_hours=24&failure_rate_per_km=&recovery_hours=&safe_set=leg&coarsen=4`
+
+```json
+"survival": {"p_safe": 0.9931, "p_safe_next": 0.9942, "best_action": 3, "best_action_name": "E",
+             "next_block": [89, 124], "next_pixel": [358, 498], "block": [89, 123], "coarsen": 4,
+             "soc_frac": 1.0, "t_hours": 0.0, "safe_set": "leg", "step_hours": 0.1436, "horizon_hours": 24.0},
+"survival_model": {"model": "reach_avoid_value_iteration_v1", "validity": "MODEL", "n_states": 36875000, "...": "..."}
+```
+
+| Alan | Anlam |
+|---|---|
+| `survival` | `survival=true` ve `start_utc` ile: "bu hücreden bu saatte (`t_hours`) bu SOC ile en iyi politika %X ihtimalle kurtulur" (`p_safe`), en iyi eylem (`0–7` hamle N,S,W,E,NW,NE,SW,SE; `8` bekle; `254` zaten güvenli; `255` eylem yok) ve hedef blok/piksel. Aksi hâlde `null`, nedeni `survival_model.reason`. `leg` kümesi `goal_row/goal_col` ister (yoksa 422). |
+
+### `POST /api/replan` — `recovery_policy: true` → `recovery_suggestion`
+
+```json
+{"current": {"row": 200, "col": 300}, "goal": {"row": 494, "col": 450}, "rover_id": "lpr_1",
+ "state": {"actual_soc": 0.62, "planned_soc": 0.80}, "utc": "2026-09-13T04:00:00", "recovery_policy": true,
+ "survival_horizon_hours": 24, "failure_rate_per_km": 0.2, "recovery_hours": 10}
+```
+
+```json
+"recovery_suggestion": {"action": 1, "action_name": "S", "target_block": [51, 75], "target_pixel": [206, 302],
+                        "p_safe_now": 0.97, "p_safe_next": 0.975, "soc_frac": 0.62, "hours": 0.0, "block": [50, 75],
+                        "safe_set": "leg", "validity": "MODEL", "model": "reach_avoid_value_iteration_v1",
+                        "failure_model": {"...": "..."}, "claim": "...", "current_pixel": [200, 300], "goal_pixel": [494, 450],
+                        "utc": "2026-09-13T04:00:00"},
+"survival_model": {"model": "reach_avoid_value_iteration_v1", "...": "..."}
+```
+
+| Alan | Anlam |
+|---|---|
+| `recovery_suggestion` | Mevcut bloktan kurtarma politikasının eylemi ("acil durum önerisi"), `state.actual_soc` (yoksa 1,0) ile, `utc` anında; tetikleyici ateşlesin ateşlemesin döner. `recovery_policy` verilmezse ya da `utc` yoksa `null` (+ `survival_model.reason`). Mevcut alanlar (`replanned`, `triggers`, `evaluated`, `skipped`, `comm_window`, `plan`) aynen. |
+
+### `GET /api/survival?start_utc=&rover_id=&goal_row=&goal_col=&horizon_hours=24&soc_pct=1.0&t_hours=0&coarsen=4&failure_rate_per_km=&recovery_hours=&safe_set=leg&soc_bins=16&format=json|f32&field=p_safe|best_action`
+
+```json
+{"rover_id": "lpr_1", "start_utc": "2026-09-28T00:00:00", "t_hours": 0.0, "soc_pct": 1.0, "goal": [206, 426],
+ "survival_model": {"model": "reach_avoid_value_iteration_v1", "validity": "MODEL", "n_states": 25000000, "step_hours": 0.2154, "...": "..."},
+ "summary": {"traversable_blocks": 11402, "mean_p_safe": 0.93, "fraction_at_least_0_95": 0.71, "fraction_at_least_0_5": 0.97, "fraction_zero": 0.02, "time_bin": [0, 0], "soc_bin": 19},
+ "grid": {"rows": 125, "cols": 125, "resolution_m": 20.0, "coarsen": 4, "downsample": 4},
+ "fields": {"p_safe": {"units": "fraction", "min": 0.0, "max": 1.0, "nodata": 4223, "binary_url": "/api/survival?...&format=f32&field=p_safe"},
+            "best_action": {"units": "code", "min": 0.0, "max": 255.0, "nodata": 4223, "binary_url": "..."}},
+ "binary_format": {"dtype": "float32", "endian": "little", "order": "row-major", "shape": [125, 125], "nodata": "NaN"},
+ "claim": "..."}
+```
+
+| Alan | Anlam |
+|---|---|
+| `fields.p_safe`, `fields.best_action` | **Kaba** gridde (H/coarsen × W/coarsen) `t_hours` kutusu ve `soc_pct` kutusundaki `P_safe` ve eylem kodu; geçilmez blok NaN. `format=f32` ile `/api/layers` tel biçimi, `X-Layer-Validity: MODEL`, `X-Layer-Downsample: coarsen`. |
+| `summary` | Geçilebilir blokların ort. `P_safe`'i, ≥ 0,95 / ≥ 0,5 / = 0 kesirleri, okunan zaman/SOC kutusu. |
+| Hatalar | `leg` kümesi hedef ister (422); `haven` kümesi A1 haritası ister (422 + neden); `t_hours` ufuk dışı 422; `horizon_hours` > 168 422. |
+
+### `POST /api/stress-test` — `perturbations.fault_rate_per_km`, `perturbations.fault_recovery_h`; yanıt `faults` bloğu
+
+SHERPA'ya arıza olayı eklendi: koşu başına Poisson(α · rota km) arıza, rota mesafesi boyunca düzgün konumlar;
+hamlenin ilk yarısındaki arıza kalkıştan **önce** kaynak hücrede, ikinci yarısındaki varıştan **sonra** hedef
+hücrede R saat bekletir (ev-içi güç × güç çarpanı − güneş); **rota değişmez** (SHERPA sabit planı tekrar
+oynatır; kurtarma politikasının kendi riski `survival.rollout`'tur). Varsayılan 0 (arıza yok, B5 bit-eşit).
+
+```json
+"faults": {"runs_with_fault": 274, "total_faults": 312, "mean_faults": 0.312, "mean_hold_h": 3.12,
+           "rate_per_km": 0.2, "recovery_h": 10.0, "source": "assumption: ...", "policy": "the fixed plan is resumed after every hold ..."},
+"metrics": {"fault_hold_h": {"p5": 0.0, "p50": 0.0, "p95": 10.0, "...": "..."}, "...": "..."}
+```
+
+**Frontend'in çizebileceği (kod değişmeden):** `GET /api/survival` `p_safe` katmanını (kaba grid, `coarsen`
+ölçeğiyle) ısı haritası ve `best_action` kodlarını ok alanı olarak; rota kartında `survival.route`
+(yürütme riski, min `P_safe`) ve "β sürgüsü" (`max_failure_probability`); hücre kartında
+`survival.p_safe` + `best_action_name`; replan panelinde `recovery_suggestion` (eylem + hedef piksel + `P_safe`);
+SHERPA kartında `faults`. Her sayının yanında `validity: MODEL` ve `failure_model.source` (varsayım).
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,

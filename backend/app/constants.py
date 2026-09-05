@@ -190,6 +190,23 @@ REGOLITH_VIPER_TESTBED: dict[str, Any] = {
 # moved at 0.05 already, the daytime pair only from 0.15 (probe 3, C4 spec).
 W_ROUGHNESS_DEFAULT: float = 0.15
 
+# ── B1: the fault model behind the recovery policy ──────────────────────────
+# No rover in this catalogue publishes a mobility fault rate or a recovery
+# time, so neither is a profile field: a number without a source does not
+# go into the catalogue. The recovery policy (app/survival.py) needs both,
+# and takes them as EXPLICIT assumptions -- Lamarre, Malhotra and Kelly's
+# large-scale experiment values -- reported with this source string on
+# every response that used them, and swept in the report.
+FAILURE_RATE_PER_KM_ASSUMED: float = 0.2      # one mobility fault per 5 000 m driven
+FAULT_RECOVERY_HOURS_ASSUMED: float = 10.0    # 36 000 s to resolve a fault, holding position
+FAILURE_MODEL_SOURCE: str = (
+    "assumption: Lamarre, Malhotra, Kelly -- Recovery Policies for Safe Exploration "
+    "of Lunar PSRs (Acta Astronautica 2023, arXiv 2307.16786) experiment 3 and Safe "
+    "Mission-Level Path Planning (IEEE AERO 2024, arXiv 2401.08558) Table II: Poisson "
+    "faults at 1 per 5 000 m driven, 36 000 s to recover; no rover profile in this "
+    "catalogue publishes either number"
+)
+
 # Multi-rover catalogue
 ROVERS: dict[str, dict[str, Any]] = {
     "lpr_1": {

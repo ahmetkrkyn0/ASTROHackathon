@@ -36,6 +36,8 @@ from typing import Any
 
 import numpy as np
 
+from .constants import FAILURE_MODEL_SOURCE
+
 #: 95 percent two-sided normal quantile, for the Wilson interval.
 _Z_95: float = 1.959963984540054
 
@@ -67,6 +69,14 @@ class Perturbations:
     #: Solar energetic particle event: the rover goes to safe mode and holds.
     sep_event_probability: float = 0.0
     sep_event_mean_h: float = 24.0
+    #: Mobility faults (B1): a Poisson process in distance driven, rate per
+    #: km, each holding the rover in place for the recovery time -- in the
+    #: origin cell when it strikes in the first half of a move, in the
+    #: destination cell in the second half (Lamarre et al.). The rover then
+    #: continues the PLANNED route; it does not re-plan. No rover publishes
+    #: a rate; the default injects none (constants.FAILURE_MODEL_SOURCE).
+    fault_rate_per_km: float = 0.0
+    fault_recovery_h: float = 10.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -129,8 +139,14 @@ def sample_perturbations(
     perturbations: Perturbations = SHERPA_DEFAULTS,
     initial_soc_frac: float = 1.0,
     planned_end_h: float = 0.0,
+    route_distance_m: float = 0.0,
 ) -> dict[str, np.ndarray]:
     """One draw of every uncertainty per run, as ``(n_runs,)`` arrays.
+
+    * ``fault_count`` ~ Poisson(rate * route km) and ``fault_positions_m``
+      ``(n_runs, F)``, the odometer readings at which faults strike, sorted,
+      NaN past each run's count (B1; *route_distance_m* is the route's
+      odometry, zero faults without it or without a rate).
 
     * ``start_delay_h`` >= 0;
     * ``speed_multiplier`` in ``[speed_multiplier_floor, 1]``;
@@ -170,6 +186,17 @@ def sample_perturbations(
         rng, n, p.sep_event_probability, p.sep_event_mean_h, planned_end_h
     )
 
+    distance = max(0.0, float(route_distance_m))
+    expected_faults = max(0.0, float(p.fault_rate_per_km)) / 1000.0 * distance
+    if expected_faults > 0.0:
+        fault_count = rng.poisson(expected_faults, n).astype(np.int64)
+    else:
+        fault_count = np.zeros(n, dtype=np.int64)
+    n_columns = max(1, int(fault_count.max()) if n else 1)
+    positions = np.sort(rng.uniform(0.0, distance, (n, n_columns)), axis=1)
+    beyond = np.arange(n_columns)[None, :] >= fault_count[:, None]
+    fault_positions = np.where(beyond, np.nan, positions)
+
     return {
         "start_delay_h": delay,
         "speed_multiplier": speed,
@@ -181,6 +208,8 @@ def sample_perturbations(
         "sep_event": sep_event,
         "sep_start_h": sep_start,
         "sep_end_h": sep_end,
+        "fault_count": fault_count,
+        "fault_positions_m": fault_positions,
     }
 
 
@@ -539,6 +568,10 @@ class RunResults:
     arrival_h: np.ndarray
     battery_wh: np.ndarray
     alive: np.ndarray
+    # Mobility faults (B1): how many struck each run and the hours they
+    # cost. Zeros when the samples carried none.
+    fault_count: np.ndarray | None = None
+    fault_hold_h: np.ndarray | None = None
 
     @property
     def n_runs(self) -> int:
@@ -551,8 +584,17 @@ def simulate_runs(
     rover: Any,
     samples: dict[str, np.ndarray],
     dark_threshold: float = DARK_RATIO_THRESHOLD,
+    fault_recovery_h: float = 0.0,
 ) -> RunResults:
     """Execute the route once per sampled run, all runs at once.
+
+    Mobility faults (B1): ``samples["fault_positions_m"]`` are odometer
+    readings; a fault in the first half of a move holds the rover
+    *fault_recovery_h* hours in the origin cell before it departs, one in
+    the second half holds it in the destination cell after it arrives, at
+    housekeeping power minus solar income. The route itself is unchanged
+    (SHERPA replays a fixed plan), so this is the risk of the PLAN executed
+    as planned, not of the recovery policy.
 
     The clock is continuous; the sky is read per slice. Policy (SHERPA's
     operator): a MOVE departs at ``max(clock, planned departure)`` -- ahead
@@ -663,6 +705,20 @@ def simulate_runs(
     past_deadline = np.zeros(n_runs, dtype=np.int64)
     holds = [np.zeros(n_runs), np.zeros(n_runs)]
     haven_fields = sky.deadline_h is not None and sky.tts_h is not None
+    positions = samples.get("fault_positions_m")
+    fault_positions = (
+        np.full((n_runs, 1), np.nan)
+        if positions is None
+        else np.asarray(positions, dtype=np.float64).reshape(n_runs, -1)
+    )
+    recovery_h = max(0.0, float(fault_recovery_h))
+    fault_count = np.zeros(n_runs, dtype=np.int64)
+    fault_hold = np.zeros(n_runs)
+    odometer = 0.0
+
+    def faults_between(lo: float, hi: float) -> np.ndarray:
+        with np.errstate(invalid="ignore"):
+            return np.count_nonzero((fault_positions >= lo) & (fault_positions < hi), axis=1)
 
     def record_margins(state: int, mask: np.ndarray) -> None:
         nonlocal link
@@ -704,6 +760,19 @@ def simulate_runs(
                 covered = mask & event & (depart >= start) & (depart < end)
                 holds[which] += np.where(covered, end - depart, 0.0)
                 depart = np.where(covered, end, depart)
+        # A fault in the first half of this move pins the rover in the
+        # origin cell for the recovery time before it can depart. (B1.)
+        if not legs.is_wait[leg]:
+            leg_m = float(legs.distance_m[leg])
+            first = np.where(mask, faults_between(odometer, odometer + 0.5 * leg_m), 0)
+            second = np.where(mask, faults_between(odometer + 0.5 * leg_m, odometer + leg_m), 0)
+            odometer += leg_m
+            first_hold = first * recovery_h
+            depart = depart + first_hold
+            fault_count += first + second
+            fault_hold += first_hold
+        else:
+            second = np.zeros(n_runs, dtype=np.int64)
 
         # The hold at s_from, if any.
         hold = depart - clock
@@ -744,6 +813,29 @@ def simulate_runs(
             min_battery = np.where(mask, np.minimum(min_battery, battery), min_battery)
             max_dark = np.where(mask, np.maximum(max_dark, dark), max_dark)
             reserve_breached |= mask & (battery < reserve_wh)
+
+            # A fault in the second half pins the rover in the destination
+            # cell for the recovery time after it arrives. (B1.)
+            second_hold = second * recovery_h
+            pinned = mask & (second_hold > 0.0)
+            if pinned.any():
+                hold_end = arrive + second_hold
+                exposure = exposure_mean(s_to, arrive, hold_end)
+                drain = (housekeeping(exposure) * m_power - p_solar_w * (1.0 - exposure)) * second_hold
+                battery = np.where(pinned, np.minimum(e_cap_wh, battery - drain), battery)
+                end_exposure = shadow[slice_of(hold_end), s_to]
+                dark = np.where(
+                    pinned,
+                    np.where(end_exposure >= thr, dark + second_hold * end_exposure, 0.0),
+                    dark,
+                )
+                if sky.earth is not None:
+                    dsn_hours += np.where(pinned & ~link, second_hold, 0.0)
+                min_battery = np.where(pinned, np.minimum(min_battery, battery), min_battery)
+                max_dark = np.where(pinned, np.maximum(max_dark, dark), max_dark)
+                reserve_breached |= pinned & (battery < reserve_wh)
+                fault_hold += second_hold
+                arrive = np.where(pinned, hold_end, arrive)
 
         cause = np.where(
             arrive > horizon_h + 1e-9,
@@ -793,6 +885,8 @@ def simulate_runs(
         arrival_h=arrival,
         battery_wh=battery_at,
         alive=alive_at,
+        fault_count=fault_count,
+        fault_hold_h=fault_hold,
     )
 
 
@@ -927,6 +1021,9 @@ def summarize_runs(
             results.dsn_shadow_h if sky.earth is not None else np.full(n, np.nan)
         ),
         "states_past_haven_deadline": results.states_past_deadline,
+        "fault_hold_h": (
+            np.zeros(n) if results.fault_hold_h is None else np.asarray(results.fault_hold_h, dtype=np.float64)
+        ),
         "start_delay_h": np.asarray(samples["start_delay_h"], dtype=np.float64),
         "speed_multiplier": np.asarray(samples["speed_multiplier"], dtype=np.float64),
         "power_multiplier": np.asarray(samples["power_multiplier"], dtype=np.float64),
@@ -1030,6 +1127,21 @@ def summarize_runs(
             "dsn": _outage("dsn_event", "dsn_start_h", "dsn_end_h", results.dsn_hold_h),
             "sep": _outage("sep_event", "sep_start_h", "sep_end_h", results.sep_hold_h),
         },
+        # Mobility faults injected along the fixed route (B1): the rate and
+        # recovery time are filled in by stress_test_route, which knows the
+        # perturbations; here the counts.
+        "faults": {
+            "runs_with_fault": (
+                0 if results.fault_count is None else int(np.count_nonzero(results.fault_count > 0))
+            ),
+            "total_faults": 0 if results.fault_count is None else int(results.fault_count.sum()),
+            "mean_faults": (
+                0.0 if results.fault_count is None else round(float(np.mean(results.fault_count)), 4)
+            ),
+            "mean_hold_h": (
+                0.0 if results.fault_hold_h is None else round(float(np.mean(results.fault_hold_h)), 4)
+            ),
+        },
         "verdict": {
             "reaches_goal_at_95pct": bool(reaches),
             "full_success_at_95pct": bool(full_at_95),
@@ -1073,10 +1185,22 @@ def stress_test_route(
     t0 = time.perf_counter()
     rng = np.random.default_rng(int(seed))
     samples = sample_perturbations(
-        rng, int(n_runs), perturbations, initial_soc_frac, legs.planned_duration_h
+        rng, int(n_runs), perturbations, initial_soc_frac, legs.planned_duration_h,
+        route_distance_m=legs.odometry_m,
     )
-    results = simulate_runs(legs, sky, rover, samples)
+    results = simulate_runs(legs, sky, rover, samples, fault_recovery_h=perturbations.fault_recovery_h)
     summary = summarize_runs(results, legs, sky, rover, samples, n_bins=n_bins)
+    summary["faults"].update(
+        {
+            "rate_per_km": float(perturbations.fault_rate_per_km),
+            "recovery_h": float(perturbations.fault_recovery_h),
+            "source": FAILURE_MODEL_SOURCE,
+            "policy": (
+                "the fixed plan is resumed after every hold (SHERPA replays the route); "
+                "the recovery policy's own risk is app.survival.rollout"
+            ),
+        }
+    )
 
     nominal = simulate_runs(legs, sky, rover, _nominal_samples(initial_soc_frac))
     e_cap_wh = float(rover["e_cap_wh"])

@@ -104,6 +104,10 @@ LAYER_UNITS: dict[str, str] = {
     # NASA's measured products (C4): present only with the roughness cache.
     "roughness": "m",
     "psr": "boolean",
+    # The recovery policy's fields (B1): served by GET /api/survival, never
+    # by the manifest -- they depend on a goal, an epoch and a battery.
+    "survival_probability": "fraction",
+    "best_action": "code",
 }
 
 #: What each layer means to someone building the scene, in one line.
@@ -139,6 +143,17 @@ LAYER_DESCRIPTIONS: dict[str, str] = {
     "psr": (
         "NASA PGDA PSR map (LPSR, 20 m/px): 1.0 inside a permanently shadowed region, "
         "0.0 outside. A measured product and a check of shadow_ratio, not a planning input."
+    ),
+    "survival_probability": (
+        "Probability that the optimal recovery policy from this coarse block, at the "
+        "requested hour and state of charge, reaches the safe set (goal or safe haven "
+        "with the required charge) before the horizon under the assumed Poisson fault "
+        "model (B1; MODEL). NaN where the block is impassable."
+    ),
+    "best_action": (
+        "The recovery policy's action code at that block, hour and charge: 0-7 a move "
+        "(N, S, W, E, NW, NE, SW, SE), 8 wait, 254 already safe, 255 none (failed or "
+        "impassable)."
     ),
 }
 

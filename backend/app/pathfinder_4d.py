@@ -56,6 +56,10 @@ REJECTION_KEYS: tuple[str, ...] = (
     # for every slice of the move -- refused only under
     # require_continuous_illumination.
     "continuous_illumination",
+    # The chance constraint (B1): a MOVE whose fault branches would push the
+    # execution failure probability over max_failure_probability, refused
+    # only when a survival field and a beta are given.
+    "failure_probability",
 )
 
 
@@ -90,6 +94,7 @@ def no_path_reason_4d(
     dte = rejections.get("earth_visibility", 0)
     haven = rejections.get("safe_haven_deadline", 0)
     corridor = rejections.get("continuous_illumination", 0)
+    risk = rejections.get("failure_probability", 0)
 
     parts: list[str] = []
     # The envelope first: when the battery or the darkness closed the route,
@@ -124,6 +129,12 @@ def no_path_reason_4d(
             "every block the rover occupies, for every slice of a move, must be "
             "lit in the shadow series)"
         )
+    if risk:
+        parts.append(
+            f"{risk} moves would have pushed the execution failure probability "
+            "over max_failure_probability (the chance constraint: every fault "
+            "branch is closed with the recovery policy's P_safe)"
+        )
     if lateral:
         parts.append(
             f"{lateral} edges exceeded the {rover['slope_lateral_max_deg']} deg "
@@ -152,7 +163,7 @@ def no_path_reason_4d(
     lead = "No path found"
     if horizon and not (
         lateral or along or blocked or unknown or soc or endurance or dte or haven
-        or corridor
+        or corridor or risk
     ):
         lead = "No path found within the time horizon"
     return (
@@ -314,6 +325,8 @@ def _empty(
     nodes_expanded: int = 0,
     safe_haven_enforced: bool = False,
     continuous_illumination_enforced: bool = False,
+    survival_enforced: bool = False,
+    start_recovery_prob: float | None = None,
 ) -> dict[str, Any]:
     """A failed plan.
 
@@ -331,6 +344,8 @@ def _empty(
         "path_time_to_haven_h": None,
         "path_hours_until_earthset": None,
         "path_haven_margin_h": None,
+        "path_survival_prob": None,
+        "path_recovery_prob": None,
         "metrics": {
             "wait_steps": 0,
             "move_steps": 0,
@@ -356,6 +371,11 @@ def _empty(
             "states_outside_corridor": None,
             "moves_outside_corridor": None,
             "continuous_illumination_enforced": bool(continuous_illumination_enforced),
+            # The chance constraint (B1): None without a survival field.
+            "execution_failure_probability": None,
+            "min_recovery_prob": None,
+            "start_recovery_prob": start_recovery_prob,
+            "survival_enforced": bool(survival_enforced),
         },
         "error": error,
     }
@@ -386,30 +406,45 @@ _DARK_BINS_PER_ENDURANCE: int = 100
 # dark. The SPICE series is binary, so this only matters for the static
 # (long-run fraction) fallback, where it reads "mostly dark".
 _DARK_RATIO_THRESHOLD: float = 0.5
+# The execution-survival axis (B1). Under a beta a label whose survival
+# product is within one percent of a cheaper label's is pruned (the same
+# order as the battery's tolerance; beta is a number like 0.02 or 0.05),
+# and the label key bins it in thousandths. Without a beta the axis is
+# switched off (infinite tolerance): the plan is the cost-optimal one and
+# its risk is REPORTED, so the search expands exactly the nodes it expands
+# without a field -- measured on the lunar-night pair, keeping the axis
+# live in report-only mode expanded 1.2 M nodes against 171 k and took
+# 281 s against 21 s. Without a field every label carries exactly 1.0
+# here, so the pre-B1 search is reproduced bit for bit either way.
+_SURVIVAL_DOMINANCE_TOL: float = 0.01
+_SURVIVAL_BINS: int = 1000
 
 
 def _dominated(
-    front: list[tuple[float, float, float]],
+    front: list[tuple[float, float, float, float]],
     g: float,
     battery: float,
     dark: float,
     battery_tol: float,
     dark_tol: float,
     strict: bool = False,
+    surv: float = 1.0,
+    surv_tol: float = _SURVIVAL_DOMINANCE_TOL,
 ) -> bool:
     """True if some label in *front* is at least as good on every axis.
 
-    A label is (cost so far, battery Wh, continuous shadow hours). Lower
-    cost, more battery and less shadow all dominate, each within its
-    tolerance. With *strict* the label must be beaten on at least one axis
-    beyond the tolerance, which is how a label already in the front is told
-    apart from a genuine dominator at pop time.
+    A label is (cost so far, battery Wh, continuous shadow hours, execution
+    survival). Lower cost, more battery, less shadow and more survival all
+    dominate, each within its tolerance. With *strict* the label must be
+    beaten on at least one axis beyond the tolerance, which is how a label
+    already in the front is told apart from a genuine dominator at pop time.
     """
-    for other_g, other_battery, other_dark in front:
+    for other_g, other_battery, other_dark, other_surv in front:
         if (
             other_g <= g + 1e-12
             and other_battery >= battery - battery_tol
             and other_dark <= dark + dark_tol
+            and other_surv >= surv - surv_tol
         ):
             if not strict:
                 return True
@@ -417,30 +452,34 @@ def _dominated(
                 other_g < g - 1e-12
                 or other_battery > battery + battery_tol
                 or other_dark < dark - dark_tol
+                or other_surv > surv + surv_tol
             ):
                 return True
     return False
 
 
 def _insert_label(
-    front: list[tuple[float, float, float]],
+    front: list[tuple[float, float, float, float]],
     g: float,
     battery: float,
     dark: float,
     battery_tol: float,
     dark_tol: float,
+    surv: float = 1.0,
+    surv_tol: float = _SURVIVAL_DOMINANCE_TOL,
 ) -> None:
     """Add a non-dominated label and drop the ones it dominates."""
     front[:] = [
-        (other_g, other_battery, other_dark)
-        for other_g, other_battery, other_dark in front
+        (other_g, other_battery, other_dark, other_surv)
+        for other_g, other_battery, other_dark, other_surv in front
         if not (
             g <= other_g + 1e-12
             and battery >= other_battery - battery_tol
             and dark <= other_dark + dark_tol
+            and surv >= other_surv - surv_tol
         )
     ]
-    front.append((g, battery, dark))
+    front.append((g, battery, dark, surv))
 
 
 def astar_4d(
@@ -464,8 +503,29 @@ def astar_4d(
     corridor_cube: np.ndarray | None = None,
     corridor_lit_run_cube: np.ndarray | None = None,
     require_continuous_illumination: bool = False,
+    survival_field: Any | None = None,
+    max_failure_probability: float | None = None,
 ) -> dict[str, Any]:
     """Plan through space and time. Returns path_states, path_pixels, metrics.
+
+    The chance constraint (B1)
+    --------------------------
+    *survival_field* is a ``survival.SurvivalField``: ``P_safe`` and the
+    recovery policy over (time bin, block, SOC bin) under a Poisson fault
+    model. Given, every label carries an EXECUTION SURVIVAL product: at
+    each MOVE the no-fault branch continues on the plan and each fault
+    branch is closed with ``P_safe`` of the state the fault leaves the
+    rover in (Lamarre et al., AERO 2024), so ``1 - product`` at the goal is
+    the probability that this plan, executed with the recovery policy as
+    its fallback, ends in failure. Always REPORTED -- ``path_survival_prob``
+    and ``path_recovery_prob`` per state, ``metrics.execution_failure_probability``,
+    ``min_recovery_prob``, ``start_recovery_prob`` -- and with
+    *max_failure_probability* ENFORCED: a move that would push the
+    execution failure probability over it is refused (tallied as
+    ``failure_probability``), and a start whose optimal recovery policy
+    already fails more often than that is refused at once, since no plan
+    from it can do better. Without a field the fourth label axis is a
+    constant and the search is the pre-B1 one bit for bit.
 
     The continuous-illumination corridor (A2)
     -----------------------------------------
@@ -614,6 +674,21 @@ def astar_4d(
             "continuous illumination (require_continuous_illumination=True "
             "without a corridor to check against)"
         )
+    field = survival_field
+    beta = None if max_failure_probability is None else float(max_failure_probability)
+    enforce_surv = beta is not None
+    if enforce_surv and field is None:
+        return _empty(
+            "survival_field is required to enforce max_failure_probability "
+            f"({beta}): the chance constraint closes every fault branch with "
+            "the recovery policy's P_safe and has nothing to read without one",
+            survival_enforced=True,
+        )
+    if enforce_surv and not (0.0 < beta < 1.0):
+        return _empty(
+            f"max_failure_probability must lie strictly between 0 and 1, not {beta}",
+            survival_enforced=True,
+        )
     haven_fields = tts is not None
     enforce_haven = bool(require_safe_haven)
     if enforce_haven and not haven_fields:
@@ -659,6 +734,22 @@ def astar_4d(
             "at the first slice: under require_continuous_illumination the "
             "rover must begin in a block that is lit and can stay lit",
             continuous_illumination_enforced=True,
+        )
+
+    e_cap_wh = float(rover["e_cap_wh"])
+    battery0 = min(1.0, max(0.0, float(initial_soc_frac))) * e_cap_wh
+    start_recovery = (
+        None if field is None else float(field.p_safe_at(0, start[0], start[1], battery0))
+    )
+    if enforce_surv and 1.0 - start_recovery > beta + 1e-12:
+        return _empty(
+            f"Start {start} cannot satisfy max_failure_probability={beta}: even the "
+            "optimal recovery policy from there fails with probability "
+            f"{1.0 - start_recovery:.4f} (P_safe {start_recovery:.4f} at "
+            f"{100.0 * battery0 / e_cap_wh if e_cap_wh > 0 else 0.0:.0f} percent charge), "
+            "and no plan can do better than the optimal policy",
+            survival_enforced=True,
+            start_recovery_prob=start_recovery,
         )
 
     # The goal's own deadline bounds the whole search. Arrival time only
@@ -740,11 +831,15 @@ def astar_4d(
         return hours_lower_bound * (1.0 + min_cost)
 
     # -- The envelope -------------------------------------------------------
-    e_cap_wh = float(rover["e_cap_wh"])
     reserve_wh = e_cap_wh * float(rover.get("soc_min_pct") or 0.0)
     h_max_shadow = float(rover["h_max_shadow_h"])
-    battery0 = min(1.0, max(0.0, float(initial_soc_frac))) * e_cap_wh
     track = shadow is not None
+    surv_tol = _SURVIVAL_DOMINANCE_TOL if enforce_surv else math.inf
+    # The move factor depends on the label only through its battery, and
+    # labels at one node differ by less than the key's resolution; memoised
+    # at that resolution (a quarter percent of capacity) so the fault
+    # branches are priced once per (slice, cell, direction, charge bin).
+    factor_cache: dict[tuple[int, int, int, int, int], float] = {}
 
     endurance_finite = math.isfinite(h_max_shadow) and h_max_shadow > 0.0
     dark_quantum_h = (
@@ -784,8 +879,13 @@ def astar_4d(
     def dark_key(dark_h: float) -> int:
         return int(dark_h / dark_quantum_h)
 
-    def label_of(r: int, c: int, t: int, battery_wh: float, dark_h: float):
-        return (r, c, t, battery_key(battery_wh), dark_key(dark_h))
+    def surv_key(surv: float) -> int:
+        # Part of the label key only under a beta; in report-only mode the
+        # key is the pre-B1 one and the cheapest label's product is reported.
+        return int(surv * _SURVIVAL_BINS) if enforce_surv else 0
+
+    def label_of(r: int, c: int, t: int, battery_wh: float, dark_h: float, surv: float = 1.0):
+        return (r, c, t, battery_key(battery_wh), dark_key(dark_h), surv_key(surv))
 
     def envelope_after(
         exposure: float,
@@ -814,13 +914,14 @@ def astar_4d(
         return new_battery, new_dark, None
 
     # -- Label-setting A* ---------------------------------------------------
-    start_label = label_of(start[0], start[1], 0, battery0, 0.0)
+    start_label = label_of(start[0], start[1], 0, battery0, 0.0, 1.0)
     g_score: dict[tuple, float] = {start_label: 0.0}
     battery_of: dict[tuple, float] = {start_label: battery0}
     dark_of: dict[tuple, float] = {start_label: 0.0}
+    surv_of: dict[tuple, float] = {start_label: 1.0}
     came_from: dict[tuple, tuple] = {}
-    fronts: dict[tuple[int, int, int], list[tuple[float, float, float]]] = {
-        (start[0], start[1], 0): [(0.0, battery0, 0.0)]
+    fronts: dict[tuple[int, int, int], list[tuple[float, float, float, float]]] = {
+        (start[0], start[1], 0): [(0.0, battery0, 0.0, 1.0)]
     }
     closed: set[tuple] = set()
     counter = 0
@@ -831,19 +932,21 @@ def astar_4d(
     goal_label: tuple | None = None
 
     def push(
-        r: int, c: int, t: int, g_new: float, battery_wh: float, dark_h: float, parent: tuple
+        r: int, c: int, t: int, g_new: float, battery_wh: float, dark_h: float, parent: tuple,
+        surv: float = 1.0,
     ) -> None:
         nonlocal counter
         node = (r, c, t)
         front = fronts.setdefault(node, [])
-        if _dominated(front, g_new, battery_wh, dark_h, battery_tol, dark_tol):
+        if _dominated(front, g_new, battery_wh, dark_h, battery_tol, dark_tol, surv=surv, surv_tol=surv_tol):
             return
-        _insert_label(front, g_new, battery_wh, dark_h, battery_tol, dark_tol)
-        label = label_of(r, c, t, battery_wh, dark_h)
+        _insert_label(front, g_new, battery_wh, dark_h, battery_tol, dark_tol, surv=surv, surv_tol=surv_tol)
+        label = label_of(r, c, t, battery_wh, dark_h, surv)
         if g_new < g_score.get(label, math.inf):
             g_score[label] = g_new
             battery_of[label] = battery_wh
             dark_of[label] = dark_h
+            surv_of[label] = surv
             came_from[label] = parent
             counter += 1
             h = heuristic(r, c)
@@ -853,10 +956,11 @@ def astar_4d(
         _f, _h, _n, label = heapq.heappop(heap)
         if label in closed:
             continue
-        row, col, slice_index, _bkey, _dkey = label
+        row, col, slice_index, _bkey, _dkey, _skey = label
         current_g = g_score[label]
         battery_wh = battery_of[label]
         dark_h = dark_of[label]
+        surv = surv_of[label]
         # A label pushed earlier may have been dominated since by a better
         # one at the same node; expanding it would only re-derive worse
         # successors.
@@ -868,6 +972,8 @@ def astar_4d(
             battery_tol,
             dark_tol,
             strict=True,
+            surv=surv,
+            surv_tol=surv_tol,
         ):
             continue
         closed.add(label)
@@ -907,9 +1013,10 @@ def astar_4d(
                     # Waiting into a dark voxel is leaving the corridor. (A2.)
                     rejections["continuous_illumination"] += 1
                 else:
+                    # No fault on a wait: the survival product is unchanged.
                     push(
                         row, col, slice_index + 1,
-                        current_g + wait_step, new_battery, new_dark, label,
+                        current_g + wait_step, new_battery, new_dark, label, surv,
                     )
 
         # MOVE edges
@@ -1026,11 +1133,30 @@ def astar_4d(
                 if refused is not None:
                     rejections[refused] += 1
                     continue
+                move_drain_wh = drain_wh
             else:
                 new_battery, new_dark = battery_wh, dark_h
+                move_drain_wh = 0.0
+
+            # The chance constraint (B1): close the fault branches of this
+            # move with the recovery policy and refuse it when the execution
+            # failure probability would exceed beta.
+            new_surv = surv
+            if field is not None:
+                cache_key = (slice_index, row, col, nr * width + nc, battery_key(battery_wh))
+                factor = factor_cache.get(cache_key)
+                if factor is None:
+                    factor = field.move_survival_factor(
+                        slice_index, row, col, nr, nc, battery_wh, travel_h, distance_m, move_drain_wh
+                    )[0]
+                    factor_cache[cache_key] = factor
+                new_surv = surv * factor
+                if enforce_surv and 1.0 - new_surv > beta + 1e-12:
+                    rejections["failure_probability"] += 1
+                    continue
 
             step = travel_h * (1.0 + 0.5 * (from_cost + to_cost))
-            push(nr, nc, arrival, current_g + step, new_battery, new_dark, label)
+            push(nr, nc, arrival, current_g + step, new_battery, new_dark, label, new_surv)
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     if goal_label is None:
@@ -1041,6 +1167,8 @@ def astar_4d(
             nodes_expanded,
             safe_haven_enforced=enforce_haven,
             continuous_illumination_enforced=enforce_corridor,
+            survival_enforced=enforce_surv,
+            start_recovery_prob=start_recovery,
         )
 
     labels: list[tuple] = [goal_label]
@@ -1048,9 +1176,24 @@ def astar_4d(
         labels.append(came_from[labels[-1]])
     labels.reverse()
 
-    states: list[tuple[int, int, int]] = [(r, c, t) for r, c, t, _b, _d in labels]
+    states: list[tuple[int, int, int]] = [(r, c, t) for r, c, t, _b, _d, _s in labels]
     batteries = [battery_of[label] for label in labels]
     darks = [dark_of[label] for label in labels]
+    survivals = [surv_of[label] for label in labels]
+
+    if field is None:
+        path_survival_prob = None
+        path_recovery_prob = None
+        execution_failure = None
+        min_recovery = None
+    else:
+        path_survival_prob = [round(float(v), 6) for v in survivals]
+        path_recovery_prob = [
+            round(float(field.p_safe_at(t, r, c, wh)), 6)
+            for (r, c, t), wh in zip(states, batteries)
+        ]
+        execution_failure = round(1.0 - float(survivals[-1]), 6)
+        min_recovery = round(min(path_recovery_prob), 6)
 
     wait_steps = sum(
         1
@@ -1130,6 +1273,11 @@ def astar_4d(
         "path_time_to_haven_h": path_time_to_haven_h,
         "path_hours_until_earthset": path_hours_until_earthset,
         "path_haven_margin_h": path_haven_margin_h,
+        # One entry per state (B1): the execution survival so far (the
+        # product of the move factors) and the recovery policy's P_safe of
+        # the state itself. None without a survival field.
+        "path_survival_prob": path_survival_prob,
+        "path_recovery_prob": path_recovery_prob,
         "metrics": {
             "wait_steps": wait_steps,
             "move_steps": len(states) - 1 - wait_steps,
@@ -1171,6 +1319,15 @@ def astar_4d(
             "states_outside_corridor": states_outside_corridor,
             "moves_outside_corridor": moves_outside_corridor,
             "continuous_illumination_enforced": enforce_corridor,
+            # The chance constraint (B1): 1 - survival at the goal, the
+            # lowest recovery probability along the route, the start's own,
+            # and whether beta was enforced. None without a field.
+            "execution_failure_probability": execution_failure,
+            "min_recovery_prob": min_recovery,
+            "start_recovery_prob": (
+                None if start_recovery is None else round(float(start_recovery), 6)
+            ),
+            "survival_enforced": enforce_surv,
         },
         "error": None,
     }
