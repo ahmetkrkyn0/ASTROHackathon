@@ -80,9 +80,10 @@
 .chat-window {
   position: fixed;
   right: 16px;
-  /* Sits above the launcher rather than on top of it: the launcher's own
-     56px offset clear of the status strip, plus its 46px, plus the gap. */
-  bottom: 114px;
+  /* The launcher hides while this is open, so the window no longer has to
+     clear it -- it sits where the launcher was, 56px clear of the status
+     strip, rather than 114px up with an empty gap beneath it. */
+  bottom: 56px;
   z-index: 100;
   display: flex;
   flex-direction: column;

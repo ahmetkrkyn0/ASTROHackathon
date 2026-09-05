@@ -3,33 +3,45 @@
    modal, it never blurs it. Same three rules as the rest of the cockpit --
    flat surfaces, 2px radius, mono for measured data only. */
 
+/* In the top bar, not floating over the map.
+
+   It used to sit at right:74 / bottom:56, beside the assistant launcher, and
+   the two read as a stack of buttons in the corner of the terrain -- with the
+   report vanishing under the chat window whenever that was open, which is why
+   it had been pushed sideways in the first place. The bar is where the
+   cockpit's other application-level control already lives (Systems), so this
+   belongs beside it rather than in a second, invented place.
+
+   In the bar's flow, not positioned into it: the button is portalled into an
+   anchor the bar renders, so it is laid out by .lp-topbar-right like every
+   other control there. A fixed offset would have had to be re-measured every
+   time the readouts beside it changed length. */
 .lp-report-launcher {
-  position: fixed;
-  /* Beside the assistant launcher, not above it. The assistant is 46px wide at
-     right:16 / bottom:56, and stacking the report button over it put this one
-     underneath the open chat window. Sitting alongside keeps both reachable
-     whether the window is open or closed. */
-  right: 74px;
-  bottom: 56px;
-  height: 46px;
-  z-index: 100;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 14px;
-  background: var(--bg-card);
-  border: 1px solid var(--line-accent);
+  padding: 0 12px;
+  background: rgba(186, 175, 245, 0.1);
+  border: 1px solid var(--line-accent-hover);
   border-radius: var(--radius);
-  color: var(--lavender);
+  color: var(--lavender-bright);
   font-family: var(--font-body);
   font-size: var(--fs-small);
+  font-weight: 600;
   letter-spacing: var(--track-normal);
   cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
 }
 
 .lp-report-launcher:hover {
-  border-color: var(--line-accent-hover);
-  background: var(--bg-raised);
+  background: rgba(186, 175, 245, 0.2);
+  border-color: var(--lavender);
+}
+
+.lp-report-launcher:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
 }
 
 .lp-report-launcher-icon {

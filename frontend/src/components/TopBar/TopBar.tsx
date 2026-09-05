@@ -7,6 +7,15 @@ import type { MissionMode } from '../../mission/types'
 
 export type { MissionMode }
 
+/**
+ * The empty node in the bar that Mission Report portals its launcher into.
+ *
+ * Exported so the feature and the bar name the same thing once. The bar does
+ * not import the report: a feature is registered, never wired in by the shell,
+ * and this keeps that true while still letting one live up here.
+ */
+export const REPORT_LAUNCHER_SLOT_ID = 'lp-topbar-report-slot'
+
 interface TopBarProps {
   mode: MissionMode
   onModeChange: (mode: MissionMode) => void
@@ -82,6 +91,17 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
 
       <div className="lp-topbar-right">
+        {/* Where Mission Report mounts itself.
+        
+            The report is registered in globalOverlay -- it owns a full-screen
+            modal, which is not a bar control -- but its launcher belongs up
+            here beside Systems rather than floating over the terrain. An empty
+            anchor plus a portal is what lets those two live in one feature
+            without the bar importing it, and without the button being placed
+            by a fixed offset that every change to the readouts beside it would
+            break. */}
+        <div id={REPORT_LAUNCHER_SLOT_ID} className="lp-topbar-report-slot" />
+
         {onToggleSystems && (
           <button
             type="button"

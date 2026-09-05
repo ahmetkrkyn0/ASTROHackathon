@@ -2510,6 +2510,14 @@ select {
   letter-spacing: var(--track-caps);
 }
 
+/* Mission Report's anchor. `display: contents` so the empty div is not a flex
+   item -- otherwise .lp-topbar-right's 24px gap would be spent on a zero-width
+   box whenever there is no route and the report renders nothing. With it, the
+   portalled button becomes the flex item directly. */
+.lp-topbar-report-slot {
+  display: contents;
+}
+
 .lp-topbar-meta {
   display: flex;
   align-items: center;

@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { REPORT_LAUNCHER_SLOT_ID } from '../../components/TopBar/TopBar'
 import { useMission } from '../../mission/MissionContext'
 import { useMissionRuntime } from '../../mission/MissionRuntimeContext'
 import { MissionReportModal } from './MissionReportModal'
@@ -19,18 +22,41 @@ export function MissionReport() {
   const { routePlaybackStep, payloadW, heaterW } = useMissionRuntime()
   const { isOpen, open, close } = useMissionReport(planResult, routePlaybackStep)
 
+  /**
+   * The bar's anchor, found after it has mounted.
+   *
+   * Read in an effect rather than during render: this feature and the top bar
+   * are siblings under .app-shell, and on the first pass the node may not
+   * exist yet. State rather than a ref because finding it has to cause the
+   * re-render that actually paints the button.
+   */
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    setSlot(document.getElementById(REPORT_LAUNCHER_SLOT_ID))
+  }, [])
+
   if (!planResult) return null
+
+  const launcher = !isOpen && (
+    <button
+      type="button"
+      className="lp-report-launcher"
+      onClick={open}
+      title="Open the post-drive mission report"
+    >
+      <span className="lp-report-launcher-icon" aria-hidden="true">
+        ▤
+      </span>
+      Mission Report
+    </button>
+  )
 
   return (
     <>
-      {!isOpen && (
-        <button type="button" className="lp-report-launcher" onClick={open}>
-          <span className="lp-report-launcher-icon" aria-hidden="true">
-            ▤
-          </span>
-          Mission Report
-        </button>
-      )}
+      {/* Into the bar when its anchor is there, and in place if it is not --
+          a missing anchor should cost the button its position, not its
+          existence. */}
+      {slot && launcher ? createPortal(launcher, slot) : launcher}
       {isOpen && (
         <MissionReportModal
           plan={planResult}
