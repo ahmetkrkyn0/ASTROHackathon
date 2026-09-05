@@ -68,39 +68,57 @@ export function Assistant() {
         aria-controls={CHAT_WINDOW_ID}
         onClick={toggle}
       >
-        {/* A rover antenna sending a beam, not a speech bubble. The bubble is
-            the generic web-chat mark and said nothing about what this is; the
-            mission speaks to a vehicle on a surface, so the icon is a dish on
-            a mast over a horizon, with the transmission arcs rising off it. */}
+        {/* The mark: a route solved around an obstacle, start to goal.
+
+            LunaPath does not run on the rover -- the README is explicit that
+            it is a ground-layer tool planning globally from orbital data, with
+            no onboard perception. An antenna talking to a vehicle was the
+            wrong metaphor and a speech bubble was no metaphor at all. What
+            this product does, in one line, is find a way across a surface
+            under competing costs, and the route is what the assistant talks
+            about in both of its modes.
+
+            The composition carries the meaning rather than decorating it. The
+            crater sits ON the straight line between the two endpoints, so the
+            path bending over it reads as a decision the solver made and not as
+            an ornamental curve. Endpoints are the map's own vocabulary: start
+            a filled node, goal an open ring, distinguished by shape so they do
+            not depend on position or colour. The crater is drawn at 45%
+            opacity because it is the terrain being reasoned about, not the
+            answer.
+
+            Verified by rendering at 22px, the size it is actually drawn: all
+            three elements stay separable. */}
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          {/* Horizon */}
+          {/* The obstacle, on the direct line the route cannot take. */}
+          <ellipse
+            cx="12"
+            cy="11.9"
+            rx="3.5"
+            ry="2.6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            opacity="0.45"
+          />
+          {/* The solved path, bowing clear of it. */}
           <path
-            d="M3 19.5h18"
+            d="M4.4 7.2C8 2.6 17.4 5 19.6 16.6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+          {/* Start: filled node. */}
+          <circle cx="4.4" cy="7.2" r="2" fill="currentColor" stroke="none" />
+          {/* Goal: open ring. */}
+          <circle
+            cx="19.6"
+            cy="16.6"
+            r="2.5"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          {/* Mast and dish */}
-          <path
-            d="M9 19.5l2.4-7.2"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          <path
-            d="M8.4 11.2a3.4 3.4 0 0 1 6.1 1.9l-6.1-1.9z"
-            fill="currentColor"
-            stroke="none"
-          />
-          {/* Two transmission arcs */}
-          <path
-            d="M15.4 8.6a4.2 4.2 0 0 1 1.5 3.2M17.6 6.1a7.2 7.2 0 0 1 2.6 5.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
           />
         </svg>
         {unread && <span className="chat-launcher-dot" aria-hidden="true" />}
