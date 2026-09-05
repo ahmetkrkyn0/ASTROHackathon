@@ -1997,6 +1997,36 @@ select {
   height: 100%;
 }
 
+.terrain3d-rockbox-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.terrain3d-rockbox {
+  position: absolute;
+  display: none;
+  border: 1.5px solid rgba(255, 82, 82, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 8px rgba(255, 82, 82, 0.35);
+  border-radius: 2px;
+}
+
+.terrain3d-rockbox-label {
+  position: absolute;
+  left: 0;
+  top: -20px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: rgba(120, 20, 20, 0.85);
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+
 .terrain3d-status {
   position: absolute;
   inset: 0;

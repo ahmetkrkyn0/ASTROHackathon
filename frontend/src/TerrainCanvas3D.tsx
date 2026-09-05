@@ -565,6 +565,54 @@ const NASA_ROCK_TEMPLATE_URLS = [
   '/models/nasa_rocks/rock-15556.json',
 ]
 
+const TERRAIN_NET_RINGS = 9
+const TERRAIN_NET_AZIMUTH_STEPS = 48
+
+/**
+ * A polar wireframe draped over the terrain around the sensor, out to LiDAR
+ * range -- the "net" reference point-cloud HUDs overlay on raw returns so
+ * the ground reads as a continuous scanned surface instead of loose dots.
+ * Vertices reuse sampleTerrainHeight, the same DEM lookup rock placement
+ * already relies on, so the net follows the identical surface the rover and
+ * rocks sit on. Returns null (skip) for any grid vertex off the loaded DEM
+ * window instead of drawing a false point at sea level.
+ */
+function buildTerrainNetPositions(
+  terrain: TerrainField,
+  originX: number,
+  originZ: number,
+  maxRangeM: number,
+): Float32Array {
+  const ringRadii: number[] = []
+  for (let i = 1; i <= TERRAIN_NET_RINGS; i++) {
+    ringRadii.push((i / TERRAIN_NET_RINGS) * maxRangeM)
+  }
+  const grid: Array<Array<THREE.Vector3 | null>> = ringRadii.map((radius) => {
+    const row: Array<THREE.Vector3 | null> = []
+    for (let j = 0; j < TERRAIN_NET_AZIMUTH_STEPS; j++) {
+      const angle = (j / TERRAIN_NET_AZIMUTH_STEPS) * Math.PI * 2
+      const x = originX + Math.sin(angle) * radius
+      const z = originZ - Math.cos(angle) * radius
+      const y = sampleTerrainHeight(terrain, x, z)
+      row.push(y === null ? null : new THREE.Vector3(x, y + 0.15, z))
+    }
+    return row
+  })
+
+  const verts: number[] = []
+  const pushSegment = (a: THREE.Vector3 | null, b: THREE.Vector3 | null) => {
+    if (!a || !b) return
+    verts.push(a.x, a.y, a.z, b.x, b.y, b.z)
+  }
+  for (let i = 0; i < grid.length; i++) {
+    for (let j = 0; j < TERRAIN_NET_AZIMUTH_STEPS; j++) {
+      pushSegment(grid[i][j], grid[i][(j + 1) % TERRAIN_NET_AZIMUTH_STEPS])
+      if (i + 1 < grid.length) pushSegment(grid[i][j], grid[i + 1][j])
+    }
+  }
+  return new Float32Array(verts)
+}
+
 function createRoverModel(): {
   group: THREE.Group
   lidarHead: THREE.Group
@@ -715,6 +763,9 @@ export default function TerrainCanvas3D({
     lidarScan: LidarScanResult | null
     lidarOrigin: THREE.Vector3
     lidarRevolutionStartedAt: number
+    terrainNet: THREE.LineSegments
+    rockBoxContainer: HTMLDivElement
+    rockBoxPool: HTMLDivElement[]
     earthMesh?: THREE.Mesh
     sunSprite?: THREE.Sprite
     camera?: THREE.PerspectiveCamera
@@ -917,6 +968,32 @@ export default function TerrainCanvas3D({
     lidarPoints.renderOrder = 4
     scene.add(lidarPoints)
 
+    // A faint polar grid draped over the terrain within scan range -- the
+    // "net" every reference point-cloud viewer overlays on top of raw
+    // returns so the surface reads as a continuous mesh, not just scattered
+    // dots. Built alongside the point cloud in the debounced rock/lidar
+    // effect below; empty until the first scan lands.
+    const terrainNetMaterial = new THREE.LineBasicMaterial({
+      color: 0x8fd8ff,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+    })
+    const terrainNet = new THREE.LineSegments(new THREE.BufferGeometry(), terrainNetMaterial)
+    terrainNet.renderOrder = 3
+    terrainNet.visible = false
+    scene.add(terrainNet)
+
+    // Screen-space "ROCK 7.4 m" perception boxes: a plain HTML overlay
+    // (not CSS2DObject) because each box's on-screen SIZE, not just its
+    // position, has to track the rock's projected silhouette every frame --
+    // an object-detection look, not a fixed-size label pinned to a point.
+    // Pooled and reused rather than recreated per frame.
+    const rockBoxContainer = document.createElement('div')
+    rockBoxContainer.className = 'terrain3d-rockbox-layer'
+    container.appendChild(rockBoxContainer)
+    const rockBoxPool: HTMLDivElement[] = []
+
     const sweepGeometry = new THREE.BufferGeometry()
     sweepGeometry.setAttribute(
       'position',
@@ -1048,6 +1125,9 @@ export default function TerrainCanvas3D({
         lidarScan: null,
         lidarOrigin: new THREE.Vector3(),
         lidarRevolutionStartedAt: performance.now(),
+        terrainNet,
+        rockBoxContainer,
+        rockBoxPool,
         earthMesh: earth.mesh,
         sunSprite: sunFlare,
         camera,
@@ -1075,6 +1155,9 @@ export default function TerrainCanvas3D({
           lidarPointMaterial.dispose()
           sweepGeometry.dispose()
           ;(lidarSweep.material as THREE.Material).dispose()
+          terrainNet.geometry.dispose()
+          terrainNetMaterial.dispose()
+          rockBoxContainer.remove()
           sceneRef.current?.photoTexture?.dispose()
           sceneRef.current?.detailTexture?.dispose()
         },
@@ -1116,6 +1199,97 @@ export default function TerrainCanvas3D({
       onError?.(error instanceof Error ? error.message : String(error))
     })
 
+    // Perception-style "ROCK 7.4 m" boxes, screen-projected fresh every
+    // frame so their on-screen size and position track the live camera --
+    // unlike the corner telemetry panel, a fixed-rate update would visibly
+    // lag behind orbit drags and FPS look-ahead. Scratch objects are
+    // module-scope-per-mount to avoid per-frame allocation.
+    const MAX_ROCK_BOXES = 6
+    const rockBoxTempBox = new THREE.Box3()
+    const rockBoxWorldPos = new THREE.Vector3()
+    const rockBoxNdc = new THREE.Vector3()
+    const rockBoxCorners = Array.from({ length: 8 }, () => new THREE.Vector3())
+    const updateRockBoxes = (state: NonNullable<typeof sceneRef.current>) => {
+      const box3dLayer = state.rockBoxContainer
+      if (!state.lidarPoints.visible) {
+        for (const el of state.rockBoxPool) el.style.display = 'none'
+        return
+      }
+      const width = box3dLayer.clientWidth
+      const height = box3dLayer.clientHeight
+      if (width === 0 || height === 0) return
+
+      const candidates: Array<{ left: number; top: number; w: number; h: number; distance: number }> = []
+      for (const child of state.rockGroup.children) {
+        if (!(child instanceof THREE.Mesh)) continue
+        child.getWorldPosition(rockBoxWorldPos)
+        const distance = rockBoxWorldPos.distanceTo(state.lidarOrigin)
+        if (distance > LIDAR_CONFIG.maxRangeM) continue
+
+        rockBoxTempBox.setFromObject(child)
+        const { min, max } = rockBoxTempBox
+        rockBoxCorners[0].set(min.x, min.y, min.z)
+        rockBoxCorners[1].set(min.x, min.y, max.z)
+        rockBoxCorners[2].set(min.x, max.y, min.z)
+        rockBoxCorners[3].set(min.x, max.y, max.z)
+        rockBoxCorners[4].set(max.x, min.y, min.z)
+        rockBoxCorners[5].set(max.x, min.y, max.z)
+        rockBoxCorners[6].set(max.x, max.y, min.z)
+        rockBoxCorners[7].set(max.x, max.y, max.z)
+
+        let minX = Infinity
+        let minY = Infinity
+        let maxX = -Infinity
+        let maxY = -Infinity
+        let behind = false
+        for (const corner of rockBoxCorners) {
+          rockBoxNdc.copy(corner).project(camera)
+          if (rockBoxNdc.z > 1) {
+            behind = true
+            break
+          }
+          const px = (rockBoxNdc.x + 1) * 0.5 * width
+          const py = (1 - rockBoxNdc.y) * 0.5 * height
+          if (px < minX) minX = px
+          if (px > maxX) maxX = px
+          if (py < minY) minY = py
+          if (py > maxY) maxY = py
+        }
+        if (behind || maxX < 0 || minX > width || maxY < 0 || minY > height) continue
+        if (maxX - minX < 4 || maxY - minY < 4) continue
+
+        candidates.push({ left: minX, top: minY, w: maxX - minX, h: maxY - minY, distance })
+      }
+
+      candidates.sort((a, b) => a.distance - b.distance)
+      const shown = candidates.slice(0, MAX_ROCK_BOXES)
+
+      while (state.rockBoxPool.length < shown.length) {
+        const el = document.createElement('div')
+        el.className = 'terrain3d-rockbox'
+        const label = document.createElement('span')
+        label.className = 'terrain3d-rockbox-label'
+        el.appendChild(label)
+        box3dLayer.appendChild(el)
+        state.rockBoxPool.push(el)
+      }
+
+      state.rockBoxPool.forEach((el, i) => {
+        const item = shown[i]
+        if (!item) {
+          el.style.display = 'none'
+          return
+        }
+        el.style.display = 'block'
+        el.style.left = `${item.left}px`
+        el.style.top = `${item.top}px`
+        el.style.width = `${item.w}px`
+        el.style.height = `${item.h}px`
+        const label = el.firstElementChild as HTMLSpanElement
+        label.textContent = `ROCK ${item.distance.toFixed(1)} m`
+      })
+    }
+
     const animate = () => {
       frame = requestAnimationFrame(animate)
       // OrbitControls.update() re-aims the camera at controls.target every
@@ -1150,6 +1324,11 @@ export default function TerrainCanvas3D({
         state.lidarSweep.geometry.setDrawRange(0, 2)
       }
       renderer.render(scene, camera)
+      // After render, not before: world matrices (rocks, camera) are only
+      // guaranteed current once the renderer's own traversal has updated
+      // them this frame, and box3-from-object / camera.project() both need
+      // that here.
+      if (state) updateRockBoxes(state)
     }
     animate()
 
@@ -1671,6 +1850,12 @@ export default function TerrainCanvas3D({
       pointGeometry.setAttribute('position', new THREE.BufferAttribute(scan.positions, 3))
       pointGeometry.setAttribute('color', new THREE.BufferAttribute(scan.colors, 3))
       pointGeometry.computeBoundingSphere()
+
+      const netPositions = buildTerrainNetPositions(terrain, roverX, roverZ, LIDAR_CONFIG.maxRangeM)
+      state.terrainNet.geometry.dispose()
+      state.terrainNet.geometry = new THREE.BufferGeometry()
+      state.terrainNet.geometry.setAttribute('position', new THREE.BufferAttribute(netPositions, 3))
+
       setLidarTelemetry(scan.summary)
     }, 300)
 
@@ -1687,18 +1872,19 @@ export default function TerrainCanvas3D({
   useEffect(() => {
     const state = sceneRef.current
     if (!state || status !== 'ready') return
-    // The raw return cloud and sweep line are legible at FPS range -- each
-    // point is metres from the sensor. At orbit scale the whole 60 m scan
-    // collapses into a few dozen screen pixels around the rover and reads as
-    // noise, not data; the rock markers already say "something is here" at
-    // that scale, so the point cloud stays hidden there.
-    const showLidarDetail = lidarEnabled && cameraMode === 'fps'
-    state.lidarPoints.visible = showLidarDetail
-    state.lidarSweep.visible = showLidarDetail
+    // The point cloud and terrain net now show in both camera modes -- a
+    // real perception HUD (see reference captures) reads the scan the same
+    // way whether you're standing on the surface or looking down at it. Only
+    // the animated rotating sweep beam stays FPS-only: at orbit's pulled-back
+    // distance it collapses to a barely visible line, not worth the draw.
+    state.lidarPoints.visible = lidarEnabled
+    state.terrainNet.visible = lidarEnabled
+    state.lidarSweep.visible = lidarEnabled && cameraMode === 'fps'
     // Rock markers are this scan's orbit-scale stand-in (see their own
     // comment at creation) -- turning the sensor off should hide every
-    // trace of "detected rocks", not just the FPS-range point cloud.
+    // trace of "detected rocks", not just the point cloud.
     state.rockMarkerGroup.visible = lidarEnabled && cameraMode === 'orbit'
+    state.rockBoxContainer.style.display = lidarEnabled ? '' : 'none'
     // The physical sensor mast/dome model is never shown -- see where
     // rover.mast/rover.lidarHead are created, just below createRoverModel().
   }, [lidarEnabled, cameraMode, status])
@@ -1709,6 +1895,12 @@ export default function TerrainCanvas3D({
     if (!state || status !== 'ready') return
     const { routeGroup, manifest, mesh } = state
 
+    for (const child of routeGroup.children) {
+      if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+        child.geometry.dispose()
+        ;(child.material as THREE.Material).dispose()
+      }
+    }
     routeGroup.clear()
     if (!waypoints || waypoints.length < 2) return
 
@@ -1731,12 +1923,52 @@ export default function TerrainCanvas3D({
       const y = ((w.altitude_m ?? minM) - minM) * vx + 4
       return new THREE.Vector3(x, y, z)
     })
+    // A flat, glowing ribbon rather than a thin wire: reference perception
+    // HUDs draw the planned path as a road-width band on the ground, not a
+    // 1px line lost against a metre-scale rock field. Each segment gets its
+    // own perpendicular (cross of travel direction with world-up), so a
+    // sharp turn seams rather than mitres -- fine at this width.
+    const RIBBON_HALF_WIDTH_M = 0.9
+    const ribbonVerts: number[] = []
+    const up = new THREE.Vector3(0, 1, 0)
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i]
+      const b = points[i + 1]
+      const dir = new THREE.Vector3().subVectors(b, a)
+      if (dir.lengthSq() < 1e-6) continue
+      dir.normalize()
+      const perp = new THREE.Vector3().crossVectors(dir, up).normalize().multiplyScalar(RIBBON_HALF_WIDTH_M)
+      const aL = new THREE.Vector3().addVectors(a, perp)
+      const aR = new THREE.Vector3().subVectors(a, perp)
+      const bL = new THREE.Vector3().addVectors(b, perp)
+      const bR = new THREE.Vector3().subVectors(b, perp)
+      ribbonVerts.push(
+        aL.x, aL.y, aL.z, aR.x, aR.y, aR.z, bR.x, bR.y, bR.z,
+        aL.x, aL.y, aL.z, bR.x, bR.y, bR.z, bL.x, bL.y, bL.z,
+      )
+    }
+    const ribbonGeometry = new THREE.BufferGeometry()
+    ribbonGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ribbonVerts), 3))
+    ribbonGeometry.computeVertexNormals()
     routeGroup.add(
-      new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(points),
-        new THREE.LineBasicMaterial({ color: 0x00e5ff }),
+      new THREE.Mesh(
+        ribbonGeometry,
+        new THREE.MeshBasicMaterial({
+          color: 0x39ff6a,
+          transparent: true,
+          opacity: 0.5,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
       ),
     )
+    const centerlinePoints = points.map((p) => new THREE.Vector3(p.x, p.y + 0.12, p.z))
+    const centerline = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(centerlinePoints),
+      new THREE.LineDashedMaterial({ color: 0xd6ffde, dashSize: 3, gapSize: 2 }),
+    )
+    centerline.computeLineDistances()
+    routeGroup.add(centerline)
     // res * 2.5 = 12.5 m radius, a 25 m ball -- fine as a landmark against a
     // 2.5 km overview, but the scene now also renders 0.3-2 m rocks and a
     // LiDAR cloud at metre scale, and up close this dwarfed all of it. res
