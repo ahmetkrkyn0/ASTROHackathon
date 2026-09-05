@@ -52,7 +52,13 @@ export function timeAxisOverlays(
       cols: cube.cols,
       values,
       ramp: { min, max, colors: RAMP_STOPS[field] },
-      style: { opacity: 0.6 },
+      // 0.35, not the 0.6 this started at. The shadow ramp runs white to
+      // black, so at 0.6 it did not read as a field painted over the terrain
+      // -- it read as the lighting being switched off, and the same DEM
+      // looked like a different, darker place in ANALYZE than in PLAN. The
+      // hillshade underneath is the thing that makes the surface legible as
+      // terrain at all, and a field laid on top of it has to let it through.
+      style: { opacity: 0.35 },
     })
   }
 
