@@ -67,36 +67,91 @@ const DEFAULT_ORIGIN_Y = 48000
 const DEFAULT_RESOLUTION_M = 80
 
 export const START_MINT = '#5fe3b0'
-export const GOAL_CORAL = '#ff7a5c'
+export const GOAL_CORAL = '#ed856e'
+/** The trajectory itself, not a risk reading. */
 export const ROUTE_CYAN = '#4fd8f0'
-export const LAVENDER_ACCENT = '#b3a5ff'
+export const LAVENDER_ACCENT = '#baaff5'
 
+/**
+ * The risk ramp, mirroring --risk-* in App.css.
+ *
+ * Written out because canvas strokeStyle and THREE.Color take a string, not a
+ * CSS variable. The two must move together; App.css carries the derivation
+ * and the measurements behind these four values.
+ */
 export function riskToHex(level: string): string {
   switch (level.toUpperCase()) {
     case 'LOW':
-      return '#4fd08a'
+      return '#4a8fd8'
     case 'MEDIUM':
-      return '#e8c85a'
+      return '#e3d548'
     case 'HIGH':
-      return '#f09a4a'
+      return '#d69770'
     case 'CRITICAL':
-      return '#ee5a52'
+      return '#ed4b3d'
     default:
       return '#8b94a6'
   }
 }
 
+/**
+ * The dash pattern that carries risk alongside its colour.
+ *
+ * Colour alone cannot do this job. Four steps on one colour channel have a
+ * measured ceiling of ~42 separation under the traffic-light metaphor, and
+ * the ramp we can actually ship reaches 27.8 -- better than the 15.4 it
+ * replaces, still not enough to be the only channel. The guidance is explicit:
+ * do not rely solely on colour.
+ *
+ * The progression is a metaphor rather than four arbitrary patterns: the line
+ * breaks up more as the risk rises. Solid ground, then gaps, then barely
+ * holding together. Someone who cannot see any of the four colours still reads
+ * the severity order off the line.
+ *
+ * Lengths are canvas units at the 2.8px stroke the route is drawn with; they
+ * are deliberately far apart so the patterns survive a short segment.
+ */
+export function riskToDash(level: string): number[] {
+  switch (level.toUpperCase()) {
+    case 'LOW':
+      return []
+    case 'MEDIUM':
+      return [10, 5]
+    case 'HIGH':
+      return [4, 4]
+    case 'CRITICAL':
+      return [1.5, 3.5]
+    default:
+      return []
+  }
+}
+
+/** The same patterns as an SVG stroke-dasharray, for the legend. */
+export function riskToDashArray(level: string): string {
+  const dash = riskToDash(level)
+  return dash.length ? dash.join(' ') : 'none'
+}
+
+/**
+ * Battery state of charge, on the risk ramp.
+ *
+ * Deliberately the same four values and the same four thresholds the backend
+ * uses to derive risk_level (simulation.py `_risk_level`): a battery at 20%
+ * IS a HIGH-risk rover, and showing that reading in a colour the risk ramp
+ * does not use would be the same defect the legend had -- one meaning, two
+ * colours.
+ */
 export function batteryToHex(percent: number): string {
   if (percent > 50) {
-    return '#4fd08a'
+    return riskToHex('LOW')
   }
   if (percent > 25) {
-    return '#e8c85a'
+    return riskToHex('MEDIUM')
   }
   if (percent > 10) {
-    return '#f09a4a'
+    return riskToHex('HIGH')
   }
-  return '#ee5a52'
+  return riskToHex('CRITICAL')
 }
 
 export function thermalToRgb(value: number | null, min: number, max: number, lut?: number[]): RGB {

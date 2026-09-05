@@ -7,6 +7,7 @@ import MapCanvas, {
   type MapCanvasHandle,
   type MapViewMode,
 } from './MapCanvas'
+import { riskToDashArray, riskToHex } from './colormap'
 import SpaceBackdrop from './SpaceBackdrop'
 import TerrainCanvas3D from './TerrainCanvas3D'
 import {
@@ -95,12 +96,24 @@ interface ToastItem {
   actionId?: 'show-traversability'
 }
 
+/**
+ * The risk legend, derived rather than transcribed.
+ *
+ * These four hexes used to be written out here, and they had drifted: the
+ * legend taught green for "Safe" while the map drew a safe segment in cyan --
+ * a colour distance of 62, so the legend was describing something the map
+ * never rendered. Reading riskToHex makes that class of drift impossible.
+ *
+ * The swatch shows the dash pattern too, because the map now carries risk in
+ * the line's pattern as well as its colour, and a legend that showed only
+ * colour would document half the encoding.
+ */
 const LEGEND_ITEMS = [
-  { label: 'Safe', color: '#4fd08a' },
-  { label: 'Caution', color: '#e8c85a' },
-  { label: 'High', color: '#f09a4a' },
-  { label: 'Critical', color: '#ee5a52' },
-]
+  { label: 'Safe', level: 'LOW' },
+  { label: 'Caution', level: 'MEDIUM' },
+  { label: 'High', level: 'HIGH' },
+  { label: 'Critical', level: 'CRITICAL' },
+] as const
 
 export default function App() {
   // Phase and lifecycle: defaults to landing or direct to app if specified in URL
@@ -815,7 +828,22 @@ export default function App() {
               <span className="lp-legend-label">RISK</span>
               {LEGEND_ITEMS.map((item) => (
                 <span key={item.label} className="lp-legend-item">
-                  <span className="lp-legend-swatch" style={{ background: item.color }} />
+                  <svg
+                    className="lp-legend-line"
+                    viewBox="0 0 22 8"
+                    aria-hidden="true"
+                    focusable="false"
+                  >
+                    <line
+                      x1="1"
+                      y1="4"
+                      x2="21"
+                      y2="4"
+                      stroke={riskToHex(item.level)}
+                      strokeWidth="2.4"
+                      strokeDasharray={riskToDashArray(item.level)}
+                    />
+                  </svg>
                   {item.label}
                 </span>
               ))}

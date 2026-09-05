@@ -17,6 +17,7 @@ import {
   lunarRegolithToRgb,
   magmaToRgb,
   riskToHex,
+  riskToDash,
   rdYlGnToRgb,
   shadeRegolith,
   thermalToRgb,
@@ -437,19 +438,64 @@ function redraw(
     ctx.shadowColor = 'rgba(0, 0, 0, 0.55)'
     ctx.shadowBlur = 12
 
+    // Runs of one risk level, not one path per segment.
+    //
+    // The segment between two waypoints is about a cell long, and a dash
+    // pattern restarted on every one of those would draw the same first dash
+    // every time -- four identical lines wearing four colours, which is the
+    // problem the pattern exists to solve. Stroking the whole run as a single
+    // path lets the pattern actually repeat and be recognised.
+    ctx.lineWidth = 2.8
+    let runStart = 1
     for (let index = 1; index <= drawUpTo; index += 1) {
-      const previous = waypoints[index - 1]
-      const current = waypoints[index]
-      
-      // Base cyan trajectory with risk color accenting
-      ctx.strokeStyle = current.risk_level === 'LOW' ? ROUTE_CYAN : riskToHex(current.risk_level)
-      ctx.lineWidth = 2.8
+      const level = waypoints[index].risk_level
+      const isLastSegment = index === drawUpTo
+      const runEnds = isLastSegment || waypoints[index + 1].risk_level !== level
+
+      if (!runEnds) {
+        continue
+      }
+
+      ctx.strokeStyle = riskToHex(level)
+      ctx.setLineDash(riskToDash(level))
       ctx.beginPath()
-      ctx.moveTo(previous.col, previous.row)
-      ctx.lineTo(current.col, current.row)
+      ctx.moveTo(waypoints[runStart - 1].col, waypoints[runStart - 1].row)
+      for (let step = runStart; step <= index; step += 1) {
+        ctx.lineTo(waypoints[step].col, waypoints[step].row)
+      }
       ctx.stroke()
+
+      // A severe stretch has to be findable, not just readable once found.
+      // The marker sits where the run begins and is drawn solid, so it
+      // survives whatever the dash pattern is doing.
+      if (level === 'HIGH' || level === 'CRITICAL') {
+        ctx.save()
+        ctx.setLineDash([])
+        ctx.fillStyle = riskToHex(level)
+        ctx.strokeStyle = '#05070d'
+        ctx.lineWidth = 1
+        const wp = waypoints[runStart - 1]
+        const size = level === 'CRITICAL' ? 4.6 : 3.8
+        ctx.beginPath()
+        // Triangle for CRITICAL, square for HIGH: two shapes nobody has to
+        // compare against a legend to tell apart.
+        if (level === 'CRITICAL') {
+          ctx.moveTo(wp.col, wp.row - size)
+          ctx.lineTo(wp.col + size, wp.row + size * 0.8)
+          ctx.lineTo(wp.col - size, wp.row + size * 0.8)
+          ctx.closePath()
+        } else {
+          ctx.rect(wp.col - size / 2, wp.row - size / 2, size, size)
+        }
+        ctx.fill()
+        ctx.stroke()
+        ctx.restore()
+      }
+
+      runStart = index + 1
     }
 
+    ctx.setLineDash([])
     ctx.restore()
 
     if (currentStep !== null && currentStep < waypoints.length) {

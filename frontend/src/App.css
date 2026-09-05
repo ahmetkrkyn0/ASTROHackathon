@@ -26,7 +26,11 @@
   --line: #161b27;
   --line-card: #1d2432;
   --line-inner: #1a202c;
-  --line-button: #262f40;
+  /* 3.30:1 against --bg-card. WCAG 1.4.11 asks 3:1 of any border that is the
+     only thing identifying a control, and at #262f40 this was 1.42. The
+     purely decorative lines above are exempt and keep their weight; this one
+     draws buttons and inputs. */
+  --line-button: #58658a;
   --line-accent: #322b57;
   --line-accent-hover: #4a4276;
 
@@ -51,20 +55,49 @@
   --text-dimmest: #737d90;
 
   /* Accents. One colour, one meaning -- section 7 of the design doc. */
-  --lavender: #b3a5ff;
+  /* Both of these were at 100% saturation, which the dark-mode guidance
+     advises against: on a near-black ground a fully saturated accent is the
+     most tiring thing on the screen. Same hue and lightness, saturation
+     brought inside the band the other accents already occupy (58-85%).
+     Contrast is unchanged or slightly better. */
+  --lavender: #baaff5;
   --lavender-bright: #cfc7ff;
   --mint: #5fe3b0;
   --mint-text: #93dcc4;
   --cyan: #4fd8f0;
   --cyan-text: #8fe6f5;
-  --coral: #ff7a5c;
+  --coral: #ed856e;
   --coral-text: #ffa48d;
 
-  /* Risk ramp: safe, caution, high, critical. Readings, not decoration. */
-  --risk-low: #4fd08a;
-  --risk-med: #e8c85a;
-  --risk-high: #f09a4a;
-  --risk-crit: #ee5a52;
+  /* Risk ramp: safe, caution, high, critical. Readings, not decoration.
+
+     Re-derived from a constrained search over 800,000 candidates, because the
+     old green/yellow/orange/red ramp was not readable. Measured separation of
+     its weakest pair, across normal vision and the three dichromacies, was
+     15.4 on a 0-100 scale -- under 25 is "the same colour". `low` and `crit`,
+     the one distinction this product exists to draw, fell from 95.5 to 24.8
+     under deuteranopia, which affects about 6% of men.
+
+     What changed and why:
+       - `low` left the green band for blue (H211). Green sits beside red
+         under protan/deutan simulation; blue does not. This alone lifts
+         low/crit from 24.8 to 69.8.
+       - `crit` moved off the orange-red boundary toward true red (H5).
+       - The warm trio was spread as far as a four-step traffic-light ramp
+         allows.
+
+     Weakest pair is now 27.8 (was 15.4). All four clear WCAG AA on --bg-card
+     (5.15 to 12.58), and `low` stays 45.2 from --cyan so a safe segment is
+     not mistaken for the shadow layer it is drawn over.
+
+     27.8 is better, not sufficient: a four-step ramp on one colour channel has
+     a mathematical ceiling (42.6 measured, under this metaphor). That is why
+     the map route also carries a dash pattern -- colour is never the only
+     channel. See riskToDash in colormap.ts. */
+  --risk-low: #4a8fd8;
+  --risk-med: #e3d548;
+  --risk-high: #d69770;
+  --risk-crit: #ed4b3d;
 
   --radius: 2px;
 
@@ -5177,6 +5210,16 @@ select {
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
   flex: none;
+}
+
+/* The legend swatch is a line, because what it documents is a line: the map
+   encodes risk in both the colour and the dash pattern, and a solid block
+   could only ever show half of that. */
+.lp-legend-line {
+  width: 22px;
+  height: 8px;
+  flex: none;
+  overflow: visible;
 }
 
 .lp-legend-item {

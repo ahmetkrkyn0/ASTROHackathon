@@ -63,7 +63,11 @@ export function timeAxisOverlays(
       kind: 'polyline',
       id: 'time-axis-route',
       points: plan4d.path_pixels.map(([row, col]) => ({ row, col })),
-      style: { color: '#e8c85a', widthPx: 2.5, opacity: 0.95 },
+      // Lavender, not the ramp's amber. A yellow line on this map means
+      // MEDIUM risk everywhere else, and the time-expanded route is not a
+      // risk reading at all -- it is a second plan. Borrowing a ramp colour
+      // for it made the map say something it did not mean.
+      style: { color: '#baaff5', widthPx: 2.5, opacity: 0.95 },
     })
   }
 
