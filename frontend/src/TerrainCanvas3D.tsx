@@ -24,6 +24,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { MapViewMode } from './MapCanvas'
 import type { Waypoint } from './api'
 import {
@@ -486,9 +487,9 @@ function createRegolithTexture(): THREE.CanvasTexture {
   return texture
 }
 
-/** Soft round sprite for point clouds and locator markers -- a flat square
- * PointsMaterial/SpriteMaterial dot reads as a pixelated smear at any scale;
- * this alpha-fades to the edge so clusters blend instead of tiling visibly. */
+/** Soft round sprite for locator markers -- a flat square SpriteMaterial dot
+ * reads as a pixelated smear at any scale; this alpha-fades to the edge so
+ * clusters blend instead of tiling visibly. */
 function createSoftDotTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = 64
@@ -503,7 +504,74 @@ function createSoftDotTexture(): THREE.CanvasTexture {
   return new THREE.CanvasTexture(canvas)
 }
 
-function createRoverModel(): { group: THREE.Group; lidarHead: THREE.Group } {
+/** Point-cloud dot: a solid disc with only a 1-2 px antialiased rim, not a
+ * soft glow. A LiDAR return is a discrete measurement -- CloudCompare, RViz
+ * and PDAL all draw it as a crisp, fully-opaque dot, and the wide soft
+ * falloff createSoftDotTexture uses reads as a faint, sparse haze at typical
+ * point counts instead of the dense, confident cloud a real one shows. */
+function createSolidDotTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 32
+  canvas.height = 32
+  const ctx = canvas.getContext('2d')!
+  const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16)
+  grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)')
+  grad.addColorStop(0.82, 'rgba(255, 255, 255, 1.0)')
+  grad.addColorStop(1, 'rgba(255, 255, 255, 0)')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, 32, 32)
+  return new THREE.CanvasTexture(canvas)
+}
+
+interface RockTemplatePayload {
+  vertexCount: number
+  /** Non-indexed Float32Array, base64: x,y,z per vertex. */
+  position: string
+  /** Non-indexed Float32Array, base64: nx,ny,nz per vertex. */
+  normal: string
+}
+
+function base64ToFloat32Array(base64: string): Float32Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Float32Array(bytes.buffer)
+}
+
+/**
+ * A real Apollo lunar sample's scanned shape, not a synthetic polyhedron --
+ * see frontend/simplify_rock.mjs for how the ~100k-vertex NASA Astromaterials
+ * 3D source (https://ares.jsc.nasa.gov/astromaterials3d/) was decimated to
+ * this. Centred at its own origin and normalised to a unit bounding sphere,
+ * the same convention IcosahedronGeometry(1, ...) already used, so the rock
+ * field's existing per-instance radiusX/Y/Z scaling applies unchanged.
+ */
+async function fetchRockGeometryTemplate(url: string): Promise<THREE.BufferGeometry | null> {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) return null
+    const payload: RockTemplatePayload = await response.json()
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(base64ToFloat32Array(payload.position), 3))
+    geometry.setAttribute('normal', new THREE.BufferAttribute(base64ToFloat32Array(payload.normal), 3))
+    return geometry
+  } catch {
+    return null
+  }
+}
+
+const NASA_ROCK_TEMPLATE_URLS = [
+  '/models/nasa_rocks/rock-15016.json',
+  '/models/nasa_rocks/rock-15556.json',
+]
+
+function createRoverModel(): {
+  group: THREE.Group
+  lidarHead: THREE.Group
+  mast: THREE.Mesh
+  chassis: THREE.Mesh
+  wheels: THREE.Mesh[]
+} {
   const group = new THREE.Group()
   const chassisMaterial = new THREE.MeshStandardMaterial({
     color: 0xd5d9dc,
@@ -525,12 +593,14 @@ function createRoverModel(): { group: THREE.Group; lidarHead: THREE.Group } {
   chassis.position.y = 0.6
   group.add(chassis)
 
+  const wheels: THREE.Mesh[] = []
   for (const x of [-0.88, 0.88]) {
     for (const z of [-0.62, 0.62]) {
       const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.24, 16), tireMaterial)
       wheel.rotation.z = Math.PI / 2
       wheel.position.set(x, 0.34, z)
       group.add(wheel)
+      wheels.push(wheel)
     }
   }
 
@@ -547,7 +617,7 @@ function createRoverModel(): { group: THREE.Group; lidarHead: THREE.Group } {
   lidarHead.add(lower, aperture)
   group.add(lidarHead)
 
-  return { group, lidarHead }
+  return { group, lidarHead, mast, chassis, wheels }
 }
 
 function disposeObjectTree(root: THREE.Object3D): void {
@@ -599,6 +669,15 @@ export default function TerrainCanvas3D({
   const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('fps')
   const [lidarEnabled, setLidarEnabled] = useState(true)
   const [lidarTelemetry, setLidarTelemetry] = useState<LidarScanSummary | null>(null)
+  // Real NASA Astromaterials 3D lunar sample scans (decimated offline --
+  // see frontend/simplify_rock.mjs -- from ~100k verts down to a few
+  // hundred), used as the rock field's shape templates once they arrive.
+  // A ref, not state holding the geometries themselves: they are mutated
+  // in place by nothing, read by the rock-generation effect on demand, and
+  // do not need to trigger a re-render on their own -- rockTemplatesReady
+  // is the flag that does that, exactly once, when loading finishes.
+  const rockTemplatesRef = useRef<THREE.BufferGeometry[]>([])
+  const [rockTemplatesReady, setRockTemplatesReady] = useState(false)
 
   // The raw NAC crop still carries its own 2010 grazing-light shadow
   // micro-texture (see PHOTO_TEXTURE_URL's own comment on why it is drawn
@@ -704,7 +783,11 @@ export default function TerrainCanvas3D({
       map: rockTexture,
       roughness: 1,
       metalness: 0,
-      flatShading: true,
+      // Smooth (not flat) shading: the NASA scan templates and the
+      // icosahedron fallback both carry proper computeVertexNormals()
+      // output, and interpolating between them is what keeps a few hundred
+      // triangles reading as a rounded rock instead of a faceted gemstone.
+      flatShading: false,
       // Defensive, not decorative: independent per-vertex displacement below
       // can fold a facet back on itself at high subdivision, flipping its
       // winding relative to the camera. FrontSide culls that facet outright,
@@ -716,6 +799,7 @@ export default function TerrainCanvas3D({
     scene.add(rockGroup)
 
     const softDotTexture = createSoftDotTexture()
+    const solidDotTexture = createSolidDotTexture()
 
     // Metre-scale rocks are correctly tiny across a 2.5 km overview. These
     // non-colliding markers make their locations inspectable in orbit mode;
@@ -734,11 +818,89 @@ export default function TerrainCanvas3D({
 
     const rover = createRoverModel()
     scene.add(rover.group)
+    // The physical sensor mast/dome is not shown -- it stays in the scene
+    // graph (its rotation still drives the animated sweep fan below) but
+    // never renders. Nothing else reads its visibility, so setting it once
+    // here is enough regardless of the lidarEnabled toggle or camera mode.
+    rover.mast.visible = false
+    rover.lidarHead.visible = false
+
+    // NASA VIPER's published footprint -- about the size of a golf cart,
+    // 1.5 x 1.5 x 2.5 m (L x W x H). The GLB is an AI-generated asset at an
+    // arbitrary native scale, not metres, so it is uniformly rescaled here
+    // so its longest horizontal dimension becomes this rover's real length.
+    // "Gerçek boyutlu" means it reads correctly next to the 0.3-2 m rocks
+    // and the physically-scaled terrain, not a claim that every proportion
+    // is a laser-measured replica of the real rover.
+    const ROVER_MODEL_LENGTH_M = 1.5
+    new GLTFLoader().load(
+      '/models/viper-rover.glb',
+      (gltf) => {
+        if (disposed) return
+        const model = gltf.scene
+        const box = new THREE.Box3().setFromObject(model)
+        const size = box.getSize(new THREE.Vector3())
+        const center = box.getCenter(new THREE.Vector3())
+        // Recentre horizontally and drop the model so its own lowest point
+        // sits at local y=0 -- the ground-contact point every other rover
+        // placement in this file already assumes.
+        model.position.x -= center.x
+        model.position.z -= center.z
+        model.position.y -= box.min.y
+        const longestHorizontal = Math.max(size.x, size.z)
+        const scale = longestHorizontal > 1e-6 ? ROVER_MODEL_LENGTH_M / longestHorizontal : 1
+        model.scale.setScalar(scale)
+        const scaledHeight = size.y * scale
+
+        // The procedural chassis/wheels are hidden, not removed: the mast
+        // and LiDAR head stay the exact objects the sweep animation and the
+        // orbit-mode scale toggle already reference, just resized and
+        // repositioned onto the new body's roofline instead of the
+        // placeholder box's. Sized for the OLD 1.85 m boxy chassis (0.82 m
+        // mast on a 0.6 m body), the mast alone was nearly as tall as this
+        // flatter model's entire body -- reading as a stuck-on antenna
+        // rather than part of the vehicle. Scaling the sensor rig itself
+        // down keeps it proportionate to whatever body it ends up sitting
+        // on, model-generated or procedural.
+        rover.chassis.visible = false
+        rover.wheels.forEach((wheel) => {
+          wheel.visible = false
+        })
+        const sensorScale = 0.55
+        rover.mast.scale.setScalar(sensorScale)
+        rover.lidarHead.scale.setScalar(sensorScale)
+        const mastHeight = 0.82 * sensorScale
+        rover.mast.position.y = scaledHeight + mastHeight / 2
+        rover.lidarHead.position.y = scaledHeight + mastHeight + 0.03 * sensorScale
+
+        rover.group.add(model)
+      },
+      undefined,
+      (error) => {
+        // Placeholder box+wheels stays visible; the scene still works.
+        console.warn('Rover GLB failed to load, keeping the procedural placeholder', error)
+      },
+    )
+
+    // Real rock shapes, loaded once. Failure (or simply not being loaded
+    // yet the first time the rock field below builds) leaves
+    // rockTemplatesRef empty, and that effect falls back to the procedural
+    // icosahedron -- never a blocking dependency.
+    Promise.all(NASA_ROCK_TEMPLATE_URLS.map(fetchRockGeometryTemplate)).then((results) => {
+      if (disposed) return
+      const templates = results.filter((geometry): geometry is THREE.BufferGeometry => geometry !== null)
+      if (templates.length === 0) {
+        console.warn('No NASA rock templates loaded; using procedural rocks throughout')
+        return
+      }
+      rockTemplatesRef.current = templates
+      setRockTemplatesReady(true)
+    })
 
     const lidarPointGeometry = new THREE.BufferGeometry()
     const lidarPointMaterial = new THREE.PointsMaterial({
-      map: softDotTexture,
-      size: 3.5,
+      map: solidDotTexture,
+      size: 5.5,
       // Screen-space dots stay legible in orbit view; their world positions
       // and occlusion are still fully metric.
       sizeAttenuation: false,
@@ -905,6 +1067,9 @@ export default function TerrainCanvas3D({
           rockMarkerMaterial.dispose()
           regolithTexture.dispose()
           softDotTexture.dispose()
+          solidDotTexture.dispose()
+          rockTemplatesRef.current.forEach((geometry) => geometry.dispose())
+          rockTemplatesRef.current = []
           disposeObjectTree(rover.group)
           lidarPointGeometry.dispose()
           lidarPointMaterial.dispose()
@@ -1297,9 +1462,56 @@ export default function TerrainCanvas3D({
         : (exaggeration ?? state.manifest.elevation.vertical_exaggeration_suggested)
   }, [exaggeration, cameraMode, status])
 
-  // Local rock field + real first-return scan. This deliberately runs after
-  // vertical scaling so obstacles, DEM returns and the rendered ground share
-  // one coordinate frame in both camera modes.
+  // Rover position + heading, decoupled from rock/LiDAR regeneration below.
+  // Route playback (PlaybackBar) advances activeWaypoint every ~50 ms; the
+  // heavy effect debounces so it does not rebuild rock meshes and re-fetch
+  // a LiDAR scan 20 times a second, but the rover itself must not wait for
+  // that debounce -- an update this cheap has no reason to lag, and a
+  // rover that only "catches up" once every 300 ms reads as "not moving".
+  useEffect(() => {
+    const state = sceneRef.current
+    if (!state || status !== 'ready' || !state.heights) return
+    const heights = state.heights
+    const { rows, cols, resolution_m: resolutionM } = state.manifest.grid
+    const source = activeWaypoint ?? waypoints?.[0] ?? null
+    const row = THREE.MathUtils.clamp(source?.row ?? Math.floor(rows / 2), 0, rows - 1)
+    const col = THREE.MathUtils.clamp(source?.col ?? Math.floor(cols / 2), 0, cols - 1)
+    const width = cols * resolutionM
+    const depth = rows * resolutionM
+    const stepX = width / (cols - 1)
+    const stepZ = depth / (rows - 1)
+    const roverX = col * stepX - width / 2
+    const roverZ = row * stepZ - depth / 2
+    const terrain: TerrainField = {
+      rows,
+      cols,
+      resolutionM,
+      minElevationM: state.manifest.elevation.min_m,
+      heights,
+      verticalScale: state.mesh.scale.z,
+    }
+    const roverGroundY = sampleTerrainHeight(terrain, roverX, roverZ) ?? 0
+
+    state.roverGroup.position.set(roverX, roverGroundY, roverZ)
+    const waypointIndex = source
+      ? waypoints?.findIndex((waypoint) => waypoint.step === source.step) ?? -1
+      : -1
+    const nextWaypoint = waypointIndex >= 0 ? waypoints?.[waypointIndex + 1] : null
+    if (nextWaypoint) {
+      const nextX = nextWaypoint.col * stepX - width / 2
+      const nextZ = nextWaypoint.row * stepZ - depth / 2
+      state.roverGroup.rotation.y = Math.atan2(nextX - roverX, nextZ - roverZ)
+    }
+    state.roverGroup.scale.setScalar(cameraMode === 'orbit' ? 10 : 1)
+    state.roverGroup.updateMatrixWorld(true)
+    state.lidarOrigin.set(roverX, roverGroundY + 1.6, roverZ)
+  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints])
+
+  // Local rock field + real first-return scan. Debounced (300 ms of no
+  // further activeWaypoint change) so scrubbing or auto-playing the route
+  // does not rebuild every rock mesh and re-fetch a backend LiDAR scan on
+  // each of the playback timer's ~50 ms ticks -- the rover's own position
+  // above is not gated on this and keeps up regardless.
   useEffect(() => {
     const state = sceneRef.current
     if (!state || status !== 'ready' || !state.heights) return
@@ -1327,44 +1539,67 @@ export default function TerrainCanvas3D({
         heights,
         verticalScale: state.mesh.scale.z,
       }
-      const roverGroundY = sampleTerrainHeight(terrain, roverX, roverZ) ?? 0
-
       for (const child of [...state.rockGroup.children]) {
         state.rockGroup.remove(child)
         if (child instanceof THREE.Mesh) child.geometry.dispose()
       }
       state.rockMarkerGroup.clear()
 
+      const rockTemplates = rockTemplatesRef.current
       for (const descriptor of generateRockField(roverX, roverZ)) {
         const groundY = sampleTerrainHeight(terrain, descriptor.x, descriptor.z)
         if (groundY === null) continue
-        // Detail 1 (12 vertices) reads as a crumpled polyhedron, not a rock --
-        // detail 2 (42 vertices) gives enough facets for the per-vertex
-        // weathering below to read as texture rather than as the whole shape.
-        const geometry = new THREE.IcosahedronGeometry(1, 2)
-        const positions = geometry.getAttribute('position') as THREE.BufferAttribute
         const random = seededRandom(descriptor.seed)
-        for (let i = 0; i < positions.count; i++) {
-          const x = positions.getX(i)
-          const y = positions.getY(i)
-          const z = positions.getZ(i)
-          // ONE factor per vertex, applied to all three axes: a radial
-          // displacement along the vertex's own direction. Three independent
-          // per-axis factors sheared neighbouring facets against each other
-          // at this subdivision level, folding a facet back on itself often
-          // enough to be the torn-hole look DoubleSide above now also guards
-          // against.
-          const weathering = 0.93 + random() * 0.12
-          positions.setXYZ(
-            i,
-            x * descriptor.radiusX * weathering,
-            y * descriptor.radiusY * weathering,
-            z * descriptor.radiusZ * weathering,
-          )
+        let geometry: THREE.BufferGeometry
+        if (rockTemplates.length > 0) {
+          // A real Apollo sample's scanned shape (unit sphere, centred --
+          // see fetchRockGeometryTemplate) is already organically irregular,
+          // so it just needs the field's existing per-instance stretch, not
+          // the synthetic per-vertex weathering the icosahedron fallback
+          // below applies to make a symmetric polyhedron look like a rock.
+          const templateIndex = Math.abs(descriptor.seed) % rockTemplates.length
+          geometry = rockTemplates[templateIndex].clone()
+          const positions = geometry.getAttribute('position') as THREE.BufferAttribute
+          for (let i = 0; i < positions.count; i++) {
+            positions.setXYZ(
+              i,
+              positions.getX(i) * descriptor.radiusX,
+              positions.getY(i) * descriptor.radiusY,
+              positions.getZ(i) * descriptor.radiusZ,
+            )
+          }
+          positions.needsUpdate = true
+          geometry.computeVertexNormals()
+          geometry.computeBoundingSphere()
+        } else {
+          // Detail 1 (12 vertices) reads as a crumpled polyhedron, not a
+          // rock -- detail 2 (42 vertices) gives enough facets for the
+          // per-vertex weathering below to read as texture rather than as
+          // the whole shape.
+          geometry = new THREE.IcosahedronGeometry(1, 2)
+          const positions = geometry.getAttribute('position') as THREE.BufferAttribute
+          for (let i = 0; i < positions.count; i++) {
+            const x = positions.getX(i)
+            const y = positions.getY(i)
+            const z = positions.getZ(i)
+            // ONE factor per vertex, applied to all three axes: a radial
+            // displacement along the vertex's own direction. Three
+            // independent per-axis factors sheared neighbouring facets
+            // against each other at this subdivision level, folding a
+            // facet back on itself often enough to be the torn-hole look
+            // DoubleSide above now also guards against.
+            const weathering = 0.93 + random() * 0.12
+            positions.setXYZ(
+              i,
+              x * descriptor.radiusX * weathering,
+              y * descriptor.radiusY * weathering,
+              z * descriptor.radiusZ * weathering,
+            )
+          }
+          positions.needsUpdate = true
+          geometry.computeVertexNormals()
+          geometry.computeBoundingSphere()
         }
-        positions.needsUpdate = true
-        geometry.computeVertexNormals()
-        geometry.computeBoundingSphere()
         const rock = new THREE.Mesh(geometry, state.rockMaterial)
         rock.position.set(descriptor.x, groundY - descriptor.radiusY * 0.12, descriptor.z)
         rock.rotation.set((random() - 0.5) * 0.18, descriptor.rotationY, (random() - 0.5) * 0.18)
@@ -1378,20 +1613,11 @@ export default function TerrainCanvas3D({
         state.rockMarkerGroup.add(marker)
       }
 
-      state.roverGroup.position.set(roverX, roverGroundY, roverZ)
-      const waypointIndex = source
-        ? waypoints?.findIndex((waypoint) => waypoint.step === source.step) ?? -1
-        : -1
-      const nextWaypoint = waypointIndex >= 0 ? waypoints?.[waypointIndex + 1] : null
-      if (nextWaypoint) {
-        const nextX = nextWaypoint.col * stepX - width / 2
-        const nextZ = nextWaypoint.row * stepZ - depth / 2
-        state.roverGroup.rotation.y = Math.atan2(nextX - roverX, nextZ - roverZ)
-      }
-      state.roverGroup.updateMatrixWorld(true)
+      // Position, heading, orbit-mode scale and lidarOrigin are the other
+      // effect's job now (it is not debounced) -- rockGroup still needs its
+      // own matrix refreshed here since it was just rebuilt above.
       state.rockGroup.updateMatrixWorld(true)
 
-      state.lidarOrigin.set(roverX, roverGroundY + 1.6, roverZ)
       const rockMeshes = state.rockGroup.children.filter(
         (object): object is THREE.Mesh => object instanceof THREE.Mesh,
       )
@@ -1428,23 +1654,35 @@ export default function TerrainCanvas3D({
       state.lidarRevolutionStartedAt = performance.now()
 
       // Visibility aids are deliberately visual-only. Ray intersections above
-      // were computed against the unscaled physical meshes.
-      state.roverGroup.scale.setScalar(cameraMode === 'orbit' ? 8 : 1)
-      state.rockMarkerGroup.visible = cameraMode === 'orbit'
+      // were computed against the unscaled physical meshes. Rocks scale in
+      // place (each mesh's own .scale, not the shared rockGroup's) because
+      // rockGroup's children sit at real WORLD positions -- scaling the
+      // group itself would fling every rock outward from the scene origin
+      // instead of growing each one around its own centre.
+      const orbitRockScale = cameraMode === 'orbit' ? 3 : 1
+      state.roverGroup.scale.setScalar(cameraMode === 'orbit' ? 10 : 1)
+      // Marker visibility is the lidarEnabled/cameraMode effect's job now
+      // (below) -- it reacts immediately, where this effect is debounced.
+      for (const child of state.rockGroup.children) {
+        child.scale.setScalar(orbitRockScale)
+      }
 
       const pointGeometry = state.lidarPoints.geometry
       pointGeometry.setAttribute('position', new THREE.BufferAttribute(scan.positions, 3))
       pointGeometry.setAttribute('color', new THREE.BufferAttribute(scan.colors, 3))
       pointGeometry.computeBoundingSphere()
       setLidarTelemetry(scan.summary)
-    }, 0)
+    }, 300)
 
     return () => {
       cancelled = true
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints])
+    // rockTemplatesReady forces exactly one extra run once the NASA rock
+    // shapes arrive, so the field does not stay on icosahedra all session
+    // just because nothing else happened to change afterwards.
+  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints, rockTemplatesReady])
 
   useEffect(() => {
     const state = sceneRef.current
@@ -1457,7 +1695,12 @@ export default function TerrainCanvas3D({
     const showLidarDetail = lidarEnabled && cameraMode === 'fps'
     state.lidarPoints.visible = showLidarDetail
     state.lidarSweep.visible = showLidarDetail
-    state.lidarHead.visible = lidarEnabled
+    // Rock markers are this scan's orbit-scale stand-in (see their own
+    // comment at creation) -- turning the sensor off should hide every
+    // trace of "detected rocks", not just the FPS-range point cloud.
+    state.rockMarkerGroup.visible = lidarEnabled && cameraMode === 'orbit'
+    // The physical sensor mast/dome model is never shown -- see where
+    // rover.mast/rover.lidarHead are created, just below createRoverModel().
   }, [lidarEnabled, cameraMode, status])
 
   // ── Planned route, drawn in the same metric frame as the mesh. ─────────────
@@ -1494,9 +1737,14 @@ export default function TerrainCanvas3D({
         new THREE.LineBasicMaterial({ color: 0x00e5ff }),
       ),
     )
+    // res * 2.5 = 12.5 m radius, a 25 m ball -- fine as a landmark against a
+    // 2.5 km overview, but the scene now also renders 0.3-2 m rocks and a
+    // LiDAR cloud at metre scale, and up close this dwarfed all of it. res
+    // * 0.6 = 3 m radius still reads clearly from orbit while sitting only
+    // a little larger than the rover itself at ground level.
     const marker = (p: THREE.Vector3, color: number) =>
       new THREE.Mesh(
-        new THREE.SphereGeometry(res * 2.5, 12, 12),
+        new THREE.SphereGeometry(res * 0.6, 12, 12),
         new THREE.MeshBasicMaterial({ color }),
       ).translateX(p.x).translateY(p.y).translateZ(p.z)
     routeGroup.add(marker(points[0], 0x2ee59d))

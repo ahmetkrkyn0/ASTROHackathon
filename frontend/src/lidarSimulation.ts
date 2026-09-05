@@ -4,7 +4,11 @@ export const LIDAR_CONFIG = {
   maxRangeM: 60,
   minRangeM: 1.5,
   rangeNoiseSigmaM: 0.02,
-  azimuthSteps: 180,
+  // 270, not 180: at typical dropout ~1400 returns read as sparse haze at
+  // FPS range against reference point-cloud captures. This is angular
+  // resolution, independent of the "16 CH" vertical channel count the UI
+  // advertises, and still well inside the backend's 360-azimuth cap.
+  azimuthSteps: 270,
   elevationAnglesDeg: [-16, -14, -12, -10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10, 12, 14],
   scanRateHz: 5,
   terrainStepM: 0.5,
