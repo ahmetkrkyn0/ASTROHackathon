@@ -14,7 +14,7 @@
 }
 
 .lp-corridor-id {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-data);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-normal);
   color: var(--cyan);
