@@ -7,11 +7,11 @@
   margin: 0 0 11px; padding: 7px 9px; border-radius: var(--radius);
   background: rgba(232, 200, 90, 0.1);
   border: 1px solid rgba(232, 200, 90, 0.28);
-  font-size: 10px; line-height: 1.5; color: var(--risk-med);
+  font-size: var(--fs-micro); line-height: 1.5; color: var(--risk-med);
 }
 
 .lp-ros-subhead {
-  margin: 12px 0 6px; font-size: 9px; letter-spacing: 0.1em;
+  margin: 12px 0 6px; font-size: var(--fs-micro); letter-spacing: var(--track-caps);
   text-transform: uppercase; color: var(--text-dim-2); font-weight: 600;
 }
 
@@ -19,15 +19,15 @@
 
 .lp-ros-list li { display: flex; flex-direction: column; gap: 2px; }
 
-.lp-ros-name { font-size: 11px; color: var(--text-2); }
-.lp-ros-detail { font-size: 10px; line-height: 1.45; color: var(--text-muted); }
+.lp-ros-name { font-size: var(--fs-small); color: var(--text-2); }
+.lp-ros-detail { font-size: var(--fs-micro); line-height: 1.45; color: var(--text-muted); }
 
 .lp-ros-path {
-  font-family: ui-monospace, monospace; font-size: 9px; color: var(--text-dim-2);
+  font-family: ui-monospace, monospace; font-size: var(--fs-micro); color: var(--text-dim-2);
 }
 
 .lp-ros-note {
-  margin: 13px 0 0; font-size: 10px; line-height: 1.5; color: var(--text-muted);
+  margin: 13px 0 0; font-size: var(--fs-micro); line-height: 1.5; color: var(--text-muted);
 }
 
 .lp-ros-note code { color: var(--text-2); }

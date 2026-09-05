@@ -125,22 +125,22 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
   const energyTotal = view.energy.driveWh + view.energy.payloadWh + view.energy.heaterWh
 
   const kpis: Array<{ label: string; value: string; color?: string }> = [
-    { label: 'MESAFE', value: `${fmt(summary.total_distance_km, 2)} km` },
-    { label: 'SÜRE', value: `${fmt(summary.total_elapsed_hours, 1)} s` },
+    { label: 'DISTANCE', value: `${fmt(summary.total_distance_km, 2)} km` },
+    { label: 'DURATION', value: `${fmt(summary.total_elapsed_hours, 1)} h` },
     {
-      label: 'BİTİŞ PİLİ',
-      value: `%${fmt(summary.final_battery_pct)}`,
+      label: 'END BATTERY',
+      value: `${fmt(summary.final_battery_pct)}%`,
       color: summary.final_battery_pct < BATTERY_RESERVE_PCT ? 'var(--risk-high)' : undefined,
     },
     {
-      label: 'EN DÜŞÜK PİL',
-      value: `%${fmt(summary.min_battery_pct)}`,
+      label: 'LOWEST BATTERY',
+      value: `${fmt(summary.min_battery_pct)}%`,
       color: summary.min_battery_pct < BATTERY_RESERVE_PCT ? 'var(--risk-high)' : undefined,
     },
-    { label: 'HARCANAN ENERJİ', value: `${fmt(summary.total_energy_consumed_wh, 0)} Wh` },
-    { label: 'MAKS. EĞİM', value: `${fmt(summary.max_slope_deg)}°` },
-    { label: 'ŞARJ MOLASI', value: String(summary.total_recharges) },
-    { label: 'ROTA DÜĞÜMÜ', value: String(summary.waypoint_count) },
+    { label: 'ENERGY USED', value: `${fmt(summary.total_energy_consumed_wh, 0)} Wh` },
+    { label: 'MAX SLOPE', value: `${fmt(summary.max_slope_deg)}°` },
+    { label: 'RECHARGES', value: String(summary.total_recharges) },
+    { label: 'ROUTE NODES', value: String(summary.waypoint_count) },
   ]
 
   return (
@@ -149,14 +149,14 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
         className="lp-report-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Görev raporu"
+        aria-label="Mission report"
       >
         <header className="lp-report-header">
           <div className="lp-report-title-block">
-            <span className="lp-meta-label">GÖREV RAPORU</span>
-            <h2 className="lp-report-title">Rota tamamlandı</h2>
+            <span className="lp-meta-label">MISSION REPORT</span>
+            <h2 className="lp-report-title">Route complete</h2>
             <span className="lp-report-subtitle">
-              {plan.rover?.name ?? 'Rover'} · {summary.waypoint_count} düğüm ·{' '}
+              {plan.rover?.name ?? 'Rover'} · {summary.waypoint_count} nodes ·{' '}
               {fmt(summary.total_distance_km, 2)} km
             </span>
           </div>
@@ -172,16 +172,16 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
               ref={closeRef}
               className="lp-report-close"
               onClick={onClose}
-              aria-label="Raporu kapat ve haritaya dön"
+              aria-label="Close the report and return to the map"
             >
-              Haritaya dön ✕
+              Back to map ✕
             </button>
           </div>
         </header>
 
         <div className="lp-report-body">
-          {/* ── Karar özeti ─────────────────────────────────────────── */}
-          <Section label="KARAR ÖZETİ">
+          {/* ── Decision summary ───────────────────────────────────── */}
+          <Section label="DECISION SUMMARY">
             <ul className="lp-report-reasons">
               {view.verdict.reasons.map((reason) => (
                 <li key={reason}>
@@ -202,39 +202,39 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
             </div>
           </Section>
 
-          {/* ── Pil ─────────────────────────────────────────────────── */}
+          {/* ── Battery ───────────────────────────────────────────── */}
           <Section
-            label="PİL PROFİLİ"
+            label="BATTERY PROFILE"
             note={
               view.recharges.length > 0
-                ? `${view.recharges.length} şarj molası (kesik yeşil çizgi)`
-                : 'Şarj molası yok'
+                ? `${view.recharges.length} recharge stops (dashed green)`
+                : 'No recharge stops'
             }
           >
             <LineArea
-              title="Mesafeye göre pil yüzdesi"
+              title="Battery percentage against distance"
               points={view.battery}
               color="var(--mint)"
               yMin={0}
               yMax={100}
               markers={view.recharges}
               refLines={[
-                { y: BATTERY_RESERVE_PCT, label: 'REZERV %30', color: 'var(--risk-high)' },
+                { y: BATTERY_RESERVE_PCT, label: 'RESERVE 30%', color: 'var(--risk-high)' },
                 {
                   y: summary.min_battery_pct,
-                  label: `MİN %${fmt(summary.min_battery_pct)}`,
+                  label: `MIN ${fmt(summary.min_battery_pct)}%`,
                   color: 'var(--text-dim)',
                 },
               ]}
-              formatY={(v) => `%${v.toFixed(0)}`}
+              formatY={(v) => `${v.toFixed(0)}%`}
               formatX={(v) => `${v.toFixed(1)}km`}
               height={200}
             />
           </Section>
 
-          {/* ── Eğim + risk ─────────────────────────────────────────── */}
+          {/* ── Slope + risk ───────────────────────────────────────── */}
           <div className="lp-report-row">
-            <Section label="EĞİM DAĞILIMI" note={`En dik adım ${fmt(summary.max_slope_deg)}°`}>
+            <Section label="SLOPE DISTRIBUTION" note={`Steepest step ${fmt(summary.max_slope_deg)}°`}>
               <HBars
                 rows={view.bins.map((bin) => ({
                   label: `${bin.bin_low_deg}–${bin.bin_high_deg}°`,
@@ -252,7 +252,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
               />
             </Section>
 
-            <Section label="RİSK DAĞILIMI" note="Adım başına risk seviyesi">
+            <Section label="RISK DISTRIBUTION" note="Risk level per step">
               <StackedBar
                 segments={RISK_LEVELS.map((level) => ({
                   label: level,
@@ -263,26 +263,26 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
             </Section>
           </div>
 
-          {/* ── Termal + gölge ──────────────────────────────────────── */}
+          {/* ── Thermal + shadow ───────────────────────────────────── */}
           <div className="lp-report-row">
             <Section
-              label="TERMAL ZARF"
+              label="THERMAL ENVELOPE"
               note={`${fmt(metrics.min_surface_temp_c, 0)}°C … ${fmt(metrics.max_surface_temp_c, 0)}°C`}
             >
               <LineArea
-                title="Mesafeye göre yüzey sıcaklığı"
+                title="Surface temperature against distance"
                 points={view.thermal}
                 color="var(--coral)"
                 fill={false}
                 refLines={[
                   {
                     y: metrics.min_surface_temp_c,
-                    label: `MİN ${fmt(metrics.min_surface_temp_c, 0)}°C`,
+                    label: `MIN ${fmt(metrics.min_surface_temp_c, 0)}°C`,
                     color: 'var(--cyan)',
                   },
                   {
                     y: metrics.max_surface_temp_c,
-                    label: `MAKS ${fmt(metrics.max_surface_temp_c, 0)}°C`,
+                    label: `MAX ${fmt(metrics.max_surface_temp_c, 0)}°C`,
                     color: 'var(--risk-med)',
                   },
                 ]}
@@ -292,16 +292,16 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
               />
             </Section>
 
-            <Section label="GÖLGE MARUZİYETİ" note="Kesintisiz gölge, rover limitine karşı">
+            <Section label="SHADOW EXPOSURE" note="Continuous shadow against the rover limit">
               <LimitGauge
-                label="KESİNTİSİZ GÖLGE"
+                label="CONTINUOUS SHADOW"
                 value={summary.max_continuous_shadow_h}
                 limit={summary.shadow_limit_h}
-                unit="s"
+                unit="h"
                 exceeded={summary.shadow_limit_exceeded}
               />
               <LineArea
-                title="Mesafeye göre gölge oranı"
+                title="Shadow ratio against distance"
                 points={view.shadow}
                 color="var(--cyan)"
                 yMin={0}
@@ -315,35 +315,37 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
 
           {/* ── Enerji ──────────────────────────────────────────────── */}
           <Section
-            label="ENERJİ KIRILIMI"
-            note="Sürüş enerjisi simülasyondan; payload ve ısıtıcı operatör ayarından"
+            label="ENERGY BREAKDOWN"
+            note="Drive energy from the simulation; payload and heater from the operator setting"
           >
             <Donut
               centerValue={`${fmt(energyTotal, 0)}`}
-              centerLabel="TOPLAM Wh"
+              centerLabel="TOTAL Wh"
               slices={[
-                { label: 'Sürüş', value: view.energy.driveWh, color: 'var(--lavender)' },
+                { label: 'Drive', value: view.energy.driveWh, color: 'var(--lavender)' },
                 { label: 'Payload', value: view.energy.payloadWh, color: 'var(--cyan)' },
-                { label: 'Isıtıcı', value: view.energy.heaterWh, color: 'var(--coral)' },
+                { label: 'Heater', value: view.energy.heaterWh, color: 'var(--coral)' },
               ]}
             />
           </Section>
 
-          {/* ── Detaylar ────────────────────────────────────────────── */}
+          {/* ── Details ────────────────────────────────────────────── */}
           <button
             type="button"
             className="lp-report-toggle"
             onClick={() => setDetailsOpen((open) => !open)}
             aria-expanded={detailsOpen}
           >
-            {detailsOpen ? '▾ Teknik detayları gizle' : '▸ Teknik detaylar (arazi kesiti, planlayıcı kanıtı, kilometre taşları)'}
+            {detailsOpen
+              ? '▾ Hide technical detail'
+              : '▸ Technical detail (terrain cut, planner evidence, milestones)'}
           </button>
 
           {detailsOpen && (
             <>
-              <Section label="ARAZİ KESİTİ" note="Yükseklik, adım riskiyle boyanmış">
+              <Section label="TERRAIN CUT" note="Elevation, painted by step risk">
                 <SegmentedProfile
-                  title="Mesafeye göre yükseklik"
+                  title="Elevation against distance"
                   points={view.elevation}
                   colors={view.elevationColors}
                   formatY={(v) => `${v.toFixed(0)}m`}
@@ -353,49 +355,49 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
               </Section>
 
               <div className="lp-report-row">
-                <Section label="PLANLAYICI KANITI" note="A* gerçekten kısıt uyguladı">
+                <Section label="PLANNER EVIDENCE" note="A* really did apply constraints">
                   <dl className="lp-report-dl">
                     <div>
-                      <dt>Genişletilen düğüm</dt>
+                      <dt>Nodes expanded</dt>
                       <dd>{metrics.nodes_expanded.toLocaleString('tr-TR')}</dd>
                     </div>
                     <div>
-                      <dt>Çözüm süresi</dt>
+                      <dt>Solve time</dt>
                       <dd>{fmt(metrics.computation_time_ms)} ms</dd>
                     </div>
                     <div>
-                      <dt>Toplam ağırlıklı maliyet</dt>
+                      <dt>Total weighted cost</dt>
                       <dd>{fmt(metrics.total_weighted_cost, 0)}</dd>
                     </div>
                     <div>
-                      <dt>Bariyer payı</dt>
+                      <dt>Barrier share</dt>
                       <dd>
                         {metrics.barrier_share === null
                           ? '--'
-                          : `%${fmt(metrics.barrier_share * 100)}`}
+                          : `${fmt(metrics.barrier_share * 100)}%`}
                       </dd>
                     </div>
                     {Object.entries(metrics.edges_rejected).map(([reason, count]) => (
                       <div key={reason}>
-                        <dt>Reddedilen kenar · {reason}</dt>
+                        <dt>Edges rejected · {reason}</dt>
                         <dd>{count}</dd>
                       </div>
                     ))}
                   </dl>
                 </Section>
 
-                <Section label="KİLOMETRE TAŞLARI">
+                <Section label="MILESTONES">
                   <div className="lp-report-table-wrap">
                     <table className="lp-report-table">
                       <thead>
                         <tr>
-                          <th>NOKTA</th>
-                          <th>ADIM</th>
+                          <th>POINT</th>
+                          <th>STEP</th>
                           <th>KM</th>
-                          <th>PİL</th>
-                          <th>EĞİM</th>
-                          <th>SICAKLIK</th>
-                          <th>RİSK</th>
+                          <th>BATTERY</th>
+                          <th>SLOPE</th>
+                          <th>TEMP</th>
+                          <th>RISK</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -404,7 +406,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
                             <td>{m.title}</td>
                             <td>{m.step}</td>
                             <td>{fmt(m.wp.distance_m / 1000, 2)}</td>
-                            <td>%{fmt(m.wp.battery_pct)}</td>
+                            <td>{fmt(m.wp.battery_pct)}%</td>
                             <td>{fmt(m.wp.slope_deg)}°</td>
                             <td>{fmt(m.wp.surface_temp_c, 0)}°C</td>
                             <td style={{ color: riskToHex(m.wp.risk_level) }}>{m.wp.risk_level}</td>

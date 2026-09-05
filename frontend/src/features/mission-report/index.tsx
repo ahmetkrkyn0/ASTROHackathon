@@ -28,7 +28,7 @@ export function MissionReport() {
           <span className="lp-report-launcher-icon" aria-hidden="true">
             ▤
           </span>
-          Görev Raporu
+          Mission Report
         </button>
       )}
       {isOpen && (

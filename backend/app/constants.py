@@ -63,7 +63,7 @@ DECLARED_ONLY_FIELDS: tuple[str, ...] = (
 # Multi-rover catalogue
 ROVERS: dict[str, dict[str, Any]] = {
     "lpr_1": {
-        "name": "LPR-1 (Varsayilan)",
+        "name": "LPR-1 (Default)",
         "mass_kg": 450,
         "v_max_ms": 0.2,
         "p_base_w": 200,

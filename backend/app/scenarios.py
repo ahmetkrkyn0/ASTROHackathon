@@ -13,8 +13,8 @@ SCENARIOS_DIR = os.path.join(DATA_DIR, "scenarios")
 # Weights and constraints frozen at v3.2 spec (docs/lunapath_referans_belgesi_2.md §5.2)
 MISSION_PROFILES: dict[str, dict] = {
     "balanced": {
-        "name": "Dengeli Kesif",
-        "description": "Tum riskleri dengeli sekilde dikkate alan standart mod.",
+        "name": "Balanced Recon",
+        "description": "Standard mode; weighs every risk evenly.",
         "weights": {
             "w_slope": C.W_SLOPE,
             "w_energy": C.W_ENERGY,
@@ -30,8 +30,8 @@ MISSION_PROFILES: dict[str, dict] = {
         "color": "#3B82F6",
     },
     "energy_saver": {
-        "name": "Enerji Tasarrufu",
-        "description": "Daha uzun rotalari kabul edip bataryayi korumaya odaklanir.",
+        "name": "Energy Saver",
+        "description": "Accepts a longer route to protect the battery.",
         "weights": {
             "w_slope": 0.250,
             "w_energy": 0.450,
@@ -47,8 +47,8 @@ MISSION_PROFILES: dict[str, dict] = {
         "color": "#22C55E",
     },
     "fast_recon": {
-        "name": "Hizli Kesif",
-        "description": "Daha agresif, daha kisa rota tercih eden profil.",
+        "name": "Fast Recon",
+        "description": "More aggressive; prefers the shorter route.",
         "weights": {
             "w_slope": 0.500,
             "w_energy": 0.150,
@@ -64,8 +64,8 @@ MISSION_PROFILES: dict[str, dict] = {
         "color": "#EF4444",
     },
     "shadow_traverse": {
-        "name": "Golge Gecis",
-        "description": "Golgeli bolgeden gecmek zorunlu — termal guvenlik kritik.",
+        "name": "Shadow Traverse",
+        "description": "Crossing shadow is unavoidable; thermal safety is critical.",
         "weights": {
             "w_slope": 0.200,
             "w_energy": 0.150,

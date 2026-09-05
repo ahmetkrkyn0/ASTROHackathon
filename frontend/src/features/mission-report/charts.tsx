@@ -11,9 +11,10 @@
  * Every chart draws in CSS PIXELS, not in a stretched viewBox. A viewBox that
  * fills its column scales the text with it, which put the same tick label at
  * 16px in the full-width cards and 7px in the two-up rows. Drawing in measured
- * pixels means a font-size of 10 is 10px in every card, and the charts share
- * the cockpit's type scale (9 / 10 / 11 / 12 / 14) instead of inventing one
- * per column width.
+ * pixels means a font-size of 11 is 11px in every card, and the charts sit on
+ * the cockpit's type scale (--fs-micro upward) instead of inventing one per
+ * column width. SVG text takes a number, not a CSS variable, so the two
+ * constants below are the scale's floor written out.
  */
 import React from 'react'
 import { fmt } from './format'
@@ -26,9 +27,10 @@ export interface Point {
 
 const PAD = { top: 14, right: 16, bottom: 26, left: 48 }
 
-/** The cockpit's smallest label size. Every chart label is one of these two. */
-const TICK_SIZE = 10
-const NOTE_SIZE = 10
+/** --fs-micro, the interface floor. No chart label is smaller than this. */
+const TICK_SIZE = 11
+/** Threshold annotations sit at the same rung; they are labels, not readings. */
+const NOTE_SIZE = 11
 
 const AXIS_LINE = '#161b27'
 const AXIS_TEXT = '#5d677c'
@@ -194,7 +196,7 @@ export const LineArea: React.FC<LineAreaProps> = ({
 }) => {
   const [ref, width] = useChartWidth()
 
-  if (points.length < 2) return <p className="lp-report-empty">Grafik için yeterli nokta yok.</p>
+  if (points.length < 2) return <p className="lp-report-empty">Not enough points to plot.</p>
 
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)
@@ -294,7 +296,7 @@ export const SegmentedProfile: React.FC<SegmentedProfileProps> = ({
 }) => {
   const [ref, width] = useChartWidth()
 
-  if (points.length < 2) return <p className="lp-report-empty">Yükseklik verisi yok.</p>
+  if (points.length < 2) return <p className="lp-report-empty">No elevation data.</p>
 
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)
@@ -418,7 +420,7 @@ export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel
   centerLabel,
 }) => {
   const total = slices.reduce((sum, s) => sum + s.value, 0)
-  const R = 50
+  const R = 48
   const C = 2 * Math.PI * R
   let offset = 0
 
@@ -448,9 +450,9 @@ export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel
         </g>
         <text
           x={64}
-          y={62}
+          y={61}
           textAnchor="middle"
-          fontSize={14}
+          fontSize={16}
           fill="var(--text)"
           fontFamily="var(--font-data)"
         >
@@ -458,11 +460,11 @@ export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel
         </text>
         <text
           x={64}
-          y={76}
+          y={78}
           textAnchor="middle"
-          fontSize={8}
+          fontSize={11}
           fill="var(--text-dim-2)"
-          letterSpacing="0.1em"
+          letterSpacing="0.08em"
           fontFamily="var(--font-data)"
         >
           {centerLabel}
@@ -518,10 +520,10 @@ export const LimitGauge: React.FC<{
       </div>
       <span className="lp-gauge-note">
         {limit === null
-          ? 'Bu rover için gölge limiti tanımlı değil.'
+          ? 'No shadow limit is defined for this rover.'
           : exceeded
-            ? 'Limit aşıldı — rota bu haliyle güvenli değil.'
-            : `Limitin %${fmt(pct, 0)} kadarı kullanıldı.`}
+            ? 'Limit exceeded — the route is not safe as planned.'
+            : `${fmt(pct, 0)}% of the limit used.`}
       </span>
     </div>
   )

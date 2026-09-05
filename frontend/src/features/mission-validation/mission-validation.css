@@ -4,12 +4,12 @@
 }
 
 .lp-val-table {
-  width: 100%; border-collapse: collapse; font-size: 11px;
+  width: 100%; border-collapse: collapse; font-size: var(--fs-small);
   font-variant-numeric: tabular-nums;
 }
 
 .lp-val-table th {
-  text-align: right; font-size: 9px; letter-spacing: 0.07em;
+  text-align: right; font-size: var(--fs-micro); letter-spacing: var(--track-label);
   text-transform: uppercase; color: var(--text-dim-2); padding: 3px 5px;
 }
 
@@ -23,11 +23,11 @@
 .lp-val-ours td { color: var(--cyan); }
 
 .lp-val-caveat {
-  margin: 9px 0 0; font-size: 10px; line-height: 1.5; color: var(--risk-med);
+  margin: 9px 0 0; font-size: var(--fs-micro); line-height: 1.5; color: var(--risk-med);
 }
 
 .lp-val-subhead {
-  margin: 13px 0 6px; font-size: 9px; letter-spacing: 0.1em;
+  margin: 13px 0 6px; font-size: var(--fs-micro); letter-spacing: var(--track-caps);
   text-transform: uppercase; color: var(--text-dim-2); font-weight: 600;
 }
 
@@ -37,7 +37,7 @@
   display: grid; grid-template-columns: 62px 1fr 34px; align-items: center; gap: 8px;
 }
 
-.lp-val-bin { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.lp-val-bin { font-size: var(--fs-micro); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
 .lp-val-track {
   height: 6px; border-radius: var(--radius); background: rgba(139, 148, 166, 0.16); overflow: hidden;
@@ -46,15 +46,15 @@
 .lp-val-fill { display: block; height: 100%; background: var(--cyan); }
 
 .lp-val-count {
-  font-size: 10px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-micro); text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums;
 }
 
 .lp-val-risk { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
 
 .lp-val-risk li {
-  display: flex; justify-content: space-between; font-size: 11px; color: var(--text-2);
+  display: flex; justify-content: space-between; font-size: var(--fs-small); color: var(--text-2);
 }
 
-.lp-val-temps { margin: 11px 0 0; font-size: 11px; color: var(--text-muted); }
-.lp-val-note { margin: 9px 0 0; font-size: 11px; color: var(--text-muted); }
+.lp-val-temps { margin: 11px 0 0; font-size: var(--fs-small); color: var(--text-muted); }
+.lp-val-note { margin: 9px 0 0; font-size: var(--fs-small); color: var(--text-muted); }
 .lp-val-warn { color: var(--risk-med); }

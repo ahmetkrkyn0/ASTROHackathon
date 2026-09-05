@@ -252,8 +252,8 @@ export function pixelToApproxLonLat(
 const EQ_BINS = 256
 
 /**
- * Grid verisi üzerinden histogram equalization LUT'u oluşturur.
- * Sonuç: her bin için [0,1] arası eşitlenmiş değer dizisi.
+ * Builds a histogram-equalisation LUT from the grid.
+ * Result: one equalised value in [0,1] per bin.
  */
 export function buildEqualizationLut(grid: (number | null)[][], min: number, max: number): number[] {
   const histogram = new Uint32Array(EQ_BINS)
@@ -269,7 +269,7 @@ export function buildEqualizationLut(grid: (number | null)[][], min: number, max
     }
   }
 
-  // CDF oluştur
+  // Build the CDF
   const cdf = new Float64Array(EQ_BINS)
   cdf[0] = histogram[0]
   for (let i = 1; i < EQ_BINS; i++) {

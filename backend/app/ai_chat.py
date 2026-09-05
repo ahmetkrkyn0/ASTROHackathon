@@ -478,7 +478,7 @@ def _rover_names() -> list[str]:
     """Rover identifiers K5 may see a digit inside.
 
     Both forms of the name travel. The catalogue publishes "LPR-1
-    (Varsayilan)", but a sentence contains "LPR-1" -- and without the bare form
+    (Default)", but a sentence contains "LPR-1" -- and without the bare form
     its digit survives the mask and blocks an answer that named the rover
     correctly.
     """

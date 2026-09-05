@@ -470,7 +470,7 @@ export default function TerrainCanvas3D({
         PHOTO_TEXTURE_URL,
         apply,
         undefined,
-        () => onError?.('NAC dokusu yüklenemedi'),
+        () => onError?.('NAC texture failed to load'),
       )
     }
 
@@ -570,7 +570,7 @@ export default function TerrainCanvas3D({
           base[i + 2] = SURFACE_ALBEDO.b
         }
         applyColors()
-        onError?.(`${layerName} katmanı yüklenemedi`)
+        onError?.(`${layerName} layer failed to load`)
       })
 
     return () => {
@@ -697,9 +697,9 @@ export default function TerrainCanvas3D({
 
   return (
     <div className="terrain3d-root" ref={containerRef}>
-      {status === 'loading' && <div className="terrain3d-status">Arazi yükleniyor…</div>}
+      {status === 'loading' && <div className="terrain3d-status">Loading terrain…</div>}
       {status === 'error' && (
-        <div className="terrain3d-status">3B arazi yüklenemedi — API çalışıyor mu?</div>
+        <div className="terrain3d-status">3-D terrain failed to load — is the API running?</div>
       )}
     </div>
   )

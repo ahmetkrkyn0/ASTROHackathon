@@ -65,6 +65,48 @@
   --shadow-pop: 0 12px 28px rgba(0, 0, 0, 0.55);
   --shadow-float: 0 20px 46px rgba(0, 0, 0, 0.6);
 
+  /* ── Type scale ────────────────────────────────────────────────────────
+     Seven steps, and nothing outside them. The cockpit had grown twenty
+     distinct font sizes across 306 declarations -- 8, 9, 9.5, 10, 10.5, 11,
+     11.5, 12 ... -- with two thirds of them packed between 9px and 11px. That
+     is not a scale, and it is why some readings were unreadable while others
+     shouted: half-pixel steps are invisible as hierarchy but very visible as
+     inconsistency.
+
+     11px is the FLOOR. Nothing in the interface is smaller, including the
+     uppercase micro-labels, which are the hardest thing on the screen to read
+     -- caps have no ascenders or descenders to help the eye, and 0.2em
+     tracking pulls them further apart. A 9px tracked cap label is below what
+     any enterprise or mission-control system ships. */
+  --fs-micro: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-strong: 15px;
+  --fs-value: 16px;
+  --fs-title: 18px;
+  --fs-display: 24px;
+  /* The landing headline only. It is the one place a display size is the
+     content rather than a label for it. */
+  --fs-hero: 30px;
+
+  /* ── Tracking ──────────────────────────────────────────────────────────
+     Five steps, matching the type scale's discipline. There were twenty-two
+     values here, which is the same disease as twenty font sizes: 0.13em and
+     0.14em are not two decisions, they are one decision made twice.
+
+     Tracking is INVERSELY related to size, and that is why these came down
+     when the sizes went up. The old 0.18-0.22em on uppercase labels was
+     compensating for 9px type; at 11px the same tracking is just wide, and it
+     is what pushed "MISSION SETUP" and "MISSION CONTEXT" onto two lines in a
+     fixed-width rail. */
+  --track-tight: 0.02em;
+  --track-normal: 0.04em;
+  --track-label: 0.06em;
+  --track-caps: 0.08em;
+  /* The landing eyebrow only, where the line is short and the width is the
+     point. */
+  --track-hero: 0.24em;
+
   --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-data: 'IBM Plex Mono', 'Cascadia Code', monospace;
@@ -325,17 +367,17 @@ select {
 .loading-brand {
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 600;
-  letter-spacing: 0.3em;
+  letter-spacing: var(--track-hero);
   text-transform: uppercase;
 }
 
 .landing-brand-sub {
   color: var(--text-dim-2);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.16em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -345,8 +387,8 @@ select {
   gap: 22px;
   color: var(--text-dim);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .landing-link {
@@ -380,8 +422,8 @@ select {
 .loading-percent {
   color: var(--lavender);
   font-family: var(--font-data);
-  font-size: 11px;
-  letter-spacing: 0.22em;
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -406,7 +448,7 @@ select {
   margin: 26px 0 0;
   max-width: 520px;
   color: var(--text-3);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 300;
   line-height: 1.65;
   text-wrap: pretty;
@@ -433,9 +475,9 @@ select {
   color: #0a0c14;
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
   transition: background 140ms ease;
 }
 
@@ -455,8 +497,8 @@ select {
 .landing-hint {
   color: var(--text-dim-2);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -476,8 +518,8 @@ select {
   align-items: center;
   gap: 14px;
   color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.16em;
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -488,8 +530,8 @@ select {
 .landing-dataset {
   color: var(--text-dimmest);
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.14em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 /* One orchestrated entrance rather than effects scattered over the page: the
@@ -583,9 +625,9 @@ select {
   background: linear-gradient(135deg, rgba(232, 200, 90, 0.96), rgba(224, 142, 42, 0.92));
   color: rgba(232, 200, 90, 0.08);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
   cursor: pointer;
   transition: background 0.2s ease, opacity 0.2s ease;
@@ -659,9 +701,9 @@ select {
 .brand-mark {
   color: var(--primary-container);
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
-  letter-spacing: 0.32em;
+  letter-spacing: var(--track-hero);
 }
 
 .topbar-status {
@@ -673,9 +715,9 @@ select {
 .status-line {
   color: var(--primary-container);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
 }
 
 .status-line-muted {
@@ -745,7 +787,7 @@ select {
   border: none;
   border-bottom: 1px solid var(--line);
   color: var(--text-muted);
-  font-size: 18px;
+  font-size: var(--fs-title);
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.18s ease, color 0.18s ease;
@@ -810,8 +852,8 @@ select {
   border: 1px solid rgba(179, 165, 255, 0.18);
   color: var(--primary-container);
   font-family: var(--font-data);
-  font-size: 12px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-body);
+  letter-spacing: var(--track-caps);
 }
 
 .panel-kicker,
@@ -824,24 +866,24 @@ select {
 .panel-kicker {
   margin: 0 0 4px;
   color: rgba(139, 148, 166, 0.58);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .panel-title {
   margin: 0;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: var(--track-normal);
 }
 
 .panel-description,
 .section-note,
 .card-meta {
   color: rgba(199, 205, 219, 0.72);
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.6;
 }
 
@@ -852,8 +894,8 @@ select {
 .eyebrow {
   margin: 0 0 12px;
   color: rgba(139, 148, 166, 0.5);
-  font-size: 10px;
-  letter-spacing: 0.13em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .eyebrow.tight {
@@ -875,8 +917,8 @@ select {
   background: rgba(8, 11, 18, 0.72);
   color: rgba(228, 225, 237, 0.8);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -947,16 +989,16 @@ select {
 
 .rover-card-head strong {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 .rover-card-head span,
 .rover-card-specs span {
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
 }
 
@@ -997,17 +1039,17 @@ select {
 }
 
 .profile-name {
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: var(--track-normal);
   text-transform: uppercase;
 }
 
 .profile-id {
   color: rgba(139, 148, 166, 0.54);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1023,7 +1065,7 @@ select {
 .map-switch button {
   min-height: 42px;
   border-radius: var(--radius);
-  letter-spacing: 0.08em;
+  letter-spacing: var(--track-label);
 }
 
 .coord-chip {
@@ -1032,7 +1074,7 @@ select {
   border: 1px solid rgba(29, 36, 50, 0.34);
   color: rgba(139, 148, 166, 0.82);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 700;
   cursor: pointer;
 }
@@ -1063,16 +1105,16 @@ select {
   display: block;
   margin-bottom: 5px;
   color: rgba(139, 148, 166, 0.48);
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .coord-value {
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-tight);
 }
 
 .slider-stack {
@@ -1097,8 +1139,8 @@ select {
 .slider-name,
 .slider-value {
   font-family: var(--font-data);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
 }
 
@@ -1122,7 +1164,7 @@ select {
   background: rgba(147, 0, 10, 0.18);
   border: 1px solid rgba(240, 154, 74, 0.22);
   color: var(--coral-text);
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.5;
 }
 
@@ -1171,23 +1213,23 @@ select {
 .toast-title {
   color: var(--coral-text);
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 .toast-message {
   margin: 0;
   color: rgba(240, 233, 239, 0.88);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   line-height: 1.55;
 }
 
 .toast-detail {
   color: rgba(139, 148, 166, 0.68);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.05em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
   line-height: 1.45;
 }
 
@@ -1197,8 +1239,8 @@ select {
   border: none;
   color: rgba(139, 148, 166, 0.74);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
   cursor: pointer;
 }
@@ -1336,7 +1378,7 @@ select {
 
 .route-control-inline .section-note {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .route-control-inline .coord-chip-grid {
@@ -1345,7 +1387,7 @@ select {
 
 .route-control-inline .coord-chip {
   min-height: 36px;
-  font-size: 10px;
+  font-size: var(--fs-micro);
 }
 
 .route-control-actions {
@@ -1358,7 +1400,7 @@ select {
 .route-control-actions .ghost-btn,
 .route-control-actions .primary-btn {
   min-height: 36px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   padding: 0 12px;
 }
 
@@ -1386,15 +1428,15 @@ select {
 
 .map-data-label {
   color: rgba(139, 148, 166, 0.48);
-  font-size: 10px;
-  letter-spacing: 0.18em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .map-data-value {
   color: var(--text);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .map-status-tag {
@@ -1403,8 +1445,8 @@ select {
   gap: 8px;
   color: var(--primary-container);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1426,7 +1468,7 @@ select {
   color: rgba(139, 148, 166, 0.72);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 700;
 }
 
@@ -1448,8 +1490,8 @@ select {
   display: block;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 13px;
-  letter-spacing: 0.02em;
+  font-size: var(--fs-strong);
+  letter-spacing: var(--track-tight);
 }
 
 .telemetry-header {
@@ -1497,16 +1539,16 @@ select {
 
 .telemetry-label {
   color: rgba(139, 148, 166, 0.48);
-  font-size: 9px;
-  letter-spacing: 0.18em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .telemetry-value {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: currentColor;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 .battery-card,
@@ -1531,8 +1573,8 @@ select {
 
 .card-meta {
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -1576,7 +1618,7 @@ select {
 
 .battery-copy strong {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: var(--fs-hero);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -1584,8 +1626,8 @@ select {
 .battery-copy span {
   color: rgba(139, 148, 166, 0.48);
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1607,9 +1649,9 @@ select {
 }
 
 .risk-state {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1638,22 +1680,22 @@ select {
 .risk-count-card span {
   display: block;
   color: rgba(139, 148, 166, 0.48);
-  font-size: 9px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
 .risk-count-card strong {
   display: block;
   margin-top: 6px;
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
 }
 
 .waypoint-meta {
   color: rgba(139, 148, 166, 0.52);
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1674,8 +1716,8 @@ select {
   display: block;
   color: rgba(139, 148, 166, 0.48);
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1684,7 +1726,7 @@ select {
   margin-top: 6px;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: var(--fs-value);
   font-weight: 600;
 }
 
@@ -1713,24 +1755,24 @@ select {
 }
 
 .waypoint-index {
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
 .waypoint-detail {
   color: rgba(139, 148, 166, 0.66);
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .waypoint-status {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1851,8 +1893,8 @@ select {
 
   .landing-brand-mark,
   .loading-brand {
-    font-size: 17px;
-    letter-spacing: 0.24em;
+    font-size: var(--fs-title);
+    letter-spacing: var(--track-hero);
   }
 
   .landing-brand-sub,
@@ -1860,8 +1902,8 @@ select {
   .landing-hint,
   .loading-copy,
   .loading-percent {
-    font-size: 9px;
-    letter-spacing: 0.14em;
+    font-size: var(--fs-micro);
+    letter-spacing: var(--track-caps);
   }
 
   .landing-copy h1 {
@@ -1871,7 +1913,7 @@ select {
   .landing-description {
     margin-top: 18px;
     max-width: 100%;
-    font-size: 13.5px;
+    font-size: var(--fs-strong);
     line-height: 1.6;
   }
 
@@ -1903,8 +1945,8 @@ select {
   }
 
   .brand-mark {
-    font-size: 16px;
-    letter-spacing: 0.22em;
+    font-size: var(--fs-value);
+    letter-spacing: var(--track-caps);
   }
 
   .rover-card-head,
@@ -2004,8 +2046,8 @@ select {
   align-items: center;
   justify-content: center;
   color: rgba(199, 205, 219, 0.72);
-  font-size: 0.85rem;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-strong);
+  letter-spacing: var(--track-normal);
   pointer-events: none;
 }
 
@@ -2032,9 +2074,9 @@ select {
   gap: 6px;
   color: rgba(139, 148, 166, 0.82);
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
 }
 
 .terrain3d-controls input[type='range'] {
@@ -2073,7 +2115,7 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   color: rgba(199, 205, 219, 0.9);
   cursor: pointer;
 }
@@ -2084,7 +2126,7 @@ select {
 }
 
 .terrain3d-note {
-  font-size: 0.68rem;
+  font-size: var(--fs-small);
   line-height: 1.35;
   color: rgba(199, 205, 219, 0.6);
 }
@@ -2104,7 +2146,7 @@ select {
   margin: 0;
   color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   opacity: 0.72;
 }
@@ -2122,9 +2164,9 @@ select {
   gap: 4px 6px;
   color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
 }
 
@@ -2137,8 +2179,8 @@ select {
   border-radius: var(--radius);
   color: var(--text);
   font-family: var(--font-data);
-  font-size: 13px;
-  letter-spacing: 0.02em;
+  font-size: var(--fs-strong);
+  letter-spacing: var(--track-tight);
 }
 
 .payload-inputs input:focus-visible {
@@ -2172,9 +2214,9 @@ select {
 .payload-readout strong {
   color: var(--umbra);
   font-family: var(--font-data);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 /* ── LUNAPATH MISSION CONTROL WORKSTATION DESIGN SYSTEM ────────────── */
@@ -2228,9 +2270,9 @@ select {
   color: var(--text);
   cursor: pointer;
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 600;
-  letter-spacing: 0.28em;
+  letter-spacing: var(--track-hero);
 }
 
 /* The segmented control. The active half is the only filled surface in the
@@ -2249,9 +2291,9 @@ select {
   color: var(--text-3);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 400;
-  letter-spacing: 0.14em;
+  letter-spacing: var(--track-caps);
   transition: background 140ms ease, color 140ms ease;
 }
 
@@ -2273,8 +2315,8 @@ select {
 .lp-route-required {
   color: var(--text-dim-2);
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.14em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   white-space: nowrap;
 }
 
@@ -2283,8 +2325,8 @@ select {
   align-items: center;
   gap: 24px;
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.13em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .lp-topbar-meta {
@@ -2334,8 +2376,8 @@ select {
   color: var(--text-dim-2);
   cursor: pointer;
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.13em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   transition: color 140ms ease, border-color 140ms ease;
 }
 
@@ -2353,9 +2395,9 @@ select {
 .lp-meta-label {
   color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 500;
-  letter-spacing: 0.2em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -2399,7 +2441,7 @@ select {
   border: none;
   color: var(--text-muted);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 5px 12px;
   border-radius: var(--radius);
@@ -2437,20 +2479,20 @@ select {
 
 .lp-layer-label-hint {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
-  letter-spacing: 0.1em;
+  letter-spacing: var(--track-caps);
 }
 
 .lp-layer-current-name {
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-2);
 }
 
 .lp-dropdown-chevron {
   color: var(--accent-lavender);
-  font-size: 12px;
+  font-size: var(--fs-body);
   margin-left: 2px;
 }
 
@@ -2477,9 +2519,9 @@ select {
 
 .lp-layer-group-header {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--accent-lavender);
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   padding: 4px 8px;
   border-bottom: 1px solid rgba(199, 205, 219, 0.05);
@@ -2510,21 +2552,21 @@ select {
 
 .lp-layer-item-name {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text);
 }
 
 .lp-layer-item-desc {
   display: block;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
   margin-top: 2px;
 }
 
 .lp-check-mark {
   color: var(--accent-lavender);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 700;
 }
 
@@ -2579,21 +2621,21 @@ select {
 
 .lp-solving-kicker {
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   color: var(--accent-cyan);
 }
 
 .lp-solving-title {
   margin: 2px 0 0;
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 700;
   color: var(--text);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-solving-detail {
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   color: var(--text-muted);
   margin: 0 0 14px;
@@ -2607,7 +2649,7 @@ select {
 
 .lp-solving-tag {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   padding: 3px 8px;
   background: rgba(199, 205, 219, 0.05);
   border: 1px solid var(--border-line);
@@ -2651,7 +2693,7 @@ select {
 }
 
 .lp-section-explainer {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: var(--text-dim-2);
   margin: 0;
@@ -2662,7 +2704,7 @@ select {
   border: none;
   color: var(--accent-lavender);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   cursor: pointer;
   padding: 2px 6px;
@@ -2699,19 +2741,19 @@ select {
   align-items: center;
   justify-content: center;
   color: var(--accent-lavender);
-  font-size: 14px;
+  font-size: var(--fs-strong);
 }
 
 .lp-rover-card-name {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-strong);
   font-weight: 700;
   color: var(--text);
 }
 
 .lp-rover-model-code {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -2737,7 +2779,7 @@ select {
 .lp-spec-label,
 .lp-mono-label {
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 400;
   color: var(--text-muted-2);
   text-transform: none;
@@ -2749,7 +2791,7 @@ select {
 .lp-spec-val,
 .lp-mono-val {
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 400;
   color: var(--text);
   text-align: right;
@@ -2767,23 +2809,34 @@ select {
   border-radius: var(--radius);
 }
 
+/* Label over value, not label beside value. Side by side, "MISSION PROFILE"
+   and a profile name do not fit one 250px rail line at 11px: the caption
+   wrapped to "MISSION / PROFILE", and truncating the name instead traded a
+   layout bug for an information one -- "Balanced Recon" became "Balanced R…".
+   Stacking is the same shape the KPI tiles already use, and both read whole. */
 .lp-profile-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.lp-profile-caption,
+.lp-profile-active-tag {
+  white-space: nowrap;
 }
 
 .lp-profile-caption {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
 }
 
 .lp-profile-active-tag {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-2);
 }
@@ -2808,7 +2861,7 @@ select {
   border: 1px solid var(--border-line);
   background: rgba(16, 22, 36, 0.7);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 500;
   cursor: pointer;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
@@ -2851,24 +2904,24 @@ select {
 
 .lp-constraint-label {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-constraint-value {
   font-family: var(--font-data);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   color: var(--text-2);
   font-weight: 600;
 }
 
 .lp-constraint-badge {
   font-family: var(--font-data);
-  font-size: 8px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
   padding: 2px 5px;
   border-radius: var(--radius);
   width: fit-content;
@@ -2909,14 +2962,14 @@ select {
 }
 
 .lp-slider-label {
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 500;
   color: var(--text-2);
 }
 
 .lp-slider-number {
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--accent-lavender);
   font-weight: 600;
 }
@@ -2960,14 +3013,14 @@ select {
   border-top: 1px solid var(--line);
   border-radius: 0;
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: var(--fs-small);
 }
 
 .lp-seq-num {
   flex: none;
   color: var(--text-dimmest);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 400;
 }
 
@@ -2995,8 +3048,8 @@ select {
   color: var(--text-2);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 11.5px;
-  letter-spacing: 0.06em;
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-label);
   transition: border-color 140ms ease, color 140ms ease;
 }
 
@@ -3021,21 +3074,21 @@ select {
   border-color: rgba(95, 227, 176, 0.4);
   color: var(--mint-text);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .lp-pick-btn.is-set-goal {
   border-color: rgba(255, 122, 92, 0.4);
   color: var(--coral-text);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .lp-seq-status {
   flex: none;
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   padding: 0;
   background: none;
   color: var(--text-dim-2);
@@ -3081,7 +3134,7 @@ select {
 
 .lp-modal-title {
   margin: 2px 0 0;
-  font-size: 20px;
+  font-size: var(--fs-display);
   font-weight: 700;
   color: var(--text);
 }
@@ -3090,7 +3143,7 @@ select {
   background: transparent;
   border: none;
   color: var(--text-dim-2);
-  font-size: 18px;
+  font-size: var(--fs-title);
   cursor: pointer;
   padding: 4px;
 }
@@ -3100,7 +3153,7 @@ select {
 }
 
 .lp-modal-subtitle {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--text-muted);
   margin: 0 0 20px;
 }
@@ -3140,7 +3193,7 @@ select {
 
 .lp-agency-badge {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--accent-lavender);
   background: rgba(179, 165, 255, 0.12);
   padding: 2px 6px;
@@ -3149,7 +3202,7 @@ select {
 
 .lp-active-pill {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--accent-mint);
   font-weight: 700;
   background: rgba(95, 227, 176, 0.15);
@@ -3166,19 +3219,19 @@ select {
 
 .lp-rover-name {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 700;
   color: var(--text);
 }
 
 .lp-rover-id-code {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
 .lp-rover-desc {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.4;
   color: var(--text-muted);
   margin: 0 0 12px;
@@ -3209,7 +3262,7 @@ select {
   border: 1px solid rgba(179, 165, 255, 0.25);
   color: var(--accent-lavender);
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   cursor: pointer;
   transition: all 140ms ease;
@@ -3229,7 +3282,7 @@ select {
 /* Mission Context (Right Rail Plan Mode) */
 .lp-live-badge {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   padding: 2px 6px;
   border-radius: var(--radius);
   background: rgba(95, 227, 176, 0.15);
@@ -3238,7 +3291,7 @@ select {
 }
 
 .lp-panel-desc-text {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: var(--text-muted);
   margin: 0;
@@ -3258,14 +3311,14 @@ select {
 
 .lp-layer-card-tag {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--accent-lavender);
-  letter-spacing: 0.1em;
+  letter-spacing: var(--track-caps);
   margin-bottom: 2px;
 }
 
 .lp-layer-card-title {
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text);
 }
@@ -3285,7 +3338,7 @@ select {
 }
 
 .lp-no-route-icon {
-  font-size: 24px;
+  font-size: var(--fs-display);
   color: var(--accent-lavender);
   opacity: 0.7;
   margin-bottom: 8px;
@@ -3293,14 +3346,19 @@ select {
 
 .lp-no-route-title {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 700;
   color: var(--text-2);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
+  /* Without this the heading broke as "NO ROUTE ANALYSIS / YET", leaving one
+     word orphaned on its own line. `balance` lets the browser even out the
+     lines instead of filling the first one greedily; where it is unsupported
+     the heading simply wraps as before. */
+  text-wrap: balance;
 }
 
 .lp-no-route-text {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: var(--text-dim-2);
   margin: 0 0 14px;
@@ -3317,7 +3375,7 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-dim-2);
   background: rgba(5, 7, 13, 0.4);
   padding: 6px 8px;
@@ -3338,7 +3396,7 @@ select {
   background: rgba(179, 165, 255, 0.12);
   color: var(--accent-lavender);
   font-weight: 700;
-  font-size: 9px;
+  font-size: var(--fs-micro);
   padding: 2px 6px;
   border-radius: var(--radius);
 }
@@ -3355,7 +3413,7 @@ select {
   border-radius: var(--radius);
   color: var(--text);
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   cursor: pointer;
   transition: all 160ms ease;
@@ -3381,7 +3439,7 @@ select {
 
 .lp-code-tag {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--accent-lavender);
 }
 
@@ -3389,7 +3447,7 @@ select {
   display: flex;
   gap: 8px;
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3432,13 +3490,13 @@ select {
 
 .lp-point-type {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
 .lp-point-coord {
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--text-2);
 }
 
@@ -3455,7 +3513,7 @@ select {
 .lp-readonly-row {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .lp-readonly-name {
@@ -3478,12 +3536,12 @@ select {
 
 .lp-overall-risk-badge {
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   padding: 2px 8px;
   border-radius: var(--radius);
   border: 1px solid;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--track-label);
 }
 
 .lp-decision-kpi-grid {
@@ -3504,21 +3562,21 @@ select {
 
 .lp-kpi-label {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-kpi-val {
   font-family: var(--font-data);
-  font-size: 14px;
+  font-size: var(--fs-strong);
   color: var(--text);
   font-weight: 700;
 }
 
 .lp-kpi-sub {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3558,7 +3616,7 @@ select {
   display: flex;
   justify-content: space-between;
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3592,7 +3650,7 @@ select {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-muted);
   position: relative;
 }
@@ -3604,7 +3662,7 @@ select {
   padding: 6px 24px 6px 8px;
   color: var(--text);
   font-family: var(--font-data);
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 
 .lp-unit-tag {
@@ -3612,7 +3670,7 @@ select {
   right: 8px;
   bottom: 7px;
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3679,13 +3737,13 @@ select {
 
 .lp-milestone-title {
   font-family: var(--font-data);
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text);
 }
 
 .lp-milestone-coord {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -3693,7 +3751,7 @@ select {
   display: flex;
   gap: 8px;
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-muted);
 }
 
@@ -3718,8 +3776,8 @@ select {
   border-radius: var(--radius);
   color: var(--text-2);
   font-family: var(--font-body);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-label);
   padding: 5px 11px;
   cursor: pointer;
   white-space: nowrap;
@@ -3799,14 +3857,14 @@ select {
 
 .lp-stat-name {
   font-family: var(--font-data);
-  font-size: 9px;
+  font-size: var(--fs-micro);
   color: var(--text-dimmest);
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track-caps);
 }
 
 .lp-stat-val {
   font-family: var(--font-data);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-2);
   font-weight: 400;
   white-space: nowrap;
@@ -3936,7 +3994,7 @@ select {
 
 .lp-systems-title {
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: var(--fs-display);
   font-weight: 800;
   color: var(--text);
   margin: 0;
@@ -3953,7 +4011,7 @@ select {
   border: 1px solid rgba(199, 205, 219, 0.12);
   border-radius: var(--radius);
   color: var(--text-2);
-  font-size: 14px;
+  font-size: var(--fs-strong);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -3965,7 +4023,7 @@ select {
 
 .lp-systems-subtitle {
   font-family: var(--font-body);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-muted);
   margin: 12px 0 20px;
@@ -4014,7 +4072,7 @@ select {
   border: 1px solid transparent;
   color: var(--text-muted);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 6px 2px;
   border-radius: var(--radius);
@@ -4044,7 +4102,7 @@ select {
 
 .lp-seq-sub {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
   margin-top: 1px;
 }
@@ -4055,7 +4113,7 @@ select {
   border: 1px solid var(--line-button);
   color: var(--text-muted);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 6px 10px;
   border-radius: var(--radius);
@@ -4097,7 +4155,10 @@ select {
 
 .lp-panel-action-row {
   display: grid;
-  grid-template-columns: 68px 1fr;
+  /* Content-sized, not a fixed 68px: the Clear button's label has to fit at
+     whatever the type scale says, and a hard column width silently clipped it
+     when the scale moved. */
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
   margin-top: 14px;
 }
@@ -4107,7 +4168,7 @@ select {
   border: 1px solid var(--line-button);
   color: var(--text-muted);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 10px 10px;
   border-radius: var(--radius);
@@ -4131,9 +4192,9 @@ select {
   border: 0;
   color: #0a0c14;
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
   padding: 10px 12px;
   border-radius: var(--radius);
   cursor: pointer;
@@ -4191,7 +4252,7 @@ select {
 
 .lp-drawer-title {
   margin: 2px 0 0;
-  font-size: 20px;
+  font-size: var(--fs-display);
   font-weight: 700;
   color: var(--text);
 }
@@ -4200,7 +4261,7 @@ select {
   background: transparent;
   border: 1px solid rgba(199, 205, 219, 0.1);
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--fs-strong);
   cursor: pointer;
   padding: 6px 10px;
   border-radius: var(--radius);
@@ -4213,7 +4274,7 @@ select {
 }
 
 .lp-drawer-subtitle {
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   color: var(--text-muted);
   margin: 0 0 16px;
@@ -4260,7 +4321,7 @@ select {
 
 .lp-highlight-badge {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--cyan-text);
   background: rgba(14, 165, 233, 0.12);
   padding: 2px 6px;
@@ -4278,7 +4339,7 @@ select {
 
 .lp-default-weights-note {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim-2);
 }
 
@@ -4287,7 +4348,7 @@ select {
   border: 1px solid rgba(179, 165, 255, 0.3);
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   padding: 7px 12px;
   border-radius: var(--radius);
@@ -4330,9 +4391,9 @@ select {
 
 .lp-hud-title {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
   color: var(--text-muted);
 }
 
@@ -4345,7 +4406,7 @@ select {
   background: transparent;
   border: 1px solid rgba(199, 205, 219, 0.1);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   line-height: 1;
   padding: 2px 5px;
   border-radius: var(--radius);
@@ -4378,13 +4439,13 @@ select {
 }
 
 .lp-hud-min-dot {
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .lp-hud-min-coords,
 .lp-hud-min-alt {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   color: var(--text-2);
 }
@@ -4394,7 +4455,7 @@ select {
 }
 
 .lp-hud-min-expand-icon {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-muted);
 }
 
@@ -4409,7 +4470,7 @@ select {
 
 .lp-hud-pill {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 600;
   padding: 2px 6px;
   border-radius: var(--radius);
@@ -4432,7 +4493,7 @@ select {
   border: 1px solid rgba(199, 205, 219, 0.12);
   color: var(--text-muted);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   padding: 5px 10px;
   border-radius: var(--radius);
@@ -4455,7 +4516,7 @@ select {
 }
 
 .lp-dock-icon {
-  font-size: 10px;
+  font-size: var(--fs-micro);
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -4489,19 +4550,19 @@ select {
 
 .lp-fleet-phase-badge {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 700;
   color: var(--cyan);
   background: rgba(79, 216, 240, 0.12);
   border: 1px solid rgba(79, 216, 240, 0.35);
   padding: 3px 10px;
   border-radius: var(--radius);
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-fleet-site-badge {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   color: var(--mint);
   background: rgba(95, 227, 176, 0.1);
@@ -4512,7 +4573,7 @@ select {
 
 .lp-fleet-headline {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: var(--fs-hero);
   font-weight: 800;
   color: var(--text);
   letter-spacing: -0.01em;
@@ -4521,7 +4582,7 @@ select {
 
 .lp-fleet-subhead {
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: var(--fs-strong);
   line-height: 1.6;
   color: var(--text-muted);
   margin: 0;
@@ -4617,9 +4678,9 @@ select {
 
 .lp-card-agency {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-normal);
   padding: 3px 8px;
   border-radius: var(--radius);
   background: rgba(5, 7, 13, 0.85);
@@ -4628,7 +4689,7 @@ select {
 
 .lp-card-active-pill {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   color: var(--mint);
   background: rgba(95, 227, 176, 0.2);
@@ -4650,7 +4711,7 @@ select {
 
 .lp-card-highlight {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-2);
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
@@ -4673,7 +4734,7 @@ select {
 
 .lp-card-name {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
   color: var(--text);
   margin: 0;
@@ -4681,13 +4742,13 @@ select {
 
 .lp-card-code {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   color: var(--cyan-text);
 }
 
 .lp-card-description {
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   color: var(--text-muted);
   margin: 0 0 12px;
@@ -4714,15 +4775,15 @@ select {
 
 .lp-card-spec-k {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
+  font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-dim-2);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
 }
 
 .lp-card-spec-v {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 700;
   color: var(--text);
 }
@@ -4738,16 +4799,16 @@ select {
 
 .lp-card-payload-title {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   color: var(--cyan);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-label);
   display: block;
   margin-bottom: 3px;
 }
 
 .lp-card-payload-text {
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: var(--text-2);
   margin: 0;
@@ -4765,7 +4826,7 @@ select {
   border: 1px solid rgba(199, 205, 219, 0.12);
   color: var(--text-2);
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 600;
   padding: 9px 12px;
   border-radius: var(--radius);
@@ -4812,7 +4873,7 @@ select {
 }
 
 .lp-dock-hint {
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-dim-2);
   font-family: 'IBM Plex Mono', monospace;
 }
@@ -4848,14 +4909,14 @@ select {
 }
 
 .lp-dock-slider-label {
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
   color: var(--text-2);
 }
 
 .lp-dock-slider-val {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 700;
   color: var(--cyan);
 }
@@ -4877,7 +4938,7 @@ select {
 
 .lp-dock-rover-name {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 700;
   color: var(--mint);
 }
@@ -4887,9 +4948,9 @@ select {
   border: 1px solid rgba(199, 205, 219, 0.25);
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-tight);
   padding: 13px 26px;
   border-radius: var(--radius);
   cursor: pointer;
@@ -4914,7 +4975,7 @@ select {
 }
 
 .lp-deploy-arrow {
-  font-size: 17px;
+  font-size: var(--fs-title);
   transition: transform 0.2s ease;
 }
 
@@ -5024,7 +5085,7 @@ select {
 .lp-scale-copy {
   color: var(--text-muted-2);
   font-family: var(--font-data);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   white-space: nowrap;
 }
 
@@ -5044,8 +5105,8 @@ select {
 .lp-legend-label {
   color: var(--text-dimmest);
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.14em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   flex: none;
 }
 
@@ -5054,7 +5115,7 @@ select {
   align-items: center;
   gap: 6px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   white-space: nowrap;
   flex: none;
 }

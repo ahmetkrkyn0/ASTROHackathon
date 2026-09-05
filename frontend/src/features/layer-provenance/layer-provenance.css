@@ -14,15 +14,15 @@
 }
 
 .lp-provenance-name {
-  font-size: 12px;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-body);
+  letter-spacing: var(--track-normal);
   color: var(--text-2);
 }
 
 .lp-provenance-badge {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.09em;
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
   padding: 3px 8px;
   border-radius: var(--radius);
@@ -40,7 +40,7 @@
 .lp-provenance-why,
 .lp-provenance-desc {
   margin: 0 0 8px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.5;
   color: var(--text-muted);
 }
@@ -54,18 +54,18 @@
 .lp-provenance-facts div { display: flex; flex-direction: column; gap: 2px; }
 
 .lp-provenance-facts dt {
-  font-size: 9px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: var(--text-dim-2);
 }
 
 .lp-provenance-facts dd {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
-.lp-provenance-note { margin: 0; font-size: 11px; color: var(--text-muted); }
+.lp-provenance-note { margin: 0; font-size: var(--fs-small); color: var(--text-muted); }
 .lp-provenance-warn { color: var(--risk-med); }

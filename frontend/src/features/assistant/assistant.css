@@ -167,7 +167,7 @@
 }
 
 .chat-identity .panel-title {
-  font-size: 15px;
+  font-size: var(--fs-value);
 }
 
 .chat-header-actions {
@@ -182,8 +182,8 @@
   align-items: center;
   gap: 5px;
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: rgba(139, 148, 166, 0.55);
   white-space: nowrap;
@@ -204,7 +204,7 @@
   background: rgba(8, 11, 18, 0.7);
   color: rgba(139, 148, 166, 0.8);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   cursor: pointer;
   white-space: nowrap;
   transition: border-color 0.16s ease, color 0.16s ease;
@@ -231,8 +231,8 @@
 
 .chat-level-label {
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.11em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: rgba(139, 148, 166, 0.5);
 }
@@ -257,8 +257,8 @@
   background: transparent;
   color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   cursor: pointer;
   transition: background 0.14s ease, color 0.14s ease;
 }
@@ -313,14 +313,14 @@
 .chat-intro-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: var(--fs-strong);
   font-weight: 600;
   color: rgba(199, 205, 219, 0.92);
 }
 
 .chat-intro-copy {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: rgba(139, 148, 166, 0.62);
 }
@@ -339,7 +339,7 @@
   background: none;
   color: var(--text-3);
   font-family: var(--font-body);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.14s ease, color 0.14s ease;
@@ -358,7 +358,7 @@
 .chat-intro-note,
 .chat-intro-blocked {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-small);
   line-height: 1.5;
   color: rgba(139, 148, 166, 0.55);
 }
@@ -406,8 +406,8 @@
 
 .chat-role {
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: rgba(139, 148, 166, 0.52);
 }
@@ -417,8 +417,8 @@
   border: 0;
   background: none;
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: var(--text-dim-2);
 }
@@ -426,7 +426,7 @@
 .chat-text {
   margin: 0;
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   line-height: 1.6;
   color: rgba(199, 205, 219, 0.92);
   /* Plain text, wrapped honestly: no markdown renderer is loaded, so
@@ -436,13 +436,13 @@
 }
 
 .chat-text.is-secondary {
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: rgba(199, 205, 219, 0.74);
 }
 
 .chat-error-title {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.5;
   color: rgba(199, 205, 219, 0.92);
@@ -461,7 +461,7 @@
 
 .chat-notice-title {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.45;
   color: rgba(240, 154, 74, 0.95);
@@ -469,7 +469,7 @@
 
 .chat-notice-copy {
   margin: 4px 0 0;
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.5;
   color: rgba(199, 205, 219, 0.78);
 }
@@ -496,7 +496,7 @@
   border-left-width: 3px;
   background: rgba(20, 21, 30, 0.6);
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.5;
 }
 
@@ -504,8 +504,8 @@
   flex-shrink: 0;
   padding-top: 1px;
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
 }
 
@@ -543,8 +543,8 @@
 
 .chat-block-title {
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.11em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: rgba(139, 148, 166, 0.48);
 }
@@ -559,7 +559,7 @@
   margin: 0;
   padding-left: 16px;
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.5;
   color: rgba(199, 205, 219, 0.72);
 }
@@ -582,7 +582,7 @@
 
 .chat-evidence-label {
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.45;
   color: rgba(199, 205, 219, 0.8);
 }
@@ -592,8 +592,8 @@
   border-radius: var(--radius);
   border: 1px solid rgba(29, 36, 50, 0.4);
   font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.08em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
   text-transform: uppercase;
   color: rgba(139, 148, 166, 0.7);
   white-space: nowrap;
@@ -622,14 +622,14 @@
   align-items: center;
   gap: 7px;
   font-family: var(--font-body);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   color: rgba(179, 165, 255, 0.88);
 }
 
 .chat-stage-note {
   margin: 0;
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: rgba(139, 148, 166, 0.55);
 }
 
@@ -713,7 +713,7 @@
   background: rgba(8, 11, 18, 0.72);
   color: rgba(199, 205, 219, 0.92);
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   line-height: 1.5;
 }
 
@@ -740,7 +740,7 @@
 
 .chat-hint {
   font-family: var(--font-body);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: rgba(139, 148, 166, 0.5);
 }
 
@@ -751,7 +751,7 @@
   background: rgba(50, 43, 87, 0.5);
   color: rgba(199, 205, 219, 0.95);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-body);
   cursor: pointer;
   transition: background 0.16s ease;
 }
@@ -821,9 +821,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
   text-transform: uppercase;
   color: var(--chat-muted, var(--text-muted));
 }
@@ -844,9 +844,9 @@
    Scoped to .chat-panel: .panel-title and .panel-kicker are shared with the
    rail panels, which want their own sizes. */
 .chat-panel .panel-title {
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 500;
-  letter-spacing: 0.2em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -855,8 +855,8 @@
   margin: 5px 0 0;
   color: var(--text-dim-2);
   font-family: var(--font-data);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .chat-identity {
@@ -874,7 +874,7 @@
 
 .chat-intro-copy,
 .chat-intro-title {
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   line-height: 1.65;
   color: var(--text-3);
 }

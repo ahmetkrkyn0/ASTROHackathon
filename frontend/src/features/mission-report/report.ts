@@ -36,40 +36,40 @@ export function decideVerdict(plan: PlanResponse): VerdictResult {
 
   if (s.stranded) {
     blocking.push(
-      `Rover ${s.stranded_at_step ?? '?'}. adımda enerjisiz kaldı — rota tamamlanamıyor.`,
+      `Rover ran out of energy at step ${s.stranded_at_step ?? '?'} — the route cannot be completed.`,
     )
   }
   if (plan.execution?.truncated) {
     blocking.push(
-      `Rota kesildi: ${plan.execution.executable_nodes}/${plan.execution.planned_nodes} düğüm sürülebilir` +
+      `Route truncated: ${plan.execution.executable_nodes}/${plan.execution.planned_nodes} nodes are drivable` +
         (plan.execution.reason ? ` (${plan.execution.reason}).` : '.'),
     )
   }
   if (s.shadow_limit_exceeded) {
     blocking.push(
-      `Kesintisiz gölge ${s.max_continuous_shadow_h.toFixed(1)} s, rover limiti ${s.shadow_limit_h?.toFixed(1)} s.`,
+      `Continuous shadow ${s.max_continuous_shadow_h.toFixed(1)} h against a rover limit of ${s.shadow_limit_h?.toFixed(1)} h.`,
     )
   }
   if (s.critical_steps_count > 0) {
-    blocking.push(`${s.critical_steps_count} adım CRITICAL risk seviyesinde.`)
+    blocking.push(`${s.critical_steps_count} steps at CRITICAL risk.`)
   }
 
   if (s.high_or_above_steps_count > 0) {
-    warnings.push(`${s.high_or_above_steps_count} adım HIGH veya üzeri riskte.`)
+    warnings.push(`${s.high_or_above_steps_count} steps at HIGH risk or above.`)
   }
   if (s.min_battery_pct < BATTERY_WATCH_PCT) {
-    warnings.push(`Pil en düşük %${s.min_battery_pct.toFixed(1)} seviyesine indi.`)
+    warnings.push(`Battery fell to ${s.min_battery_pct.toFixed(1)}% at its lowest.`)
   }
   if (s.peak_power_exceeded_steps > 0) {
-    warnings.push(`${s.peak_power_exceeded_steps} adımda tepe güç bütçesi aşıldı.`)
+    warnings.push(`Peak power budget exceeded on ${s.peak_power_exceeded_steps} steps.`)
   }
   if (s.total_recharges > 0) {
-    warnings.push(`Rota ${s.total_recharges} şarj molası gerektiriyor.`)
+    warnings.push(`The route needs ${s.total_recharges} recharge stops.`)
   }
 
   if (blocking.length > 0) return { verdict: 'NO-GO', reasons: [...blocking, ...warnings] }
   if (warnings.length > 0) return { verdict: 'GO-WITH-RISK', reasons: warnings }
-  return { verdict: 'GO', reasons: ['Sürüş kısıtlarının hiçbiri ihlal edilmedi.'] }
+  return { verdict: 'GO', reasons: ['No driving constraint was violated.'] }
 }
 
 export const VERDICT_COLOR: Record<Verdict, string> = {
@@ -200,15 +200,15 @@ export function milestones(waypoints: Waypoint[]): Milestone[] {
   // Endpoints are claimed FIRST, and the order is the whole fix: on a route
   // that drains monotonically -- which is most of them -- the lowest battery
   // IS the last waypoint, and letting the extreme claim that step left the
-  // table with no row called HEDEF at all.
-  add(0, 'BAŞLANGIÇ')
-  add(waypoints.length - 1, 'HEDEF')
+  // table with no row called GOAL at all.
+  add(0, 'START')
+  add(waypoints.length - 1, 'GOAL')
 
   if (waypoints.length > 8) {
     for (const [frac, label] of [
-      [0.25, '%25'],
-      [0.5, '%50'],
-      [0.75, '%75'],
+      [0.25, '25%'],
+      [0.5, '50%'],
+      [0.75, '75%'],
     ] as const) {
       add(Math.floor(waypoints.length * frac), label)
     }
@@ -220,8 +220,8 @@ export function milestones(waypoints: Waypoint[]): Milestone[] {
     if (wp.slope_deg > waypoints[steepest].slope_deg) steepest = i
     if (wp.battery_pct < waypoints[weakest].battery_pct) weakest = i
   })
-  add(steepest, 'EN DİK')
-  add(weakest, 'EN DÜŞÜK PİL')
+  add(steepest, 'STEEPEST')
+  add(weakest, 'LOWEST BATTERY')
 
   return [...picked.entries()]
     .sort((a, b) => a[0] - b[0])
