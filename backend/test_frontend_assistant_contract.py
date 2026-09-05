@@ -336,7 +336,14 @@ def test_the_three_levels_survive(label):
 
 def test_the_window_id_and_class_names_are_unchanged():
     assert "const CHAT_WINDOW_ID = 'analysis-assistant-window'" in INDEX
-    assert "`chat-window ${isOpen ? 'is-open' : ''}`" in INDEX
+    # Matched by shape rather than by the template's exact text. shell.css names
+    # `.chat-window` and `.is-open` as the published pair, and says so in its own
+    # comment; a third class beside them -- the drag state -- leaves that
+    # contract intact. Pinning the whole template made a legitimate addition
+    # read as a broken contract, which is the opposite of what this asserts.
+    window_class = re.search(r"className=\{`chat-window ([^`]*)`\}", INDEX)
+    assert window_class, "the chat window's className template was not found"
+    assert "isOpen ? 'is-open' : ''" in window_class.group(1)
     # shell.css moves the toast stack with a sibling selector keyed off both.
     assert ".chat-window.is-open ~ .toast-stack" in SHELL_CSS
 
