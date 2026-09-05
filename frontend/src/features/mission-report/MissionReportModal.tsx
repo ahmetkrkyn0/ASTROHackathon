@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { PlanResponse } from '../../api'
 import type { RouteStatistics } from '../../net/types'
 import { riskToHex } from '../../colormap'
@@ -178,7 +179,21 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
     { label: 'Route nodes', value: String(summary.waypoint_count) },
   ]
 
-  return (
+  /**
+   * Portalled to <body>, and the print stylesheet is why.
+   *
+   * Printing this report means hiding everything that is not it, which
+   * `report.css` does with `body > *:not(.lp-report-scrim)`. Rendered in the
+   * globalOverlay slot the scrim sits inside `#root > .app-shell`, so that
+   * selector matched `#root` and hid the report along with the cockpit: every
+   * "Save as PDF" produced a blank A4 page.
+   *
+   * The portal also takes the report out from under `.app-shell`, which is
+   * `height: 100vh; overflow: hidden` -- ancestors that would have cropped a
+   * ten-card report to a single page. On screen nothing moves: the scrim is
+   * `position: fixed; inset: 0`, which looks the same from either parent.
+   */
+  return createPortal(
     <div className="lp-report-scrim" role="presentation">
       <div
         className="lp-report-modal"
@@ -469,6 +484,7 @@ export const MissionReportModal: React.FC<Props> = ({ plan, payloadW, heaterW, o
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

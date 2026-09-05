@@ -567,6 +567,38 @@
     box-shadow: none;
     background: #fff;
     color: #111;
+
+    /* Retone the document by its tokens, not element by element.
+       Listing selectors only reaches what someone remembered to list, and it
+       reached none of the SVG: chart labels are drawn with fill="var(--text)"
+       and so were still painting near-white onto white paper. Redefining the
+       scale here catches every reference at once, in the charts and in the
+       markup alike.
+
+       Deliberately absent: --risk-*, --cyan and the rest of the semantic
+       palette. Those carry a reading rather than a rank, which is why the
+       rules below spend ink keeping them exact. */
+    --text: #111;
+    --text-2: #111;
+    --text-3: #333;
+    --text-muted: #555;
+    --text-muted-2: #555;
+    --text-dim: #555;
+    --text-dim-2: #555;
+    --text-dimmest: #666;
+    /* Grid and hairlines. #161b27 is a whisper on the console and a hard
+       black rule on paper. */
+    --line: #ddd;
+    --border-line: #ddd;
+  }
+
+  /* The unfilled part of a bar is the remainder, and on screen it is a dark
+     inset. Printed as-is it became a solid black block wider than the reading
+     it was meant to frame. */
+  .lp-hbar-track,
+  .lp-stacked-bar,
+  .lp-gauge-track {
+    background: #eee;
   }
 
   .lp-report-body {
@@ -628,8 +660,11 @@
 
   /* Colour that carries a reading survives the browser's ink-saving. */
   .lp-stacked-seg,
+  .lp-stacked-bar,
   .lp-hbar-fill,
+  .lp-hbar-track,
   .lp-gauge-fill,
+  .lp-gauge-track,
   .lp-legend-swatch,
   .lp-reason-dot,
   .lp-report-verdict,

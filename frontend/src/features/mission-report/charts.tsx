@@ -32,11 +32,22 @@ const TICK_SIZE = 11
 /** Threshold annotations sit at the same rung; they are labels, not readings. */
 const NOTE_SIZE = 11
 
-const AXIS_LINE = '#161b27'
-/** --text-dim-2. Written out because SVG's fill takes no CSS variable here;
-    it must be changed together with the token, and it clears WCAG AA (5.07:1
-    on --bg-card) at the 11px these labels are drawn at. */
-const AXIS_TEXT = '#7b8497'
+/**
+ * Axis furniture, through the tokens rather than copied out of them.
+ *
+ * These were written as literals -- '#161b27' and '#7b8497' -- on the belief
+ * that SVG's fill and stroke take no CSS variable. They do: every other
+ * colour in this file already arrives as var(--risk-high), var(--cyan) or
+ * var(--text), and the browser resolves all of them the same way.
+ *
+ * The copies were not merely redundant, they were unreachable. The report's
+ * print stylesheet re-colours the document by redefining these tokens, so a
+ * literal is a value no medium can retone: on paper the grid printed as a
+ * hard black rule and the tick labels came out at 3.76:1 on white. Through
+ * the token both follow the page they are drawn on.
+ */
+const AXIS_LINE = 'var(--line)'
+const AXIS_TEXT = 'var(--text-dim-2)'
 
 /**
  * How much ink an area fill is allowed.
