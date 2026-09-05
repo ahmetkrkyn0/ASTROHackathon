@@ -1,12 +1,11 @@
 import React from 'react'
-import type { PlanWeights, RoverEntry } from '../../api'
+import type { RoverEntry } from '../../api'
+import RoutePriorities from '../../features/mission-setup/RoutePriorities'
 
 interface FleetSelectionViewProps {
   rovers: RoverEntry[]
   selectedRover: RoverEntry | null
   onSelectRover: (rover: RoverEntry) => void
-  weights: PlanWeights
-  onWeightsChange: (weights: PlanWeights) => void
   onDeployToMap: () => void
 }
 
@@ -95,32 +94,12 @@ function getRoverMeta(id: string): RoverDetailMeta {
   return ROVER_META.lpr_1
 }
 
-const WEIGHT_CONTROLS: Array<{
-  key: keyof PlanWeights
-  label: string
-  desc: string
-}> = [
-  { key: 'w_slope', label: 'Slope Safety', desc: 'Avoids steep inclines, cliff faces, and high-tilt zones' },
-  { key: 'w_energy', label: 'Energy Optimization', desc: 'Minimizes Watt-hour electrical drain from rover batteries' },
-  { key: 'w_shadow', label: 'Shadow Exposure', desc: 'Avoids permanently shadowed, light-deprived cold traps' },
-  { key: 'w_thermal', label: 'Cryogenic Thermal Risk', desc: 'Steers away from severe -200°C thermal shock zones' },
-]
-
 export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
   rovers,
   selectedRover,
   onSelectRover,
-  weights,
-  onWeightsChange,
   onDeployToMap,
 }) => {
-  const handleWeightChange = (key: keyof PlanWeights, val: number) => {
-    onWeightsChange({
-      ...weights,
-      [key]: val,
-    })
-  }
-
   return (
     <div className="lp-fleet-view">
       {/* ── Top Header Banner ── */}
@@ -235,37 +214,21 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
         })}
       </div>
 
-      {/* ── Mission Parameters & Deployment Dock ── */}
+      {/* ── Mission Parameters & Deployment Dock ──
+          The rover is only half the decision; what the solver should optimise
+          for is the other half, and both are made here before the map opens.
+          RoutePriorities carries the presets, their constraints and the four
+          weights -- it reads the mission context directly, so nothing about
+          them passes through this component. */}
       <section className="lp-fleet-bottom-dock">
-        <div className="lp-dock-weights-col">
+        <div className="lp-dock-priorities-col">
           <div className="lp-dock-section-title">
-            <span className="lp-meta-label">ROUTE A* OPTIMIZATION WEIGHTS</span>
-            <span className="lp-dock-hint">Fine-tune cost heuristics for this rover's transit</span>
+            <span className="lp-meta-label">Route priorities</span>
+            <span className="lp-dock-hint">
+              What the A* solver optimises for on this rover's transit
+            </span>
           </div>
-
-          <div className="lp-dock-sliders-row">
-            {WEIGHT_CONTROLS.map(({ key, label, desc }) => {
-              const val = weights[key]
-              return (
-                <div key={key} className="lp-dock-slider-cell">
-                  <div className="lp-dock-slider-head">
-                    <span className="lp-dock-slider-label">{label}</span>
-                    <strong className="lp-dock-slider-val">{val.toFixed(2)}</strong>
-                  </div>
-                  <input
-                    type="range"
-                    className="lp-range-input"
-                    min={0}
-                    max={2}
-                    step={0.05}
-                    value={val}
-                    onChange={(e) => handleWeightChange(key, parseFloat(e.target.value))}
-                    title={desc}
-                  />
-                </div>
-              )
-            })}
-          </div>
+          <RoutePriorities />
         </div>
 
         {/* Big Deployment Action Button */}

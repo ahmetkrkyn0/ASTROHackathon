@@ -1,37 +1,22 @@
 import React, { useEffect, useRef } from 'react'
 import type { PlanWeights } from '../../api'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
-import type { ProfileConstraints } from '../../net/types'
-import { useMissionProfiles } from './useMissionProfiles'
 
-const WEIGHT_CONTROLS: Array<{
-  key: keyof PlanWeights
-  label: string
-  desc: string
-}> = [
-  { key: 'w_slope', label: 'Slope Safety', desc: 'Avoids steep inclines and cliff edges' },
-  { key: 'w_energy', label: 'Energy Use', desc: 'Minimizes battery kWh draw during transit' },
-  { key: 'w_shadow', label: 'Shadow Exposure', desc: 'Avoids permanently shadowed cold traps' },
-  { key: 'w_thermal', label: 'Thermal Risk', desc: 'Steers clear of extreme cryogenic zones' },
-]
-
-/** Display order + formatting for the four constraints a profile carries. */
-const CONSTRAINT_CONTROLS: Array<{
-  key: keyof ProfileConstraints
-  label: string
-  format: (v: number) => string
-}> = [
-  { key: 'max_slope_deg', label: 'Max Slope', format: (v) => `${v.toFixed(0)}°` },
-  { key: 'max_shadow_h', label: 'Max Shadow', format: (v) => `${v.toFixed(0)} h` },
-  { key: 'max_energy_wh', label: 'Energy Budget', format: (v) => `${v.toFixed(0)} Wh` },
-  { key: 'min_soc', label: 'Min SoC', format: (v) => `${(v * 100).toFixed(0)}%` },
+/**
+ * The four weights, in the order the hangar sets them and this panel reports
+ * them. Labels only: the controls live in RoutePriorities now.
+ */
+const WEIGHT_READOUT: Array<{ key: keyof PlanWeights; label: string }> = [
+  { key: 'w_slope', label: 'Slope Safety' },
+  { key: 'w_energy', label: 'Energy Use' },
+  { key: 'w_shadow', label: 'Shadow Exposure' },
+  { key: 'w_thermal', label: 'Thermal Risk' },
 ]
 
 export const MissionSetupPanel: React.FC = () => {
   const { rover: selectedRover, weights, start, goal, planResult, clickMode, isSolving } =
     useMission()
   const {
-    setWeights: onWeightsChange,
     setClickMode: onSetClickMode,
     planRoute: onPlanRoute,
     resetMission: onReset,
@@ -39,15 +24,6 @@ export const MissionSetupPanel: React.FC = () => {
     openFleetSelect: onOpenFleetSelect,
   } = useMissionActions()
   const hasRoute = Boolean(planResult)
-  const { profiles, activeId, applyProfile, loading: profilesLoading } = useMissionProfiles()
-  const activeProfile = activeId && profiles ? profiles[activeId] : null
-
-  const handleWeightChange = (key: keyof PlanWeights, val: number) => {
-    onWeightsChange({
-      ...weights,
-      [key]: val,
-    })
-  }
 
   /**
    * The weights the route on screen was actually solved with.
@@ -266,109 +242,32 @@ export const MissionSetupPanel: React.FC = () => {
         )}
       </section>
 
-      {/* ── 3. ROUTE PRIORITIES SLIDERS ── */}
+      {/* ── 3. ROUTE PRIORITIES, AS SET IN THE HANGAR ── */}
       <section className="lp-panel-section">
         <div className="lp-section-header-row">
           <span className="lp-meta-label">Route priorities</span>
+          <button
+            type="button"
+            className="lp-text-action-btn"
+            onClick={onOpenFleetSelect}
+            title="Return to the fleet hangar to change the mission profile and weights"
+          >
+            Change
+          </button>
         </div>
 
-        {/* Mission profile presets (GET /api/profiles). Selecting one writes
-            its four weights into the sliders below; its constraints ride along
-            as read-only context. */}
-        {profiles && Object.keys(profiles).length > 0 && (
-          <div className="lp-profile-block">
-            <div className="lp-profile-head">
-              <span className="lp-profile-caption">Mission profile</span>
-              <span className={`lp-profile-active-tag ${activeProfile ? '' : 'is-custom'}`}>
-                {activeProfile ? activeProfile.name : 'Custom'}
-              </span>
+        {/* Read-only, and that is the point: /api/plan reads these at solve
+            time, so a slider here would have been editing the description of
+            a route already drawn. They are chosen in the hangar, before there
+            is a map to argue with. Same markup as the ANALYZE snapshot, which
+            has always reported them this way. */}
+        <div className="lp-readonly-weights">
+          {WEIGHT_READOUT.map(({ key, label }) => (
+            <div key={key} className="lp-readonly-row">
+              <span className="lp-readonly-name">{label}</span>
+              <span className="lp-readonly-val">{weights[key].toFixed(3)}</span>
             </div>
-
-            <div className="lp-profile-chips" role="group" aria-label="Mission profile presets">
-              {Object.entries(profiles).map(([id, profile]) => {
-                const isActive = id === activeId
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    className={`lp-profile-chip ${isActive ? 'is-active' : ''}`}
-                    style={{ '--profile-color': profile.color } as React.CSSProperties}
-                    onClick={() => applyProfile(id)}
-                    title={profile.description}
-                    aria-pressed={isActive}
-                  >
-                    <span className="lp-profile-dot" />
-                    {profile.name}
-                  </button>
-                )
-              })}
-            </div>
-
-            {/* `title` alone reached neither touch nor keyboard, so the one
-                sentence that distinguishes four profiles was invisible to a
-                user who had not hovered each chip in turn. The backend
-                already sends it. */}
-            {activeProfile?.description && (
-              <p className="lp-profile-desc">{activeProfile.description}</p>
-            )}
-
-            {activeProfile && (
-              <div className="lp-profile-constraints">
-                {CONSTRAINT_CONTROLS.map(({ key, label, format }) => {
-                  const enforced = activeProfile.constraint_handling[key] === 'enforced_in_search'
-                  return (
-                    <div key={key} className="lp-profile-constraint">
-                      <span className="lp-constraint-label">{label}</span>
-                      <strong className="lp-constraint-value">
-                        {format(activeProfile.constraints[key])}
-                      </strong>
-                      <span
-                        className={`lp-constraint-badge ${enforced ? 'is-enforced' : 'is-verified'}`}
-                        title={
-                          enforced
-                            ? 'Enforced in search: the A* solver refuses cells that violate this limit.'
-                            : 'Verified after simulation: checked against the simulated route; a plan can exceed it.'
-                        }
-                      >
-                        {enforced ? 'IN SEARCH' : 'POST-SIM'}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
-        {profilesLoading && !profiles && (
-          <p className="lp-section-explainer">Loading mission profiles…</p>
-        )}
-
-        <p className="lp-section-explainer">
-          Higher priority weights force the A* solver to penalize and circumvent that hazard more aggressively.
-        </p>
-
-        <div className="lp-priority-sliders">
-          {WEIGHT_CONTROLS.map(({ key, label, desc }) => {
-            const val = weights[key]
-            return (
-              <div key={key} className="lp-slider-block">
-                <div className="lp-slider-head">
-                  <span className="lp-slider-label">{label}</span>
-                  <span className="lp-slider-number">{val.toFixed(3)}</span>
-                </div>
-                <input
-                  type="range"
-                  className="lp-range-input"
-                  min={0}
-                  max={2}
-                  step={0.01}
-                  value={val}
-                  onChange={(e) => handleWeightChange(key, parseFloat(e.target.value))}
-                  title={desc}
-                />
-              </div>
-            )
-          })}
+          ))}
         </div>
       </section>
     </div>

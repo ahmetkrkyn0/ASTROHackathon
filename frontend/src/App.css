@@ -4946,13 +4946,50 @@ select {
   border-radius: var(--radius);
   padding: 20px 28px;
   box-shadow: var(--shadow-float);
-  align-items: center;
+  /* Top, not centre: the priorities column is now several rows tall and the
+     deploy button should sit level with its heading, not float mid-way down
+     a block it does not belong to. */
+  align-items: flex-start;
   justify-content: space-between;
 }
 
-.lp-dock-weights-col {
+.lp-dock-priorities-col {
   flex: 1;
   min-width: 0;
+}
+
+/* Presets beside the weights rather than above them: this block came from a
+   250px rail where it could only stack, and stacked here it pushed the deploy
+   button off the first screen. */
+.lp-priorities {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.lp-priorities-weights {
+  min-width: 0;
+}
+
+/* Two by two rather than four across. Four in a row left the weights column
+   one line tall beside a presets column carrying chips, a caption and four
+   constraints, and the dock read as a block of controls with a hole under it.
+   Paired, the two columns finish at roughly the same height. */
+.lp-priorities .lp-priority-sliders {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px 24px;
+}
+
+.lp-priorities .lp-section-explainer {
+  margin: 0 0 12px;
+}
+
+@media (max-width: 1240px) {
+  .lp-priorities {
+    grid-template-columns: 1fr;
+  }
 }
 
 .lp-dock-section-title {
@@ -4968,47 +5005,11 @@ select {
   font-family: var(--font-data);
 }
 
-.lp-dock-sliders-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-}
-
 @media (max-width: 1100px) {
-  .lp-dock-sliders-row {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .lp-fleet-bottom-dock {
     flex-direction: column;
     align-items: stretch;
   }
-}
-
-.lp-dock-slider-cell {
-  background: rgba(5, 7, 13, 0.5);
-  border: 1px solid rgba(199, 205, 219, 0.06);
-  border-radius: var(--radius);
-  padding: 8px 12px;
-}
-
-.lp-dock-slider-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.lp-dock-slider-label {
-  font-size: var(--fs-small);
-  font-weight: 600;
-  color: var(--text-2);
-}
-
-.lp-dock-slider-val {
-  font-family: var(--font-data);
-  font-size: var(--fs-small);
-  font-weight: 700;
-  color: var(--cyan);
 }
 
 .lp-dock-action-col {

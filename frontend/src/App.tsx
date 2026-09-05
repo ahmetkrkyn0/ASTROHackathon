@@ -638,8 +638,6 @@ export default function App() {
               rovers={rovers}
               selectedRover={selectedRover}
               onSelectRover={handleRoverSelect}
-              weights={weights}
-              onWeightsChange={setWeights}
               onDeployToMap={handleDeployToMap}
             />
           ) : (
