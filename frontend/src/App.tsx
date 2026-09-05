@@ -584,9 +584,17 @@ export default function App() {
   }, [hoverPoint, routePlaybackStep, waypoints])
 
   const missionStatus = layerError ? 'ATTN' : isSolving ? 'SOLVING' : planResult ? 'LOCKED' : 'NOMINAL'
-  // Whether the right rail has anything to show in this mode. Asked of the
-  // registry rather than hardcoded to `missionMode === 'analyze'`, so a
-  // feature registered for plan later brings the column back on its own.
+  // What each rail has to show in this mode. Asked of the registry rather
+  // than hardcoded per mode, so registering a feature for a rail is the only
+  // thing needed to bring its column back.
+  //
+  // Plan and analyze now use opposite halves of the cockpit: plan owns the
+  // left rail and no right one, analyze the right and no left. Neither is
+  // stated here -- both fall out of what FEATURES declares.
+  const leftRailFeatures = useMemo(
+    () => selectFeatures(FEATURES, 'leftRail', missionMode),
+    [missionMode],
+  )
   const rightRailFeatures = useMemo(
     () => selectFeatures(FEATURES, 'rightRail', missionMode),
     [missionMode],
@@ -728,19 +736,29 @@ export default function App() {
             vehicle", under the rover card that prompts the thought, returns
             there rather than opening a modal over the map. */}
         <main
-            className={`content-grid ${rightRailFeatures.length === 0 ? 'no-right-rail' : ''}`}
+            className={[
+              'content-grid',
+              leftRailFeatures.length === 0 ? 'no-left-rail' : '',
+              rightRailFeatures.length === 0 ? 'no-right-rail' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
           >
-            {/* ── LEFT RAIL: MISSION SETUP (PLAN) vs MISSION SNAPSHOT (ANALYZE) ──
-                Both rails are permanent. They each used to carry a 40px
-                collapse strip, which spent the top of the panel, plus a
-                hairline, on a control for a problem nobody had: the rails
-                hold what the cockpit is driven from, and folding them away
-                leaves a map you cannot plan on. Removing it also lifts the
-                first section 40px, which is where Mission targets wanted to
-                be. */}
-            <aside className="left-rail">
-              <LeftRailSlot />
-          </aside>
+            {/* ── LEFT RAIL: MISSION SETUP, IN PLAN ──
+                Rendered only when the registry has something for it, exactly
+                like the right rail below. In analyze it has nothing, so the
+                column goes with it.
+
+                Neither rail collapses any more. They each used to carry a
+                40px strip for that, which spent the top of the panel plus a
+                hairline on a control for a problem nobody had -- the rails
+                hold what the cockpit is driven from, and a folded rail leaves
+                a map you cannot plan on. */}
+            {leftRailFeatures.length > 0 && (
+              <aside className="left-rail">
+                <LeftRailSlot />
+              </aside>
+            )}
 
           {/* ── CENTER STAGE: 2D/3D TERRAIN WORKBENCH ───────────────────────── */}
           <section className="center-stage">

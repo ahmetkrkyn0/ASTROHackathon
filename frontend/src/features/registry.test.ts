@@ -137,12 +137,32 @@ describe('FEATURES', () => {
     )
   })
 
-  it('leaves the right rail empty in plan and filled in analyze', () => {
-    // App.tsx renders the <aside> and its grid column only when this is
-    // non-empty, so a feature registered for plan's right rail without that
-    // being the intent would quietly put the 288px column back.
+  it('gives each mode one rail and no more', () => {
+    // The cockpit's layout is derived from this, not stated anywhere else:
+    // App.tsx renders each <aside> and its grid track only when the rail is
+    // non-empty. Plan owns the left rail, analyze the right, and a feature
+    // registered into the empty one would quietly restore a column and take
+    // that width off the map.
+    expect(selectFeatures(FEATURES, 'leftRail', 'plan').length).toBeGreaterThan(0)
     expect(selectFeatures(FEATURES, 'rightRail', 'plan')).toHaveLength(0)
+
     expect(selectFeatures(FEATURES, 'rightRail', 'analyze').length).toBeGreaterThan(0)
+    expect(selectFeatures(FEATURES, 'leftRail', 'analyze')).toHaveLength(0)
+  })
+
+  it('keeps the retired snapshot panel out of both modes', () => {
+    // modes: [] is how it is retired without being deleted. An empty array
+    // and an omitted `modes` are opposites -- omitted means every mode -- so
+    // this is the one registration where dropping the field would put a
+    // locked read-only panel back in both rails at once.
+    const snapshot = FEATURES.find((feature) => feature.id === 'mission-snapshot')
+    expect(snapshot?.modes).toEqual([])
+    expect(selectFeatures(FEATURES, 'leftRail', 'plan').map((f) => f.id)).not.toContain(
+      'mission-snapshot',
+    )
+    expect(selectFeatures(FEATURES, 'leftRail', 'analyze').map((f) => f.id)).not.toContain(
+      'mission-snapshot',
+    )
   })
 
   it('shows mission setup in the left rail only during plan mode', () => {

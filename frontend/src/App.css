@@ -940,19 +940,31 @@ select {
   color: var(--text-muted);
 }
 
+/* Three tracks declared, but the two modes each use two of them: plan runs
+   left + map, analyze runs map + right. The base template stays three-wide so
+   there is one place the widths are written, and the modifiers below drop
+   whichever track has no rail to put in it -- a template with more tracks than
+   children leaves the surplus as empty surface beside the map. */
 .content-grid {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr) 288px;
+  grid-template-columns: 300px minmax(0, 1fr) 340px;
   overflow: hidden;
 }
 
-/* Plan renders no right rail, so the track it would occupy must go too --
-   a three-column template with two children leaves 288px of empty surface
-   between the map's right edge and the window. */
+/* Plan: 300px, up from 264. The rail holds two full-width picker buttons
+   whose labels carry coordinates ("START 259, 252"), a four-row sequence
+   list, and a 2x2 spec grid -- all of which were wrapping at 264. */
 .content-grid.no-right-rail {
-  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+/* Analyze: 340px, up from 288. This rail now carries the whole analysis on
+   its own -- route metrics, the profile comparison and the cost readout --
+   with no left rail sharing the reporting. */
+.content-grid.no-left-rail {
+  grid-template-columns: minmax(0, 1fr) 340px;
 }
 
 .left-rail,
@@ -1958,11 +1970,15 @@ select {
 
 @media (max-width: 1180px) {
   .content-grid {
-    grid-template-columns: 230px minmax(0, 1fr) 276px;
+    grid-template-columns: 264px minmax(0, 1fr) 300px;
   }
 
   .content-grid.no-right-rail {
-    grid-template-columns: 230px minmax(0, 1fr);
+    grid-template-columns: 264px minmax(0, 1fr);
+  }
+
+  .content-grid.no-left-rail {
+    grid-template-columns: minmax(0, 1fr) 300px;
   }
 }
 
@@ -1975,7 +1991,12 @@ select {
     max-width: 100%;
   }
 
-  .content-grid {
+  /* One column, whichever rails are present. The modifiers carry a class and
+     so outrank a bare `.content-grid` at the same media width -- listing them
+     here is what stops a 300px track surviving into the stacked layout. */
+  .content-grid,
+  .content-grid.no-left-rail,
+  .content-grid.no-right-rail {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 1fr) auto auto;
   }

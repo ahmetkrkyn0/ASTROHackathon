@@ -98,12 +98,16 @@ export const FEATURES: readonly FeatureRegistration[] = [
   { id: 'mission-context', slot: 'rightRail', Component: MissionContextFeature, modes: ['analyze'] },
   // Plan only: meaningful after the hangar's rover selection is complete.
   { id: 'mission-setup', slot: 'leftRail', Component: MissionSetup, modes: ['plan'] },
-  // analyze only. App.tsx rendered this as the else-branch of
-  // `missionMode === 'plan' ? MissionSetupPanel : MissionSnapshotPanel`, and
-  // fleet replaces the whole cockpit, so analyze was the only stage it ever
-  // appeared in. Leaving modes off would put it beside the setup panel in
-  // plan -- the exact quiet mistake the filter exists to make explicit.
-  { id: 'mission-snapshot', slot: 'leftRail', Component: MissionSnapshot, modes: ['analyze'] },
+  // Registered for no mode, which is how a feature is retired without being
+  // deleted. It was analyze's left rail: a locked read-only echo of the rover,
+  // the two endpoints and the four weights -- all of it already reported by
+  // the right rail's analysis, and none of it editable here. Analyze now runs
+  // with the left rail gone entirely and the map that much wider.
+  //
+  // Its one control, "Edit & Replan", was `setMissionMode('plan')` and nothing
+  // else -- exactly what the top bar's PLAN tab does. That tab is enabled
+  // throughout analyze, so removing this panel takes no route back with it.
+  { id: 'mission-snapshot', slot: 'leftRail', Component: MissionSnapshot, modes: [] },
   { id: 'route-analysis', slot: 'rightRail', Component: RouteAnalysis, modes: ['analyze'] },
   // analyze only, from App.tsx's `missionMode === 'analyze' && planResult`
   // guard. Only the mode half becomes a registration: the bar already
