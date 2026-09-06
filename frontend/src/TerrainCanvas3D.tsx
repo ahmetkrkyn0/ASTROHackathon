@@ -25,18 +25,28 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { ClickMode, MapViewMode } from './MapCanvas'
 import type { Waypoint } from './api'
 import {
   buildLidarScanFromBackend,
   fetchBackendLidarScan,
+  generatePebbleField,
   generateRockField,
   LIDAR_CONFIG,
+  ROCK_FIELD,
   sampleTerrainHeight,
+  sampleTerrainNormal,
   seededRandom,
   simulateLidarScan,
 } from './lidarSimulation'
-import type { LidarScanResult, LidarScanSummary, RockDescriptor, TerrainField } from './lidarSimulation'
+import type {
+  LidarScanResult,
+  LidarScanSummary,
+  RockDescriptor,
+  RockShape,
+  TerrainField,
+} from './lidarSimulation'
 
 /** Which binary layer paints the surface, per 2-D view mode. */
 const LAYER_FOR_VIEW: Record<MapViewMode, string> = {
@@ -432,9 +442,16 @@ function createRockTexture(): THREE.CanvasTexture {
   for (let y = 0; y < canvas.height; y++) {
     for (let x = 0; x < canvas.width; x++) {
       const index = (y * canvas.width + x) * 4
-      const broad = 12 * Math.sin(x * 0.17) * Math.cos(y * 0.11)
-      const grain = (random() - 0.5) * 34
-      const value = THREE.MathUtils.clamp(104 + broad + grain, 55, 148)
+      const broad = 16 * Math.sin(x * 0.17) * Math.cos(y * 0.11)
+      const grain = (random() - 0.5) * 46
+      // Centred near white, not near mid-grey. This texture MULTIPLIES the
+      // material's base colour, so a mean of ~104/255 was quietly costing
+      // rocks 60% of their albedo on top of it and rendering them near
+      // black against the regolith. Rock on the Moon is the brighter of the
+      // two -- fresh basalt and breccia sit around 0.10-0.30 reflectance
+      // where mature soil is 0.08-0.12 -- so the base colour below carries
+      // the albedo and this carries only the grain around it.
+      const value = THREE.MathUtils.clamp(205 + broad + grain, 150, 255)
       image.data[index] = value
       image.data[index + 1] = value * 0.965
       image.data[index + 2] = value * 0.92
@@ -554,7 +571,13 @@ async function fetchRockGeometryTemplate(url: string): Promise<THREE.BufferGeome
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(base64ToFloat32Array(payload.position), 3))
     geometry.setAttribute('normal', new THREE.BufferAttribute(base64ToFloat32Array(payload.normal), 3))
-    return geometry
+    // Welded on arrival: the payload is non-indexed, and three.js gives any
+    // non-indexed geometry flat per-face normals when they are recomputed --
+    // which every rock needs after the field stretches it to its own
+    // semi-axes. Welding once here is what lets a scanned rock come out
+    // smooth instead of faceted, and costs one pass per template rather
+    // than one per rock.
+    return mergeVertices(geometry, 1e-5)
   } catch {
     return null
   }
@@ -564,6 +587,271 @@ const NASA_ROCK_TEMPLATE_URLS = [
   '/models/nasa_rocks/rock-15016.json',
   '/models/nasa_rocks/rock-15556.json',
 ]
+
+/**
+ * Make a MeshStandardMaterial sample its map by world-space triplanar
+ * projection instead of by UV.
+ *
+ * This is not a stylistic choice. The NASA scan templates ship POSITION and
+ * NORMAL only -- no `uv` attribute at all -- so a plain `map` on them
+ * silently degraded to sampling a single texel: every real-shaped rock in
+ * the field rendered as a flat, untextured colour, and only the procedural
+ * fallback ever looked like stone. Projecting from world position removes
+ * the requirement entirely, and it also fixes two problems a UV unwrap
+ * would still have had: no seam down a blobby closed surface, and constant
+ * texel density whether the rock is 10 cm or 4 m, because the projection is
+ * measured in metres rather than in each rock's own normalised space.
+ */
+function applyTriplanarMapping(material: THREE.MeshStandardMaterial, texturesPerMetre: number) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTriplanarScale = { value: texturesPerMetre }
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vTriplanarPos;
+        varying vec3 vTriplanarNormal;`,
+      )
+      .replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+        vec4 triplanarLocal = vec4( transformed, 1.0 );
+        vec3 triplanarNormal = objectNormal;
+        #ifdef USE_INSTANCING
+          triplanarLocal = instanceMatrix * triplanarLocal;
+          triplanarNormal = mat3( instanceMatrix ) * triplanarNormal;
+        #endif
+        vTriplanarPos = ( modelMatrix * triplanarLocal ).xyz;
+        vTriplanarNormal = mat3( modelMatrix ) * triplanarNormal;`,
+      )
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform float uTriplanarScale;
+        varying vec3 vTriplanarPos;
+        varying vec3 vTriplanarNormal;`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#ifdef USE_MAP
+          vec3 triBlend = abs( normalize( vTriplanarNormal ) );
+          triBlend = pow( triBlend, vec3( 3.0 ) );
+          triBlend /= max( triBlend.x + triBlend.y + triBlend.z, 1e-4 );
+          vec4 triSample =
+            texture2D( map, vTriplanarPos.zy * uTriplanarScale ) * triBlend.x +
+            texture2D( map, vTriplanarPos.xz * uTriplanarScale ) * triBlend.y +
+            texture2D( map, vTriplanarPos.xy * uTriplanarScale ) * triBlend.z;
+          diffuseColor *= triSample;
+        #endif`,
+      )
+  }
+  // Two materials whose onBeforeCompile differ must not share a compiled
+  // program; three.js keys its program cache on this alongside the source.
+  material.customProgramCacheKey = () => `triplanar-${texturesPerMetre}`
+}
+
+/**
+ * Deterministic 3D value noise, used to weather a sphere into a rock. Same
+ * lattice-hash construction as the rock field's own 2D patch noise, so a
+ * given seed always carves the identical shape, on every reload.
+ */
+function rockNoise3D(x: number, y: number, z: number, seed: number): number {
+  const hash = (a: number, b: number, c: number) => {
+    let h =
+      Math.imul(a | 0, 0x8da6b343) ^ Math.imul(b | 0, 0xd8163841) ^ Math.imul(c | 0, 0xcb1ab31f)
+    h = Math.imul(h ^ seed, 0x45d9f3b)
+    h = Math.imul(h ^ (h >>> 16), 0x45d9f3b)
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296
+  }
+  const xi = Math.floor(x)
+  const yi = Math.floor(y)
+  const zi = Math.floor(z)
+  const xf = x - xi
+  const yf = y - yi
+  const zf = z - zi
+  const u = xf * xf * (3 - 2 * xf)
+  const v = yf * yf * (3 - 2 * yf)
+  const w = zf * zf * (3 - 2 * zf)
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+  const c00 = lerp(hash(xi, yi, zi), hash(xi + 1, yi, zi), u)
+  const c10 = lerp(hash(xi, yi + 1, zi), hash(xi + 1, yi + 1, zi), u)
+  const c01 = lerp(hash(xi, yi, zi + 1), hash(xi + 1, yi, zi + 1), u)
+  const c11 = lerp(hash(xi, yi + 1, zi + 1), hash(xi + 1, yi + 1, zi + 1), u)
+  return lerp(lerp(c00, c10, v), lerp(c01, c11, v), w)
+}
+
+function rockFbm3D(x: number, y: number, z: number, seed: number, octaves: number): number {
+  let amplitude = 1
+  let frequency = 1
+  let sum = 0
+  let norm = 0
+  for (let i = 0; i < octaves; i++) {
+    sum += amplitude * rockNoise3D(x * frequency, y * frequency, z * frequency, seed + i * 7919)
+    norm += amplitude
+    amplitude *= 0.5
+    frequency *= 2.13
+  }
+  return sum / norm
+}
+
+/**
+ * Welded unit icospheres, one per subdivision level, built once and cloned
+ * per rock. Welding matters for more than memory: three.js computes FLAT
+ * normals for any non-indexed geometry, so the smooth families below only
+ * actually come out smooth if their base shares vertices between faces.
+ * (IcosahedronGeometry ships non-indexed, which is why every rock in this
+ * scene read as faceted before regardless of the material's flatShading.)
+ */
+const icosphereBaseCache = new Map<number, THREE.BufferGeometry>()
+function icosphereBase(detail: number): THREE.BufferGeometry {
+  const cached = icosphereBaseCache.get(detail)
+  if (cached) return cached
+  const welded = mergeVertices(new THREE.IcosahedronGeometry(1, detail), 1e-5)
+  icosphereBaseCache.set(detail, welded)
+  return welded
+}
+
+/**
+ * Build one rock's geometry, already scaled to its own semi-axes.
+ *
+ * The four families exist because lunar rocks of different sizes and ages
+ * genuinely do not share a silhouette, and a field built from one shape
+ * (or, as this one was, from two scans plus a single polyhedron) reads as a
+ * repeated prop no matter how well the placement is randomised:
+ *
+ *  - `scan`    a real decimated Apollo sample, when one is loaded
+ *  - `cobble`  gardened and abraded: rounded, low-amplitude relief
+ *  - `breccia` freshly excavated: angular, cut by flat conchoidal facets
+ *  - `slab`    a tabular spall: flat top and bottom, ragged rim
+ */
+function buildRockGeometry(
+  shape: RockShape,
+  seed: number,
+  radiusX: number,
+  radiusY: number,
+  radiusZ: number,
+  templates: THREE.BufferGeometry[],
+  detail: number,
+): THREE.BufferGeometry {
+  const random = seededRandom(seed)
+  const faceted = shape === 'breccia' || shape === 'slab'
+  let geometry: THREE.BufferGeometry =
+    shape === 'scan' && templates.length > 0
+      ? templates[Math.abs(seed) % templates.length].clone()
+      : icosphereBase(detail).clone()
+
+  // Fracture planes for the angular families. A plane is a unit normal plus
+  // an offset; every vertex past it is projected back onto it, which is what
+  // turns a sphere into something with real flat faces and sharp edges
+  // rather than a dented ball.
+  const cuts: Array<{ n: THREE.Vector3; d: number }> = []
+  if (shape === 'breccia') {
+    const cutCount = 3 + Math.floor(random() * 4)
+    for (let i = 0; i < cutCount; i++) {
+      const theta = random() * Math.PI * 2
+      const phi = Math.acos(2 * random() - 1)
+      cuts.push({
+        n: new THREE.Vector3(
+          Math.sin(phi) * Math.cos(theta),
+          Math.cos(phi),
+          Math.sin(phi) * Math.sin(theta),
+        ),
+        d: 0.62 + random() * 0.3,
+      })
+    }
+  } else if (shape === 'slab') {
+    // Two near-parallel bedding planes give the flat top and bottom; a few
+    // steep ones chip the rim so it is not a perfect disc.
+    const tilt = (random() - 0.5) * 0.25
+    cuts.push({ n: new THREE.Vector3(tilt, 1, tilt * 0.6).normalize(), d: 0.5 + random() * 0.16 })
+    cuts.push({
+      n: new THREE.Vector3(-tilt, -1, -tilt * 0.6).normalize(),
+      d: 0.5 + random() * 0.16,
+    })
+    const rimCount = 2 + Math.floor(random() * 3)
+    for (let i = 0; i < rimCount; i++) {
+      const theta = random() * Math.PI * 2
+      cuts.push({
+        n: new THREE.Vector3(Math.cos(theta), (random() - 0.5) * 0.3, Math.sin(theta)).normalize(),
+        d: 0.74 + random() * 0.24,
+      })
+    }
+  }
+
+  const relief = shape === 'cobble' ? 0.15 : shape === 'scan' ? 0.06 : 0.1
+  const octaves = shape === 'cobble' ? 3 : 2
+  const noiseSeed = seed >>> 0
+  const positions = geometry.getAttribute('position') as THREE.BufferAttribute
+  const vertex = new THREE.Vector3()
+  const direction = new THREE.Vector3()
+
+  for (let i = 0; i < positions.count; i++) {
+    vertex.fromBufferAttribute(positions, i)
+    direction.copy(vertex).normalize()
+    // A RADIAL displacement -- one factor along the vertex's own direction.
+    // Three independent per-axis factors shear neighbouring facets against
+    // each other and fold them back through the surface, which is the torn
+    // -hole artefact DoubleSide was previously papering over.
+    const noise = rockFbm3D(
+      direction.x * 2.6,
+      direction.y * 2.6,
+      direction.z * 2.6,
+      noiseSeed,
+      octaves,
+    )
+    vertex.multiplyScalar(1 + (noise - 0.5) * 2 * relief)
+    for (const cut of cuts) {
+      const distance = vertex.dot(cut.n)
+      if (distance > cut.d) vertex.addScaledVector(cut.n, cut.d - distance)
+    }
+    positions.setXYZ(i, vertex.x * radiusX, vertex.y * radiusY, vertex.z * radiusZ)
+  }
+  positions.needsUpdate = true
+
+  // Angular families keep their facets. Averaging normals across a
+  // conchoidal fracture is exactly what would make a sharply cut block read
+  // as another rounded blob, whatever its silhouette says.
+  if (faceted && geometry.index) {
+    const nonIndexed = geometry.toNonIndexed()
+    geometry.dispose()
+    geometry = nonIndexed
+  }
+  geometry.computeVertexNormals()
+  geometry.computeBoundingSphere()
+  return geometry
+}
+
+/**
+ * Gravel is drawn as instances, so it needs a small fixed set of unit-sized
+ * shapes rather than one bespoke geometry per clast. Eight is enough that
+ * the repetition is invisible at the sizes and distances involved -- each
+ * instance still gets its own semi-axis scaling, yaw and terrain-normal
+ * tilt, so two instances of the same variant do not present the same
+ * silhouette -- and few enough that the whole ground cover costs eight draw
+ * calls instead of the three and a half thousand it would as loose meshes.
+ */
+const PEBBLE_VARIANT_SHAPES: RockShape[] = [
+  'cobble',
+  'cobble',
+  'cobble',
+  'breccia',
+  'breccia',
+  'slab',
+  'cobble',
+  'breccia',
+]
+/** Per-variant instance capacity; overflow is simply not drawn. */
+const PEBBLE_VARIANT_CAPACITY = 1024
+
+function buildPebbleVariants(templates: THREE.BufferGeometry[]): THREE.BufferGeometry[] {
+  return PEBBLE_VARIANT_SHAPES.map((shape, index) =>
+    // Detail 1: a clast this size never covers more than a few pixels, and
+    // the shape families read from their silhouette and facets rather than
+    // from smoothness at that scale.
+    buildRockGeometry(shape, 0x9e3779b1 + index * 0x85ebca6b, 1, 1, 1, templates, 1),
+  )
+}
 
 const TERRAIN_NET_RINGS = 9
 const TERRAIN_NET_AZIMUTH_STEPS = 48
@@ -826,6 +1114,11 @@ export default function TerrainCanvas3D({
   // "where the rover currently is" always reads as the rocks travelling
   // with it, no matter how wide the radius or how coarse the recentring.
   const lastRockFieldWaypointsRef = useRef<Waypoint[] | null | undefined>(undefined)
+  // Where the gravel layer was last built. Unlike the navigation rocks --
+  // anchored to the route so they stay put while the rover drives past --
+  // gravel is a distance-graded LOD around the sensor and has to follow it,
+  // so it is rebuilt on real movement rather than on every throttle tick.
+  const lastPebbleOriginRef = useRef<{ x: number; z: number } | null>(null)
 
   // The raw NAC crop still carries its own 2010 grazing-light shadow
   // micro-texture (see PHOTO_TEXTURE_URL's own comment on why it is drawn
@@ -852,6 +1145,8 @@ export default function TerrainCanvas3D({
     photoAvailable: boolean
     routeGroup: THREE.Group
     rockGroup: THREE.Group
+    /** One InstancedMesh per gravel variant; see buildPebbleVariants. */
+    pebbleMeshes: THREE.InstancedMesh[]
     rockMarkerGroup: THREE.Group
     rockMarkerMaterial: THREE.SpriteMaterial
     rockMaterial: THREE.MeshStandardMaterial
@@ -930,7 +1225,9 @@ export default function TerrainCanvas3D({
     // seeds, so they remain fixed when the rover advances along a route.
     const rockTexture = createRockTexture()
     const rockMaterial = new THREE.MeshStandardMaterial({
-      color: 0x8b867f,
+      // Slightly brighter than SURFACE_ALBEDO: an exposed rock face has not
+      // been space-weathered and darkened the way the surrounding soil has.
+      color: 0x9a938a,
       map: rockTexture,
       roughness: 1,
       metalness: 0,
@@ -939,15 +1236,36 @@ export default function TerrainCanvas3D({
       // output, and interpolating between them is what keeps a few hundred
       // triangles reading as a rounded rock instead of a faceted gemstone.
       flatShading: false,
-      // Defensive, not decorative: independent per-vertex displacement below
-      // can fold a facet back on itself at high subdivision, flipping its
-      // winding relative to the camera. FrontSide culls that facet outright,
-      // which reads as a torn hole with the void showing through. DoubleSide
-      // costs nothing visible on a convex rock and guarantees no gaps.
+      // Defensive, not decorative: vertex displacement can fold a facet back
+      // on itself, flipping its winding relative to the camera. FrontSide
+      // culls that facet outright, which reads as a torn hole with the void
+      // showing through. DoubleSide costs nothing visible on a convex rock
+      // and guarantees no gaps.
       side: THREE.DoubleSide,
     })
+    // ~1.6 texture repeats per metre of world, so a 40 cm cobble and a 4 m
+    // block carry grain at the same physical scale instead of one looking
+    // like sandpaper and the other like a smooth boulder.
+    applyTriplanarMapping(rockMaterial, 1.6)
     const rockGroup = new THREE.Group()
     scene.add(rockGroup)
+
+    // Sub-navigation-size gravel. Allocated empty (count 0) and filled as
+    // the rover moves; the geometries are swapped in once the scan
+    // templates resolve, since the variants that use them cannot be built
+    // before then.
+    const pebbleMeshes: THREE.InstancedMesh[] = buildPebbleVariants([]).map((geometry) => {
+      const mesh = new THREE.InstancedMesh(geometry, rockMaterial, PEBBLE_VARIANT_CAPACITY)
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      mesh.count = 0
+      // Instances sit at real world positions, so the mesh itself never
+      // moves and its own bounds would be computed from the base geometry
+      // at the origin. Frustum culling on that would blink the whole gravel
+      // layer out whenever the origin left the view.
+      mesh.frustumCulled = false
+      scene.add(mesh)
+      return mesh
+    })
 
     const softDotTexture = createSoftDotTexture()
     const solidDotTexture = createSolidDotTexture()
@@ -1093,6 +1411,14 @@ export default function TerrainCanvas3D({
         return
       }
       rockTemplatesRef.current = templates
+      // The gravel variants were built before the templates existed, so the
+      // 'scan'-family slots fell back to procedural shapes. Rebuild them now
+      // that real ones are available; the instance matrices are untouched.
+      const upgraded = buildPebbleVariants(templates)
+      pebbleMeshes.forEach((mesh, index) => {
+        mesh.geometry.dispose()
+        mesh.geometry = upgraded[index]
+      })
       setRockTemplatesReady(true)
     })
 
@@ -1262,6 +1588,7 @@ export default function TerrainCanvas3D({
         photoAvailable,
         routeGroup,
         rockGroup,
+        pebbleMeshes,
         rockMarkerGroup,
         rockMarkerMaterial,
         rockMaterial,
@@ -1289,6 +1616,10 @@ export default function TerrainCanvas3D({
           earth.mesh.geometry.dispose()
           rockGroup.children.forEach((rock) => {
             if (rock instanceof THREE.Mesh) rock.geometry.dispose()
+          })
+          pebbleMeshes.forEach((mesh) => {
+            mesh.geometry.dispose()
+            mesh.dispose()
           })
           rockMaterial.dispose()
           rockTexture.dispose()
@@ -1973,70 +2304,34 @@ export default function TerrainCanvas3D({
           waypoints && waypoints.length > 0 && obstacleRocks
             ? obstacleRocks
             : generateRockField(fieldCenterX, fieldCenterZ, fieldRadiusM)
+        const rockUp = new THREE.Vector3(0, 1, 0)
         for (const descriptor of rockDescriptors) {
           const groundY = sampleTerrainHeight(terrain, descriptor.x, descriptor.z)
           if (groundY === null) continue
-          const random = seededRandom(descriptor.seed)
-          let geometry: THREE.BufferGeometry
-          // One extra "slot" beyond the real templates so roughly one rock
-          // in (templates+1) is still the procedural icosahedron even when
-          // real scans are loaded -- a field built from only 2 real Apollo
-          // scans repeats those exact 2 silhouettes everywhere once it
-          // covers this much area, which reads as artificial in its own
-          // way; mixing in the weathered polyhedron breaks that repetition.
-          const templateSlot = Math.abs(descriptor.seed) % (rockTemplates.length + 1)
-          if (rockTemplates.length > 0 && templateSlot < rockTemplates.length) {
-            // A real Apollo sample's scanned shape (unit sphere, centred --
-            // see fetchRockGeometryTemplate) is already organically
-            // irregular, so it just needs the field's existing per-instance
-            // stretch, not the synthetic per-vertex weathering the
-            // icosahedron fallback below applies to make a symmetric
-            // polyhedron look like a rock.
-            geometry = rockTemplates[templateSlot].clone()
-            const positions = geometry.getAttribute('position') as THREE.BufferAttribute
-            for (let i = 0; i < positions.count; i++) {
-              positions.setXYZ(
-                i,
-                positions.getX(i) * descriptor.radiusX,
-                positions.getY(i) * descriptor.radiusY,
-                positions.getZ(i) * descriptor.radiusZ,
-              )
-            }
-            positions.needsUpdate = true
-            geometry.computeVertexNormals()
-            geometry.computeBoundingSphere()
-          } else {
-            // Detail 1 (12 vertices) reads as a crumpled polyhedron, not a
-            // rock -- detail 2 (42 vertices) gives enough facets for the
-            // per-vertex weathering below to read as texture rather than as
-            // the whole shape.
-            geometry = new THREE.IcosahedronGeometry(1, 2)
-            const positions = geometry.getAttribute('position') as THREE.BufferAttribute
-            for (let i = 0; i < positions.count; i++) {
-              const x = positions.getX(i)
-              const y = positions.getY(i)
-              const z = positions.getZ(i)
-              // ONE factor per vertex, applied to all three axes: a radial
-              // displacement along the vertex's own direction. Three
-              // independent per-axis factors sheared neighbouring facets
-              // against each other at this subdivision level, folding a
-              // facet back on itself often enough to be the torn-hole look
-              // DoubleSide above now also guards against.
-              const weathering = 0.93 + random() * 0.12
-              positions.setXYZ(
-                i,
-                x * descriptor.radiusX * weathering,
-                y * descriptor.radiusY * weathering,
-                z * descriptor.radiusZ * weathering,
-              )
-            }
-            positions.needsUpdate = true
-            geometry.computeVertexNormals()
-            geometry.computeBoundingSphere()
-          }
+          const geometry = buildRockGeometry(
+            descriptor.shape,
+            descriptor.seed,
+            descriptor.radiusX,
+            descriptor.radiusY,
+            descriptor.radiusZ,
+            rockTemplates,
+            2,
+          )
           const rock = new THREE.Mesh(geometry, state.rockMaterial)
-          rock.position.set(descriptor.x, groundY - descriptor.radiusY * 0.12, descriptor.z)
-          rock.rotation.set((random() - 0.5) * 0.18, descriptor.rotationY, (random() - 0.5) * 0.18)
+          // Sunk by its own burial fraction rather than a flat 12%: a rock
+          // sits IN the regolith it has been gardened into, and how deep
+          // depends on how long it has been there, which is what the field
+          // encodes as size-dependent burial.
+          rock.position.set(descriptor.x, groundY - descriptor.radiusY * descriptor.burial, descriptor.z)
+          // Oriented against the local surface, not against world up. On a
+          // slope a world-up rock cuts into the hill on its uphill side and
+          // hangs off it on the downhill side; matching the terrain normal
+          // first, then applying the rock's own yaw and bedding tilt in
+          // that frame, is what makes it read as resting on the ground.
+          rock.quaternion.setFromUnitVectors(rockUp, sampleTerrainNormal(terrain, descriptor.x, descriptor.z))
+          rock.rotateY(descriptor.rotationY)
+          rock.rotateX(descriptor.tiltX)
+          rock.rotateZ(descriptor.tiltZ)
           rock.userData.lidarRockId = descriptor.id
           state.rockGroup.add(rock)
 
@@ -2053,8 +2348,64 @@ export default function TerrainCanvas3D({
         state.rockGroup.updateMatrixWorld(true)
       }
 
+      // Gravel: rebuilt only after the rover has actually covered ground,
+      // and skipped entirely in orbit mode where a 10 cm clast is far below
+      // one pixel across a 2.5 km overview.
+      const showPebbles = cameraMode !== 'orbit'
+      state.pebbleMeshes.forEach((mesh) => {
+        mesh.visible = showPebbles
+      })
+      const lastPebbleOrigin = lastPebbleOriginRef.current
+      const pebblesMoved =
+        !lastPebbleOrigin || Math.hypot(roverX - lastPebbleOrigin.x, roverZ - lastPebbleOrigin.z) > 4
+      if (showPebbles && pebblesMoved) {
+        lastPebbleOriginRef.current = { x: roverX, z: roverZ }
+        const counts = new Array<number>(state.pebbleMeshes.length).fill(0)
+        const pebbleMatrix = new THREE.Matrix4()
+        const pebblePosition = new THREE.Vector3()
+        const pebbleQuaternion = new THREE.Quaternion()
+        const pebbleTilt = new THREE.Quaternion()
+        const pebbleScale = new THREE.Vector3()
+        // YXZ so the composition matches the navigation rocks' rotateY ->
+        // rotateX -> rotateZ exactly; a different order would tilt gravel
+        // and boulders differently on the same slope.
+        const pebbleEuler = new THREE.Euler(0, 0, 0, 'YXZ')
+        const pebbleUp = new THREE.Vector3(0, 1, 0)
+        for (const pebble of generatePebbleField(roverX, roverZ)) {
+          const variant = Math.abs(pebble.seed) % state.pebbleMeshes.length
+          const index = counts[variant]
+          if (index >= PEBBLE_VARIANT_CAPACITY) continue
+          const groundY = sampleTerrainHeight(terrain, pebble.x, pebble.z)
+          if (groundY === null) continue
+          pebblePosition.set(pebble.x, groundY - pebble.radiusY * pebble.burial, pebble.z)
+          pebbleQuaternion.setFromUnitVectors(
+            pebbleUp,
+            sampleTerrainNormal(terrain, pebble.x, pebble.z),
+          )
+          pebbleEuler.set(pebble.tiltX, pebble.rotationY, pebble.tiltZ, 'YXZ')
+          pebbleQuaternion.multiply(pebbleTilt.setFromEuler(pebbleEuler))
+          pebbleScale.set(pebble.radiusX, pebble.radiusY, pebble.radiusZ)
+          pebbleMatrix.compose(pebblePosition, pebbleQuaternion, pebbleScale)
+          state.pebbleMeshes[variant].setMatrixAt(index, pebbleMatrix)
+          counts[variant] = index + 1
+        }
+        state.pebbleMeshes.forEach((mesh, index) => {
+          mesh.count = counts[index]
+          mesh.instanceMatrix.needsUpdate = true
+        })
+      }
+
+      // Only the rocks a beam could actually reach. The field is anchored to
+      // the whole route and runs to 500 m, but the sensor sees 60; handing
+      // the raycaster all of them made every one of the 270 x 16 beams
+      // bounding-sphere test a couple of thousand meshes it had no chance of
+      // hitting, several times a second, for nothing.
+      const scanReachM = LIDAR_CONFIG.maxRangeM + ROCK_FIELD.maxDiameterM
       const rockMeshes = state.rockGroup.children.filter(
-        (object): object is THREE.Mesh => object instanceof THREE.Mesh,
+        (object): object is THREE.Mesh =>
+          object instanceof THREE.Mesh &&
+          Math.hypot(object.position.x - state.lidarOrigin.x, object.position.z - state.lidarOrigin.z) <=
+            scanReachM,
       )
       const scanSeed = ((row + 1) * 73856093) ^ ((col + 1) * 19349663)
 

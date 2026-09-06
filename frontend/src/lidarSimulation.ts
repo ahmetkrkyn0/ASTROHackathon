@@ -23,6 +23,15 @@ export interface TerrainField {
   verticalScale: number
 }
 
+/**
+ * Which shape family TerrainCanvas3D should build this rock from. Chosen
+ * here rather than in the renderer because the choice is not arbitrary: a
+ * 10 cm clast and a 3 m block do not weather into the same silhouette, so
+ * the size distribution below and the shape distribution have to be drawn
+ * together.
+ */
+export type RockShape = 'scan' | 'cobble' | 'breccia' | 'slab'
+
 export interface RockDescriptor {
   id: string
   x: number
@@ -32,6 +41,18 @@ export interface RockDescriptor {
   radiusZ: number
   rotationY: number
   seed: number
+  /**
+   * Fraction of radiusY sunk below the surface. Rocks on the Moon sit IN
+   * the regolith they have been gardened into, not balanced on top of it,
+   * and the fraction is size-dependent -- a small clast is mostly buried
+   * while a fresh metre-scale block is barely settled.
+   */
+  burial: number
+  /** Shape family; see RockShape. */
+  shape: RockShape
+  /** Bedding tilt applied on top of the terrain normal, radians. */
+  tiltX: number
+  tiltZ: number
   /**
    * Grid cell this rock sits in, only populated when generateRockField is
    * given grid metadata to convert into. App.tsx uses this to tell the
@@ -144,8 +165,274 @@ export function sampleTerrainHeight(field: TerrainField, x: number, z: number): 
 }
 
 /**
+ * Surface normal of the rendered DEM at (x, z), by central differences on
+ * the same bilinear lookup everything else uses. Rocks are oriented against
+ * this rather than against world up: a rock resting on a 12-degree slope
+ * leans with the slope, and one that does not reads as stuck through the
+ * ground on the uphill side and floating on the downhill side. Falls back
+ * to straight up wherever the DEM window runs out.
+ */
+export function sampleTerrainNormal(field: TerrainField, x: number, z: number): THREE.Vector3 {
+  const step = Math.max(field.resolutionM * 0.5, 0.5)
+  const east = sampleTerrainHeight(field, x + step, z)
+  const west = sampleTerrainHeight(field, x - step, z)
+  const south = sampleTerrainHeight(field, x, z + step)
+  const north = sampleTerrainHeight(field, x, z - step)
+  if (east === null || west === null || south === null || north === null) {
+    return new THREE.Vector3(0, 1, 0)
+  }
+  return new THREE.Vector3(west - east, 2 * step, north - south).normalize()
+}
+
+/**
+ * Lunar rock-field parameters. The size distribution is Golombek & Rapp's
+ * cumulative fractional-area model -- the same one used to choose Mars
+ * landing sites and to predict boulder hazards from orbit:
+ *
+ *     F(D) = k * exp(-q(k) * D),   q(k) = 1.79 + 0.152 / k
+ *
+ * F is the fraction of ground covered by rocks with diameter >= D, and k is
+ * the total rock abundance (CFA) of the terrain. Dividing by a rock's own
+ * footprint (pi D^2 / 4) turns that area fraction into a NUMBER density,
+ * which is what a point process needs. Using the real model rather than a
+ * hand-tuned "0.28 + rand^2.35 * 1.9" is what makes the mix of pebbles,
+ * cobbles and the occasional genuine block come out right on its own.
+ */
+export const ROCK_FIELD = {
+  /** CFA of ordinary, gardened mare-like regolith between ejecta patches. */
+  baseCfa: 0.02,
+  /** CFA inside a fresh-crater ejecta patch. */
+  patchCfa: 0.035,
+  /** Characteristic patch size, metres -- an ejecta apron, not a continent. */
+  patchScaleM: 55,
+  /**
+   * Smallest rock the navigation layer carries. Rocks below this are
+   * decorative gravel: they are not a mobility hazard for a ~0.27 m wheel,
+   * they are far too small for the backend's 5 m/px DEM to route around,
+   * and at true lunar density there are tens of thousands of them inside
+   * LiDAR range alone. generatePebbleField covers that range instead.
+   */
+  navMinDiameterM: 0.45,
+  /** Largest block this field will place. */
+  maxDiameterM: 4.5,
+  /** Rocks nearer than this to the field origin are suppressed. */
+  safetyRadiusM: 4.5,
+  chunkM: 24,
+  /** Guard against a pathological patch dumping a whole quarry in one cell. */
+  maxPerChunk: 16,
+} as const
+
+/** Golombek's shape parameter: steeper (fewer big rocks) for sparser ground. */
+function golombekQ(cfa: number): number {
+  return 1.79 + 0.152 / Math.max(cfa, 1e-3)
+}
+
+/** Rocks per square metre with diameter >= dMin, for terrain of abundance k. */
+function rockNumberDensity(cfa: number, dMin: number): number {
+  const areaFraction = cfa * Math.exp(-golombekQ(cfa) * dMin)
+  return areaFraction / ((Math.PI * dMin * dMin) / 4)
+}
+
+/**
+ * Draw one diameter from the same distribution, by inverting
+ * N(>=D) / N(>=dMin) = u. The ratio is monotone decreasing in D and has no
+ * closed-form inverse, so this bisects -- 28 iterations is exact to well
+ * under a millimetre over this range, and costs nothing at these counts.
+ */
+function sampleRockDiameter(cfa: number, dMin: number, dMax: number, u: number): number {
+  const q = golombekQ(cfa)
+  const target = Math.max(u, 1e-6)
+  const ratio = (d: number) => (Math.exp(-q * (d - dMin)) * dMin * dMin) / (d * d)
+  if (target <= ratio(dMax)) return dMax
+  let lo = dMin
+  let hi = dMax
+  for (let i = 0; i < 28; i++) {
+    const mid = (lo + hi) / 2
+    if (ratio(mid) > target) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
+/**
+ * Observed lunar rock size-frequency curves are exponential through the
+ * gardened cobble range but develop a distinctly heavier, power-law tail
+ * above roughly a metre, where the population is fresh impact ejecta that
+ * has not been comminuted yet. A single exponential fitted to the small end
+ * predicts essentially no boulders at all -- it put the largest rock in a
+ * whole 500 m field at 1.5 m, which is not what Apollo surface panoramas or
+ * LROC boulder counts show. Drawing a fraction of rocks from a truncated
+ * Pareto tail instead restores real blocks without inflating the overall
+ * count, and ties how blocky a patch is to that patch's own abundance --
+ * so ordinary ground stays cobbly and an ejecta apron reads as a boulder
+ * field, which is the actual difference between the two.
+ */
+function sampleNavDiameter(cfa: number, random: () => number): number {
+  const patchStrength = THREE.MathUtils.clamp(
+    (cfa - ROCK_FIELD.baseCfa) / Math.max(ROCK_FIELD.patchCfa - ROCK_FIELD.baseCfa, 1e-6),
+    0,
+    1,
+  )
+  const tailProbability = 0.08 + 0.42 * patchStrength
+  const dMin = ROCK_FIELD.navMinDiameterM
+  const dMax = ROCK_FIELD.maxDiameterM
+  if (random() < tailProbability) {
+    const alpha = 2.2
+    const cut = Math.pow(dMin / dMax, alpha)
+    const d = dMin / Math.pow(1 - random() * (1 - cut), 1 / alpha)
+    return Math.min(d, dMax)
+  }
+  return sampleRockDiameter(cfa, dMin, dMax, random())
+}
+
+/** Knuth for the small counts this field sees; normal approximation above it. */
+function samplePoisson(lambda: number, random: () => number): number {
+  if (lambda <= 0) return 0
+  if (lambda > 30) {
+    const gaussian =
+      Math.sqrt(-2 * Math.log(Math.max(random(), 1e-9))) * Math.cos(2 * Math.PI * random())
+    return Math.max(0, Math.round(lambda + gaussian * Math.sqrt(lambda)))
+  }
+  const limit = Math.exp(-lambda)
+  let n = 0
+  let product = 1
+  do {
+    n++
+    product *= random()
+  } while (product > limit)
+  return n - 1
+}
+
+/**
+ * Lattice value noise keyed on world metres. Everything about it depends on
+ * (x, z) alone -- never on which window, rover position or route asked for
+ * it -- which is what lets two independent callers (App.tsx's pre-planning
+ * obstacle pass and TerrainCanvas3D's renderer) agree on the same field.
+ */
+function valueNoise2D(x: number, z: number): number {
+  const xi = Math.floor(x)
+  const zi = Math.floor(z)
+  const xf = x - xi
+  const zf = z - zi
+  const u = xf * xf * (3 - 2 * xf)
+  const v = zf * zf * (3 - 2 * zf)
+  const n00 = hash2(xi, zi) / 4294967296
+  const n10 = hash2(xi + 1, zi) / 4294967296
+  const n01 = hash2(xi, zi + 1) / 4294967296
+  const n11 = hash2(xi + 1, zi + 1) / 4294967296
+  return (n00 * (1 - u) + n10 * u) * (1 - v) + (n01 * (1 - u) + n11 * u) * v
+}
+
+function fbm2D(x: number, z: number, octaves = 3): number {
+  let amplitude = 1
+  let frequency = 1
+  let sum = 0
+  let norm = 0
+  for (let i = 0; i < octaves; i++) {
+    sum += amplitude * valueNoise2D(x * frequency, z * frequency)
+    norm += amplitude
+    amplitude *= 0.5
+    frequency *= 2.07
+  }
+  return sum / norm
+}
+
+/**
+ * Local rock abundance. Rocks on an airless, impact-gardened surface are not
+ * scattered uniformly -- they arrive in ejecta aprons around fresh craters
+ * and are then slowly buried, so the ground alternates between long clean
+ * stretches and distinctly blocky patches. A smoothstepped fBm reproduces
+ * exactly that: mostly baseline, with localised concentrations.
+ */
+export function rockAbundanceAt(x: number, z: number): number {
+  const patch = fbm2D(x / ROCK_FIELD.patchScaleM, z / ROCK_FIELD.patchScaleM, 3)
+  const t = THREE.MathUtils.smoothstep(patch, 0.5, 0.86)
+  return ROCK_FIELD.baseCfa + (ROCK_FIELD.patchCfa - ROCK_FIELD.baseCfa) * t
+}
+
+/**
+ * Shape family by size. Not decoration: small clasts survive as rounded
+ * cobbles because micrometeorite gardening abrades them, while a freshly
+ * excavated metre block is still angular breccia or a slabby spall, and
+ * the two do not read alike in silhouette.
+ */
+function pickShape(diameterM: number, random: () => number): RockShape {
+  const u = random()
+  if (diameterM < 0.22) return u < 0.85 ? 'cobble' : 'breccia'
+  if (diameterM < 0.9) {
+    if (u < 0.45) return 'scan'
+    if (u < 0.75) return 'cobble'
+    if (u < 0.93) return 'breccia'
+    return 'slab'
+  }
+  if (u < 0.34) return 'scan'
+  if (u < 0.72) return 'breccia'
+  if (u < 0.92) return 'slab'
+  return 'cobble'
+}
+
+/** Semi-axis ratios (b/a, c/a) per family; a is always the semi-major axis. */
+const SHAPE_AXIS_RATIOS: Record<RockShape, { y: [number, number]; z: [number, number] }> = {
+  cobble: { y: [0.78, 0.96], z: [0.74, 0.94] },
+  scan: { y: [0.62, 0.86], z: [0.55, 0.8] },
+  breccia: { y: [0.58, 0.88], z: [0.5, 0.78] },
+  slab: { y: [0.22, 0.44], z: [0.66, 0.95] },
+}
+
+/**
+ * Turn a drawn diameter into a full descriptor. Split out because the
+ * navigation field and the gravel field below need identical rock
+ * character -- only their size range and their consumers differ.
+ */
+function describeRock(
+  id: string,
+  x: number,
+  z: number,
+  diameterM: number,
+  seed: number,
+  random: () => number,
+): RockDescriptor {
+  const shape = pickShape(diameterM, random)
+  const ratios = SHAPE_AXIS_RATIOS[shape]
+  const semiMajor = diameterM / 2
+  const ratioY = ratios.y[0] + random() * (ratios.y[1] - ratios.y[0])
+  const ratioZ = ratios.z[0] + random() * (ratios.z[1] - ratios.z[0])
+  // Small clasts have been gardened deep into the regolith; a metre block
+  // has barely settled. 1/(1+D) falls off at about that rate, and a slab
+  // sinks further than a compact rock of the same footprint.
+  const slabFactor = shape === 'slab' ? 1.25 : 1
+  const burial = THREE.MathUtils.clamp(
+    0.06 + ((0.34 * random() + 0.1) / (1 + diameterM)) * slabFactor,
+    0.05,
+    0.46,
+  )
+  // A slab lies with its flat face on the ground; a compact rock can rest
+  // on any facet, so it tilts further off the local surface normal.
+  const tiltRange = shape === 'slab' ? 0.1 : 0.22
+  return {
+    id,
+    x,
+    z,
+    radiusX: semiMajor,
+    radiusY: semiMajor * ratioY,
+    radiusZ: semiMajor * ratioZ,
+    rotationY: random() * Math.PI * 2,
+    seed: hash2(seed, 0x9e37),
+    burial,
+    shape,
+    tiltX: (random() - 0.5) * 2 * tiltRange,
+    tiltZ: (random() - 0.5) * 2 * tiltRange,
+  }
+}
+
+/**
  * Stable metre-scale rocks around a rover. Rock identity is tied to absolute
  * world chunks, so moving the rover does not make obstacles slide around.
+ *
+ * Only rocks at or above ROCK_FIELD.navMinDiameterM appear here: these are
+ * the ones that are a real mobility hazard, that LiDAR resolves as an
+ * obstacle, and that the backend planner is told to route around. The
+ * gravel below that size is generatePebbleField's job.
  */
 export function generateRockField(
   originX: number,
@@ -158,58 +445,147 @@ export function generateRockField(
   // pre-planning obstacle pass needs this; rendering call sites can omit it.
   grid?: { rows: number; cols: number; resolutionM: number },
 ): RockDescriptor[] {
-  const chunkM = 18
-  const minChunkX = Math.floor((originX - radiusM) / chunkM)
-  const maxChunkX = Math.floor((originX + radiusM) / chunkM)
-  const minChunkZ = Math.floor((originZ - radiusM) / chunkM)
-  const maxChunkZ = Math.floor((originZ + radiusM) / chunkM)
-  const rocks: RockDescriptor[] = []
+  const chunkM = ROCK_FIELD.chunkM
+  // One chunk of overscan: rocks just outside the requested radius still
+  // have to be generated so the overlap rejection below sees them, and are
+  // only dropped afterwards. Without it, whether a rock near the edge got
+  // rejected would depend on where the window happened to be cut, and the
+  // field would stop being a fixed property of the world.
+  const minChunkX = Math.floor((originX - radiusM) / chunkM) - 1
+  const maxChunkX = Math.floor((originX + radiusM) / chunkM) + 1
+  const minChunkZ = Math.floor((originZ - radiusM) / chunkM) - 1
+  const maxChunkZ = Math.floor((originZ + radiusM) / chunkM) + 1
 
+  const candidates: RockDescriptor[] = []
   for (let cz = minChunkZ; cz <= maxChunkZ; cz++) {
     for (let cx = minChunkX; cx <= maxChunkX; cx++) {
       const seed = hash2(cx, cz)
       const random = seededRandom(seed)
-      // ~40% of chunks now sit empty, and a chunk that does get a rock is
-      // mostly a single one -- roughly half the overall density this field
-      // had before, without touching how far it reaches or how varied the
-      // rocks look.
-      if (random() < 0.4) continue
-      const count = random() < 0.7 ? 1 : 2
+      const cfa = rockAbundanceAt((cx + 0.5) * chunkM, (cz + 0.5) * chunkM)
+      const density = rockNumberDensity(cfa, ROCK_FIELD.navMinDiameterM)
+      const count = Math.min(
+        ROCK_FIELD.maxPerChunk,
+        samplePoisson(density * chunkM * chunkM, random),
+      )
       for (let i = 0; i < count; i++) {
-        const x = (cx + 0.12 + random() * 0.76) * chunkM
-        const z = (cz + 0.12 + random() * 0.76) * chunkM
-        const distance = Math.hypot(x - originX, z - originZ)
-        if (distance > radiusM || distance < 4.5) continue
-
-        // A long-tailed size distribution: mostly cobbles, with occasional
-        // boulders large enough to be a genuine mobility hazard.
-        const size = 0.28 + Math.pow(random(), 2.35) * 1.9
-        let row: number | undefined
-        let col: number | undefined
-        if (grid) {
-          const gridWidth = grid.cols * grid.resolutionM
-          const gridDepth = grid.rows * grid.resolutionM
-          const stepX = gridWidth / (grid.cols - 1)
-          const stepZ = gridDepth / (grid.rows - 1)
-          col = Math.round((x + gridWidth / 2) / stepX)
-          row = Math.round((z + gridDepth / 2) / stepZ)
-        }
-        rocks.push({
-          id: `${cx}:${cz}:${i}`,
-          x,
-          z,
-          radiusX: size * (0.72 + random() * 0.48),
-          radiusY: size * (0.58 + random() * 0.58),
-          radiusZ: size * (0.72 + random() * 0.48),
-          rotationY: random() * Math.PI * 2,
-          seed: hash2(seed, i + 1),
-          row,
-          col,
-        })
+        const x = (cx + random()) * chunkM
+        const z = (cz + random()) * chunkM
+        const diameterM = sampleNavDiameter(cfa, random)
+        candidates.push(
+          describeRock(`${cx}:${cz}:${i}`, x, z, diameterM, hash2(seed, i + 1), random),
+        )
       }
     }
   }
+
+  // Rocks do not interpenetrate. Resolving overlaps by "whoever was
+  // generated first wins" would make the outcome depend on iteration order
+  // and therefore on the window; ranking by each rock's own hash is a
+  // property of the rock itself, so the same pair always resolves the same
+  // way no matter who asks or from where.
+  candidates.sort((a, b) => hash2(a.seed, 0x51ed) - hash2(b.seed, 0x51ed))
+  const cellM = ROCK_FIELD.maxDiameterM
+  const buckets = new Map<string, RockDescriptor[]>()
+  const kept: RockDescriptor[] = []
+  for (const rock of candidates) {
+    const bx = Math.floor(rock.x / cellM)
+    const bz = Math.floor(rock.z / cellM)
+    let overlaps = false
+    for (let dz = -1; dz <= 1 && !overlaps; dz++) {
+      for (let dx = -1; dx <= 1 && !overlaps; dx++) {
+        const neighbours = buckets.get(`${bx + dx}:${bz + dz}`)
+        if (!neighbours) continue
+        for (const other of neighbours) {
+          const minGap =
+            Math.max(rock.radiusX, rock.radiusZ) + Math.max(other.radiusX, other.radiusZ)
+          if (Math.hypot(rock.x - other.x, rock.z - other.z) < minGap * 1.05) {
+            overlaps = true
+            break
+          }
+        }
+      }
+    }
+    if (overlaps) continue
+    const key = `${bx}:${bz}`
+    const bucket = buckets.get(key)
+    if (bucket) bucket.push(rock)
+    else buckets.set(key, [rock])
+    kept.push(rock)
+  }
+
+  const rocks: RockDescriptor[] = []
+  for (const rock of kept) {
+    const distance = Math.hypot(rock.x - originX, rock.z - originZ)
+    if (distance > radiusM || distance < ROCK_FIELD.safetyRadiusM) continue
+    if (grid) {
+      const gridWidth = grid.cols * grid.resolutionM
+      const gridDepth = grid.rows * grid.resolutionM
+      const stepX = gridWidth / (grid.cols - 1)
+      const stepZ = gridDepth / (grid.rows - 1)
+      rock.col = Math.round((rock.x + gridWidth / 2) / stepX)
+      rock.row = Math.round((rock.z + gridDepth / 2) / stepZ)
+    }
+    rocks.push(rock)
+  }
   return rocks
+}
+
+/**
+ * Distance-graded gravel: the sub-navigation-size clasts that make the
+ * ground read as a real regolith surface at eye height rather than a bare
+ * mesh with a few boulders on it. At true lunar abundance there are tens of
+ * thousands of these inside LiDAR range, so the minimum size carried rises
+ * with distance -- a 10 cm clast is worth drawing two metres away and is
+ * sub-pixel at fifty. Purely decorative: never raycast, never sent to the
+ * planner, and rendered as instances rather than as individual meshes.
+ */
+export const PEBBLE_TIERS: Array<{ innerM: number; outerM: number; minDiameterM: number }> = [
+  { innerM: 0, outerM: 18, minDiameterM: 0.1 },
+  { innerM: 18, outerM: 40, minDiameterM: 0.13 },
+  { innerM: 40, outerM: 70, minDiameterM: 0.22 },
+]
+
+export function generatePebbleField(originX: number, originZ: number): RockDescriptor[] {
+  const chunkM = 6
+  const outerM = PEBBLE_TIERS[PEBBLE_TIERS.length - 1].outerM
+  const minChunkX = Math.floor((originX - outerM) / chunkM)
+  const maxChunkX = Math.floor((originX + outerM) / chunkM)
+  const minChunkZ = Math.floor((originZ - outerM) / chunkM)
+  const maxChunkZ = Math.floor((originZ + outerM) / chunkM)
+  const pebbles: RockDescriptor[] = []
+
+  for (let cz = minChunkZ; cz <= maxChunkZ; cz++) {
+    for (let cx = minChunkX; cx <= maxChunkX; cx++) {
+      const centreX = (cx + 0.5) * chunkM
+      const centreZ = (cz + 0.5) * chunkM
+      const distance = Math.hypot(centreX - originX, centreZ - originZ)
+      const tier = PEBBLE_TIERS.find((t) => distance >= t.innerM && distance < t.outerM)
+      if (!tier) continue
+      // Seeded on the chunk AND the tier: a chunk that changes tier as the
+      // rover approaches re-draws at the finer size floor, which is the
+      // point of the grading, and does so identically every time.
+      const seed = hash2(hash2(cx, cz), Math.round(tier.minDiameterM * 1000))
+      const random = seededRandom(seed)
+      const cfa = rockAbundanceAt(centreX, centreZ)
+      const density = rockNumberDensity(cfa, tier.minDiameterM)
+      const count = Math.min(64, samplePoisson(density * chunkM * chunkM, random))
+      for (let i = 0; i < count; i++) {
+        const x = (cx + random()) * chunkM
+        const z = (cz + random()) * chunkM
+        if (Math.hypot(x - originX, z - originZ) < 2) continue
+        const diameterM = sampleRockDiameter(
+          cfa,
+          tier.minDiameterM,
+          ROCK_FIELD.navMinDiameterM,
+          random(),
+        )
+        pebbles.push(
+          describeRock(`p${cx}:${cz}:${i}`, x, z, diameterM, hash2(seed, i + 1), random),
+        )
+      }
+    }
+  }
+  return pebbles
 }
 
 function firstTerrainReturn(
