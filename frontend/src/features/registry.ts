@@ -20,6 +20,7 @@ import { RouteAnalysis } from './route-analysis'
 import { RouteModel } from './route-model'
 import { SafetyMargins } from './safety-margins'
 import { TimeAxis } from './time-axis'
+import { Uncertainty } from './uncertainty'
 import { SolvingIndicator } from './solving-indicator'
 
 /**
@@ -166,6 +167,11 @@ export const FEATURES: readonly FeatureRegistration[] = [
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation, group: 'systems' },
   { id: 'corridor', slot: 'rightRail', Component: CorridorFeature, group: 'systems' },
   { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop, group: 'systems' },
+  // Analyze only, and in the drawer: a post-route analysis that takes seconds
+  // and needs a preprocessing cache many deployments will not have. It never
+  // blocks the route -- an unavailable ensemble costs this panel and nothing
+  // else.
+  { id: 'uncertainty', slot: 'rightRail', Component: Uncertainty, modes: ['analyze'], group: 'systems' },
   // Analyze only. The cost under the pointer is worth reading in both modes,
   // but it is the last primary occupant of the right rail, and leaving it
   // registered in plan would keep a 288px column open for one hover readout.
