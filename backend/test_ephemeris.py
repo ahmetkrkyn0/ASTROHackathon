@@ -252,3 +252,58 @@ def test_utc_to_et_without_the_fix_would_have_failed_cold(monkeypatch):
     monkeypatch.setattr(spiceypy, "str2et", _fake_str2et)
     with pytest.raises(RuntimeError, match="NOLEAPSECONDS"):
         spiceypy.str2et("2026-08-30T00:00:00")
+
+
+# ── body-parameterised ephemeris (A4: the Earth is the same call as the Sun) ─
+#
+# Direct-to-Earth visibility needs exactly the geometry the Sun already gets:
+# spkpos in MOON_ME from the Moon, light-time corrected. The only thing that
+# changes is the target name, so the target is a parameter and the two
+# public helpers are one-line wrappers. Faked spiceypy, so this runs on a
+# fresh clone with no kernels.
+
+
+def _fake_spice(monkeypatch):
+    import spiceypy
+
+    from app import ephemeris
+
+    calls: list[tuple] = []
+
+    def _fake_spkpos(target, et, frame, abcorr, observer):
+        calls.append((target, et, frame, abcorr, observer))
+        return ([1.0, 2.0, 3.0], 0.0)
+
+    monkeypatch.setattr(spiceypy, "furnsh", lambda _path: None)
+    monkeypatch.setattr(spiceypy, "ktotal", lambda _category: 1)
+    monkeypatch.setattr(spiceypy, "spkpos", _fake_spkpos)
+    ephemeris._FURNISHED.clear()
+    return ephemeris, calls
+
+
+def test_earth_vector_body_queries_spice_for_the_earth(monkeypatch):
+    ephemeris, calls = _fake_spice(monkeypatch)
+    try:
+        vec = ephemeris.earth_vector_body(123.0)
+    finally:
+        ephemeris._FURNISHED.clear()
+    assert calls == [("EARTH", 123.0, "MOON_ME", "LT+S", "MOON")]
+    np.testing.assert_allclose(vec, [1.0, 2.0, 3.0])
+
+
+def test_sun_vector_body_still_queries_the_sun(monkeypatch):
+    ephemeris, calls = _fake_spice(monkeypatch)
+    try:
+        ephemeris.sun_vector_body(456.0)
+    finally:
+        ephemeris._FURNISHED.clear()
+    assert calls == [("SUN", 456.0, "MOON_ME", "LT+S", "MOON")]
+
+
+def test_body_vector_body_takes_any_naif_target(monkeypatch):
+    ephemeris, calls = _fake_spice(monkeypatch)
+    try:
+        ephemeris.body_vector_body("EARTH BARYCENTER", 7.0)
+    finally:
+        ephemeris._FURNISHED.clear()
+    assert calls[0][0] == "EARTH BARYCENTER"

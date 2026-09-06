@@ -253,3 +253,92 @@ def test_a_new_plan_replaces_the_active_corridor(client):
     x0, y0 = _corridor_start_xy(second)
     payload = client.post("/api/pose", json={"pose": _pose_body(x0, y0)}).json()
     assert payload["corridor_fix"]["inside"] is True
+
+
+# ── A4: the Earth link from a pose, and on its own endpoint ────────────────
+
+
+def _fake_window(minutes: float, visible: bool = True):
+    def _window(metadata, row, col, utc, **kwargs):
+        return {
+            "utc": utc,
+            "row": row,
+            "col": col,
+            "visible_now": visible,
+            "minutes_remaining": minutes if visible else None,
+            "minutes_until_visible": None if visible else minutes,
+            "next_change_utc": None,
+            "search_limited": False,
+            "trigger_minutes_remaining": minutes if visible else 0.0,
+            "earth_elevation_deg": 3.0,
+            "earth_azimuth_true_deg": 100.0,
+            "earth_azimuth_grid_deg": 350.0,
+            "horizon_deg": 1.0,
+        }
+
+    return _window
+
+
+def test_a_pose_computes_its_own_comm_window(client, monkeypatch):
+    """pose.timestamp_utc and pose.x_m/y_m are everything the geometry needs:
+    the trigger that used to wait for a hand-fed number now fires from the
+    map. The fake records the cell it was asked about, so the pixel
+    conversion is pinned too."""
+    import app.main as main_module
+
+    asked = []
+
+    def _window(metadata, row, col, utc, **kwargs):
+        asked.append((row, col, utc))
+        return _fake_window(5.0)(metadata, row, col, utc)
+
+    monkeypatch.setattr(main_module, "comm_window_from_metadata", _window)
+    plan_payload = _plan(client)
+    x, y = _corridor_start_xy(plan_payload)
+    payload = client.post("/api/pose", json={"pose": _pose_body(x, y)}).json()
+
+    assert payload["trigger_state"]["comm_minutes_remaining"] == 5.0
+    assert "comm_window" in [t["trigger_id"] for t in payload["fired_triggers"]]
+    assert payload["recommended_action"] == "replan"
+    assert payload["comm_window"]["trigger_minutes_remaining"] == 5.0
+    # The corridor starts at fine pixel (2, 2); the pose sits exactly there.
+    assert asked == [(2, 2, "2026-08-30T12:00:00Z")]
+
+
+def test_a_pose_without_a_horizon_cube_leaves_comm_unchecked(client):
+    plan_payload = _plan(client)
+    x, y = _corridor_start_xy(plan_payload)
+    payload = client.post("/api/pose", json={"pose": _pose_body(x, y)}).json()
+    assert payload["comm_window"] is None
+    assert "comm_window" in [entry["trigger_id"] for entry in payload["skipped"]]
+    assert payload["recommended_action"] == "continue"
+
+
+def test_comm_window_endpoint_needs_the_horizon_cube(client):
+    response = client.get("/api/comm-window?row=2&col=2&utc=2026-09-03T12:00:00")
+    assert response.status_code == 409
+    assert "horizon" in response.json()["detail"].lower()
+
+
+def test_comm_window_endpoint_returns_the_window(client, monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "comm_window_from_metadata", _fake_window(240.0))
+    response = client.get("/api/comm-window?row=2&col=3&utc=2026-09-03T12:00:00")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["row"] == 2 and payload["col"] == 3
+    assert payload["visible_now"] is True
+    assert payload["minutes_remaining"] == 240.0
+    assert payload["trigger_minutes_remaining"] == 240.0
+
+
+def test_comm_window_endpoint_rejects_a_cell_outside_the_grid(client, monkeypatch):
+    import app.main as main_module
+
+    def _out_of_grid(metadata, row, col, utc, **kwargs):
+        raise ValueError(f"cell ({row}, {col}) is outside the grid")
+
+    monkeypatch.setattr(main_module, "comm_window_from_metadata", _out_of_grid)
+    response = client.get("/api/comm-window?row=99&col=0&utc=2026-09-03T12:00:00")
+    assert response.status_code == 422

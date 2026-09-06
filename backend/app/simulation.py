@@ -78,6 +78,14 @@ class RoverState:
     # is a rover waiting to die; the summary reports it rather than
     # continuing to quote a battery percentage as if the traverse succeeded.
     stranded: bool = False
+    # The array's income while driving this step (p_solar_w scaled by the
+    # cell's illumination, over the drive time). The battery moves by
+    # step_energy_wh minus this -- cost_engine.move_battery_drain_wh, the
+    # same signed drain the 4-D planner integrates. Until B5 the simulator
+    # charged the gross draw and credited nothing, so /api/plan and
+    # /api/plan-4d disagreed about the battery on every lit cell (doc 11,
+    # section 2.3, item 3).
+    step_solar_wh: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -100,6 +108,7 @@ class RoverState:
             "recharged_this_step": self.recharged_this_step,
             "battery_low_pct": round(self.battery_low_pct, 2),
             "stranded": self.stranded,
+            "step_solar_wh": round(self.step_solar_wh, 2),
         }
 
 
@@ -193,6 +202,7 @@ def simulate_path(
         if i == 0:
             step_time_h = 0.0
             step_energy = 0.0
+            step_solar = 0.0
         else:
             travel_s = edge_travel_time_s(drive_slope_deg, step_dist, rover_cfg)
             if not math.isfinite(travel_s):
@@ -206,8 +216,13 @@ def simulate_path(
                 gross_energy_per_metre_wh(drive_slope_deg, shadow_ratio, rover_cfg)
                 * step_dist
             )
+            # The array keeps producing while the rover drives. Draw minus
+            # this income is cost_engine.move_battery_drain_wh -- the signed
+            # drain the 4-D planner integrates -- and the battery is capped
+            # at capacity, as there. (B5; doc 11 section 2.3, item 3.)
+            step_solar = solar_power_w * (1.0 - shadow_ratio) * step_time_h
 
-        battery_wh -= step_energy
+        battery_wh = min(battery_capacity_wh, battery_wh - step_energy + step_solar)
         # Bank the drive time before any recharge stop extends it, so the
         # clock advances exactly once per step.
         elapsed_hours += step_time_h
@@ -287,6 +302,7 @@ def simulate_path(
                 recharged_this_step=recharged_this_step,
                 battery_low_pct=battery_low_pct,
                 stranded=stranded,
+                step_solar_wh=step_solar,
             )
         )
 
@@ -362,6 +378,7 @@ def summarize_simulation(
             "max_slope_deg": 0.0,
             "max_segment_slope_deg": 0.0,
             "total_energy_consumed_wh": 0.0,
+            "total_solar_energy_wh": 0.0,
             "total_shadow_exposure": 0.0,
             "critical_steps_count": 0,
             "high_or_above_steps_count": 0,
@@ -395,6 +412,9 @@ def summarize_simulation(
             max(s.segment_slope_deg for s in states), 2
         ),
         "total_energy_consumed_wh": round(sum(s.step_energy_wh for s in states), 2),
+        # The array's income over the driven steps (recharge stops are not
+        # included: they are reported through total_recharges and the clock).
+        "total_solar_energy_wh": round(sum(s.step_solar_wh for s in states), 2),
         "total_shadow_exposure": round(total_shadow_exposure, 4),
         "critical_steps_count": sum(1 for s in states if s.risk_level == "CRITICAL"),
         "high_or_above_steps_count": sum(

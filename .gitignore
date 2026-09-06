@@ -47,3 +47,26 @@ log/
 # Superpowers subagent-driven-development scratch workspaces
 .superpowers/
 bags/
+
+# Derived-artefact provenance written beside the gitignored .npy caches
+# (scripts/build_horizon_cache.py, scripts/build_earth_visibility_cache.py);
+# they carry absolute local paths and are rebuilt with the caches.
+lunapath/data/processed/horizon_map_meta.json
+lunapath/data/processed/earth_visibility_meta.json
+# B3: NASA DEM-clone cache provenance (scripts/build_dem_clone_cache.py)
+lunapath/data/processed/dem_clones_meta.json
+lunapath/data/processed/dem_clone_horizons_meta.json
+# PDS3 labels fetched next to LOLA .img products
+*.lbl
+# C4: NASA LDRM roughness / LPSR PSR cache provenance and the report's raw
+# 50 m windows (scripts/build_roughness_cache.py); rebuilt with the caches.
+lunapath/data/processed/roughness_meta.json
+lunapath/data/processed/psr_meta.json
+lunapath/data/processed/roughness_baselines.npz
+# D2: MoonPlanBench occupancy maps (Chancán et al. 2025, CC BY-NC-SA 4.0) and
+# their provenance JSON (scripts/build_moonplanbench_cache.py); never committed.
+lunapath/data/benchmarks/
+# C6: heat1d envelope-transient cache and its provenance
+# (scripts/build_thermal_envelope_cache.py); rebuilt together, never committed.
+lunapath/data/processed/thermal_envelope_heat1d.npz
+lunapath/data/processed/thermal_envelope_meta.json

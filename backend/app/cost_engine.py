@@ -13,6 +13,9 @@ from typing import Any
 import numpy as np
 
 from . import constants as C
+from .risk import slip_cvar, slope_cvar
+from .roughness import RoughnessScale
+from .slip_model import slip_ratio, slip_ratio_array
 
 # Identifies the formula compute_cost_grid implements. Bump this whenever a
 # penalty term changes shape, so anything holding a cost grid computed by an
@@ -20,21 +23,75 @@ from . import constants as C
 # longer matches this code instead of being silently reused. The v2 bump is
 # review #1: f_energy -> f_energy_cell. (Review #5.) The v3 bump is round 3
 # review H-4: f_energy_cell now reads shadow as well as slope, so the energy
-# criterion is no longer a monotone restatement of the slope criterion.
-COST_MODEL_ID: str = "weighted_cell_cost_shadow_aware_energy_v3"
+# criterion is no longer a monotone restatement of the slope criterion. The
+# v4 bump is C3: edge_travel_time_s applies the rover's slip curve, so the
+# per-metre energies behind f_energy_cell -- and with them the grid -- now
+# grow with slip. B2 (risk_alpha) does NOT bump it: with risk_alpha=None the
+# grid is this formula, operation for operation; a grid built under an alpha
+# is keyed by metadata["risk_alpha"] instead (rover_grids). The v5 bump is
+# C4: a fifth criterion, f_roughness (NASA's LOLA LDRM roughness, MEASURED),
+# enters the weighted sum with w_roughness whenever the roughness layer is
+# beside the processed grids -- so with the layer the grid is a different
+# number; without it the four-term body runs operation for operation as v4
+# did (asserted bit for bit in test_roughness_cost and, on Site11, by the
+# v4 SHA-256 lock with the layer removed).
+COST_MODEL_ID: str = "weighted_cell_cost_shadow_aware_energy_slip_roughness_v5"
 
 _WEIGHT_KEYS: tuple[str, ...] = (
     "w_slope",
     "w_energy",
     "w_shadow",
     "w_thermal",
+    "w_roughness",
 )
+
+#: The criteria compute_cost_grid always sums, in order; roughness (C4) is
+#: appended only when its layer is present -- see cost_criteria_for.
+COST_CRITERIA_BASE: tuple[str, ...] = ("slope", "energy", "shadow", "thermal")
+
+
+def cost_criteria_for(roughness_present: bool) -> list[str]:
+    """The criteria a cost grid built with (or without) the roughness layer
+    actually sums; stamped as ``metadata["cost_criteria"]`` so a response
+    can say whether ``w_roughness`` steered anything."""
+    criteria = list(COST_CRITERIA_BASE)
+    if roughness_present:
+        criteria.append("roughness")
+    return criteria
 
 
 def _resolve_rover(rover: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
     if rover is None:
         return C.get_rover()
     return rover
+
+
+class _SlipFreeView(Mapping):
+    """A read-only view of a rover profile with its ``slip_curve`` hidden, so
+    ``slip_model.curve_for`` finds none and every time/energy function
+    evaluates slip-free. Used for the energy criterion's reference scale
+    (see :func:`f_energy_cell`) and by the C3 report's before/after runs."""
+
+    __slots__ = ("_base",)
+
+    def __init__(self, base: Mapping[str, Any]) -> None:
+        self._base = base
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "slip_curve":
+            raise KeyError(key)
+        return self._base[key]
+
+    def __iter__(self):
+        return (key for key in self._base if key != "slip_curve")
+
+    def __len__(self) -> int:
+        return len(self._base) - (1 if "slip_curve" in self._base else 0)
+
+
+def slip_free_view(rover: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+    """The same profile evaluated without its slip curve (C3)."""
+    return _SlipFreeView(_resolve_rover(rover))
 
 
 def default_weights(rover: Mapping[str, Any] | None = None) -> dict[str, float]:
@@ -45,6 +102,7 @@ def default_weights(rover: Mapping[str, Any] | None = None) -> dict[str, float]:
         "w_energy": float(rover_cfg["w_energy"]),
         "w_shadow": float(rover_cfg["w_shadow"]),
         "w_thermal": float(rover_cfg["w_thermal"]),
+        "w_roughness": float(rover_cfg["w_roughness"]),
     }
 
 
@@ -65,13 +123,30 @@ def resolve_weights(
 
 # ── 2.3.1  f_slope — Sigmoid slope penalty ──────────────────────────────────
 
-def f_slope(theta_deg: float, rover: Mapping[str, Any] | None = None) -> float:
+def f_slope(
+    theta_deg: float,
+    rover: Mapping[str, Any] | None = None,
+    risk_alpha: float | None = None,
+    slope_sigma: float | None = None,
+) -> float:
+    """Sigmoid slope penalty in MRU [0, 1]; ``inf`` above the rover's limit.
+
+    B2: with *risk_alpha* the sigmoid reads the slope's CVaR tail,
+    ``min(slope_max, |slope| + slope_sigma * m_alpha)`` (:func:`risk.slope_cvar`),
+    while the impassable gate stays on the NOMINAL slope -- so a risk
+    appetite reorders passable cells and never changes which cells are
+    passable. Without a (finite, positive) *slope_sigma* the tail is the
+    nominal slope. ``risk_alpha=None`` is the pre-B2 body, unchanged.
+    """
     rover_cfg = _resolve_rover(rover)
     slope_max = float(rover_cfg["slope_max_deg"])
     slope_comfortable = float(rover_cfg["slope_comfortable_deg"])
     if theta_deg > slope_max:
         return float("inf")
-    return 1.0 / (1.0 + math.exp(-0.4 * (theta_deg - slope_comfortable)))
+    theta = theta_deg
+    if risk_alpha is not None:
+        theta = slope_cvar(theta_deg, risk_alpha, slope_sigma, rover_cfg)
+    return 1.0 / (1.0 + math.exp(-0.4 * (theta - slope_comfortable)))
 
 
 # ── 2.3.2  f_energy — Physics-based energy penalty ──────────────────────────
@@ -131,8 +206,12 @@ def net_energy_per_metre_wh(
     theta_deg: float,
     shadow_ratio: float = 0.0,
     rover: Mapping[str, Any] | None = None,
+    slip: float | None = None,
 ) -> float:
     """Energy the BATTERY loses to advance one metre.
+
+    *slip*, when given, replaces the curve's mean slip in the per-metre time
+    (B2 prices a cell at its slip tail this way); ``None`` is the curve.
 
     Draw minus the solar input the cell actually offers, floored at zero: a
     cell where the array outproduces the drive is free, not negative, because
@@ -154,7 +233,7 @@ def net_energy_per_metre_wh(
     """
     rover_cfg = _resolve_rover(rover)
     theta = max(0.0, float(theta_deg))
-    seconds = edge_travel_time_s(theta, 1.0, rover_cfg)
+    seconds = edge_travel_time_s(theta, 1.0, rover_cfg, slip=slip)
     if not math.isfinite(seconds):
         return float("inf")
     mu = 1.0 + float(rover_cfg["mu_coeff"]) * math.sin(math.radians(theta))
@@ -217,8 +296,18 @@ def f_energy_cell(
     theta_deg: float,
     rover: Mapping[str, Any] | None = None,
     shadow_ratio: float = 0.0,
+    risk_alpha: float | None = None,
+    slope_sigma: float | None = None,
 ) -> float:
     """Cell-level energy penalty in MRU [0, 1].
+
+    B2: with *risk_alpha* the cell is priced at its slip TAIL,
+    ``min(0.9, CVaR_alpha(slip))`` from C3's anchor spread and the slope
+    sigma carried in by the delta method (:func:`risk.slip_cvar`), in place
+    of the curve's mean; the reference scale below is untouched, so a tail
+    that exceeds the slip-free worst cell saturates at 1.0 (measured on
+    Site11: 15 percent of LPR-1's passable cells saturate nominally, 40
+    percent at alpha 0.99). ``risk_alpha=None`` is the pre-B2 body.
 
     Unlike :func:`f_energy`, which reports one edge's energy as a FRACTION OF
     BATTERY CAPACITY, this reports how much MORE energy a cell costs than the
@@ -262,9 +351,23 @@ def f_energy_cell(
     if theta > slope_max:
         return float("inf")
 
-    best_wh = net_energy_per_metre_wh(0.0, 0.0, rover_cfg)
-    here_wh = net_energy_per_metre_wh(max(0.0, theta), shadow_ratio, rover_cfg)
-    worst_wh = net_energy_per_metre_wh(slope_max, 1.0, rover_cfg)
+    # C3: the cell's own energy includes slip; the SCALE does not. Normalising
+    # against the slip-inclusive worst admissible cell (25 deg at slip 0.9,
+    # ten times the slip-free time) squeezed every ordinary cell into
+    # [0, 0.15] -- measured: LPR-1's dark 10 deg cell fell from 0.58 to
+    # 0.07 -- and the criterion collapsed back towards a monotone function
+    # of slope, the very H-4 failure above. The reference span therefore
+    # stays the slip-free best/worst pair: slip raises a cell's penalty on
+    # that fixed scale, and a cell whose slip-inclusive energy exceeds the
+    # slip-free worst saturates at 1.0 (its time and battery cost are still
+    # charged in full by the planner and the simulator).
+    reference = slip_free_view(rover_cfg)
+    best_wh = net_energy_per_metre_wh(0.0, 0.0, reference)
+    slip = None
+    if risk_alpha is not None:
+        slip = slip_cvar(max(0.0, theta), risk_alpha, rover_cfg, slope_sigma)
+    here_wh = net_energy_per_metre_wh(max(0.0, theta), shadow_ratio, rover_cfg, slip=slip)
+    worst_wh = net_energy_per_metre_wh(slope_max, 1.0, reference)
     if not math.isfinite(here_wh) or best_wh < 0.0:
         return float("inf")
 
@@ -390,8 +493,26 @@ def edge_travel_time_s(
     theta_deg: float,
     d_m: float,
     rover: Mapping[str, Any] | None = None,
+    slip: float | None = None,
 ) -> float:
-    """Return traversal time for one edge in seconds."""
+    """Return traversal time for one edge in seconds.
+
+    ``L = d / cos(theta)`` is the ground length of the edge, ``v = v_max *
+    cos(theta)`` the speed the wheels can hold on that grade, and -- since C3
+    -- ``L / (1 - slip)`` the WHEEL distance needed to cover ``L`` on the
+    rover's slip curve (``slip_model.slip_ratio``; 0 for a profile that
+    declares no curve). This is the ONE place slip enters the model: every
+    energy figure is a power times this time, so time and energy grow
+    together and every consumer (planner, simulator, corridor, Monte Carlo,
+    safe-haven distances, corridor slice counts, auto slice length) stays
+    consistent. :func:`edge_travel_time_s_array` is the vectorised twin in
+    the same operation order.
+
+    *slip* (B2) says "use this ratio instead of the curve's mean" -- the
+    energy criterion prices a cell at its CVaR tail through it. ``None``
+    is the curve, and that path is the pre-B2 arithmetic operation for
+    operation.
+    """
     rover_cfg = _resolve_rover(rover)
     cos_t = math.cos(math.radians(theta_deg))
     if cos_t <= 0:
@@ -400,7 +521,38 @@ def edge_travel_time_s(
     if v <= 0:
         return float("inf")
     L = d_m / cos_t
-    return L / v
+    s = slip_ratio(theta_deg, rover_cfg) if slip is None else float(slip)
+    L_wheel = L / (1.0 - s)
+    return L_wheel / v
+
+
+def edge_travel_time_s_array(
+    theta_deg: np.ndarray,
+    d_m: np.ndarray | float,
+    rover: Mapping[str, Any] | None = None,
+    slip: np.ndarray | None = None,
+) -> np.ndarray:
+    """:func:`edge_travel_time_s` over arrays, in the same operation order.
+
+    ``inf`` wherever ``cos(theta) <= 0``. Bit-for-bit equal to the scalar on
+    this platform (tested per profile), which is what lets the gated graph
+    (``safe_haven._gated_edges``) and the corridor tables be built
+    vectorised while the 4-D planner calls the scalar per edge: a move whose
+    travel is exactly one slice rounds the same way in all three. *slip*
+    as in the scalar (B2).
+    """
+    rover_cfg = _resolve_rover(rover)
+    theta = np.asarray(theta_deg, dtype=np.float64)
+    distance = np.asarray(d_m, dtype=np.float64)
+    cos_t = np.cos(np.radians(theta))
+    v_max = float(rover_cfg["v_max_ms"])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        v = v_max * cos_t
+        L = distance / cos_t
+        s = slip_ratio_array(theta, rover_cfg) if slip is None else np.asarray(slip, dtype=np.float64)
+        L_wheel = L / (1.0 - s)
+        seconds = L_wheel / v
+    return np.where((cos_t > 0.0) & (v > 0.0), seconds, np.inf)
 
 
 def edge_energy_wh(
@@ -408,7 +560,10 @@ def edge_energy_wh(
     d_m: float,
     rover: Mapping[str, Any] | None = None,
 ) -> float:
-    """Return physical edge energy in Wh."""
+    """Return physical edge energy in Wh: traction power over the edge's
+    travel time. The distance / (1 - slip) correction of C3 enters through
+    :func:`edge_travel_time_s`, so this and every per-metre energy grow by
+    the same factor as the time."""
     rover_cfg = _resolve_rover(rover)
     theta_rad = math.radians(theta_deg)
     cos_t = math.cos(theta_rad)
@@ -785,6 +940,25 @@ def log_barrier_penalty(
 
 # ── Combined edge cost ──────────────────────────────────────────────────────
 
+# ── 2.3.5  f_roughness — measured hectometre-scale roughness (C4) ──────────
+
+def f_roughness(roughness_m: float | None, scale: "RoughnessScale | None") -> float:
+    """Roughness penalty in MRU [0, 1]: the cell's percentile rank among the
+    80-90 S region's 50 m LDRM pixels (:class:`app.roughness.RoughnessScale`).
+
+    *roughness_m* is NASA's LOLA LDRM roughness (metres, 100 m baseline) of
+    the 50 m pixel that contains the cell -- a MEASURED block statistic, not
+    the roughness of the cell. *scale* is the statistical mapping to [0, 1]
+    (MODEL) that ships with the layer; a roughness value without its scale
+    cannot be normalised and is refused. A missing value (NaN/None) reads
+    ``NAN_ROUGHNESS_F`` and never blocks a cell. Scalar reference form of
+    :func:`app.cost_vec.f_roughness_grid` (same ``np.interp`` call).
+    """
+    if scale is None:
+        raise ValueError("f_roughness needs the layer's RoughnessScale (roughness_meta.json['scale'])")
+    return float(scale.f(roughness_m))
+
+
 def total_edge_cost(
     slope_deg: float,
     distance_m: float,
@@ -843,8 +1017,18 @@ def compute_cost_grid(
     weights: Mapping[str, float] | None = None,
     rover: Mapping[str, Any] | None = None,
     thermal_min_grid: np.ndarray | None = None,
+    risk_alpha: float | None = None,
+    slope_sigma_grid: np.ndarray | None = None,
+    roughness_grid: np.ndarray | None = None,
+    roughness_scale: "RoughnessScale | None" = None,
 ) -> np.ndarray:
     """Compute a continuous weighted cost layer for each grid cell.
+
+    *roughness_grid* (C4) is NASA's LDRM roughness in metres on the same
+    grid and *roughness_scale* its [0, 1] mapping; given together, the
+    fifth criterion ``w_roughness * f_roughness_grid`` is added AFTER the
+    four-term sum, so without them the body below is the v4 formula
+    operation for operation. A grid without its scale is refused.
 
     This is a *cell-level proxy* for the planner's full edge cost:
     - the slope and energy terms (`f_slope`, `f_energy_cell`) read the local
@@ -857,9 +1041,33 @@ def compute_cost_grid(
       path planning.
 
     Blocked cells are kept separate via ``traversable`` and receive ``inf``.
+
+    *risk_alpha* (B2) makes the slope and energy terms read their CVaR
+    tails, with *slope_sigma_grid* (B3's per-cell slope sigma, same shape)
+    as the slope's spread; ``None`` is this formula unchanged, bit for bit.
     """
     if slope_grid.shape != thermal_grid.shape or slope_grid.shape != shadow_ratio_grid.shape:
         raise ValueError("slope, thermal, and shadow grids must have identical shapes")
+    slope_sigma = None
+    if slope_sigma_grid is not None:
+        slope_sigma = np.asarray(slope_sigma_grid, dtype=np.float64)
+        if slope_sigma.shape != slope_grid.shape:
+            raise ValueError(
+                f"slope_sigma grid {slope_sigma.shape} must match the slope grid {slope_grid.shape}"
+            )
+
+    roughness = None
+    if roughness_grid is not None:
+        if roughness_scale is None:
+            raise ValueError(
+                "a roughness grid cannot enter the cost without its RoughnessScale "
+                "(roughness_meta.json['scale']); pass roughness_scale or drop the grid"
+            )
+        roughness = np.asarray(roughness_grid, dtype=np.float64)
+        if roughness.shape != slope_grid.shape:
+            raise ValueError(
+                f"roughness grid {roughness.shape} must match the slope grid {slope_grid.shape}"
+            )
 
     if traversable is None:
         traversable_mask = np.ones_like(slope_grid, dtype=bool)
@@ -878,6 +1086,7 @@ def compute_cost_grid(
     # every plan. (Backend review, #8.)
     from .cost_vec import (
         f_energy_cell_grid,
+        f_roughness_grid,
         f_shadow_cell_grid,
         f_slope_grid,
         f_thermal_grid,
@@ -894,17 +1103,29 @@ def compute_cost_grid(
 
     with np.errstate(invalid="ignore"):
         combined = (
-            resolved["w_slope"] * f_slope_grid(slope, rover_cfg)
+            resolved["w_slope"]
+            * f_slope_grid(slope, rover_cfg, risk_alpha=risk_alpha, slope_sigma=slope_sigma)
             # Reads shadow as well as slope now: without it the energy layer
             # was a monotone restatement of the slope layer and two of the
             # four AHP criteria decided the same thing. (Round 3, H-4.)
-            + resolved["w_energy"] * f_energy_cell_grid(slope, rover_cfg, shadow)
+            + resolved["w_energy"]
+            * f_energy_cell_grid(
+                slope, rover_cfg, shadow, risk_alpha=risk_alpha, slope_sigma=slope_sigma
+            )
             + resolved["w_shadow"] * f_shadow_cell_grid(shadow)
             # Both ends of the cell's temperature range when the caller has
             # them: a cell survivable at its peak but not at its cold-end
             # equilibrium is not a safe cell. (Round 4 review, H-3.)
             + resolved["w_thermal"] * f_thermal_grid(thermal, rover_cfg, thermal_min)
         )
+        # C4: the measured roughness criterion, added after the four-term
+        # sum so the layer-less path above stays the v4 body bit for bit. A
+        # missing measurement reads the regional median rank (0.5); it never
+        # joins the invalid mask below.
+        if roughness is not None:
+            combined = combined + resolved["w_roughness"] * f_roughness_grid(
+                roughness, roughness_scale
+            )
 
     cost_grid = np.maximum(combined, 0.01)
     invalid = (

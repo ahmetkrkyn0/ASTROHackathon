@@ -10,6 +10,12 @@ rover. This module recomputes both when the requested rover or resolved
 weights differ from that default. (Faz 4 final-review finding H1: this used
 to live inside ``backend/app/main.py`` -- the FastAPI shell -- so the ROS 2
 shell never got the adaptation. It belongs here so both shells call it.)
+
+B2 adds the operator's risk appetite to the key: a cost grid built under a
+``risk_alpha`` is stamped ``metadata["risk_alpha"]`` (and ``metadata["risk"]``
+says where the slope sigma came from), so a request at a different alpha --
+or with none -- never reuses it. ``risk_alpha=None`` leaves the grids exactly
+as before: no stamp, the v4 formula bit for bit.
 """
 
 from __future__ import annotations
@@ -17,21 +23,27 @@ from __future__ import annotations
 import numpy as np
 
 from .constants import DEFAULT_ROVER_ID, get_rover
-from .cost_engine import COST_MODEL_ID, compute_cost_grid, resolve_weights
+from .cost_engine import COST_MODEL_ID, compute_cost_grid, cost_criteria_for, resolve_weights
+from .risk import RISK_MEASURE_ID
+from .roughness import RoughnessScale
 from .traversability import compute_traversability_bool
+from .uncertainty import uncertainty_layers_for_grids
 
 
 def grids_for_rover(
     base_grids: dict,
     rover_id: str = DEFAULT_ROVER_ID,
     weights: dict[str, float] | None = None,
+    risk_alpha: float | None = None,
 ) -> dict:
-    """Return grids adapted for the selected rover and weights."""
+    """Return grids adapted for the selected rover, weights and risk appetite."""
     rover = get_rover(rover_id)
     metadata = dict(base_grids.get("metadata", {}))
     default_rover_id = metadata.get("default_rover_id", DEFAULT_ROVER_ID)
     stored_weights = metadata.get("cost_weights", {})
     resolved_weights = resolve_weights(weights, rover)
+    alpha = None if risk_alpha is None else float(risk_alpha)
+    stored_alpha = metadata.get("risk_alpha")
 
     # Recomputed unconditionally rather than trusting the stored mask when the
     # ids happen to match. ``default_rover_id`` is only a LABEL in metadata.json
@@ -53,11 +65,33 @@ def grids_for_rover(
         thermal_min=base_grids.get("thermal_min"),
     )
 
+    # The slope's spread for the risk tails (B2): NASA's DEM clones when
+    # cached beside the processed grids, else none -- and the response says
+    # which. Only consulted under an alpha; the nominal path never touches
+    # the clone cache.
+    slope_sigma = None
+    sigma_info: dict | None = None
+    if alpha is not None:
+        layers, info = uncertainty_layers_for_grids(base_grids, rover_id)
+        if layers is not None and layers.get("slope_sigma") is not None:
+            slope_sigma = layers["slope_sigma"]
+            sigma_info = dict(info or {})
+
+    # The measured roughness layer (C4) and its scale, when the cache is
+    # beside the processed grids: the fifth criterion enters the cost here.
+    # A roughness grid whose metadata carries no scale is refused rather
+    # than priced by guesswork.
+    roughness = base_grids.get("roughness")
+    roughness_scale = None
+    if roughness is not None:
+        roughness_scale = RoughnessScale.from_meta((metadata.get("roughness") or {}).get("scale"))
+
     # The stored cost grid carries the same trust problem as the stored mask:
-    # it is only reusable if it was built with THIS rover, THESE weights, and
-    # a mask matching the one just recomputed. The id/weight check alone let a
-    # mislabelled grid through. Comparing the mask itself closes the gap --
-    # a cheap array comparison against a grid we already hold. (Review #2.)
+    # it is only reusable if it was built with THIS rover, THESE weights, THIS
+    # risk appetite, and a mask matching the one just recomputed. The
+    # id/weight check alone let a mislabelled grid through. Comparing the mask
+    # itself closes the gap -- a cheap array comparison against a grid we
+    # already hold. (Review #2.)
     mask_matches_stored = (
         "traversable" in base_grids
         and np.asarray(base_grids["traversable"], dtype=bool).shape == traversable.shape
@@ -72,12 +106,19 @@ def grids_for_rover(
     # changed the energy term, and reusing it would have kept planning on
     # the inert-energy costs the fix was meant to remove. (Review #5.)
     stored_model = metadata.get("cost_model")
+    # C4: rover, weights, mask, model and alpha can all match while the
+    # CRITERIA differ -- a five-criterion grid handed back without its
+    # roughness layer (or a four-criterion one with the layer now present).
+    # The cost_criteria stamp is compared for exactly that case.
+    criteria = cost_criteria_for(roughness is not None)
     needs_cost_recompute = (
         rover_id != default_rover_id
         or resolved_weights != stored_weights
         or not mask_matches_stored
         or "cost" not in base_grids
         or stored_model != COST_MODEL_ID
+        or stored_alpha != alpha
+        or metadata.get("cost_criteria") != criteria
     )
     cost = (
         compute_cost_grid(
@@ -89,6 +130,10 @@ def grids_for_rover(
             weights=resolved_weights,
             rover=rover,
             thermal_min_grid=base_grids.get("thermal_min"),
+            risk_alpha=alpha,
+            slope_sigma_grid=slope_sigma,
+            roughness_grid=roughness,
+            roughness_scale=roughness_scale,
         )
         if needs_cost_recompute
         else base_grids["cost"]
@@ -97,13 +142,40 @@ def grids_for_rover(
     if needs_cost_recompute:
         metadata["cost_model"] = COST_MODEL_ID
     metadata["cost_weights"] = resolved_weights
+    # Which criteria the grid actually sums (C4): five with the roughness
+    # layer, four without -- so a response can say the fifth weight steered
+    # nothing when the cache is absent.
+    metadata["cost_criteria"] = criteria
     metadata["rover_id"] = rover_id
     metadata["rover_name"] = rover["name"]
     metadata["default_rover_id"] = default_rover_id
 
-    return {
+    out = {
         **base_grids,
         "traversable": traversable,
         "cost": cost,
         "metadata": metadata,
     }
+    # Adapted grids may be adapted again (reports, the sweep endpoint): a
+    # previous alpha's stamp and its slope_sigma layer must not survive a
+    # request that does not ask for them.
+    previously_stamped = (base_grids.get("metadata") or {}).get("risk") is not None
+    if alpha is None:
+        metadata.pop("risk_alpha", None)
+        metadata.pop("risk", None)
+        if previously_stamped:
+            out.pop("slope_sigma", None)
+    else:
+        metadata["risk_alpha"] = alpha
+        metadata["risk"] = {
+            "alpha": alpha,
+            "measure": RISK_MEASURE_ID,
+            "slope_sigma_source": "dem_clones" if slope_sigma is not None else "none",
+            "slope_sigma_model": None if sigma_info is None else sigma_info.get("model"),
+            "n_clones": None if sigma_info is None else sigma_info.get("n_clones"),
+        }
+        if slope_sigma is not None:
+            out["slope_sigma"] = slope_sigma
+        elif previously_stamped:
+            out.pop("slope_sigma", None)
+    return out

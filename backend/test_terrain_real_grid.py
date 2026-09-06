@@ -117,23 +117,25 @@ def test_every_manifest_url_serves_the_full_grid(client):
 SERIES = "/api/illumination-series"
 
 # The span has to cross a terminator, and at a polar site that is a question
-# of DAYS, not hours. Measured on this grid: the Sun's grid azimuth sweeps
-# only ~3 deg per 6 hours, while the local horizon toward azimuth 300-320 deg
-# stands at ~15 deg -- so from 2026-09-01 the site sits at 0% lit for six
-# straight days, and the previous 3-day query sampled nothing but that shadow.
-# The illumination cycle here is ~12 days lit / ~14 days dark; this window
-# starts just before the crossing and walks 0% -> 95% lit over six days,
-# which is the behaviour these tests exist to pin.
+# of DAYS, not hours: the Sun's grid azimuth sweeps only ~3 deg per 6 hours.
+#
+# Re-measured on this grid with the two-scale horizon cube (A4: the far
+# field, marched on LOLA's 40 m polar DEM from 10 km to 150 km, raised the
+# horizon in 27.5% of (azimuth, cell) pairs by 4.2 deg on average -- and at
+# a Sun elevation of a degree or so that is decisive). The lit fraction now
+# peaks near 47%, never 95%, and the cycle runs: dark 29 Aug - 2 Sep, lit
+# 2 - 11 Sep, dark 12 - 18 Sep, lit 18 - 27 Sep, dark 28 Sep - 1 Oct, lit
+# 1 - 11 Oct. _QUERY starts in the dark and walks 0% -> ~47% lit over six
+# days (1 Oct crossing); _COOLING_QUERY starts lit and walks ~33% -> 0%
+# (28 Sep crossing). Both directions are exercised because a sign error in
+# the relaxation would survive a test that only ever watched the surface
+# warm.
 #
 # The lesson generalises past this file: /api/plan-4d's defaults (24 slices
 # x 1 h) span a single day, over which nothing about the illumination at a
 # polar site changes at all.
-_QUERY = "start_utc=2026-09-07T00:00:00&n_slices=12&slice_hours=12&downsample=5"
-
-# The same cycle twelve days on: ~96% lit down to fully dark, -55 C to the
-# PSR floor. Both directions are exercised because a sign error in the
-# relaxation would survive a test that only ever watched the surface warm.
-_COOLING_QUERY = "start_utc=2026-09-19T00:00:00&n_slices=12&slice_hours=12&downsample=5"
+_QUERY = "start_utc=2026-09-29T00:00:00&n_slices=12&slice_hours=12&downsample=5"
+_COOLING_QUERY = "start_utc=2026-09-25T00:00:00&n_slices=12&slice_hours=12&downsample=5"
 
 _HAS_HORIZON = os.path.exists(os.path.join(_P1_PROCESSED_DIR, "horizon_map.npy"))
 needs_horizon = pytest.mark.skipif(
@@ -189,7 +191,7 @@ def _series_means(client, query: str, field: str) -> list[float]:
 @needs_horizon
 def test_surface_warms_as_the_terminator_arrives(client):
     """Temperature has to follow illumination. _QUERY walks this site from
-    fully shadowed into ~95% lit over six days; the surface must come up
+    fully shadowed into ~47% lit over six days; the surface must come up
     with it."""
     means = _series_means(client, _QUERY, "surface_temp_c")
     assert means[-1] > means[0], f"surface never warms: {means}"
@@ -198,7 +200,7 @@ def test_surface_warms_as_the_terminator_arrives(client):
 
 @needs_horizon
 def test_surface_cools_as_the_terrain_falls_into_shadow(client):
-    """The other half of the same cycle, twelve days later: ~96% lit down to
+    """The other half of the cycle, four days earlier: ~33% lit down to
     fully dark. Tested separately because a series that only ever warms
     would satisfy a direction-agnostic assertion while a sign error still
     lurked in the relaxation."""
@@ -219,7 +221,11 @@ def test_surface_lags_illumination_rather_than_tracking_it_instantly(client):
     """
     means = _series_means(client, _COOLING_QUERY, "surface_temp_c")
     total = abs(means[-1] - means[0])
-    assert total > 50.0, f"not enough swing to judge the lag: {means}"
+    # With the two-scale horizon the window is at most ~47% lit (~33% at
+    # the start of _COOLING_QUERY), so the grid-mean swing is ~44 C rather
+    # than the ~90 C a 96%-lit start gave. The guard only has to rule out
+    # a flat series; the lag itself is judged by the ratio below.
+    assert total > 30.0, f"not enough swing to judge the lag: {means}"
     steps = [abs(b - a) for a, b in zip(means[:-1], means[1:])]
     assert max(steps) < 0.6 * total, (
         f"one slice carries {max(steps) / total:.0%} of the swing -- "

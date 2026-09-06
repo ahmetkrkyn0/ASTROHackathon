@@ -34,6 +34,31 @@ COMM_WINDOW_MINUTES: float = 15.0
 # (Round 3 review, L-9.)
 LOCALIZATION_SIGMA_MULTIPLIER: float = 2.0
 
+# Entrenchment (C6): a rover that cannot move counts down against a
+# TOLERABLE ENTRENCHED TIME -- JSC's term (ICES-2025-376) for the finite
+# time an immobilised vehicle may stay put before "the clock runs out";
+# here the tighter of the thermal dwell of its block (the time its inner
+# temperature takes to leave the envelope) and the safe-haven window (Earth
+# link left minus the drive to the nearest haven). The fractions that
+# separate the levels are OUR choice, not a published number: half the
+# budget used is a warning, four fifths is critical, all of it is failed.
+# The trigger fires at critical; a warning is reported, not acted on.
+ENTRENCHMENT_WARNING_FRAC: float = 0.5
+ENTRENCHMENT_CRITICAL_FRAC: float = 0.8
+ENTRENCHMENT_LEVELS: tuple[str, ...] = ("ok", "warning", "critical", "fail")
+
+
+def entrenchment_level(used_fraction: float) -> str:
+    """ok / warning / critical / fail from the fraction of the budget used."""
+    u = float(used_fraction)
+    if u >= 1.0:
+        return "fail"
+    if u >= ENTRENCHMENT_CRITICAL_FRAC:
+        return "critical"
+    if u >= ENTRENCHMENT_WARNING_FRAC:
+        return "warning"
+    return "ok"
+
 
 @dataclass(frozen=True)
 class TriggerResult:
@@ -139,6 +164,30 @@ def check_localization_uncertainty(
     )
 
 
+def check_entrenchment(entrenched_hours: float, tolerable_hours: float) -> TriggerResult:
+    """Count an immobilised rover down against its tolerable entrenched time.
+
+    *entrenched_hours* is how long the rover has been unable to move;
+    *tolerable_hours* the budget (thermal dwell of the block, or the haven
+    window, whichever is tighter -- the caller decides). Fires at the
+    critical level (four fifths used) and beyond; the level itself is in
+    the detail so a warning is visible without forcing a replan. A zero or
+    negative budget is already failed.
+    """
+    entrenched = max(0.0, float(entrenched_hours))
+    tolerable = float(tolerable_hours)
+    used = math.inf if tolerable <= 0.0 else entrenched / tolerable
+    level = entrenchment_level(used)
+    remaining = tolerable - entrenched
+    percent = "inf" if math.isinf(used) else f"{100.0 * used:.0f}"
+    return TriggerResult(
+        "entrenchment",
+        level in ("critical", "fail"),
+        f"entrenched {entrenched:.2f} h of {tolerable:.2f} h tolerable "
+        f"({percent} percent used, {remaining:+.2f} h left): level {level}",
+    )
+
+
 # Which telemetry keys each trigger needs. Declared once so evaluate_triggers
 # can report what it could NOT check instead of silently skipping it.
 _TRIGGER_INPUTS: dict[str, tuple[str, ...]] = {
@@ -154,6 +203,11 @@ _TRIGGER_INPUTS: dict[str, tuple[str, ...]] = {
     # itself "that enumeration", and invisible in the one place a caller
     # reads to learn what was actually checked. (Round 3 review, L-10.)
     "slip_accumulation": ("map_progress_m", "odometer_claim_m"),
+    # Entrenchment (C6): the caller (POST /api/replan) fills
+    # tolerable_entrenched_hours from the block's thermal dwell and the haven
+    # window when it can; without a finite budget the trigger is skipped and
+    # the entrenchment block says why.
+    "entrenchment": ("entrenched_hours", "tolerable_entrenched_hours"),
 }
 
 # Keys a trigger may READ but does not require. Absent, the check still
@@ -260,6 +314,10 @@ def evaluate_triggers_detailed(
                 check_localization_uncertainty(
                     state["localization_covariance_m"], state["half_width_m"]
                 )
+            )
+        elif trigger_id == "entrenchment":
+            results.append(
+                check_entrenchment(state["entrenched_hours"], state["tolerable_entrenched_hours"])
             )
         elif trigger_id == "slip_accumulation":
             from .slip_model import check_slip_accumulation

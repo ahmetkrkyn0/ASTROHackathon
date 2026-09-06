@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .slip_model import SlipAnchor, rover_slip_block
+
 # Shared environment constants
 GRAVITY_MOON = 1.62
 LOG_BARRIER_MU = 0.1
@@ -45,8 +47,13 @@ MODELLED_FIELDS: frozenset[str] = frozenset(
         "w_energy",
         "w_shadow",
         "w_thermal",
+        # C4: the fifth criterion's weight (LOLA LDRM roughness).
+        "w_roughness",
         "sensor_payload_w",
         "sensor_heater_w",
+        # C3: the anchors cost_engine.edge_travel_time_s reads through
+        # slip_model.slip_ratio -- every time and energy figure depends on it.
+        "slip_curve",
     }
 )
 
@@ -58,6 +65,165 @@ DECLARED_ONLY_FIELDS: tuple[str, ...] = (
     "regen_efficiency",
     "thermal_tau_s",
     "h_design_shadow_h",
+    # C3: published regolith / test-bed parameters behind the slip anchors
+    # (Yutu-2's Bekker-type ranges, VIPER's GRC-1 test bed). Reference only:
+    # no Bekker equation is coded; the slip curve reads its anchors, not this.
+    "regolith",
+)
+
+# ── C3: slip anchors ─────────────────────────────────────────────────────────
+# The two sourced points every slip curve in the catalogue is built from.
+# No anchor exists without a source; a profile that has no slip data of its
+# own carries these as EXPLICIT assumptions (kind "assumption", source
+# starting with "assumption:"), never as a silent default. See
+# app/slip_model.py for the claim limits.
+
+SLIP_ANCHOR_YUTU2_FLAT = SlipAnchor(
+    slope_deg=0.0,
+    slip=0.0375,
+    sigma=0.01875,
+    kind="measured",
+    source=(
+        "Yutu-2 (Chang'e-4) measured wheel slip ratio: 'most the wheel slip "
+        "ratios are between 0 and -0.075' (skid) on slopes up to 8.86 deg; the "
+        "magnitude midpoint of |0..0.075| is taken as the flat-ground value and "
+        "sigma = range/4 -- Nature Communications 2024 (PMC11258293), Methods, "
+        "'Lunar regolith parameter estimation'"
+    ),
+)
+
+SLIP_ANCHOR_YUTU2_STEEPEST = SlipAnchor(
+    slope_deg=8.86,
+    slip=0.075,
+    sigma=0.01875,
+    kind="measured_bound",
+    source=(
+        "Yutu-2 (Chang'e-4) measured: the upper end of the |0..0.075| slip "
+        "range at the steepest slope driven (8.86 deg, outbound traverse) -- "
+        "Nature Communications 2024 (PMC11258293), Results, 'Topographic and "
+        "mobility hazards analysis'"
+    ),
+)
+
+SLIP_ANCHOR_VIPER_15 = SlipAnchor(
+    slope_deg=15.0,
+    slip=0.40,
+    sigma=0.20,
+    kind="design_constraint",
+    source=(
+        "VIPER mobility design requirement: 'a maximum of 40% slip up a maximum "
+        "slope of 15 deg' (an upper bound, not a typical value); GRC-1 simulant "
+        "at 15-20 percent relative density, MGRU test unit, slip from wheel "
+        "rotation rates against Optitrack motion tracking -- PSJ 2025 "
+        "(10.3847/PSJ/add13f) sect. 3.5 and 3.2. sigma: assumption, Yutu-2's "
+        "relative spread (sigma/mu = 0.5) transferred"
+    ),
+)
+
+
+def _transferred(anchor: SlipAnchor, note: str) -> SlipAnchor:
+    """The same point, re-labelled as an assumption for a profile it was not
+    measured or specified for. The original source travels with it."""
+    return SlipAnchor(
+        slope_deg=anchor.slope_deg,
+        slip=anchor.slip,
+        sigma=anchor.sigma,
+        kind="assumption",
+        source=f"assumption: {note} | {anchor.source}",
+    )
+
+
+_YUTU2_FLAT_TRANSFERRED = _transferred(
+    SLIP_ANCHOR_YUTU2_FLAT,
+    "flat-ground slip transferred from Yutu-2's Chang'e-4 measurement (flat-"
+    "ground slip of a driven wheel is only weakly terrain-dependent); no "
+    "published flat-ground slip for this profile",
+)
+_VIPER_15_TRANSFERRED = _transferred(
+    SLIP_ANCHOR_VIPER_15,
+    "VIPER's 15 deg design ceiling used as this profile's 15 deg anchor; no "
+    "published slip-versus-slope data for this vehicle",
+)
+
+# Published regolith / test-bed parameters behind the anchors. Reference
+# only ("read_by": "nothing"): no Bekker/Wong equation is coded here.
+REGOLITH_YUTU2: dict[str, Any] = {
+    "site": "Chang'e-4 landing region, Von Karman crater (lunar far side)",
+    "internal_friction_angle_deg": [21.5, 42.0],
+    "cohesion_pa": [520, 3154],
+    "sinkage_exponent": [0.87, 1.0],
+    "mean_wheel_sinkage_mm": 8.0,
+    "wheel_sinkage_range_mm": [5.0, 15.0],
+    "bearing_strength_kpa": 4.0,
+    "max_slope_driven_deg": 8.86,
+    "slip_ratio_range": [-0.075, 0.0],
+    "validity": "MEASURED at the Chang'e-4 site (far-side mare), not at the pole",
+    "source": (
+        "Nature Communications 2024 (PMC11258293), Results 'Mechanical property "
+        "identification' (Fig. 4) and 'Topographic and mobility hazards "
+        "analysis'; Ding et al., Science Robotics 2022 (abj6660)"
+    ),
+    "read_by": "nothing",
+}
+
+REGOLITH_VIPER_TESTBED: dict[str, Any] = {
+    "site": "VIPER MGRU mobility test bed (laboratory)",
+    "simulant": "GRC-1",
+    "relative_density_pct": [15, 20],
+    "validity": (
+        "GROUND_TEST: loose GRC-1 as a lower-bound strength case for the "
+        "south pole; not a measurement of polar regolith"
+    ),
+    "source": "PSJ 2025 (10.3847/PSJ/add13f), sect. 3.2",
+    "read_by": "nothing",
+}
+
+# ── C4: the roughness criterion's weight ─────────────────────────────────────
+# ASSUMPTION, stated rather than hidden: no rover profile and no mission
+# profile has a published weighting for a roughness criterion (the four
+# existing weights are the reference document's gradient-normalised expert
+# weights, not AHP -- doc 11). The fifth criterion therefore enters every
+# profile at one value, of the order of the minor criteria already there
+# (shadow 0.10-0.30, thermal 0-0.35), and the other four are NOT rescaled so
+# the term stays purely additive. Its sensitivity is swept 0-0.5 in
+# docs/research/roughness_psr_report.md; on Site11 the lunar-night route
+# moved at 0.05 already, the daytime pair only from 0.15 (probe 3, C4 spec).
+W_ROUGHNESS_DEFAULT: float = 0.15
+
+# ── B1: the fault model behind the recovery policy ──────────────────────────
+# No rover in this catalogue publishes a mobility fault rate or a recovery
+# time, so neither is a profile field: a number without a source does not
+# go into the catalogue. The recovery policy (app/survival.py) needs both,
+# and takes them as EXPLICIT assumptions -- Lamarre, Malhotra and Kelly's
+# large-scale experiment values -- reported with this source string on
+# every response that used them, and swept in the report.
+FAILURE_RATE_PER_KM_ASSUMED: float = 0.2      # one mobility fault per 5 000 m driven
+FAULT_RECOVERY_HOURS_ASSUMED: float = 10.0    # 36 000 s to resolve a fault, holding position
+FAILURE_MODEL_SOURCE: str = (
+    "assumption: Lamarre, Malhotra, Kelly -- Recovery Policies for Safe Exploration "
+    "of Lunar PSRs (Acta Astronautica 2023, arXiv 2307.16786) experiment 3 and Safe "
+    "Mission-Level Path Planning (IEEE AERO 2024, arXiv 2401.08558) Table II: Poisson "
+    "faults at 1 per 5 000 m driven, 36 000 s to recover; no rover profile in this "
+    "catalogue publishes either number"
+)
+
+# ── C6: the heater in the temperature model ─────────────────────────────────
+# Every profile publishes a heater power (p_heater_w, p_shadow_w) and a shadow
+# endurance (h_max_shadow_h), and the energy model drains the heater in
+# shadow -- but no profile publishes how many kelvin that power buys the
+# battery, so the temperature model has no heater at all (D3 measured the
+# consequence: every route's inner temperature leaves the envelope). The
+# thermal dwell model (app/thermal_dwell.py) therefore offers the heater only
+# as an EXPLICIT assumption a caller switches on (heater_model =
+# "thermostat_assumed"), reported with this source string; no profile field
+# is invented and the default remains "none".
+HEATER_THERMOSTAT_ASSUMPTION_SOURCE: str = (
+    "assumption: the survival heater holds the inner temperature at the lower bound of "
+    "the tightest declared operating envelope (bat_op_min_c / elec_op_min_c) for as long "
+    "as the battery lasts -- the reading of a catalogue that publishes a heater power "
+    "(p_heater_w, p_shadow_w) and a shadow endurance (h_max_shadow_h) but no W-to-K "
+    "coefficient; the energy the heater draws is already in cost_engine.housekeeping_power_w. "
+    "Not a rover specification: no profile publishes a thermostat set point"
 )
 
 # Multi-rover catalogue
@@ -90,10 +256,14 @@ ROVERS: dict[str, dict[str, Any]] = {
         "elec_op_max_c": 40,
         "f_net_n": 210,
         "mu_coeff": 3.471,
+        # C3: no published slip data for LPR-1 -- both anchors are transfers.
+        "slip_curve": (_YUTU2_FLAT_TRANSFERRED, _VIPER_15_TRANSFERRED),
+        "regolith": None,
         "w_slope": 0.409,
         "w_energy": 0.259,
         "w_shadow": 0.142,
         "w_thermal": 0.190,
+        "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
     },
@@ -125,10 +295,14 @@ ROVERS: dict[str, dict[str, Any]] = {
         "elec_op_max_c": None,
         "f_net_n": 50,
         "mu_coeff": 1.296,
+        # C3: no published slip data for LUVMI-M -- both anchors are transfers.
+        "slip_curve": (_YUTU2_FLAT_TRANSFERRED, _VIPER_15_TRANSFERRED),
+        "regolith": None,
         "w_slope": 0.40,
         "w_energy": 0.30,
         "w_shadow": 0.30,
         "w_thermal": 0.0,
+        "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
     },
@@ -160,10 +334,18 @@ ROVERS: dict[str, dict[str, Any]] = {
         "elec_op_max_c": 50,
         "f_net_n": 200,
         "mu_coeff": 3.645,
+        # C3: VIPER's own 15 deg / 40 percent design requirement; the flat-
+        # ground point is Yutu-2's, transferred. Yutu-2's 8.86 deg point is
+        # NOT transferred: Chang'e-4 mare regolith and loose GRC-1 are
+        # different soils, and joining them would put an unsourced kink
+        # between 8.86 and 15 deg.
+        "slip_curve": (_YUTU2_FLAT_TRANSFERRED, SLIP_ANCHOR_VIPER_15),
+        "regolith": REGOLITH_VIPER_TESTBED,
         "w_slope": 0.35,
         "w_energy": 0.25,
         "w_shadow": 0.20,
         "w_thermal": 0.20,
+        "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
     },
@@ -195,10 +377,19 @@ ROVERS: dict[str, dict[str, Any]] = {
         "elec_op_max_c": 55,
         "f_net_n": 80,
         "mu_coeff": 2.835,
+        # C3: Yutu-2's own measured points (0 deg, 8.86 deg); beyond its
+        # measured slopes VIPER's 15 deg ceiling is transferred.
+        "slip_curve": (
+            SLIP_ANCHOR_YUTU2_FLAT,
+            SLIP_ANCHOR_YUTU2_STEEPEST,
+            _VIPER_15_TRANSFERRED,
+        ),
+        "regolith": REGOLITH_YUTU2,
         "w_slope": 0.50,
         "w_energy": 0.30,
         "w_shadow": 0.20,
         "w_thermal": 0.0,
+        "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
     },
@@ -253,6 +444,7 @@ def rover_default_weights(rover_id: str | None = None) -> dict[str, float]:
         "w_energy": float(rover["w_energy"]),
         "w_shadow": float(rover["w_shadow"]),
         "w_thermal": float(rover["w_thermal"]),
+        "w_roughness": float(rover["w_roughness"]),
     }
 
 
@@ -284,6 +476,10 @@ def rover_catalog() -> list[dict[str, Any]]:
                 "declared_only": {
                     field: rover.get(field) for field in DECLARED_ONLY_FIELDS
                 },
+                # C3: the slip curve the model applies, its anchors and their
+                # sources, and the claim limit -- a literature-anchored
+                # MODEL, never a measurement.
+                "slip_model": rover_slip_block(rover),
             }
         )
     return catalog
@@ -360,3 +556,4 @@ W_SLOPE = float(_DEFAULT_ROVER["w_slope"])
 W_ENERGY = float(_DEFAULT_ROVER["w_energy"])
 W_SHADOW = float(_DEFAULT_ROVER["w_shadow"])
 W_THERMAL = float(_DEFAULT_ROVER["w_thermal"])
+W_ROUGHNESS = float(_DEFAULT_ROVER["w_roughness"])

@@ -65,6 +65,7 @@ def test_metadata_records_the_rover_and_the_resolved_weights():
         "w_energy",
         "w_shadow",
         "w_thermal",
+        "w_roughness",  # C4
     }
     assert base["metadata"].get("rover_id") is None  # the input is not mutated
 

@@ -31,6 +31,7 @@ import numpy as np
 from .cost_engine import (
     COST_MODEL_ID,
     compute_cost_grid,
+    cost_criteria_for,
     f_thermal,
     geometric_barrier_terms,
     lateral_slope_tan,
@@ -218,6 +219,10 @@ def _resolve_cost_grid(
             # A grid produced by an older formula (a P1 .npy on disk) is not
             # this build's grid even when the rover and weights agree.
             and metadata.get("cost_model") == COST_MODEL_ID
+            # ... nor is one that summed a different set of criteria (C4:
+            # with or without the roughness layer). An unstamped grid is
+            # not trusted either.
+            and metadata.get("cost_criteria") == cost_criteria_for(grids.get("roughness") is not None)
         ):
             return np.asarray(cached, dtype=np.float64)
 
@@ -227,6 +232,15 @@ def _resolve_cost_grid(
     # significant digits, and ``min_cost`` (which scales the heuristic) could
     # round UP off the true minimum, costing admissibility a hair.
     # (Round 4 review, L-3.)
+    #
+    # The measured roughness layer (C4) rides along when the grids carry it,
+    # so a recompute here prices the same five criteria grids_for_rover does.
+    roughness = grids.get("roughness")
+    roughness_scale = None
+    if roughness is not None:
+        from .roughness import RoughnessScale
+
+        roughness_scale = RoughnessScale.from_meta((metadata.get("roughness") or {}).get("scale"))
     return compute_cost_grid(
         slope_grid, thermal_grid, shadow_grid,
         resolution_m=resolution,
@@ -234,6 +248,8 @@ def _resolve_cost_grid(
         weights=weights,
         rover=rover_cfg,
         thermal_min_grid=grids.get("thermal_min"),
+        roughness_grid=roughness,
+        roughness_scale=roughness_scale,
     ).astype(np.float64)
 
 

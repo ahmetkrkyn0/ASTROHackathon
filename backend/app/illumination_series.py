@@ -107,6 +107,88 @@ def build_shadow_series(
     }
 
 
+def cell_shadow_series(
+    metadata: dict[str, Any],
+    row: int,
+    col: int,
+    n_slices: int,
+    slice_hours: float,
+    start_utc: str | None,
+    base_value: float,
+) -> tuple[list[float], dict[str, Any]]:
+    """``(shadow_series, provenance)`` for ONE fine cell (C6).
+
+    The same contract as :func:`build_shadow_series` -- binary per slice
+    from the horizon cube and the Sun's track, or the long-run
+    ``base_value`` repeated with a reason when there is no epoch, no cube or
+    no kernels -- but reading a single cell's horizon profile out of the
+    memory-mapped cube, so a hover or a telemetry tick pays for one profile
+    rather than a 500 x 500 mask per slice.
+    """
+    static = [float(base_value)] * int(n_slices)
+    if start_utc is None:
+        return static, {
+            "model": "static",
+            "time_varying": False,
+            "reason": (
+                "no start epoch given; illumination is a function of time and "
+                "cannot vary without one"
+            ),
+        }
+    cache_path = horizon_cache_path(metadata)
+    if cache_path is None:
+        return static, {
+            "model": "static",
+            "time_varying": False,
+            "reason": (
+                f"no {HORIZON_CACHE_FILENAME} beside the processed grids; run "
+                "scripts/build_horizon_cache.py to enable time-varying shadow"
+            ),
+        }
+    try:
+        from .ephemeris import (
+            sun_azel_from_vector,
+            sun_vector_body,
+            true_azimuth_to_grid_azimuth,
+            true_north_grid_azimuth,
+            utc_to_et,
+        )
+        from .illumination import illuminated_mask
+
+        horizon = np.load(cache_path, mmap_mode="r")
+        profile = np.asarray(horizon[:, int(row) : int(row) + 1, int(col) : int(col) + 1])
+        lat_deg, lon_deg = _window_centre_latlon(metadata)
+        crs_wkt = metadata.get("crs")
+        north_grid_az = (
+            true_north_grid_azimuth(lat_deg, lon_deg, str(crs_wkt))
+            if crs_wkt and crs_wkt != "unknown"
+            else 0.0
+        )
+        start = _parse_start_utc(start_utc)
+        from datetime import timedelta
+
+        series: list[float] = []
+        for index in range(int(n_slices)):
+            moment = start + timedelta(hours=float(slice_hours) * index)
+            et = utc_to_et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
+            true_az, elev = sun_azel_from_vector(sun_vector_body(et), lat_deg, lon_deg)
+            grid_az = true_azimuth_to_grid_azimuth(true_az, north_grid_az)
+            lit = bool(illuminated_mask(profile, grid_az, elev)[0, 0])
+            series.append(0.0 if lit else 1.0)
+    except Exception as exc:  # noqa: BLE001 - spiceypy raises assorted builtins
+        return static, {
+            "model": "static",
+            "time_varying": False,
+            "reason": f"real illumination unavailable ({exc})",
+        }
+    return series, {
+        "model": "spice_horizon",
+        "time_varying": True,
+        "horizon_cache": cache_path,
+        "start_utc": start_utc,
+    }
+
+
 def _spice_shadow_series(
     base_shadow: np.ndarray,
     metadata: dict[str, Any],
@@ -173,6 +255,74 @@ def _window_centre_latlon(metadata: dict[str, Any]) -> tuple[float, float]:
     return float(lat), float(lon)
 
 
+def _grid_north_azimuth(metadata: dict[str, Any]) -> float:
+    """Grid-frame bearing of true north at the window centre, 0.0 when the
+    metadata carries no usable CRS (the synthetic test grids)."""
+    from .ephemeris import true_north_grid_azimuth
+
+    lat_deg, lon_deg = _window_centre_latlon(metadata)
+    crs_wkt = metadata.get("crs")
+    if crs_wkt and crs_wkt != "unknown":
+        return float(true_north_grid_azimuth(lat_deg, lon_deg, str(crs_wkt)))
+    return 0.0
+
+
+def _parse_start_utc(start_utc: str):
+    from datetime import datetime, timezone
+
+    start = datetime.fromisoformat(str(start_utc).replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return start
+
+
+def body_track_for_series(
+    metadata: dict[str, Any],
+    n_slices: int,
+    slice_hours: float,
+    start_utc: str,
+    body: str = "SUN",
+) -> list[dict[str, Any]]:
+    """Azimuth and elevation of NAIF target *body* at each slice of a series.
+
+    One implementation for the Sun and the Earth: Direct-to-Earth
+    visibility (A4) is the illumination question asked of a different body,
+    and two copies of this loop would be two places for the frame rotation
+    to go wrong. ``sun_track_for_series`` and
+    ``earth_visibility.earth_track_for_series`` are the named entry points.
+
+    Raises whatever spiceypy raises when kernels are missing; the caller
+    decides whether that is fatal.
+    """
+    from datetime import timedelta
+
+    from . import ephemeris
+
+    lat_deg, lon_deg = _window_centre_latlon(metadata)
+    north_grid_az = _grid_north_azimuth(metadata)
+    start = _parse_start_utc(start_utc)
+
+    track: list[dict[str, Any]] = []
+    for index in range(int(n_slices)):
+        moment = start + timedelta(hours=float(slice_hours) * index)
+        et = ephemeris.utc_to_et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
+        true_az, elev = ephemeris.sun_azel_from_vector(
+            ephemeris.body_vector_body(body, et), lat_deg, lon_deg
+        )
+        track.append(
+            {
+                "index": index,
+                "utc": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "azimuth_true_deg": float(true_az) % 360.0,
+                "azimuth_grid_deg": float(
+                    ephemeris.true_azimuth_to_grid_azimuth(true_az, north_grid_az)
+                ) % 360.0,
+                "elevation_deg": float(elev),
+            }
+        )
+    return track
+
+
 def sun_track_for_series(
     metadata: dict[str, Any],
     n_slices: int,
@@ -198,42 +348,4 @@ def sun_track_for_series(
     way :func:`build_shadow_series` treats the same failure: degrade, and say
     so, rather than take the endpoint down.
     """
-    from datetime import datetime, timedelta, timezone
-
-    from .ephemeris import (
-        sun_azel_from_vector,
-        sun_vector_body,
-        true_azimuth_to_grid_azimuth,
-        true_north_grid_azimuth,
-        utc_to_et,
-    )
-
-    lat_deg, lon_deg = _window_centre_latlon(metadata)
-    crs_wkt = metadata.get("crs")
-    north_grid_az = (
-        true_north_grid_azimuth(lat_deg, lon_deg, str(crs_wkt))
-        if crs_wkt and crs_wkt != "unknown"
-        else 0.0
-    )
-
-    start = datetime.fromisoformat(str(start_utc).replace("Z", "+00:00"))
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
-
-    track: list[dict[str, Any]] = []
-    for index in range(int(n_slices)):
-        moment = start + timedelta(hours=float(slice_hours) * index)
-        et = utc_to_et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
-        true_az, elev = sun_azel_from_vector(sun_vector_body(et), lat_deg, lon_deg)
-        track.append(
-            {
-                "index": index,
-                "utc": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "azimuth_true_deg": float(true_az) % 360.0,
-                "azimuth_grid_deg": float(
-                    true_azimuth_to_grid_azimuth(true_az, north_grid_az)
-                ) % 360.0,
-                "elevation_deg": float(elev),
-            }
-        )
-    return track
+    return body_track_for_series(metadata, n_slices, slice_hours, start_utc, body="SUN")

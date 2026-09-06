@@ -68,12 +68,17 @@ def _make_grids(
                 "w_energy": 0.259,
                 "w_shadow": 0.142,
                 "w_thermal": 0.190,
+                # A grid stamped with THIS build's cost_model carries this
+                # build's weight set, which since C4 has five keys.
+                "w_roughness": 0.15,
             },
             # Stamped so the stored cost grid counts as this build's: an
             # unstamped grid is now recomputed rather than trusted, because a
             # P1 .npy predating the review #1 energy change would otherwise
             # keep planning on the old formula. (Review #5.)
             "cost_model": COST_MODEL_ID,
+            # ... and which criteria it summed (C4): four, no roughness layer.
+            "cost_criteria": ["slope", "energy", "shadow", "thermal"],
             "default_rover_id": "lpr_1",
         },
     }

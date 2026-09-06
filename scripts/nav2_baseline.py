@@ -13,7 +13,6 @@ comparison runs with or without a ROS installation.
 from __future__ import annotations
 
 import argparse
-import heapq
 import json
 import math
 import sys
@@ -24,52 +23,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
+from app.benchmark import shortest_traversable_path  # noqa: E402
 from app.data_loader import load_preprocessed_grids  # noqa: E402
 from app.pathfinder import astar  # noqa: E402
-
-OFFSETS = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))
-
-
-def shortest_traversable_path(traversable, start, goal, resolution_m):
-    """8-connected Dijkstra on pure distance: the SmacPlanner2D objective."""
-    height, width = traversable.shape
-    dist = {start: 0.0}
-    came: dict[tuple[int, int], tuple[int, int]] = {}
-    heap = [(0.0, start)]
-    seen = set()
-    while heap:
-        d, node = heapq.heappop(heap)
-        if node in seen:
-            continue
-        seen.add(node)
-        if node == goal:
-            break
-        r, c = node
-        for dr, dc in OFFSETS:
-            nr, nc = r + dr, c + dc
-            if not (0 <= nr < height and 0 <= nc < width) or not traversable[nr, nc]:
-                continue
-            # Same diagonal corner-cutting rule LunaPath's planners apply.
-            # Without it the baseline may squeeze between two blocked cells
-            # where LunaPath refuses to, making the baseline's route
-            # artificially shorter -- a comparison that flatters LunaPath's
-            # own numbers by holding the baseline to a weaker safety
-            # standard. (Round 2 review, M-1.)
-            if dr and dc and not (traversable[r, nc] and traversable[nr, c]):
-                continue
-            step = resolution_m * (math.sqrt(2.0) if dr and dc else 1.0)
-            nd = d + step
-            if nd < dist.get((nr, nc), math.inf):
-                dist[(nr, nc)] = nd
-                came[(nr, nc)] = node
-                heapq.heappush(heap, (nd, (nr, nc)))
-    if goal not in dist:
-        return [], math.inf
-    path = [goal]
-    while path[-1] in came:
-        path.append(came[path[-1]])
-    path.reverse()
-    return path, dist[goal]
 
 
 def summarise(path, grids, resolution_m):

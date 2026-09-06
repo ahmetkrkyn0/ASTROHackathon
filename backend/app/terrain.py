@@ -95,6 +95,23 @@ LAYER_UNITS: dict[str, str] = {
     "shadow_ratio": "fraction",
     "cost": "dimensionless",
     "traversable": "boolean",
+    "earth_visibility": "fraction",
+    # The DEM-clone ensemble (B3): present only with the clone cache.
+    "p_traversable": "fraction",
+    "slope_sigma": "deg",
+    "elevation_sigma": "m",
+    "slope_sigma_nasa": "deg",
+    # NASA's measured products (C4): present only with the roughness cache.
+    "roughness": "m",
+    "psr": "boolean",
+    # The recovery policy's fields (B1): served by GET /api/survival, never
+    # by the manifest -- they depend on a goal, an epoch and a battery.
+    "survival_probability": "fraction",
+    "best_action": "code",
+    # The thermal dwell (C6): served by GET /api/thermal-dwell, never by the
+    # manifest -- it depends on an epoch, a rover and an inner temperature.
+    "max_dwell_h": "h",
+    "dwell_side": "code",
 }
 
 #: What each layer means to someone building the scene, in one line.
@@ -107,6 +124,52 @@ LAYER_DESCRIPTIONS: dict[str, str] = {
     "shadow_ratio": "Fraction of the sampled window the cell spends shadowed.",
     "cost": "Weighted multi-criteria traverse cost; NaN where impassable.",
     "traversable": "1.0 passable, 0.0 not.",
+    "earth_visibility": (
+        "Fraction of the sampled span in which the Earth is above the local "
+        "horizon: where a direct-to-Earth radio link is geometrically possible."
+    ),
+    "p_traversable": (
+        "Fraction of NASA's DEM clones in which the cell passes this rover's "
+        "slope and cold-end gates: 1 certainly passable, 0 certainly not."
+    ),
+    "slope_sigma": "Standard deviation of the slope across the DEM-clone ensemble.",
+    "elevation_sigma": (
+        "NASA PGDA's total elevation uncertainty (toterr) for the DEM: the "
+        "adjustment's error model, not a measurement."
+    ),
+    "slope_sigma_nasa": "NASA PGDA's slope uncertainty (slperr) for the DEM.",
+    "roughness": (
+        "NASA LOLA LDRM roughness (PGDA product 90): spread of LOLA spot height "
+        "residuals around a plane fit within a 100 m window, posted at 50 m/px; every "
+        "5 m cell carries its 50 m pixel's value -- a hectometre-scale block statistic, "
+        "not the cell's own roughness."
+    ),
+    "psr": (
+        "NASA PGDA PSR map (LPSR, 20 m/px): 1.0 inside a permanently shadowed region, "
+        "0.0 outside. A measured product and a check of shadow_ratio, not a planning input."
+    ),
+    "survival_probability": (
+        "Probability that the optimal recovery policy from this coarse block, at the "
+        "requested hour and state of charge, reaches the safe set (goal or safe haven "
+        "with the required charge) before the horizon under the assumed Poisson fault "
+        "model (B1; MODEL). NaN where the block is impassable."
+    ),
+    "best_action": (
+        "The recovery policy's action code at that block, hour and charge: 0-7 a move "
+        "(N, S, W, E, NW, NE, SW, SE), 8 wait, 254 already safe, 255 none (failed or "
+        "impassable)."
+    ),
+    "max_dwell_h": (
+        "Hours a rover arriving at this coarse block at the requested hour with its "
+        "nominal inner temperature may stand still before the first-order lag toward the "
+        "cell's surface-derived inner temperature leaves the tightest declared "
+        "battery/electronics envelope (C6; MODEL, uncalibrated). Capped at the lookahead "
+        "where open-ended; NaN where the block is impassable."
+    ),
+    "dwell_side": (
+        "Which side of the envelope the dwell ends on: 0 none within the lookahead, "
+        "1 cold, 2 hot. NaN where impassable."
+    ),
 }
 
 #: Layers both representations serve, in the order the manifest lists them.
@@ -119,6 +182,18 @@ TERRAIN_LAYERS: tuple[str, ...] = (
     "shadow_ratio",
     "cost",
     "traversable",
+    # Optional: present only when scripts/build_earth_visibility_cache.py
+    # has run. terrain_manifest skips layers the grids do not carry.
+    "earth_visibility",
+    # Optional: present only when scripts/build_dem_clone_cache.py has run
+    # (B3). Same rule: absent from the manifest, not published as unknown.
+    "p_traversable",
+    "slope_sigma",
+    "elevation_sigma",
+    "slope_sigma_nasa",
+    # NASA's measured roughness and PSR layers (C4), when cached.
+    "roughness",
+    "psr",
 )
 
 
@@ -284,7 +359,7 @@ def terrain_manifest(
     span_row = rows * resolution_m
     span_col = cols * resolution_m
 
-    return {
+    manifest: dict[str, Any] = {
         "grid": {
             "rows": rows,
             "cols": cols,
@@ -322,3 +397,8 @@ def terrain_manifest(
         "weights": weights,
         "layers": layers,
     }
+    # The DEM-clone ensemble's pedigree (B3): NASA's product, the clone
+    # count, what was held fixed. Present exactly when the p_* layers are.
+    if metadata.get("dem_uncertainty") is not None:
+        manifest["dem_uncertainty"] = metadata["dem_uncertainty"]
+    return manifest

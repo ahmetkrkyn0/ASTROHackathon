@@ -42,27 +42,45 @@ def march_distances_cells(
     max_range_m: float,
     max_steps: int,
     dense_range_m: float = DEFAULT_DENSE_RANGE_M,
+    min_range_m: float = 0.0,
 ) -> np.ndarray:
     """Ray-march sample distances, in CELLS, from 1 out to ``max_range_m``.
 
     Dense (every cell) out to *dense_range_m*, geometric beyond it. Always
     reaches the full range: *max_steps* controls the far field's spacing,
     not how far the ray gets. Returns a strictly increasing float array.
+
+    *min_range_m* drops every sample closer than that: the far-field pass
+    of a two-scale horizon starts where the fine pass stopped, on a DEM
+    too coarse to say anything useful about the ground nearby.
     """
     resolution_m = float(resolution_m)
     if resolution_m <= 0.0:
         raise ValueError("resolution_m must be positive")
+    if float(min_range_m) < 0.0:
+        raise ValueError("min_range_m must not be negative")
+    if float(min_range_m) >= float(max_range_m):
+        raise ValueError(
+            f"min_range_m ({min_range_m}) must be below max_range_m ({max_range_m})"
+        )
     far_cells = max(1.0, float(max_range_m) / resolution_m)
     dense_cells = min(far_cells, max(1.0, float(dense_range_m) / resolution_m))
 
     dense = np.arange(1.0, np.floor(dense_cells) + 1.0)
     remaining = max(1, int(max_steps) - dense.size)
     if far_cells <= dense_cells or remaining <= 0:
-        return dense[dense <= far_cells] if dense.size else np.array([1.0])
+        steps = dense[dense <= far_cells] if dense.size else np.array([1.0])
+    else:
+        sparse = np.geomspace(dense_cells + 1.0, far_cells, remaining)
+        steps = np.unique(np.rint(np.concatenate([dense, sparse])))
+        steps = steps[steps >= 1.0]
 
-    sparse = np.geomspace(dense_cells + 1.0, far_cells, remaining)
-    steps = np.unique(np.rint(np.concatenate([dense, sparse])))
-    return steps[steps >= 1.0]
+    if float(min_range_m) > 0.0:
+        near = steps < float(min_range_m) / resolution_m
+        steps = steps[~near]
+        if steps.size == 0:
+            steps = np.array([np.ceil(float(min_range_m) / resolution_m)])
+    return steps
 
 
 def horizon_map(
@@ -76,8 +94,36 @@ def horizon_map(
     progress: bool = False,
     roi: tuple[int, int, int, int] | None = None,
     dense_range_m: float = DEFAULT_DENSE_RANGE_M,
+    min_range_m: float = 0.0,
+    stride: int = 1,
+    steps_cells: np.ndarray | None = None,
 ) -> np.ndarray:
     """Return (n_azimuth, H, W) float32 horizon elevation angles in degrees.
+
+    stride:
+        Compute every *stride*-th row and column of the ROI only, starting
+        at its first cell -- the output is the full ROI's cube sampled at
+        ``[::stride, ::stride]``, and the rays are still marched over the
+        whole *elevation* array. The DEM-clone ensemble (B3) uses this to
+        price the 4-D planner's block centres for twenty clones at a
+        sixteenth of the full cost.
+
+    steps_cells:
+        An explicit, strictly increasing array of ray-sample distances in
+        CELLS, replacing :func:`march_distances_cells`. The clone ensemble
+        splits the full march into a near set (re-marched on every clone)
+        and a far set (marched once on the surface DEM); with the two sets
+        partitioning the same samples, the maximum of the two passes IS the
+        single-pass cube.
+
+    min_range_m:
+        Ignore terrain closer than this. Used by the far-field pass of the
+        two-scale horizon (``scripts/build_horizon_cache.py --far-dem``):
+        a wide, coarse DEM marched from the fine pass's range outward, so
+        the far crater wall and the plateau beyond it -- which bring a
+        rim's horizon back up from -20 deg to ~0 deg -- are not lost at the
+        fine DEM's edge. Found by A4's comparison against NASA's LOLA
+        Earth-visibility product.
 
     Parameters
     ----------
@@ -112,14 +158,22 @@ def horizon_map(
                 f"roi {roi} is not inside the {height}x{width} elevation grid"
             )
 
-    steps = march_distances_cells(
-        resolution_m, max_range_m, max_steps, dense_range_m
-    )
-    rows = np.arange(row0, row1, dtype=np.float64)[:, None]
-    cols = np.arange(col0, col1, dtype=np.float64)[None, :]
-    base = elev[row0:row1, col0:col1]
+    if steps_cells is None:
+        steps = march_distances_cells(
+            resolution_m, max_range_m, max_steps, dense_range_m, min_range_m
+        )
+    else:
+        steps = np.asarray(steps_cells, dtype=np.float64)
+        if steps.ndim != 1 or steps.size == 0 or np.any(np.diff(steps) <= 0.0):
+            raise ValueError("steps_cells must be a non-empty, strictly increasing 1-D array")
+    stride = int(stride)
+    if stride < 1:
+        raise ValueError("stride must be a positive integer")
+    rows = np.arange(row0, row1, stride, dtype=np.float64)[:, None]
+    cols = np.arange(col0, col1, stride, dtype=np.float64)[None, :]
+    base = elev[row0:row1:stride, col0:col1:stride]
 
-    out = np.empty((n_azimuth, row1 - row0, col1 - col0), dtype=np.float32)
+    out = np.empty((n_azimuth, base.shape[0], base.shape[1]), dtype=np.float32)
 
     for a_i in range(n_azimuth):
         az_rad = 2.0 * np.pi * a_i / n_azimuth

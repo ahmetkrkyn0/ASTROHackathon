@@ -533,7 +533,12 @@ def test_a_rover_in_full_shadow_cannot_recharge():
 
 
 def test_recharging_in_sunlight_advances_the_clock():
-    lit = _run_simulation(0.0)
+    # Half shadow rather than full sun: since B5 the simulator credits the
+    # array while driving (the planner's move_battery_drain_wh) and a
+    # 20-degree climb in full sunlight nets only ~8 Wh per step for LPR-1,
+    # so 400 steps never reach the reserve. At 0.5 the drive drains and a
+    # stop still charges.
+    lit = _run_simulation(0.5)
     dark = _run_simulation(1.0)
     assert lit["total_recharges"] > 0
     assert lit["total_elapsed_hours"] > dark["total_elapsed_hours"]

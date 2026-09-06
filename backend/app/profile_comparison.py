@@ -14,13 +14,17 @@ the assistant is allowed to run this and is not allowed to run /api/plan.
 from __future__ import annotations
 
 import logging
+import math
 import traceback
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
+from .cost_engine import edge_travel_time_s
 from .pathfinder import astar
 from .rover_grids import grids_for_rover
+from .safety_monitor import evaluate_catalogue, trace_from_states
 from .scenarios import MISSION_PROFILES, check_profile_constraints, get_profile
 from .simulation import simulate_path, summarize_simulation
+from .slip_model import route_slip_summary
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,13 @@ def attach_constraint_check(
                 elevation_grid=grids["elevation"],
             )
             summary = summarize_simulation(states, rover)
+            # The formal, margin-bearing version of the same verdicts (D3):
+            # the boolean constraint_check stays as it was; this adds rho.
+            safety_block = _safety_margins(states, result["path_pixels"], grids, rover)
+            if safety_block is not None:
+                result["safety_margins"] = safety_block
+            # And the slip the route paid for (C3).
+            result["slip_model"] = _slip_block(states, rover)
         except Exception:
             logger.warning(
                 "Constraint check skipped for %s: %s",
@@ -60,6 +71,46 @@ def attach_constraint_check(
             summary = None
     result["constraint_check"] = check_profile_constraints(profile, summary)
     result["simulation_summary"] = summary
+
+
+def _safety_margins(
+    states: list, planned_pixels: list, grids: dict, rover: dict
+) -> Optional[dict[str, Any]]:
+    """``safety_margins`` for a simulated 2-D route; None (logged) if the
+    monitor itself fails -- a monitor bug must not take the comparison down.
+
+    The same block ``/api/plan`` publishes, computed here rather than in the
+    FastAPI shell so /api/compare, /api/plan-multi and the assistant's tool
+    all get it from the one place that solves a profile.
+    """
+    try:
+        trace = trace_from_states(
+            states,
+            [(int(r), int(c)) for r, c in planned_pixels],
+            grids.get("elevation"),
+            float(grids["metadata"]["resolution_m"]),
+            rover,
+        )
+        return evaluate_catalogue(trace, rover)
+    except Exception:  # noqa: BLE001 - reported, never fatal
+        logger.error("Safety monitor failed on the 2-D trace:\n%s", traceback.format_exc())
+        return None
+
+
+def _slip_block(states: list, rover: Mapping[str, Any]) -> dict[str, Any]:
+    """``slip_model`` for a simulated 2-D route (C3): one leg per driven
+    step, priced at the grade the simulator drove (the worse of the cell and
+    the segment slope) with its own time and drawn energy."""
+    legs = []
+    for previous, current in zip(states[:-1], states[1:]):
+        distance = float(current.distance_m) - float(previous.distance_m)
+        if distance <= 0.0:
+            continue
+        drive_slope = max(float(current.slope_deg), float(current.segment_slope_deg))
+        seconds = edge_travel_time_s(drive_slope, distance, rover)
+        hours = seconds / 3600.0 if math.isfinite(seconds) else float("inf")
+        legs.append((drive_slope, distance, hours, float(current.step_energy_wh)))
+    return route_slip_summary(legs, rover)
 
 
 def solve_profile(

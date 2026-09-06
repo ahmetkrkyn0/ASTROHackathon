@@ -312,12 +312,17 @@ def test_m7_min_battery_pct_records_the_depleted_value():
         "error": None,
         "metrics": {},
     }
+    # Sixty percent shadow rather than full sun: since B5 the simulator
+    # credits the array while driving (the planner's move_battery_drain_wh),
+    # and in full sunlight LPR-1's 410 W outproduces a shallow drive -- the
+    # battery would never deplete. At 0.6 the drive nets ~127 W out and a
+    # stop still nets ~109 W in.
     states = simulate_path(
         plan,
         np.full(shape, 0.3),
         np.full(shape, 3.0),
         np.full(shape, -60.0),
-        np.zeros(shape),
+        np.full(shape, 0.6),
         rover=rover,
         pixel_size_m=80.0,
     )

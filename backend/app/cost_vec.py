@@ -22,20 +22,36 @@ from typing import Any
 
 import numpy as np
 
-from .cost_engine import _SHADOW_LAMBDA, _resolve_rover
+from .cost_engine import (
+    _SHADOW_LAMBDA,
+    _resolve_rover,
+    edge_travel_time_s_array,
+    slip_free_view,
+)
+from .risk import slip_cvar_array, slope_cvar_array
+from .roughness import RoughnessScale  # noqa: F401  (type of the scale argument)
 
 
 def f_slope_grid(
-    slope_deg: np.ndarray, rover: Mapping[str, Any] | None = None
+    slope_deg: np.ndarray,
+    rover: Mapping[str, Any] | None = None,
+    risk_alpha: float | None = None,
+    slope_sigma: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Array form of :func:`app.cost_engine.f_slope`."""
+    """Array form of :func:`app.cost_engine.f_slope`.
+
+    With *risk_alpha* (B2) the sigmoid reads the slope's capped CVaR tail
+    from *slope_sigma* (``risk.slope_cvar_array``); the ``inf`` gate stays
+    on the nominal slope. ``risk_alpha=None`` is the pre-B2 body.
+    """
     rover_cfg = _resolve_rover(rover)
     slope_max = float(rover_cfg["slope_max_deg"])
     comfortable = float(rover_cfg["slope_comfortable_deg"])
 
     theta = np.asarray(slope_deg, dtype=np.float64)
+    read = theta if risk_alpha is None else slope_cvar_array(theta, risk_alpha, slope_sigma, rover_cfg)
     with np.errstate(over="ignore", invalid="ignore"):
-        penalty = 1.0 / (1.0 + np.exp(-0.4 * (theta - comfortable)))
+        penalty = 1.0 / (1.0 + np.exp(-0.4 * (read - comfortable)))
     return np.where(theta > slope_max, np.inf, penalty)
 
 
@@ -43,6 +59,8 @@ def f_energy_cell_grid(
     slope_deg: np.ndarray,
     rover: Mapping[str, Any] | None = None,
     shadow_ratio: np.ndarray | float = 0.0,
+    risk_alpha: float | None = None,
+    slope_sigma: np.ndarray | None = None,
 ) -> np.ndarray:
     """Array form of :func:`app.cost_engine.f_energy_cell`.
 
@@ -50,6 +68,10 @@ def f_energy_cell_grid(
     traverse costs, and without it this penalty was rank-identical to
     ``f_slope_grid`` (measured Spearman 1.000000 on the production slope
     distribution). (Round 3 review, H-4.)
+
+    With *risk_alpha* (B2) the cell is priced at its slip tail
+    (``risk.slip_cvar_array`` on the slope clipped at 0, as the scalar does)
+    instead of the curve's mean; ``risk_alpha=None`` is the pre-B2 body.
     """
     rover_cfg = _resolve_rover(rover)
     slope_max = float(rover_cfg["slope_max_deg"])
@@ -57,8 +79,12 @@ def f_energy_cell_grid(
     theta = np.asarray(slope_deg, dtype=np.float64)
     shadow = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
 
-    best_wh = _energy_per_metre_wh_scalar(0.0, 0.0, rover_cfg)
-    worst_wh = _energy_per_metre_wh_scalar(slope_max, 1.0, rover_cfg)
+    # C3: the reference scale is the slip-free best/worst pair, exactly as
+    # in the scalar form (see f_energy_cell for why); the cell's own energy
+    # below includes slip.
+    reference = slip_free_view(rover_cfg)
+    best_wh = _energy_per_metre_wh_scalar(0.0, 0.0, reference)
+    worst_wh = _energy_per_metre_wh_scalar(slope_max, 1.0, reference)
     if not np.isfinite(best_wh) or best_wh < 0.0:
         return np.full(np.broadcast(theta, shadow).shape, np.inf, dtype=np.float64)
 
@@ -66,7 +92,10 @@ def f_energy_cell_grid(
     if not np.isfinite(span) or span <= 0.0:
         return np.where(theta > slope_max, np.inf, 0.0)
 
-    here_wh = _energy_per_metre_wh_grid(theta, shadow, rover_cfg)
+    slip = None
+    if risk_alpha is not None:
+        slip = slip_cvar_array(np.clip(theta, 0.0, None), risk_alpha, rover_cfg, slope_sigma)
+    here_wh = _energy_per_metre_wh_grid(theta, shadow, rover_cfg, slip=slip)
     value = np.clip((here_wh - best_wh) / span, 0.0, 1.0)
     return np.where(theta > slope_max, np.inf, value)
 
@@ -84,21 +113,23 @@ def _housekeeping_power_w_grid(
 
 
 def _energy_per_metre_wh_grid(
-    theta_deg: np.ndarray, shadow_ratio: np.ndarray, rover_cfg: Mapping[str, Any]
+    theta_deg: np.ndarray,
+    shadow_ratio: np.ndarray,
+    rover_cfg: Mapping[str, Any],
+    slip: np.ndarray | None = None,
 ) -> np.ndarray:
     """Array form of :func:`app.cost_engine.net_energy_per_metre_wh`.
 
-    ``edge_travel_time_s(theta, 1.0) = (1 / cos) / (v_max * cos)``, so cos
-    enters SQUARED -- the same identity the scalar form relies on.
+    The per-metre time is ``edge_travel_time_s(theta, 1.0)`` -- since C3
+    including the rover's slip curve, or the explicit *slip* (B2) -- taken
+    from its vectorised twin so the two forms cannot drift.
     """
     mu_coeff = float(rover_cfg["mu_coeff"])
     p_base = float(rover_cfg["p_base_w"])
-    v_max = float(rover_cfg["v_max_ms"])
 
-    theta_rad = np.radians(np.clip(np.asarray(theta_deg, dtype=np.float64), 0.0, None))
-    cos_t = np.cos(theta_rad)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        seconds = 1.0 / (v_max * cos_t * cos_t)
+    theta_clipped = np.clip(np.asarray(theta_deg, dtype=np.float64), 0.0, None)
+    theta_rad = np.radians(theta_clipped)
+    seconds = edge_travel_time_s_array(theta_clipped, 1.0, rover_cfg, slip=slip)
     traction_w = p_base * (1.0 + mu_coeff * np.sin(theta_rad))
     ratio = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
     solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio)
@@ -189,3 +220,22 @@ def _f_thermal_one_grid(
     if total_weight == 0.0:
         return np.zeros(np.shape(inner), dtype=np.float64)
     return accumulator / total_weight
+
+
+def f_roughness_grid(
+    roughness_m: np.ndarray, scale: "RoughnessScale | None"
+) -> np.ndarray:
+    """Array form of :func:`app.cost_engine.f_roughness` (C4).
+
+    *roughness_m* is NASA's LDRM roughness (metres, 100 m baseline, the 50 m
+    pixel's value on every 5 m cell it contains) and *scale* the layer's
+    [0, 1] mapping -- the cell's percentile rank among the 80-90 S region's
+    pixels. Both forms call the same ``np.interp`` on the same array path,
+    so they are bit-equal; a missing value reads ``NAN_ROUGHNESS_F``. A grid
+    without its scale is refused, as the scalar form refuses it.
+    """
+    if scale is None:
+        raise ValueError(
+            "f_roughness_grid needs the layer's RoughnessScale (roughness_meta.json['scale'])"
+        )
+    return scale.f_grid(roughness_m)

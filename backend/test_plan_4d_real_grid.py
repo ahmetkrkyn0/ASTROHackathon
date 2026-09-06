@@ -70,17 +70,18 @@ def _same_coarse_cell(a: tuple[int, int], b: tuple[int, int]) -> bool:
 def test_default_horizon_solves_a_route_the_old_fixed_default_starved(client):
     """Locked-in regression for H1.
 
-    This start/goal pair needs 33 coarse moves at coarsen=4 (measured
-    against the checked-in grid). The old DEFAULT_PLAN_4D_SLICES=24
-    covered at most ~24 coarse moves at the auto-derived slice length, so
-    this pair failed with "No path found within the time horizon" even
-    though a route existed. The fix sizes the default from the actual
+    This start/goal pair needs 113 gated coarse moves at coarsen=4
+    (measured against the checked-in Site11 grid; the Site01 pair it
+    replaced needed 33). The old DEFAULT_PLAN_4D_SLICES=24 covered at most
+    ~24 coarse moves at the auto-derived slice length, so such a pair
+    failed with "No path found within the time horizon" even though a
+    route existed. The fix sizes the default from the actual
     shortest-route distance, so this must now succeed with no
     n_slices/horizon_hours given at all.
     """
     body = {
-        "start": {"row": 415, "col": 274},
-        "goal": {"row": 283, "col": 341},
+        "start": {"row": 186, "col": 34},
+        "goal": {"row": 494, "col": 450},
         "rover_id": _ROVER,
     }
     response = client.post("/api/plan-4d", json=body)
@@ -153,14 +154,20 @@ def test_start_in_a_coarsening_disqualified_block_gets_a_specific_422(
 
 # ── A lunar-night epoch must plan on battery, not fail on the ground's skin ──
 #
-# Measured on this grid before the fix: at 2026-09-07 (the site is dark from
-# 4 to 17 September) every coarse cell was impassable 2.5 h into the horizon
-# because the cube gated on regolith skin temperature < -150 C, so the
-# endpoint answered "1 257 052 edges led into cells with no finite cost"
-# for a 5-hour route -- while the catalogue gives LPR-1 50 h of darkness.
+# Measured on the Site01 grid before the fix: at a lunar-night epoch every
+# coarse cell was impassable 2.5 h into the horizon because the cube gated
+# on regolith skin temperature < -150 C, so the endpoint answered
+# "1 257 052 edges led into cells with no finite cost" for a 5-hour route
+# -- while the catalogue gives LPR-1 50 h of darkness.
+#
+# Re-pinned on the Site11 grid with the two-scale horizon cube (A4): the
+# site is fully dark from 12 to 18 September 2026, so an epoch on the 13th
+# gives a route that runs on battery for its whole length. The pair is the
+# same 113-move pair as above; the Site01 pair (228, 442)-(465, 49) falls
+# in a cold-trap block on this grid.
 
-_NIGHT_EPOCH = "2026-09-07T00:00:00"
-_NIGHT_PAIR = ((228, 442), (465, 49))  # plans in 5 h on the static cube
+_NIGHT_EPOCH = "2026-09-13T00:00:00"
+_NIGHT_PAIR = ((186, 34), (494, 450))
 
 _needs_horizon_cache = pytest.mark.skipif(
     not os.path.exists(os.path.join(_P1_PROCESSED_DIR, "horizon_map.npy")),

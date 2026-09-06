@@ -411,3 +411,151 @@ def test_series_manifest_urls_are_fetchable_as_given():
         response = client.get(entry["binary_url"])
         assert response.status_code == 200, f"{name}: {entry['binary_url']}"
         assert len(response.content) == 3 * 4 * 3 * 4, name
+
+
+# -- A4: the Earth-visibility layer ------------------------------------------
+
+
+def _with_earth_layer(value: float = 0.5) -> np.ndarray:
+    rng = np.arange(ROWS * COLS, dtype=np.float64).reshape(SHAPE)
+    layer = np.clip(value + (rng % 4) / 10.0, 0.0, 1.0)
+    app.state.grids["earth_visibility"] = layer
+    app.state.grids["metadata"]["layer_validity"]["earth_visibility"] = "DERIVED"
+    return layer
+
+
+def test_manifest_omits_earth_visibility_until_the_layer_is_loaded():
+    manifest = client.get("/api/terrain").json()
+    assert "earth_visibility" not in manifest["layers"]
+
+
+def test_manifest_lists_earth_visibility_when_the_layer_is_loaded():
+    layer = _with_earth_layer()
+    manifest = client.get("/api/terrain").json()
+    entry = manifest["layers"]["earth_visibility"]
+    assert entry["units"] == "fraction"
+    assert entry["validity"] == "DERIVED"
+    assert entry["min"] == pytest.approx(float(layer.min()))
+    assert entry["max"] == pytest.approx(float(layer.max()))
+    assert entry["binary_url"].startswith("/api/layers/earth_visibility?format=f32")
+    assert "Earth" in entry["description"]
+
+
+def test_earth_visibility_layer_round_trips_as_float32():
+    layer = _with_earth_layer()
+    response = client.get("/api/layers/earth_visibility?format=f32")
+    assert response.status_code == 200
+    assert response.headers["X-Layer-Validity"] == "DERIVED"
+    values = np.frombuffer(response.content, dtype=BINARY_DTYPE).reshape(SHAPE)
+    np.testing.assert_allclose(values, layer.astype(np.float32))
+    payload = client.get("/api/layers/earth_visibility").json()
+    assert payload["layer"] == "earth_visibility"
+    assert payload["shape"] == [ROWS, COLS]
+
+
+def test_missing_earth_visibility_layer_is_a_404_that_names_the_script():
+    response = client.get("/api/layers/earth_visibility")
+    assert response.status_code == 404
+    assert "build_earth_visibility_cache" in response.json()["detail"]
+
+
+# -- A4: the Earth-visibility series -----------------------------------------
+
+EARTH_SERIES = "/api/earth-series"
+
+
+def test_earth_series_with_nothing_to_compute_from_is_unavailable_and_says_so():
+    """No epoch, no horizon cube, no long-run layer: the manifest must not
+    paint a field it does not have."""
+    manifest = client.get(f"{EARTH_SERIES}?n_slices=4").json()
+    assert manifest["slices"] == 4
+    assert manifest["earth_model"]["model"] == "unavailable"
+    assert manifest["earth_model"]["time_varying"] is False
+    assert manifest["earth_model"]["reason"]
+    assert manifest["earth"] == []
+    assert manifest["fields"] == {}
+    assert manifest["binary_format"]["shape"] == [4, ROWS, COLS]
+
+    binary = client.get(f"{EARTH_SERIES}?n_slices=4&format=f32&field=earth_visible")
+    assert binary.status_code == 404
+    assert "unavailable" in binary.json()["detail"].lower()
+
+
+def test_earth_series_falls_back_to_the_long_run_layer_and_labels_it_static():
+    layer = _with_earth_layer()
+    manifest = client.get(f"{EARTH_SERIES}?n_slices=3&slice_hours=4").json()
+    assert manifest["earth_model"]["model"] == "static"
+    assert manifest["earth_model"]["time_varying"] is False
+    assert "epoch" in manifest["earth_model"]["reason"]
+    entry = manifest["fields"]["earth_visible"]
+    assert entry["units"] == "fraction"
+    assert entry["min"] == pytest.approx(float(layer.min()))
+    assert entry["max"] == pytest.approx(float(layer.max()))
+
+    binary = client.get(entry["binary_url"])
+    assert binary.status_code == 200
+    assert binary.headers["X-Series-Field"] == "earth_visible"
+    assert int(binary.headers["X-Series-Slices"]) == 3
+    cube = np.frombuffer(binary.content, dtype=BINARY_DTYPE).reshape(3, ROWS, COLS)
+    for index in range(3):
+        np.testing.assert_allclose(cube[index], layer.astype(np.float32))
+
+
+def test_earth_series_binary_preserves_slice_order_when_time_varying(monkeypatch):
+    """Same axis-swap guard as the illumination series: n_slices=4 against
+    COLS=6, each slice offset by its own index."""
+    import app.main as main_module
+
+    def _fake_series(base, metadata, n_slices, slice_hours, start_utc=None):
+        series = [np.full(SHAPE, 0.1 * i) for i in range(int(n_slices))]
+        return series, {"model": "spice_horizon", "time_varying": True}
+
+    def _fake_track(metadata, n_slices, slice_hours, start_utc):
+        return [
+            {
+                "index": i,
+                "utc": f"2026-09-0{i + 1}T00:00:00Z",
+                "azimuth_true_deg": 100.0,
+                "azimuth_grid_deg": 350.0,
+                "elevation_deg": 6.0 - i,
+            }
+            for i in range(int(n_slices))
+        ]
+
+    monkeypatch.setattr(main_module, "build_earth_visibility_series", _fake_series)
+    monkeypatch.setattr(main_module, "earth_track_for_series", _fake_track)
+
+    query = f"{EARTH_SERIES}?start_utc=2026-09-01T00:00:00&n_slices=4&slice_hours=24"
+    manifest = client.get(query).json()
+    assert manifest["earth_model"]["model"] == "spice_horizon"
+    assert manifest["start_utc"] == "2026-09-01T00:00:00"
+    assert [entry["elevation_deg"] for entry in manifest["earth"]] == [6.0, 5.0, 4.0, 3.0]
+    # The share of the grid with a link, per slice: what a timeline widget
+    # needs, straight from the slices the binary carries.
+    assert [entry["visible_fraction"] for entry in manifest["earth"]] == pytest.approx(
+        [0.0, 0.1, 0.2, 0.3]
+    )
+
+    binary = client.get(f"{query}&format=f32&field=earth_visible")
+    assert binary.status_code == 200
+    cube = np.frombuffer(binary.content, dtype=BINARY_DTYPE).reshape(4, ROWS, COLS)
+    means = cube.reshape(4, -1).mean(axis=1)
+    assert np.all(np.diff(means) > 0)
+
+
+def test_earth_series_shares_the_illumination_series_budget(monkeypatch):
+    """One budget, two endpoints: the refusal has to name a downsample that
+    fits, exactly as /api/illumination-series does. The fixture is far too
+    small to hit the real ceiling, so the ceiling is lowered to meet it."""
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "MAX_SERIES_BYTES", 100)
+    for endpoint in (EARTH_SERIES, SERIES):
+        response = client.get(f"{endpoint}?n_slices=4&downsample=1")
+        assert response.status_code == 422, endpoint
+        assert "downsample=" in response.json()["detail"], endpoint
+
+
+def test_earth_series_rejects_an_unknown_field():
+    response = client.get(f"{EARTH_SERIES}?n_slices=2&format=f32&field=shadow")
+    assert response.status_code == 422

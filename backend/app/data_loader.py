@@ -12,7 +12,16 @@ import numpy as np
 import rasterio
 
 from .constants import DEFAULT_ROVER_ID, DEFAULT_TARGET_RESOLUTION_M
-from .cost_engine import COST_MODEL_ID, compute_cost_grid, resolve_weights
+from .cost_engine import COST_MODEL_ID, compute_cost_grid, cost_criteria_for, resolve_weights
+from .roughness import (
+    PSR_CACHE_FILENAME,
+    PSR_LAYER_VALIDITY,
+    PSR_META_FILENAME,
+    ROUGHNESS_CACHE_FILENAME,
+    ROUGHNESS_LAYER_VALIDITY,
+    ROUGHNESS_META_FILENAME,
+    RoughnessScale,
+)
 from .thermal_grid import ELEV_REF_MAX_M, ELEV_REF_MIN_M, generate_thermal_grid
 from .thermal_model import (
     annual_peak_c,
@@ -64,6 +73,18 @@ _VALIDITY_LAYERS: tuple[str, ...] = (
 # illumination had no way to get back. app.cost_cube did the obvious thing
 # and corrected again. (Round 4 review, H-1.)
 THERMAL_FIELD_SUNLIT_PEAK: str = "sunlit_peak"
+
+
+def slope_deg_from_elevation(elevation: np.ndarray, resolution_m: float) -> np.ndarray:
+    """Slope magnitude in degrees from an elevation grid: the gradient formula
+    the P1 pipeline (``make_slope_grid``) and :func:`load_and_preprocess_dem`
+    share. Exposed so the DEM-clone ensemble (B3) slopes every clone with
+    exactly the operator that produced the shipped ``slope_grid`` -- a
+    probability of passability computed with a different stencil would be
+    a statement about a different planner.
+    """
+    dy, dx = np.gradient(np.asarray(elevation, dtype=np.float64), float(resolution_m))
+    return np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
 
 
 def derive_thermal_fields(
@@ -131,6 +152,29 @@ def load_preprocessed_grids(
 
     stored_validity = dict(metadata.get("layer_validity", {}))
 
+    # ── Optional: the long-run Earth-visibility layer (A4) ──────────────
+    # Written by scripts/build_earth_visibility_cache.py from the horizon
+    # cube and the ephemeris; absent on a fresh pipeline run. Absent means
+    # NO layer, not a layer of UNKNOWN provenance -- /api/terrain simply
+    # does not list it, and /api/layers says what to run.
+    earth_layer, earth_meta = _load_earth_visibility(d, tuple(result["elevation"].shape))
+    if earth_layer is not None:
+        result["earth_visibility"] = earth_layer
+
+    # ── Optional: NASA's measured roughness and PSR layers (C4) ──────────
+    # Written by scripts/build_roughness_cache.py from PGDA product 90. Same
+    # rule as above: absent means no layer. The roughness layer additionally
+    # needs its scale (roughness_meta.json["scale"]) -- without it the fifth
+    # criterion cannot be normalised, so a scale-less cache is refused.
+    roughness_layer, roughness_meta = _load_roughness(d, tuple(result["elevation"].shape))
+    roughness_scale = None
+    if roughness_layer is not None:
+        result["roughness"] = roughness_layer
+        roughness_scale = RoughnessScale.from_meta(roughness_meta.get("scale"))
+    psr_layer, psr_meta = _load_psr(d, tuple(result["elevation"].shape))
+    if psr_layer is not None:
+        result["psr"] = psr_layer
+
     # ── Illumination correction, applied exactly once ────────────────────
     # The thermal layer the surface model writes is a (slope x aspect) lookup
     # at fixed latitude: it never reads shadow_ratio, so a permanently
@@ -180,10 +224,14 @@ def load_preprocessed_grids(
     # stamped with THIS build's id afterwards: leaving the file's stored value
     # meant a freshly computed grid was labelled stale and pathfinder
     # recomputed it a second time. (Round 3 review, L-5.)
+    # A stored grid can never include the roughness criterion (the P1
+    # pipeline does not know the layer), so with the layer present the cost
+    # is always recomputed here -- ~0.05 s on the 500x500 grid. (C4.)
     recomputed_cost = (
         (weights is not None and resolved != stored_weights)
         or metadata.get("cost_model") != COST_MODEL_ID
         or legacy_coupled
+        or roughness_layer is not None
     )
     if recomputed_cost:
         result["cost"] = compute_cost_grid(
@@ -194,6 +242,8 @@ def load_preprocessed_grids(
             traversable=result["traversable"],
             weights=resolved,
             thermal_min_grid=result["thermal_min"],
+            roughness_grid=roughness_layer,
+            roughness_scale=roughness_scale,
         )
         cost_weights = resolved
         cost_model = COST_MODEL_ID
@@ -216,6 +266,17 @@ def load_preprocessed_grids(
     validity["cost"] = weakest_validity(
         validity.get("slope", "UNKNOWN"), thermal_validity, shadow_validity
     )
+    if earth_layer is not None:
+        # Derived from MEASURED elevation (the horizon cube) and the
+        # ephemeris; the same label shadow_ratio carries.
+        validity["earth_visibility"] = "DERIVED"
+    # C4: NASA's products are measured. The cost label above is NOT lifted
+    # by them -- weakest_validity keeps the weakest input (slope/thermal/
+    # shadow) in charge, which is the honest reading of a five-term sum.
+    if roughness_layer is not None:
+        validity["roughness"] = ROUGHNESS_LAYER_VALIDITY
+    if psr_layer is not None:
+        validity["psr"] = PSR_LAYER_VALIDITY
 
     result["metadata"] = {
         "origin": metadata.get("origin"),
@@ -235,12 +296,100 @@ def load_preprocessed_grids(
         "default_rover_id": metadata.get("default_rover_id", DEFAULT_ROVER_ID),
         "cost_weights": cost_weights,
         "cost_model": cost_model,
+        # Which criteria the cost grid sums (C4): five with the roughness
+        # layer beside the grids, four without.
+        "cost_criteria": cost_criteria_for(roughness_layer is not None),
         "thermal_field": THERMAL_FIELD_SUNLIT_PEAK,
         "thermal_shadow_coupled": True,  # legacy alias; see thermal_field
         "layer_validity": validity,
     }
+    if earth_meta is not None:
+        result["metadata"]["earth_visibility"] = earth_meta
+    if roughness_meta is not None:
+        result["metadata"]["roughness"] = roughness_meta
+    if psr_meta is not None:
+        result["metadata"]["psr"] = psr_meta
 
     return result
+
+
+def _load_roughness(
+    processed_dir: str, expected_shape: tuple[int, int]
+) -> tuple[np.ndarray | None, dict[str, Any] | None]:
+    """NASA's LDRM roughness on the grid (metres) and its provenance, if
+    cached (C4). The provenance is REQUIRED: it carries the scale that turns
+    metres into the [0, 1] criterion, and a layer without it is refused."""
+    layer_path = os.path.join(processed_dir, ROUGHNESS_CACHE_FILENAME)
+    if not os.path.exists(layer_path):
+        return None, None
+    layer = np.load(layer_path).astype(np.float64)
+    if layer.shape != tuple(expected_shape):
+        raise ValueError(
+            f"roughness cache {layer.shape} does not match the grid "
+            f"{tuple(expected_shape)}; rebuild it with scripts/build_roughness_cache.py"
+        )
+    meta_path = os.path.join(processed_dir, ROUGHNESS_META_FILENAME)
+    if not os.path.exists(meta_path):
+        raise ValueError(
+            f"{ROUGHNESS_CACHE_FILENAME} has no {ROUGHNESS_META_FILENAME} beside it: the "
+            "roughness scale is missing and the layer cannot be normalised; rebuild with "
+            "scripts/build_roughness_cache.py"
+        )
+    with open(meta_path, encoding="utf-8") as handle:
+        meta = json.load(handle)
+    # Validates the scale now, so a broken cache fails at load time with a
+    # message naming the scale, not at the first plan.
+    RoughnessScale.from_meta(meta.get("scale") if isinstance(meta, dict) else None)
+    return layer, meta
+
+
+def _load_psr(
+    processed_dir: str, expected_shape: tuple[int, int]
+) -> tuple[np.ndarray | None, dict[str, Any] | None]:
+    """NASA's PSR mask on the grid (1.0 inside, 0.0 outside) and its
+    provenance, if cached (C4)."""
+    layer_path = os.path.join(processed_dir, PSR_CACHE_FILENAME)
+    if not os.path.exists(layer_path):
+        return None, None
+    layer = np.load(layer_path).astype(np.float64)
+    if layer.shape != tuple(expected_shape):
+        raise ValueError(
+            f"psr cache {layer.shape} does not match the grid "
+            f"{tuple(expected_shape)}; rebuild it with scripts/build_roughness_cache.py"
+        )
+    meta_path = os.path.join(processed_dir, PSR_META_FILENAME)
+    meta: dict[str, Any] | None = None
+    if os.path.exists(meta_path):
+        with open(meta_path, encoding="utf-8") as handle:
+            meta = json.load(handle)
+    return layer, meta
+
+
+def _load_earth_visibility(
+    processed_dir: str, expected_shape: tuple[int, int]
+) -> tuple[np.ndarray | None, dict[str, Any] | None]:
+    """The cached Earth-visibility fraction and its provenance, if present."""
+    from .earth_visibility import (
+        EARTH_VISIBILITY_CACHE_FILENAME,
+        EARTH_VISIBILITY_META_FILENAME,
+    )
+
+    layer_path = os.path.join(processed_dir, EARTH_VISIBILITY_CACHE_FILENAME)
+    if not os.path.exists(layer_path):
+        return None, None
+    layer = np.load(layer_path).astype(np.float64)
+    if layer.shape != tuple(expected_shape):
+        raise ValueError(
+            f"earth_visibility cache {layer.shape} does not match the grid "
+            f"{tuple(expected_shape)}; rebuild it with "
+            "scripts/build_earth_visibility_cache.py"
+        )
+    meta_path = os.path.join(processed_dir, EARTH_VISIBILITY_META_FILENAME)
+    meta: dict[str, Any] | None = None
+    if os.path.exists(meta_path):
+        with open(meta_path, encoding="utf-8") as handle:
+            meta = json.load(handle)
+    return layer, meta
 
 
 def load_and_preprocess_dem(
@@ -290,10 +439,10 @@ def load_and_preprocess_dem(
         actual_resolution = native_resolution
 
     # Slope (degrees)
-    dy, dx = np.gradient(elevation, actual_resolution)
-    slope = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
+    slope = slope_deg_from_elevation(elevation, actual_resolution)
 
     # Aspect (degrees, 0°=North clockwise)
+    dy, dx = np.gradient(elevation, actual_resolution)
     aspect = np.degrees(np.arctan2(-dx, dy))
     aspect = (aspect + 360) % 360
 

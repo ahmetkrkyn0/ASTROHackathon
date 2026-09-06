@@ -25,6 +25,7 @@ from typing import Any
 import numpy as np
 
 from .cost_engine import edge_travel_time_s, lateral_slope_tan
+from .thermal_dwell import route_dwell_report
 
 # Every reason this planner can refuse an edge. Declared once so the metrics
 # always carry the full set of keys and a caller can tell "checked, none"
@@ -42,6 +43,29 @@ REJECTION_KEYS: tuple[str, ...] = (
     # continuous shadow longer than it survives.
     "soc_floor",
     "shadow_endurance",
+    # Direct-to-Earth: a MOVE whose arrival cell has no line of sight to
+    # Earth at the arrival slice, refused only when the caller asked for the
+    # VIPER teleoperation rule (require_earth_visibility). (A4.)
+    "earth_visibility",
+    # Safe haven (A1): a transition after which the rover could no longer
+    # reach a safe haven before the Earth sets on it, refused only under
+    # VIPER's leg rule (require_safe_haven).
+    "safe_haven_deadline",
+    # Continuous illumination (A2): a transition that would take the rover
+    # out of the lit corridor -- a wait into a dark voxel, or a move whose
+    # arrival voxel is outside the corridor or whose two blocks are not lit
+    # for every slice of the move -- refused only under
+    # require_continuous_illumination.
+    "continuous_illumination",
+    # The chance constraint (B1): a MOVE whose fault branches would push the
+    # execution failure probability over max_failure_probability, refused
+    # only when a survival field and a beta are given.
+    "failure_probability",
+    # The thermal dwell (C6): a WAIT that would keep the rover stationary in
+    # a block longer than its inner temperature allows there (the cell's
+    # max_dwell_h at the slice the stay began), refused only under
+    # require_thermal_dwell with a dwell cube.
+    "thermal_dwell",
 )
 
 
@@ -73,6 +97,11 @@ def no_path_reason_4d(
     unknown = rejections.get("nan_elevation", 0)
     soc = rejections.get("soc_floor", 0)
     endurance = rejections.get("shadow_endurance", 0)
+    dte = rejections.get("earth_visibility", 0)
+    haven = rejections.get("safe_haven_deadline", 0)
+    corridor = rejections.get("continuous_illumination", 0)
+    risk = rejections.get("failure_probability", 0)
+    dwell = rejections.get("thermal_dwell", 0)
 
     parts: list[str] = []
     # The envelope first: when the battery or the darkness closed the route,
@@ -87,6 +116,39 @@ def no_path_reason_4d(
         parts.append(
             f"{endurance} edges would have kept the rover in continuous shadow "
             f"beyond its {float(rover['h_max_shadow_h']):g} h endurance"
+        )
+    if dte:
+        parts.append(
+            f"{dte} edges would have driven the rover into a cell with no "
+            "Earth visibility (require_earth_visibility: drive only with a "
+            "direct-to-Earth link)"
+        )
+    if haven:
+        parts.append(
+            f"{haven} transitions would have left the rover unable to reach a "
+            "safe haven before the Earth sets (require_safe_haven: "
+            f"{float(rover['h_max_shadow_h']):g} h shadow endurance)"
+        )
+    if corridor:
+        parts.append(
+            f"{corridor} transitions would have taken the rover out of the "
+            "continuous-illumination corridor (require_continuous_illumination: "
+            "every block the rover occupies, for every slice of a move, must be "
+            "lit in the shadow series)"
+        )
+    if risk:
+        parts.append(
+            f"{risk} moves would have pushed the execution failure probability "
+            "over max_failure_probability (the chance constraint: every fault "
+            "branch is closed with the recovery policy's P_safe)"
+        )
+    if dwell:
+        parts.append(
+            f"{dwell} transitions (waits or moves) would have left the rover's inner "
+            "temperature outside its battery/electronics envelope (require_thermal_dwell: "
+            "the thermal dwell -- the inner temperature relaxes toward each occupied "
+            "block's surface-derived target with the rover's thermal_tau_s, and a stay "
+            "in a block may not outlast max_dwell_h there; MODEL, uncalibrated)"
         )
     if lateral:
         parts.append(
@@ -114,7 +176,10 @@ def no_path_reason_4d(
             "passable cells at this coarsen factor."
         )
     lead = "No path found"
-    if horizon and not (lateral or along or blocked or unknown or soc or endurance):
+    if horizon and not (
+        lateral or along or blocked or unknown or soc or endurance or dte or haven
+        or corridor or risk or dwell
+    ):
         lead = "No path found within the time horizon"
     return (
         f"{lead} for {rover.get('name', rover.get('id', 'this rover'))}: "
@@ -273,6 +338,11 @@ def _empty(
     elapsed_ms: float = 0.0,
     rejections: dict[str, int] | None = None,
     nodes_expanded: int = 0,
+    safe_haven_enforced: bool = False,
+    continuous_illumination_enforced: bool = False,
+    survival_enforced: bool = False,
+    start_recovery_prob: float | None = None,
+    thermal_dwell_enforced: bool = False,
 ) -> dict[str, Any]:
     """A failed plan.
 
@@ -286,6 +356,17 @@ def _empty(
     return {
         "path_states": [],
         "path_pixels": [],
+        "path_earth_visible": None,
+        "path_time_to_haven_h": None,
+        "path_hours_until_earthset": None,
+        "path_haven_margin_h": None,
+        "path_survival_prob": None,
+        "path_recovery_prob": None,
+        # The thermal dwell (C6): None without a dwell cube.
+        "path_stay_hours": None,
+        "path_max_dwell_h": None,
+        "path_dwell_margin_h": None,
+        "path_inner_c": None,
         "metrics": {
             "wait_steps": 0,
             "move_steps": 0,
@@ -299,6 +380,28 @@ def _empty(
             "edges_rejected": tally,
             "edges_dropped_at_horizon": tally.get("horizon", 0),
             "horizon_truncated": tally.get("horizon", 0) > 0,
+            "moves_out_of_earth_view": None,
+            "earth_visibility_enforced": False,
+            "min_haven_margin_h": None,
+            "states_past_haven_deadline": None,
+            "ends_at_safe_haven": None,
+            # Whether the rule was in force when the search failed: a caller
+            # reading a refusal needs to know which rules produced it.
+            "safe_haven_enforced": bool(safe_haven_enforced),
+            # The lit corridor (A2): None without a corridor cube.
+            "states_outside_corridor": None,
+            "moves_outside_corridor": None,
+            "continuous_illumination_enforced": bool(continuous_illumination_enforced),
+            # The chance constraint (B1): None without a survival field.
+            "execution_failure_probability": None,
+            "min_recovery_prob": None,
+            "start_recovery_prob": start_recovery_prob,
+            "survival_enforced": bool(survival_enforced),
+            # The thermal dwell (C6): None without a dwell cube.
+            "min_dwell_margin_h": None,
+            "states_past_thermal_dwell": None,
+            "max_stay_h": None,
+            "thermal_dwell_enforced": bool(thermal_dwell_enforced),
         },
         "error": error,
     }
@@ -329,30 +432,68 @@ _DARK_BINS_PER_ENDURANCE: int = 100
 # dark. The SPICE series is binary, so this only matters for the static
 # (long-run fraction) fallback, where it reads "mostly dark".
 _DARK_RATIO_THRESHOLD: float = 0.5
+# The execution-survival axis (B1). Under a beta a label whose survival
+# product is within one percent of a cheaper label's is pruned (the same
+# order as the battery's tolerance; beta is a number like 0.02 or 0.05),
+# and the label key bins it in thousandths. Without a beta the axis is
+# switched off (infinite tolerance): the plan is the cost-optimal one and
+# its risk is REPORTED, so the search expands exactly the nodes it expands
+# without a field -- measured on the lunar-night pair, keeping the axis
+# live in report-only mode expanded 1.2 M nodes against 171 k and took
+# 281 s against 21 s. Without a field every label carries exactly 1.0
+# here, so the pre-B1 search is reproduced bit for bit either way.
+_SURVIVAL_DOMINANCE_TOL: float = 0.01
+_SURVIVAL_BINS: int = 1000
+# The thermal axis (C6). Under require_thermal_dwell a label whose inner
+# temperature sits within a tenth of the envelope width of a cheaper
+# label's margin is pruned, and the key bins the margin in tenths of the
+# width. Finer settings (one percent, 400 bins, the battery axis's) let the
+# label count explode on Site11's day route -- the inner temperature of two
+# paths meeting at one node differs by tens of kelvin when one came through
+# sunlight and the other through shadow, so almost nothing was pruned: the
+# first real-grid run passed 2.3 GB and ten minutes without finishing; at
+# five percent and 20 bins the infeasible day route took 156 s to refuse.
+# The CONSTRAINT is still checked on the exact value; only the pruning is
+# coarse, so a warmer route within 3.5 K of a cheaper colder one may be
+# dropped. Without the constraint the tolerance is infinite and the key
+# constant: the pre-C6 search bit for bit.
+_THERMAL_MARGIN_TOL_FRAC: float = 0.10
+_THERMAL_MARGIN_BINS: int = 10
 
 
 def _dominated(
-    front: list[tuple[float, float, float]],
+    front: list[tuple[float, float, float, float, float]],
     g: float,
     battery: float,
     dark: float,
     battery_tol: float,
     dark_tol: float,
     strict: bool = False,
+    surv: float = 1.0,
+    surv_tol: float = _SURVIVAL_DOMINANCE_TOL,
+    margin: float = 0.0,
+    margin_tol: float = math.inf,
 ) -> bool:
     """True if some label in *front* is at least as good on every axis.
 
-    A label is (cost so far, battery Wh, continuous shadow hours). Lower
-    cost, more battery and less shadow all dominate, each within its
+    A label is (cost so far, battery Wh, continuous shadow hours, execution
+    survival, thermal margin -- the inner temperature's distance to the
+    nearer envelope bound). Lower cost, more battery, less shadow, more
+    survival and more thermal margin all dominate, each within its
     tolerance. With *strict* the label must be beaten on at least one axis
     beyond the tolerance, which is how a label already in the front is told
-    apart from a genuine dominator at pop time.
+    apart from a genuine dominator at pop time. The thermal axis (C6) is
+    live only under require_thermal_dwell: its default tolerance is
+    infinite, so without the constraint every comparison here is the pre-C6
+    one.
     """
-    for other_g, other_battery, other_dark in front:
+    for other_g, other_battery, other_dark, other_surv, other_margin in front:
         if (
             other_g <= g + 1e-12
             and other_battery >= battery - battery_tol
             and other_dark <= dark + dark_tol
+            and other_surv >= surv - surv_tol
+            and other_margin >= margin - margin_tol
         ):
             if not strict:
                 return True
@@ -360,30 +501,38 @@ def _dominated(
                 other_g < g - 1e-12
                 or other_battery > battery + battery_tol
                 or other_dark < dark - dark_tol
+                or other_surv > surv + surv_tol
+                or other_margin > margin + margin_tol
             ):
                 return True
     return False
 
 
 def _insert_label(
-    front: list[tuple[float, float, float]],
+    front: list[tuple[float, float, float, float, float]],
     g: float,
     battery: float,
     dark: float,
     battery_tol: float,
     dark_tol: float,
+    surv: float = 1.0,
+    surv_tol: float = _SURVIVAL_DOMINANCE_TOL,
+    margin: float = 0.0,
+    margin_tol: float = math.inf,
 ) -> None:
     """Add a non-dominated label and drop the ones it dominates."""
     front[:] = [
-        (other_g, other_battery, other_dark)
-        for other_g, other_battery, other_dark in front
+        (other_g, other_battery, other_dark, other_surv, other_margin)
+        for other_g, other_battery, other_dark, other_surv, other_margin in front
         if not (
             g <= other_g + 1e-12
             and battery >= other_battery - battery_tol
             and dark <= other_dark + dark_tol
+            and surv >= other_surv - surv_tol
+            and margin >= other_margin - margin_tol
         )
     ]
-    front.append((g, battery, dark))
+    front.append((g, battery, dark, surv, margin))
 
 
 def astar_4d(
@@ -399,8 +548,111 @@ def astar_4d(
     elevation_grid: np.ndarray | None = None,
     shadow_cube: np.ndarray | None = None,
     initial_soc_frac: float = 1.0,
+    earth_visible_cube: np.ndarray | None = None,
+    require_earth_visibility: bool = False,
+    time_to_haven_hours: np.ndarray | None = None,
+    hours_until_earthset_cube: np.ndarray | None = None,
+    require_safe_haven: bool = False,
+    corridor_cube: np.ndarray | None = None,
+    corridor_lit_run_cube: np.ndarray | None = None,
+    require_continuous_illumination: bool = False,
+    survival_field: Any | None = None,
+    max_failure_probability: float | None = None,
+    max_dwell_cube: Any | None = None,
+    require_thermal_dwell: bool = False,
 ) -> dict[str, Any]:
     """Plan through space and time. Returns path_states, path_pixels, metrics.
+
+    The thermal dwell (C6)
+    ----------------------
+    *max_dwell_cube* is a ``thermal_dwell.DwellCube``: for every (start
+    slice, block) the hours a rover arriving there with its nominal inner
+    temperature may stand still before that temperature leaves the tightest
+    declared battery/electronics envelope, plus the per-slice inner
+    temperature TARGET the cube was built from. Given, the route is always
+    REPORTED -- ``path_stay_hours`` (consecutive stationary hours in the
+    current block), ``path_max_dwell_h`` (the block's budget at the slice
+    the stay began; None where open-ended), ``path_dwell_margin_h``,
+    ``path_inner_c`` (the inner temperature integrated along the route),
+    and ``metrics.min_dwell_margin_h`` / ``states_past_thermal_dwell`` /
+    ``max_stay_h`` -- computed from the finished route, so the search itself
+    is untouched. With *require_thermal_dwell* it is ENFORCED: every label
+    carries its inner temperature, relaxed toward the occupied block's
+    target slice by slice (a wait: the block waited in; a move: the arrival
+    block, the planner's shadow-clock rule), and any transition -- wait or
+    move -- after which it would sit outside the envelope is refused
+    (tallied as ``thermal_dwell``). A stay longer than the block's dwell is
+    exactly such a wait; enforcing the temperature rather than the stay
+    also closes the loophole a stay rule leaves open, where a rover
+    shuffles between two dark blocks to reset its clock while freezing all
+    the same (found by the first version of this constraint's test). The
+    fifth label axis is the thermal margin (distance to the nearer bound,
+    more is better); without the constraint it has an infinite dominance
+    tolerance and a constant key, so the search is the pre-C6 one bit for
+    bit.
+
+    The chance constraint (B1)
+    --------------------------
+    *survival_field* is a ``survival.SurvivalField``: ``P_safe`` and the
+    recovery policy over (time bin, block, SOC bin) under a Poisson fault
+    model. Given, every label carries an EXECUTION SURVIVAL product: at
+    each MOVE the no-fault branch continues on the plan and each fault
+    branch is closed with ``P_safe`` of the state the fault leaves the
+    rover in (Lamarre et al., AERO 2024), so ``1 - product`` at the goal is
+    the probability that this plan, executed with the recovery policy as
+    its fallback, ends in failure. Always REPORTED -- ``path_survival_prob``
+    and ``path_recovery_prob`` per state, ``metrics.execution_failure_probability``,
+    ``min_recovery_prob``, ``start_recovery_prob`` -- and with
+    *max_failure_probability* ENFORCED: a move that would push the
+    execution failure probability over it is refused (tallied as
+    ``failure_probability``), and a start whose optimal recovery policy
+    already fails more often than that is refused at once, since no plan
+    from it can do better. Without a field the fourth label axis is a
+    constant and the search is the pre-B1 one bit for bit.
+
+    The continuous-illumination corridor (A2)
+    -----------------------------------------
+    *corridor_cube* is the (T, H, W) boolean corridor
+    ``illumination_corridor.build_corridor`` prunes from the shadow series
+    (CMU's sun-synchronous volume: every voxel on some lit path from the
+    first slice to the last); *corridor_lit_run_cube* the (T, H, W) count of
+    consecutive lit slices ending at each voxel, on the lit volume the
+    corridor was cut from. Given together they are always REPORTED --
+    ``metrics.states_outside_corridor``, ``metrics.moves_outside_corridor``
+    -- and with *require_continuous_illumination* ENFORCED: the start must
+    be inside at slice 0, a WAIT may only step into a corridor voxel, and a
+    MOVE of ``d`` slices may only arrive in a corridor voxel with both its
+    blocks lit for the ``d + 1`` slices from departure to arrival. Inside
+    the corridor the shadow clock never starts, so ``path_dark_hours`` is
+    zero throughout. Refusals are tallied as ``continuous_illumination``.
+
+    The safe-haven deadline (A1)
+    ----------------------------
+    *time_to_haven_hours* is the (H, W) driving time from every cell to its
+    nearest safe haven (``safe_haven.time_to_safe_haven_hours``);
+    *hours_until_earthset_cube* the (T, H, W) hours each cell has left
+    before it loses its Earth link (``safe_haven.hours_until_earthset_cube``,
+    zero where there is no link now). Given together they are always
+    REPORTED per state -- ``path_time_to_haven_h``,
+    ``path_hours_until_earthset``, ``path_haven_margin_h`` -- and with
+    *require_safe_haven* ENFORCED as VIPER's leg rule: every state the plan
+    passes through, including the start and every wait, must satisfy
+    ``time_to_haven <= hours_until_earthset``. Where the Earth is already
+    down the deadline is zero, so only a haven itself is allowed: a rover
+    without a link is a parked rover. Refusals are tallied as
+    ``safe_haven_deadline``.
+
+    Direct-to-Earth visibility (A4)
+    -------------------------------
+    *earth_visible_cube*, when supplied, is the (T, H, W) boolean field of
+    which cells have a line of sight to Earth at which slice. It is always
+    REPORTED: ``path_earth_visible`` per state and
+    ``metrics.moves_out_of_earth_view``. With *require_earth_visibility* it
+    is also ENFORCED, as VIPER's teleoperation rule: a MOVE may only arrive
+    in a cell that sees the Earth at the arrival slice. Waiting is never
+    restricted -- the rule is about driving blind, not about parking -- so
+    a rover that starts out of view may sit until the link opens. Refusals
+    are tallied as ``earth_visibility``.
 
     *elevation_grid*, when supplied, enables the same two hard edge
     constraints the 2-D planner enforces: the along-track step slope against
@@ -455,6 +707,88 @@ def astar_4d(
     shadow = None if shadow_cube is None else np.asarray(shadow_cube, dtype=np.float64)
     if shadow is not None and shadow.shape != cost.shape:
         return _empty("shadow_cube shape must match cost_cube")
+    earth = (
+        None if earth_visible_cube is None else np.asarray(earth_visible_cube, dtype=bool)
+    )
+    if earth is not None and earth.shape != cost.shape:
+        return _empty("earth_visible_cube shape must match cost_cube")
+    enforce_dte = bool(require_earth_visibility)
+    if enforce_dte and earth is None:
+        return _empty(
+            "earth_visible_cube is required to enforce Earth visibility "
+            "(require_earth_visibility=True without a field to check against)"
+        )
+    tts = (
+        None
+        if time_to_haven_hours is None
+        else np.asarray(time_to_haven_hours, dtype=np.float64)
+    )
+    deadline = (
+        None
+        if hours_until_earthset_cube is None
+        else np.asarray(hours_until_earthset_cube, dtype=np.float64)
+    )
+    if (tts is None) != (deadline is None):
+        return _empty(
+            "time_to_haven_hours and hours_until_earthset_cube go together: "
+            "give both or neither"
+        )
+    if tts is not None and tts.shape != (height, width):
+        return _empty("time_to_haven_hours shape must match cost_cube slices")
+    if deadline is not None and deadline.shape != cost.shape:
+        return _empty("hours_until_earthset_cube shape must match cost_cube")
+    corridor = None if corridor_cube is None else np.asarray(corridor_cube, dtype=bool)
+    lit_run = (
+        None if corridor_lit_run_cube is None else np.asarray(corridor_lit_run_cube)
+    )
+    if (corridor is None) != (lit_run is None):
+        return _empty(
+            "corridor_cube and corridor_lit_run_cube go together: give both or "
+            "neither"
+        )
+    if corridor is not None and corridor.shape != cost.shape:
+        return _empty("corridor_cube shape must match cost_cube")
+    if lit_run is not None and lit_run.shape != cost.shape:
+        return _empty("corridor_lit_run_cube shape must match cost_cube")
+    enforce_corridor = bool(require_continuous_illumination)
+    if enforce_corridor and corridor is None:
+        return _empty(
+            "corridor_cube and corridor_lit_run_cube are required to enforce "
+            "continuous illumination (require_continuous_illumination=True "
+            "without a corridor to check against)"
+        )
+    field = survival_field
+    beta = None if max_failure_probability is None else float(max_failure_probability)
+    enforce_surv = beta is not None
+    if enforce_surv and field is None:
+        return _empty(
+            "survival_field is required to enforce max_failure_probability "
+            f"({beta}): the chance constraint closes every fault branch with "
+            "the recovery policy's P_safe and has nothing to read without one",
+            survival_enforced=True,
+        )
+    if enforce_surv and not (0.0 < beta < 1.0):
+        return _empty(
+            f"max_failure_probability must lie strictly between 0 and 1, not {beta}",
+            survival_enforced=True,
+        )
+    dwell_cube = max_dwell_cube
+    enforce_dwell = bool(require_thermal_dwell)
+    if enforce_dwell and dwell_cube is None:
+        return _empty(
+            "max_dwell_cube is required to enforce the thermal dwell "
+            "(require_thermal_dwell=True without a cube to check against: the rover "
+            "declares no thermal_tau_s, or no dwell cube was built)",
+            thermal_dwell_enforced=True,
+        )
+    haven_fields = tts is not None
+    enforce_haven = bool(require_safe_haven)
+    if enforce_haven and not haven_fields:
+        return _empty(
+            "time_to_haven_hours and hours_until_earthset_cube are required to "
+            "enforce the safe-haven rule (require_safe_haven=True without the "
+            "fields to check against)"
+        )
 
     def in_bounds(r: int, c: int) -> bool:
         return 0 <= r < height and 0 <= c < width
@@ -467,6 +801,74 @@ def astar_4d(
         return _empty("Start is not traversable")
     if not passable[goal]:
         return _empty("Goal is not traversable")
+
+    def haven_ok(r: int, c: int, t: int) -> bool:
+        return bool(tts[r, c] <= deadline[t, r, c] + 1e-9)
+
+    if enforce_haven and not haven_ok(start[0], start[1], 0):
+        start_tts = float(tts[start])
+        start_deadline = float(deadline[0][start])
+        if start_deadline <= 0.0:
+            return _empty(
+                f"Start {start} has no Earth link at the first slice and is not "
+                "a safe haven: under the safe-haven rule the rover must already "
+                "be parked at a haven while the Earth is down"
+            )
+        return _empty(
+            f"Start {start} cannot reach a safe haven before the Earth sets: "
+            f"{start_tts:.2f} h to the nearest haven against "
+            f"{start_deadline:.2f} h of link left"
+        )
+
+    if enforce_corridor and not corridor[0][start]:
+        return _empty(
+            f"Start {start} is not inside the continuous-illumination corridor "
+            "at the first slice: under require_continuous_illumination the "
+            "rover must begin in a block that is lit and can stay lit",
+            continuous_illumination_enforced=True,
+        )
+
+    e_cap_wh = float(rover["e_cap_wh"])
+    battery0 = min(1.0, max(0.0, float(initial_soc_frac))) * e_cap_wh
+    start_recovery = (
+        None if field is None else float(field.p_safe_at(0, start[0], start[1], battery0))
+    )
+    if enforce_surv and 1.0 - start_recovery > beta + 1e-12:
+        return _empty(
+            f"Start {start} cannot satisfy max_failure_probability={beta}: even the "
+            "optimal recovery policy from there fails with probability "
+            f"{1.0 - start_recovery:.4f} (P_safe {start_recovery:.4f} at "
+            f"{100.0 * battery0 / e_cap_wh if e_cap_wh > 0 else 0.0:.0f} percent charge), "
+            "and no plan can do better than the optimal policy",
+            survival_enforced=True,
+            start_recovery_prob=start_recovery,
+        )
+
+    # The goal's own deadline bounds the whole search. Arrival time only
+    # ever grows, so once the goal can no longer satisfy the rule nothing
+    # later can end there, and without this bound a goal that never
+    # qualifies (its link already down, and it is not a haven) sent the
+    # label-setting search through every reachable state at every slice --
+    # measured on the production grid at 256 slices: not finished in ten
+    # minutes, against 8.6 s for the same pair unconstrained.
+    goal_last_ok = -1
+    if enforce_haven:
+        goal_ok = tts[goal] <= deadline[:, goal[0], goal[1]] + 1e-9
+        if not bool(goal_ok.any()):
+            goal_tts = float(tts[goal])
+            goal_link = float(np.max(deadline[:, goal[0], goal[1]]))
+            return _empty(
+                f"Goal {goal} can never satisfy the safe haven rule within the "
+                "horizon: "
+                + ("no haven is reachable from it" if not math.isfinite(goal_tts)
+                   else f"{goal_tts:.2f} h to the nearest haven")
+                + " against at most "
+                + ("no Earth link at all" if goal_link <= 0.0
+                   else f"{goal_link:.2f} h of Earth link")
+                + " at the goal (require_safe_haven)",
+                safe_haven_enforced=True,
+            )
+        goal_last_ok = int(np.flatnonzero(goal_ok)[-1])
 
     slopes = (
         np.zeros((height, width), dtype=np.float64)
@@ -521,11 +923,34 @@ def astar_4d(
         return hours_lower_bound * (1.0 + min_cost)
 
     # -- The envelope -------------------------------------------------------
-    e_cap_wh = float(rover["e_cap_wh"])
     reserve_wh = e_cap_wh * float(rover.get("soc_min_pct") or 0.0)
     h_max_shadow = float(rover["h_max_shadow_h"])
-    battery0 = min(1.0, max(0.0, float(initial_soc_frac))) * e_cap_wh
     track = shadow is not None
+    surv_tol = _SURVIVAL_DOMINANCE_TOL if enforce_surv else math.inf
+    # The thermal axis (C6): live only under the dwell constraint, where two
+    # labels at one node with different inner temperatures genuinely differ
+    # in what they may still do. Tolerance one percent of the envelope width
+    # (the battery axis's order), key in 400 bins of it.
+    if enforce_dwell:
+        env_width = max(1e-9, float(dwell_cube.envelope.hi) - float(dwell_cube.envelope.lo))
+        margin_tol = _THERMAL_MARGIN_TOL_FRAC * env_width
+        inner0 = float(dwell_cube.initial_inner_c)
+        if not dwell_cube.inside(inner0):
+            return _empty(
+                f"Start inner temperature {inner0:.2f} C is already outside the "
+                f"[{dwell_cube.envelope.lo:g}, {dwell_cube.envelope.hi:g}] C envelope: under "
+                "require_thermal_dwell no transition can begin from outside it",
+                thermal_dwell_enforced=True,
+            )
+    else:
+        env_width = 1.0
+        margin_tol = math.inf
+        inner0 = 0.0
+    # The move factor depends on the label only through its battery, and
+    # labels at one node differ by less than the key's resolution; memoised
+    # at that resolution (a quarter percent of capacity) so the fault
+    # branches are priced once per (slice, cell, direction, charge bin).
+    factor_cache: dict[tuple[int, int, int, int, int], float] = {}
 
     endurance_finite = math.isfinite(h_max_shadow) and h_max_shadow > 0.0
     dark_quantum_h = (
@@ -565,8 +990,24 @@ def astar_4d(
     def dark_key(dark_h: float) -> int:
         return int(dark_h / dark_quantum_h)
 
-    def label_of(r: int, c: int, t: int, battery_wh: float, dark_h: float):
-        return (r, c, t, battery_key(battery_wh), dark_key(dark_h))
+    def surv_key(surv: float) -> int:
+        # Part of the label key only under a beta; in report-only mode the
+        # key is the pre-B1 one and the cheapest label's product is reported.
+        return int(surv * _SURVIVAL_BINS) if enforce_surv else 0
+
+    def thermal_margin(inner_c: float) -> float:
+        # Distance to the nearer envelope bound; a constant without the
+        # constraint so the fifth axis never separates labels then. (C6.)
+        return dwell_cube.margin_c(inner_c) if enforce_dwell else 0.0
+
+    def inner_key(inner_c: float) -> int:
+        # Part of the label key only under the dwell constraint (C6).
+        return int(thermal_margin(inner_c) / env_width * _THERMAL_MARGIN_BINS) if enforce_dwell else 0
+
+    def label_of(
+        r: int, c: int, t: int, battery_wh: float, dark_h: float, surv: float = 1.0, inner_c: float = 0.0
+    ):
+        return (r, c, t, battery_key(battery_wh), dark_key(dark_h), surv_key(surv), inner_key(inner_c))
 
     def envelope_after(
         exposure: float,
@@ -595,13 +1036,15 @@ def astar_4d(
         return new_battery, new_dark, None
 
     # -- Label-setting A* ---------------------------------------------------
-    start_label = label_of(start[0], start[1], 0, battery0, 0.0)
+    start_label = label_of(start[0], start[1], 0, battery0, 0.0, 1.0, inner0)
     g_score: dict[tuple, float] = {start_label: 0.0}
     battery_of: dict[tuple, float] = {start_label: battery0}
     dark_of: dict[tuple, float] = {start_label: 0.0}
+    surv_of: dict[tuple, float] = {start_label: 1.0}
+    inner_of: dict[tuple, float] = {start_label: inner0}
     came_from: dict[tuple, tuple] = {}
-    fronts: dict[tuple[int, int, int], list[tuple[float, float, float]]] = {
-        (start[0], start[1], 0): [(0.0, battery0, 0.0)]
+    fronts: dict[tuple[int, int, int], list[tuple[float, float, float, float, float]]] = {
+        (start[0], start[1], 0): [(0.0, battery0, 0.0, 1.0, thermal_margin(inner0))]
     }
     closed: set[tuple] = set()
     counter = 0
@@ -612,19 +1055,29 @@ def astar_4d(
     goal_label: tuple | None = None
 
     def push(
-        r: int, c: int, t: int, g_new: float, battery_wh: float, dark_h: float, parent: tuple
+        r: int, c: int, t: int, g_new: float, battery_wh: float, dark_h: float, parent: tuple,
+        surv: float = 1.0, inner_c: float = 0.0,
     ) -> None:
         nonlocal counter
         node = (r, c, t)
         front = fronts.setdefault(node, [])
-        if _dominated(front, g_new, battery_wh, dark_h, battery_tol, dark_tol):
+        margin = thermal_margin(inner_c)
+        if _dominated(
+            front, g_new, battery_wh, dark_h, battery_tol, dark_tol,
+            surv=surv, surv_tol=surv_tol, margin=margin, margin_tol=margin_tol,
+        ):
             return
-        _insert_label(front, g_new, battery_wh, dark_h, battery_tol, dark_tol)
-        label = label_of(r, c, t, battery_wh, dark_h)
+        _insert_label(
+            front, g_new, battery_wh, dark_h, battery_tol, dark_tol,
+            surv=surv, surv_tol=surv_tol, margin=margin, margin_tol=margin_tol,
+        )
+        label = label_of(r, c, t, battery_wh, dark_h, surv, inner_c)
         if g_new < g_score.get(label, math.inf):
             g_score[label] = g_new
             battery_of[label] = battery_wh
             dark_of[label] = dark_h
+            surv_of[label] = surv
+            inner_of[label] = inner_c
             came_from[label] = parent
             counter += 1
             h = heuristic(r, c)
@@ -634,10 +1087,12 @@ def astar_4d(
         _f, _h, _n, label = heapq.heappop(heap)
         if label in closed:
             continue
-        row, col, slice_index, _bkey, _dkey = label
+        row, col, slice_index, _bkey, _dkey, _skey, _ykey = label
         current_g = g_score[label]
         battery_wh = battery_of[label]
         dark_h = dark_of[label]
+        surv = surv_of[label]
+        inner_c = inner_of[label]
         # A label pushed earlier may have been dominated since by a better
         # one at the same node; expanding it would only re-derive worse
         # successors.
@@ -649,6 +1104,10 @@ def astar_4d(
             battery_tol,
             dark_tol,
             strict=True,
+            surv=surv,
+            surv_tol=surv_tol,
+            margin=thermal_margin(inner_c),
+            margin_tol=margin_tol,
         ):
             continue
         closed.add(label)
@@ -675,11 +1134,34 @@ def astar_4d(
                     new_battery, new_dark, refused = battery_wh, dark_h, None
                 if refused is not None:
                     rejections[refused] += 1
+                elif enforce_haven and (
+                    slice_index + 1 > goal_last_ok
+                    or not haven_ok(row, col, slice_index + 1)
+                ):
+                    # Waiting past the deadline is how a rover ends up parked
+                    # somewhere it cannot survive; the rule binds waits too.
+                    # And past the goal's last admissible slice no wait can
+                    # lead to a plan that ends there.
+                    rejections["safe_haven_deadline"] += 1
+                elif enforce_corridor and not corridor[slice_index + 1, row, col]:
+                    # Waiting into a dark voxel is leaving the corridor. (A2.)
+                    rejections["continuous_illumination"] += 1
                 else:
-                    push(
-                        row, col, slice_index + 1,
-                        current_g + wait_step, new_battery, new_dark, label,
+                    # The inner temperature after one more slice in this
+                    # block (C6); a wait that leaves the envelope is refused
+                    # -- which is exactly a stay past the block's dwell.
+                    new_inner = (
+                        dwell_cube.inner_after(inner_c, slice_index, slice_index + 1, row, col)
+                        if enforce_dwell else inner_c
                     )
+                    if enforce_dwell and not dwell_cube.inside(new_inner):
+                        rejections["thermal_dwell"] += 1
+                    else:
+                        # No fault on a wait: the survival product is unchanged.
+                        push(
+                            row, col, slice_index + 1,
+                            current_g + wait_step, new_battery, new_dark, label, surv, new_inner,
+                        )
 
         # MOVE edges
         for d_row, d_col, diagonal in _OFFSETS:
@@ -740,6 +1222,30 @@ def astar_4d(
                 rejections["horizon"] += 1
                 continue
 
+            # VIPER's rule: drive only into a cell that sees the Earth when
+            # you get there. (A4.)
+            if enforce_dte and not earth[arrival, nr, nc]:
+                rejections["earth_visibility"] += 1
+                continue
+
+            # VIPER's leg rule: from wherever you arrive, a haven must still
+            # be reachable before the Earth sets there. (A1.)
+            if enforce_haven and (
+                arrival > goal_last_ok or not haven_ok(nr, nc, arrival)
+            ):
+                rejections["safe_haven_deadline"] += 1
+                continue
+
+            # CMU's corridor (A2): arrive in a corridor voxel, with both
+            # blocks lit for every slice of the move.
+            if enforce_corridor and not (
+                corridor[arrival, nr, nc]
+                and lit_run[arrival, row, col] >= d_slices + 1
+                and lit_run[arrival, nr, nc] >= d_slices + 1
+            ):
+                rejections["continuous_illumination"] += 1
+                continue
+
             from_cost = cost[slice_index, row, col]
             to_cost = cost[arrival, nr, nc]
             if not (math.isfinite(from_cost) and math.isfinite(to_cost)):
@@ -771,11 +1277,41 @@ def astar_4d(
                 if refused is not None:
                     rejections[refused] += 1
                     continue
+                move_drain_wh = drain_wh
             else:
                 new_battery, new_dark = battery_wh, dark_h
+                move_drain_wh = 0.0
+
+            # The chance constraint (B1): close the fault branches of this
+            # move with the recovery policy and refuse it when the execution
+            # failure probability would exceed beta.
+            new_surv = surv
+            if field is not None:
+                cache_key = (slice_index, row, col, nr * width + nc, battery_key(battery_wh))
+                factor = factor_cache.get(cache_key)
+                if factor is None:
+                    factor = field.move_survival_factor(
+                        slice_index, row, col, nr, nc, battery_wh, travel_h, distance_m, move_drain_wh
+                    )[0]
+                    factor_cache[cache_key] = factor
+                new_surv = surv * factor
+                if enforce_surv and 1.0 - new_surv > beta + 1e-12:
+                    rejections["failure_probability"] += 1
+                    continue
+
+            # The thermal envelope (C6): the inner temperature relaxes toward
+            # the arrival block's target for the slices the move takes, and a
+            # move after which it sits outside the envelope is refused. A
+            # move through shadow cools the rover as surely as a wait does.
+            new_inner = inner_c
+            if enforce_dwell:
+                new_inner = dwell_cube.inner_after(inner_c, slice_index, arrival, nr, nc)
+                if not dwell_cube.inside(new_inner):
+                    rejections["thermal_dwell"] += 1
+                    continue
 
             step = travel_h * (1.0 + 0.5 * (from_cost + to_cost))
-            push(nr, nc, arrival, current_g + step, new_battery, new_dark, label)
+            push(nr, nc, arrival, current_g + step, new_battery, new_dark, label, new_surv, new_inner)
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     if goal_label is None:
@@ -784,6 +1320,11 @@ def astar_4d(
             elapsed_ms,
             rejections,
             nodes_expanded,
+            safe_haven_enforced=enforce_haven,
+            continuous_illumination_enforced=enforce_corridor,
+            survival_enforced=enforce_surv,
+            start_recovery_prob=start_recovery,
+            thermal_dwell_enforced=enforce_dwell,
         )
 
     labels: list[tuple] = [goal_label]
@@ -791,9 +1332,29 @@ def astar_4d(
         labels.append(came_from[labels[-1]])
     labels.reverse()
 
-    states: list[tuple[int, int, int]] = [(r, c, t) for r, c, t, _b, _d in labels]
+    states: list[tuple[int, int, int]] = [(r, c, t) for r, c, t, _b, _d, _s, _y in labels]
+    # The dwell and the inner temperature along the route (C6), from the
+    # finished route -- so the report is the same whether or not the
+    # constraint was enforced (enforced, every inner value is inside).
+    dwell_report = None if dwell_cube is None else route_dwell_report(states, slice_hours, dwell_cube)
+    path_inner_c = None if dwell_cube is None else [round(v, 4) for v in dwell_cube.inner_along(states)]
     batteries = [battery_of[label] for label in labels]
     darks = [dark_of[label] for label in labels]
+    survivals = [surv_of[label] for label in labels]
+
+    if field is None:
+        path_survival_prob = None
+        path_recovery_prob = None
+        execution_failure = None
+        min_recovery = None
+    else:
+        path_survival_prob = [round(float(v), 6) for v in survivals]
+        path_recovery_prob = [
+            round(float(field.p_safe_at(t, r, c, wh)), 6)
+            for (r, c, t), wh in zip(states, batteries)
+        ]
+        execution_failure = round(1.0 - float(survivals[-1]), 6)
+        min_recovery = round(min(path_recovery_prob), 6)
 
     wait_steps = sum(
         1
@@ -808,11 +1369,85 @@ def astar_4d(
     energy_drawn = sum(max(0.0, a - b) for a, b in zip(batteries[:-1], batteries[1:]))
     energy_charged = sum(max(0.0, b - a) for a, b in zip(batteries[:-1], batteries[1:]))
 
+    if earth is None:
+        path_earth_visible = None
+        moves_out_of_view = None
+    else:
+        path_earth_visible = [bool(earth[t, r, c]) for r, c, t in states]
+        moves_out_of_view = sum(
+            1
+            for previous, current in zip(states[:-1], states[1:])
+            if previous[:2] != current[:2]
+            and not earth[current[2], current[0], current[1]]
+        )
+
+    if haven_fields:
+        def _finite_or_none(value: float) -> float | None:
+            return round(float(value), 4) if math.isfinite(value) else None
+
+        path_tts = [float(tts[r, c]) for r, c, _t in states]
+        path_deadline = [float(deadline[t, r, c]) for r, c, t in states]
+        margins = [d - x for x, d in zip(path_tts, path_deadline)]
+        finite_margins = [m for m in margins if math.isfinite(m)]
+        path_time_to_haven_h = [_finite_or_none(v) for v in path_tts]
+        path_hours_until_earthset = [_finite_or_none(v) for v in path_deadline]
+        path_haven_margin_h = [_finite_or_none(m) for m in margins]
+        min_haven_margin_h = (
+            round(min(finite_margins), 4) if finite_margins else None
+        )
+        states_past_haven_deadline = sum(
+            1 for x, d in zip(path_tts, path_deadline) if x > d + 1e-9
+        )
+        ends_at_safe_haven = bool(tts[goal] <= 1e-9)
+    else:
+        path_time_to_haven_h = None
+        path_hours_until_earthset = None
+        path_haven_margin_h = None
+        min_haven_margin_h = None
+        states_past_haven_deadline = None
+        ends_at_safe_haven = None
+
+    if corridor is None:
+        states_outside_corridor = None
+        moves_outside_corridor = None
+    else:
+        outside = [not corridor[t, r, c] for r, c, t in states]
+        states_outside_corridor = int(sum(outside))
+        moves_outside_corridor = sum(
+            1
+            for previous, current, is_out in zip(states[:-1], states[1:], outside[1:])
+            if is_out and previous[:2] != current[:2]
+        )
+
     return {
         "path_states": states,
         "path_pixels": [(r, c) for r, c, _ in states],
         "path_battery_pct": battery_pct,
         "path_dark_hours": [round(d, 4) for d in darks],
+        # One entry per state: whether that cell saw the Earth at that
+        # slice. None when no field was supplied -- never a list of True.
+        "path_earth_visible": path_earth_visible,
+        # One entry per state: driving hours to the nearest safe haven, the
+        # hours of Earth link left there, and their difference. None where
+        # a value is infinite (no haven reachable / no Earthset in sight),
+        # and None throughout when the fields were not supplied.
+        "path_time_to_haven_h": path_time_to_haven_h,
+        "path_hours_until_earthset": path_hours_until_earthset,
+        "path_haven_margin_h": path_haven_margin_h,
+        # One entry per state (B1): the execution survival so far (the
+        # product of the move factors) and the recovery policy's P_safe of
+        # the state itself. None without a survival field.
+        "path_survival_prob": path_survival_prob,
+        "path_recovery_prob": path_recovery_prob,
+        # One entry per state (C6): consecutive stationary hours in the
+        # current block, the block's dwell budget at the slice the stay began
+        # (None where open-ended) and their difference. None without a cube.
+        "path_stay_hours": None if dwell_report is None else dwell_report["path_stay_hours"],
+        "path_max_dwell_h": None if dwell_report is None else dwell_report["path_max_dwell_h"],
+        "path_dwell_margin_h": None if dwell_report is None else dwell_report["path_dwell_margin_h"],
+        # One entry per state (C6): the inner temperature, integrated along
+        # the route toward each occupied block's target. None without a cube.
+        "path_inner_c": path_inner_c,
         "metrics": {
             "wait_steps": wait_steps,
             "move_steps": len(states) - 1 - wait_steps,
@@ -837,6 +1472,42 @@ def astar_4d(
             "energy_drawn_wh": round(energy_drawn, 3),
             "energy_charged_wh": round(energy_charged, 3),
             "envelope_tracked": track,
+            # MOVE edges that arrived in a cell with no Earth line of sight
+            # (None without a field); whether such moves were refused.
+            "moves_out_of_earth_view": moves_out_of_view,
+            "earth_visibility_enforced": enforce_dte,
+            # The safe-haven margin along the route: the tightest finite
+            # margin, how many states sat past their deadline (0 whenever
+            # the rule was enforced), whether the route ends parked at a
+            # haven, and whether the rule was enforced.
+            "min_haven_margin_h": min_haven_margin_h,
+            "states_past_haven_deadline": states_past_haven_deadline,
+            "ends_at_safe_haven": ends_at_safe_haven,
+            "safe_haven_enforced": enforce_haven,
+            # The lit corridor along the route (A2): states and moves that
+            # fall outside it (0 whenever enforced), None without a cube.
+            "states_outside_corridor": states_outside_corridor,
+            "moves_outside_corridor": moves_outside_corridor,
+            "continuous_illumination_enforced": enforce_corridor,
+            # The chance constraint (B1): 1 - survival at the goal, the
+            # lowest recovery probability along the route, the start's own,
+            # and whether beta was enforced. None without a field.
+            "execution_failure_probability": execution_failure,
+            "min_recovery_prob": min_recovery,
+            "start_recovery_prob": (
+                None if start_recovery is None else round(float(start_recovery), 6)
+            ),
+            "survival_enforced": enforce_surv,
+            # The thermal dwell (C6): the tightest margin between a stay and
+            # its block's budget, how many states overran it (0 whenever
+            # enforced), the longest stay, and whether the rule was in force.
+            # None without a cube.
+            "min_dwell_margin_h": None if dwell_report is None else dwell_report["min_dwell_margin_h"],
+            "states_past_thermal_dwell": (
+                None if dwell_report is None else dwell_report["states_past_thermal_dwell"]
+            ),
+            "max_stay_h": None if dwell_report is None else dwell_report["max_stay_h"],
+            "thermal_dwell_enforced": enforce_dwell,
         },
         "error": None,
     }

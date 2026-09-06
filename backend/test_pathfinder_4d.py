@@ -479,3 +479,437 @@ def test_rejection_tally_always_carries_the_envelope_keys():
     result = _run(*_uniform_case(n_slices=8))
     tally = result["metrics"]["edges_rejected"]
     assert "soc_floor" in tally and "shadow_endurance" in tally
+
+
+# ── A4: Direct-to-Earth visibility in the planner ──────────────────────────
+#
+# VIPER drives only with a link to Earth; it may sit anywhere. So the rule
+# is on MOVE arrivals, never on WAIT. The toy strip is 1x4 with cell (0, 2)
+# the only way through, which makes "is the rule enforced" unambiguous.
+
+
+def _earth_cube(n_slices=6, shape=(1, 4)) -> np.ndarray:
+    return np.ones((n_slices, *shape), dtype=bool)
+
+
+def _run_with_earth(earth_cube, require, n_slices=6):
+    cost_cube, wait_cube, traversable = _uniform_case(n_slices=n_slices)
+    return astar_4d(
+        cost_cube,
+        wait_cube,
+        traversable,
+        start=(0, 0),
+        goal=(0, 3),
+        resolution_m=RES_M,
+        slice_hours=SLICE_H,
+        rover=get_rover(),
+        earth_visible_cube=earth_cube,
+        require_earth_visibility=require,
+    )
+
+
+def test_enforced_earth_visibility_refuses_a_move_into_a_cell_with_no_link():
+    earth = _earth_cube()
+    earth[:, 0, 2] = False  # never a link at the only cell on the way
+    result = _run_with_earth(earth, require=True)
+    assert result["error"] is not None
+    assert "Earth visibility" in result["error"]
+    assert result["metrics"]["edges_rejected"]["earth_visibility"] > 0
+
+
+def test_enforced_earth_visibility_waits_for_the_link_to_open():
+    earth = _earth_cube(n_slices=8)
+    earth[:3, 0, 2] = False  # link at (0, 2) opens at slice 3
+    result = _run_with_earth(earth, require=True, n_slices=8)
+    assert result["error"] is None
+    assert result["metrics"]["wait_steps"] >= 1
+    assert all(result["path_earth_visible"])
+    assert result["metrics"]["moves_out_of_earth_view"] == 0
+    assert result["metrics"]["earth_visibility_enforced"] is True
+    # The state that reaches (0, 2) must sit at slice 3 or later.
+    arrival_at_2 = next(t for r, c, t in result["path_states"] if (r, c) == (0, 2))
+    assert arrival_at_2 >= 3
+
+
+def test_unenforced_earth_visibility_is_reported_not_imposed():
+    earth = _earth_cube()
+    earth[:, 0, 2] = False
+    result = _run_with_earth(earth, require=False)
+    assert result["error"] is None
+    assert result["metrics"]["earth_visibility_enforced"] is False
+    assert result["metrics"]["edges_rejected"]["earth_visibility"] == 0
+    assert len(result["path_earth_visible"]) == len(result["path_states"])
+    visible_at = {
+        (r, c): v for (r, c, _t), v in zip(result["path_states"], result["path_earth_visible"])
+    }
+    assert visible_at[(0, 2)] is False and visible_at[(0, 3)] is True
+    assert result["metrics"]["moves_out_of_earth_view"] == 1
+
+
+def test_waiting_in_a_cell_without_a_link_is_allowed():
+    """The rule is on driving, not on sitting: a rover that starts out of
+    view may wait there until the link and then move."""
+    earth = _earth_cube(n_slices=8)
+    earth[:2, :, :] = False  # nothing has a link for the first two slices
+    result = _run_with_earth(earth, require=True, n_slices=8)
+    assert result["error"] is None
+    # A move launched at slice 0 would arrive at slice 1, still without a
+    # link; the only legal opening is to wait once and arrive at slice 2.
+    assert result["metrics"]["wait_steps"] >= 1
+    assert result["path_states"][0] == (0, 0, 0)
+    assert all(c == 0 for _r, c, t in result["path_states"] if t < 2)
+
+
+def test_without_an_earth_cube_nothing_is_reported():
+    result = _run(*_uniform_case())
+    assert result["path_earth_visible"] is None
+    assert result["metrics"]["moves_out_of_earth_view"] is None
+    assert result["metrics"]["earth_visibility_enforced"] is False
+    assert "earth_visibility" in result["metrics"]["edges_rejected"]
+
+
+def test_enforcing_without_a_cube_is_an_error_not_a_silent_pass():
+    result = _run_with_earth(None, require=True)
+    assert result["error"] is not None
+    assert "earth_visible_cube" in result["error"]
+
+
+def test_earth_cube_of_the_wrong_shape_is_refused():
+    result = _run_with_earth(np.ones((6, 2, 2), dtype=bool), require=False)
+    assert result["error"] is not None
+    assert "earth_visible_cube" in result["error"]
+
+
+# ── A1: the safe-haven deadline ──────────────────────────────────────────────
+#
+# VIPER's rule: at every moment the rover must still be able to reach a
+# safe haven before the Earth sets on it. Fixtures are the 1x4 corridor at
+# 80 m and 1 h slices: one MOVE takes 80 m / 0.2 m/s = 0.111 h, one slice.
+
+
+def _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require, **kwargs):
+    return astar_4d(
+        cost_cube,
+        wait_cube,
+        traversable,
+        start=(0, 0),
+        goal=(0, 3),
+        resolution_m=RES_M,
+        slice_hours=SLICE_H,
+        rover=get_rover(),
+        time_to_haven_hours=None if tts is None else np.asarray(tts, dtype=np.float64),
+        hours_until_earthset_cube=(
+            None if deadline is None else np.asarray(deadline, dtype=np.float64)
+        ),
+        require_safe_haven=require,
+        **kwargs,
+    )
+
+
+def _deadline(n_slices, per_cell):
+    """(T, 1, 4) cube holding one deadline per cell at every slice."""
+    cube = np.empty((n_slices, 1, 4), dtype=np.float64)
+    cube[:] = np.asarray(per_cell, dtype=np.float64).reshape(1, 1, 4)
+    return cube
+
+
+def test_a_move_that_could_not_make_it_back_to_a_haven_is_refused():
+    """Haven at the start; the goal cell's link closes in 0.2 h and it is
+    0.333 h from the haven. Arriving there is arriving stranded."""
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[0.0, 0.111, 0.222, 0.333]]
+    deadline = _deadline(6, [np.inf, np.inf, np.inf, 0.2])
+
+    result = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=True)
+
+    assert result["error"] is not None
+    assert "safe haven" in result["error"]
+    # The goal can never qualify, so the refusal is immediate -- no search,
+    # no tally -- and says so about the goal itself.
+    assert "Goal" in result["error"]
+    assert result["metrics"]["safe_haven_enforced"] is True
+    assert result["path_pixels"] == []
+
+
+def test_a_goal_that_is_itself_a_haven_may_be_reached_as_its_link_closes():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[0.0, 0.111, 0.222, 0.0]]
+    deadline = _deadline(6, [np.inf, np.inf, np.inf, 0.2])
+
+    result = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=True)
+
+    assert result["error"] is None
+    assert result["metrics"]["ends_at_safe_haven"] is True
+    assert result["path_haven_margin_h"][-1] == pytest.approx(0.2)
+    assert result["metrics"]["states_past_haven_deadline"] == 0
+
+
+def test_waiting_is_checked_against_the_deadline_too():
+    """The shadow-then-Sun cube makes waiting at the start attractive, but
+    the start is 0.5 h from a haven and every cell's deadline shrinks by
+    0.3 h per slice. Unconstrained, the planner waits and ends up past the
+    deadline; constrained, it must leave at once, and every state it
+    reports satisfies the rule."""
+    cost_cube, wait_cube, traversable = _shadow_then_sun_case()
+    n_slices = cost_cube.shape[0]
+    tts = np.array([[0.5, 0.4, 0.3, 0.0]])
+    deadline = np.empty((n_slices, 1, 4))
+    for t in range(n_slices):
+        deadline[t] = max(0.0, 1.0 - 0.3 * t)
+
+    free = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=False)
+    assert free["error"] is None
+    assert free["metrics"]["wait_steps"] > 0
+    assert free["metrics"]["states_past_haven_deadline"] > 0
+    assert free["metrics"]["safe_haven_enforced"] is False
+
+    ruled = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=True)
+    assert ruled["error"] is None, ruled["error"]
+    assert ruled["metrics"]["wait_steps"] == 0
+    assert ruled["metrics"]["edges_rejected"]["safe_haven_deadline"] >= 1
+    assert ruled["metrics"]["states_past_haven_deadline"] == 0
+    for (r, c, t), margin in zip(ruled["path_states"], ruled["path_haven_margin_h"]):
+        assert margin is not None and margin >= -1e-9, (r, c, t, margin)
+        assert tts[r, c] <= deadline[t, r, c] + 1e-9
+    assert ruled["metrics"]["min_haven_margin_h"] == pytest.approx(
+        min(ruled["path_haven_margin_h"])
+    )
+
+
+def test_an_open_ended_link_never_constrains():
+    """No Earthset within the lookahead: the deadline is inf everywhere, the
+    rule cannot bite, and the margins are reported as None rather than as
+    a made-up number."""
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[0.0, 0.111, 0.222, 0.333]]
+    deadline = _deadline(6, [np.inf] * 4)
+
+    result = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=True)
+    plain = _run(cost_cube, wait_cube, traversable)
+
+    assert result["error"] is None
+    assert result["path_pixels"] == plain["path_pixels"]
+    assert result["metrics"]["edges_rejected"]["safe_haven_deadline"] == 0
+    assert all(value is None for value in result["path_hours_until_earthset"])
+    assert all(value is None for value in result["path_haven_margin_h"])
+    assert result["metrics"]["min_haven_margin_h"] is None
+    assert result["path_time_to_haven_h"] == pytest.approx([0.0, 0.111, 0.222, 0.333])
+
+
+def test_a_start_that_cannot_make_a_haven_is_refused_up_front():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[5.0, 0.111, 0.222, 0.0]]
+
+    late = _run_with_haven(
+        cost_cube, wait_cube, traversable, tts, _deadline(6, [1.0, 1.0, 1.0, 1.0]), require=True
+    )
+    assert late["error"] is not None
+    assert "Start" in late["error"] and "safe haven" in late["error"]
+    assert late["path_pixels"] == []
+
+    unlinked = _run_with_haven(
+        cost_cube, wait_cube, traversable, tts, _deadline(6, [0.0, 1.0, 1.0, 1.0]), require=True
+    )
+    assert unlinked["error"] is not None
+    assert "no Earth link" in unlinked["error"]
+
+
+def test_the_haven_fields_are_reported_without_being_enforced():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    tts = [[0.0, 0.111, 0.222, np.inf]]
+    deadline = _deadline(6, [np.inf, 1.0, 1.0, 0.5])
+
+    result = _run_with_haven(cost_cube, wait_cube, traversable, tts, deadline, require=False)
+
+    assert result["error"] is None
+    n_states = len(result["path_states"])
+    assert len(result["path_time_to_haven_h"]) == n_states
+    assert len(result["path_hours_until_earthset"]) == n_states
+    assert len(result["path_haven_margin_h"]) == n_states
+    # The goal is unreachable from any haven: its time is None (inf), its
+    # margin is None, and it counts as a state past the deadline.
+    assert result["path_time_to_haven_h"][-1] is None
+    assert result["path_haven_margin_h"][-1] is None
+    assert result["metrics"]["states_past_haven_deadline"] >= 1
+    assert result["metrics"]["ends_at_safe_haven"] is False
+    assert result["metrics"]["safe_haven_enforced"] is False
+    assert result["metrics"]["edges_rejected"]["safe_haven_deadline"] == 0
+
+
+def test_without_the_haven_fields_nothing_is_reported():
+    result = _run(*_uniform_case())
+    assert result["path_time_to_haven_h"] is None
+    assert result["path_hours_until_earthset"] is None
+    assert result["path_haven_margin_h"] is None
+    assert result["metrics"]["min_haven_margin_h"] is None
+    assert result["metrics"]["states_past_haven_deadline"] is None
+    assert result["metrics"]["ends_at_safe_haven"] is None
+    assert result["metrics"]["safe_haven_enforced"] is False
+    assert result["metrics"]["edges_rejected"]["safe_haven_deadline"] == 0
+
+
+def test_enforcing_the_haven_rule_without_its_fields_is_an_error():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    result = _run_with_haven(cost_cube, wait_cube, traversable, None, None, require=True)
+    assert result["error"] is not None
+    assert "time_to_haven_hours" in result["error"]
+
+
+def test_haven_fields_of_the_wrong_shape_are_refused():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    bad_tts = np.zeros((1, 5))
+    result = _run_with_haven(
+        cost_cube, wait_cube, traversable, bad_tts, _deadline(6, [np.inf] * 4), require=False
+    )
+    assert result["error"] is not None
+    bad_deadline = np.full((3, 1, 4), np.inf)
+    result = _run_with_haven(
+        cost_cube, wait_cube, traversable, np.zeros((1, 4)), bad_deadline, require=False
+    )
+    assert result["error"] is not None
+
+
+def test_no_path_reason_names_the_haven_rule():
+    from app.pathfinder_4d import REJECTION_KEYS, no_path_reason_4d
+
+    assert "safe_haven_deadline" in REJECTION_KEYS
+    tally = {key: 0 for key in REJECTION_KEYS}
+    tally["safe_haven_deadline"] = 4
+    reason = no_path_reason_4d(tally, get_rover(), 6, 1.0)
+    assert "4 transitions" in reason and "safe haven" in reason
+
+
+
+# ── The continuous-illumination corridor (A2) ────────────────────────────────
+
+
+def _corridor_case(n_slices=8, goal_lit_from=4):
+    """1x4 row; cells 0..2 lit throughout, the goal cell lit from a slice."""
+    from app.illumination_corridor import lit_run
+
+    cost_cube, wait_cube, traversable = _uniform_case(n_slices=n_slices)
+    corridor = np.ones((n_slices, 1, 4), dtype=bool)
+    corridor[:, 0, 3] = False
+    if goal_lit_from is not None:
+        corridor[goal_lit_from:, 0, 3] = True
+    return cost_cube, wait_cube, traversable, corridor, lit_run(corridor)
+
+
+def _run_corridor(case, enforce=True, shadow_cube=None, slice_hours=SLICE_H):
+    cost_cube, wait_cube, traversable, corridor, run = case
+    return astar_4d(
+        cost_cube,
+        wait_cube,
+        traversable,
+        start=(0, 0),
+        goal=(0, 3),
+        resolution_m=RES_M,
+        slice_hours=slice_hours,
+        rover=get_rover(),
+        shadow_cube=shadow_cube,
+        corridor_cube=corridor,
+        corridor_lit_run_cube=run,
+        require_continuous_illumination=enforce,
+    )
+
+
+def test_continuous_illumination_is_a_declared_rejection_reason():
+    from app.pathfinder_4d import REJECTION_KEYS, no_path_reason_4d
+
+    assert "continuous_illumination" in REJECTION_KEYS
+    tally = {key: 0 for key in REJECTION_KEYS}
+    tally["continuous_illumination"] = 3
+    message = no_path_reason_4d(tally, get_rover(), 8, 1.0)
+    assert "corridor" in message and "3" in message
+
+
+def test_enforced_corridor_keeps_every_state_inside_and_waits_for_the_goal_to_light():
+    case = _corridor_case()
+    result = _run_corridor(case)
+    assert result["error"] is None, result["error"]
+    corridor = case[3]
+    for r, c, t in result["path_states"]:
+        assert corridor[t, r, c], (r, c, t)
+    # The goal is lit from t=4; a one-slice move needs it lit at t-1 and t,
+    # so the earliest arrival is t=5, after waiting.
+    assert result["metrics"]["arrival_slice"] == 5
+    assert result["metrics"]["wait_steps"] >= 1
+    assert result["metrics"]["continuous_illumination_enforced"] is True
+    assert result["metrics"]["states_outside_corridor"] == 0
+    assert result["metrics"]["moves_outside_corridor"] == 0
+    assert result["metrics"]["edges_rejected"]["continuous_illumination"] > 0
+
+
+def test_a_goal_the_corridor_never_opens_is_refused_with_the_corridor_named():
+    result = _run_corridor(_corridor_case(goal_lit_from=None))
+    assert result["error"] is not None
+    assert "corridor" in result["error"]
+    assert result["metrics"]["edges_rejected"]["continuous_illumination"] > 0
+    assert result["metrics"]["continuous_illumination_enforced"] is True
+
+
+def test_a_start_outside_the_corridor_at_the_first_slice_is_refused():
+    cost_cube, wait_cube, traversable, corridor, run = _corridor_case()
+    corridor = corridor.copy()
+    corridor[0, 0, 0] = False
+    result = _run_corridor((cost_cube, wait_cube, traversable, corridor, run))
+    assert result["error"] is not None
+    assert "first slice" in result["error"] and "corridor" in result["error"]
+
+
+def test_requiring_the_corridor_without_cubes_is_an_error():
+    cost_cube, wait_cube, traversable = _uniform_case()
+    result = astar_4d(
+        cost_cube, wait_cube, traversable, start=(0, 0), goal=(0, 3),
+        resolution_m=RES_M, slice_hours=SLICE_H, rover=get_rover(),
+        require_continuous_illumination=True,
+    )
+    assert result["error"] is not None and "corridor_cube" in result["error"]
+    half = astar_4d(
+        cost_cube, wait_cube, traversable, start=(0, 0), goal=(0, 3),
+        resolution_m=RES_M, slice_hours=SLICE_H, rover=get_rover(),
+        corridor_cube=np.ones((6, 1, 4), dtype=bool),
+    )
+    assert half["error"] is not None and "corridor_lit_run_cube" in half["error"]
+
+
+def test_an_unenforced_corridor_only_reports_where_the_route_leaves_it():
+    case = _corridor_case(goal_lit_from=None)
+    free = _run_corridor(case, enforce=False)
+    plain = _run(*_uniform_case(n_slices=8))
+    assert free["error"] is None
+    assert free["path_states"] == plain["path_states"]
+    assert free["metrics"]["continuous_illumination_enforced"] is False
+    # Only the arrival at the never-lit goal lies outside.
+    assert free["metrics"]["states_outside_corridor"] == 1
+    assert free["metrics"]["moves_outside_corridor"] == 1
+    assert free["metrics"]["edges_rejected"]["continuous_illumination"] == 0
+    assert plain["metrics"]["states_outside_corridor"] is None
+
+
+def test_inside_the_corridor_the_planner_accrues_no_shadow_hours():
+    case = _corridor_case()
+    shadow = np.where(case[3], 0.0, 1.0)  # the cube the corridor was cut from
+    enforced = _run_corridor(case, enforce=True, shadow_cube=shadow)
+    assert enforced["error"] is None
+    assert all(d == 0.0 for d in enforced["path_dark_hours"])
+    assert enforced["metrics"]["max_continuous_shadow_h"] == 0.0
+    free = _run_corridor(case, enforce=False, shadow_cube=shadow)
+    assert free["error"] is None
+    assert max(free["path_dark_hours"]) > 0.0  # arrives in the dark goal early
+
+
+def test_a_two_slice_move_is_refused_until_both_blocks_stay_lit_throughout():
+    from app.cost_engine import edge_travel_time_s
+
+    travel_h = edge_travel_time_s(0.0, RES_M, get_rover()) / 3600.0
+    slice_hours = travel_h * 0.6  # ceil(1/0.6) = 2 slices per move
+    case = _corridor_case(n_slices=12, goal_lit_from=4)
+    result = _run_corridor(case, slice_hours=slice_hours)
+    assert result["error"] is None, result["error"]
+    # Departure at t needs the goal lit over t..t+2: lit from 4 -> depart 4,
+    # arrive 6. Arriving at 5 (depart 3) would need it lit at 3.
+    assert result["metrics"]["arrival_slice"] == 6
+    corridor = case[3]
+    for r, c, t in result["path_states"]:
+        assert corridor[t, r, c]
