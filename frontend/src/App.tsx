@@ -136,6 +136,9 @@ export default function App() {
      from bootstrapState, which only says whether it is over. */
   const [bootStage, setBootStage] = useState<BootStage>('health')
   const [splashOpen, setSplashOpen] = useState(true)
+  /* The curtain over a stage change: what it says, and what it does when it is
+     opaque. Null when nothing is crossing. */
+  const [crossing, setCrossing] = useState<{ caption: string; then: () => void } | null>(null)
   const [planningEngaged, setPlanningEngaged] = useState(false)
 
   // Workstation mode: the two working modes of the design, PLAN and ANALYZE.
@@ -335,13 +338,23 @@ export default function App() {
 
   // Landing hands over to the hangar, not to the map: a rover is chosen
   // before there is a surface to drive it on.
-  const handleEnterMission = useCallback(() => {
-    setPhase('fleet')
+  /* One at a time. The landing button used to call this twice -- once on click
+     and again when its own exit timer fired -- which was invisible while this
+     only set a phase and would restart the curtain now. */
+  const cross = useCallback((caption: string, then: () => void) => {
+    setCrossing((current) => (current ? current : { caption, then }))
   }, [])
 
+  /* The two forward stage changes go behind the curtain. "Change vehicle"
+     deliberately does not: it is a correction, not a departure, and putting a
+     title card in front of someone fixing their rover choice is a toll. */
+  const handleEnterMission = useCallback(() => {
+    cross('Opening fleet hangar', () => setPhase('fleet'))
+  }, [cross])
+
   const handleDeployToMap = useCallback(() => {
-    setPhase('app')
-  }, [])
+    cross('Deploying to surface map', () => setPhase('app'))
+  }, [cross])
 
   const handleOpenFleetSelect = useCallback(() => {
     setPhase('fleet')
@@ -739,9 +752,19 @@ export default function App() {
           something to plan on. */}
       {splashOpen && (
         <SplashScreen
+          mode="boot"
           stage={bootStage}
           error={bootstrapState === 'error' ? (layerError ?? 'Bootstrap failed.') : null}
           onDone={handleSplashDone}
+        />
+      )}
+
+      {crossing && (
+        <SplashScreen
+          mode="transition"
+          caption={crossing.caption}
+          onMidpoint={crossing.then}
+          onDone={() => setCrossing(null)}
         />
       )}
 

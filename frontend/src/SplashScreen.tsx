@@ -2,25 +2,29 @@ import { useEffect, useState } from 'react'
 import LunaPathMark from './components/LunaPathMark'
 
 /**
- * The boot screen.
+ * The screen between one thing and the next.
  *
- * What it reports is real. App's bootstrap runs four steps in order -- reach
- * the backend, load the elevation model if it is not already resident, read the
- * rover catalogue, fetch seven terrain layers -- and this names the one that is
- * running. A bar that fills on a timer while the app does something else is a
- * progress bar in the same sense that a drawn thermometer is a temperature.
+ * Two jobs, told apart by `mode` rather than by a pile of optional props,
+ * because almost nothing about them is shared beyond the picture.
  *
- * It is held on screen for a minimum, and that IS a deliberate delay. Against a
- * warm local backend the whole sequence answers in under a tenth of a second,
- * so an honest splash would appear and vanish inside two frames -- a flash that
- * reads as a rendering fault rather than as a product. MIN_VISIBLE_MS is the
- * floor that makes it legible; when the backend is cold, or the DEM has to be
- * preprocessed, the real work outlasts it and the floor costs nothing.
+ * BOOT reports something real. App's bootstrap runs four steps in order --
+ * reach the backend, load the elevation model if it is not already resident,
+ * read the rover catalogue, fetch seven terrain layers -- and this names the
+ * one that is running. A bar that fills on a timer while the app does
+ * something else is a progress bar in the same sense that a drawn thermometer
+ * is a temperature.
+ *
+ * TRANSITION covers a stage change: the landing screen giving way to the
+ * hangar, the hangar to the cockpit. There is no measurable work behind it, so
+ * it does not pretend there is -- no percentage, and the bar is timed to the
+ * curtain rather than to anything underneath. That stays honest because the
+ * thing it times IS the wait. The stage swaps at the midpoint, while the
+ * screen is opaque, so what the curtain lifts on is already the next one.
  */
 
 export type BootStage = 'health' | 'dem' | 'rovers' | 'layers' | 'ready'
 
-/** What each stage is called, and how far along it is. */
+/** What each boot step is called, and how far along it is. */
 const STAGES: Record<BootStage, { label: string; percent: number }> = {
   health: { label: 'Contacting mission backend', percent: 12 },
   dem: { label: 'Loading lunar elevation model', percent: 34 },
@@ -34,6 +38,17 @@ const MIN_VISIBLE_MS = 3000
 
 /** Matches the .splash-screen exit transition in App.css. */
 const EXIT_MS = 520
+
+/**
+ * A stage change is a curtain, not a boot. Three seconds is a title card you
+ * watch once; on the two screens you cross on the way to a route it would be
+ * six seconds of nothing. This is the shortest beat that still reads as
+ * deliberate rather than as a flicker.
+ */
+const TRANSITION_MS = 1500
+
+/** When the stage swaps behind the curtain -- opaque, and clear of both edges. */
+const SWAP_AT_MS = 620
 
 /**
  * How long the boot may sit on one step before the screen says so.
@@ -50,15 +65,28 @@ const EXIT_MS = 520
  */
 const STALL_MS = 9000
 
-interface SplashScreenProps {
-  stage: BootStage
-  /** The bootstrap's failure, if it had one. Holds the splash open. */
-  error: string | null
-  /** Called once the screen has finished leaving, so App can stop rendering it. */
-  onDone: () => void
+type SplashScreenProps =
+  | {
+      mode: 'boot'
+      stage: BootStage
+      /** The bootstrap's failure, if it had one. Holds the screen open. */
+      error: string | null
+      onDone: () => void
+    }
+  | {
+      mode: 'transition'
+      /** What is being opened, in the operator's words. */
+      caption: string
+      /** Fired under cover, to swap the stage. */
+      onMidpoint: () => void
+      onDone: () => void
+    }
+
+export default function SplashScreen(props: SplashScreenProps) {
+  return props.mode === 'boot' ? <BootSplash {...props} /> : <TransitionSplash {...props} />
 }
 
-export default function SplashScreen({ stage, error, onDone }: SplashScreenProps) {
+function BootSplash({ stage, error, onDone }: Extract<SplashScreenProps, { mode: 'boot' }>) {
   const [floorPassed, setFloorPassed] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const [stalled, setStalled] = useState(false)
@@ -89,11 +117,85 @@ export default function SplashScreen({ stage, error, onDone }: SplashScreenProps
 
   const { label, percent } = STAGES[stage]
   const stallNote = stalled && !error ? `Still waiting on ${label.toLowerCase()}.` : null
-  const failed = Boolean(error) || stalled
 
   return (
+    <SplashFrame leaving={leaving}>
+      <div className="splash-progress">
+        <div className="loading-copy-row">
+          <span className="loading-copy">{error ? 'Boot failed' : label}</span>
+          <span className="loading-percent">{error ? '--' : `${percent}%`}</span>
+        </div>
+        <div className="loading-bar-track">
+          <div
+            className={`loading-bar-fill ${error || stalled ? 'is-failed' : ''}`}
+            style={{ width: `${error ? 100 : percent}%` }}
+          />
+        </div>
+      </div>
+
+      {/* The backend's own words when it gave any. A boot that cannot reach the
+          planner is the one moment where the exact failure is worth more than a
+          tidy line -- and when it gave none, saying which step is hanging beats
+          a bar that has stopped moving for no stated reason. */}
+      {error ? (
+        <p className="splash-error">{error}</p>
+      ) : stallNote ? (
+        <p className="splash-error">{stallNote} Check that the API is running on port 8000.</p>
+      ) : null}
+    </SplashFrame>
+  )
+}
+
+function TransitionSplash({
+  caption,
+  onMidpoint,
+  onDone,
+}: Extract<SplashScreenProps, { mode: 'transition' }>) {
+  const [leaving, setLeaving] = useState(false)
+
+  useEffect(() => {
+    const swap = window.setTimeout(onMidpoint, SWAP_AT_MS)
+    const exit = window.setTimeout(() => setLeaving(true), TRANSITION_MS)
+    const done = window.setTimeout(onDone, TRANSITION_MS + EXIT_MS)
+    return () => {
+      window.clearTimeout(swap)
+      window.clearTimeout(exit)
+      window.clearTimeout(done)
+    }
+    // Mount-only: the curtain owns its clock from the moment it appears, and
+    // re-running these on a prop identity change would restart it mid-cross.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <SplashFrame leaving={leaving} entering>
+      <div className="splash-progress">
+        <div className="loading-copy-row">
+          <span className="loading-copy">{caption}</span>
+        </div>
+        {/* No percentage: nothing here is measured. The bar is the curtain's own
+            clock, which is the one thing it can honestly report. */}
+        <div className="loading-bar-track">
+          <div className="loading-bar-fill is-timed" />
+        </div>
+      </div>
+    </SplashFrame>
+  )
+}
+
+/** The picture both modes share. */
+function SplashFrame({
+  leaving,
+  entering,
+  children,
+}: {
+  leaving: boolean
+  entering?: boolean
+  children: React.ReactNode
+}) {
+  return (
     <section
-      className={`splash-screen ${leaving ? 'is-leaving' : ''}`}
+      className={`splash-screen ${leaving ? 'is-leaving' : ''} ${entering ? 'is-entering' : ''}`}
       role="status"
       aria-live="polite"
     >
@@ -103,31 +205,7 @@ export default function SplashScreen({ stage, error, onDone }: SplashScreenProps
           <span className="loading-brand">LunaPath</span>
           <span className="splash-tagline">Lunar south pole mission planning</span>
         </div>
-
-        <div className="splash-progress">
-          <div className="loading-copy-row">
-            <span className="loading-copy">{error ? 'Boot failed' : label}</span>
-            <span className="loading-percent">{error ? '--' : `${percent}%`}</span>
-          </div>
-          <div className="loading-bar-track">
-            <div
-              className={`loading-bar-fill ${failed ? 'is-failed' : ''}`}
-              style={{ width: `${error ? 100 : percent}%` }}
-            />
-          </div>
-        </div>
-
-        {/* The backend's own words when it gave any. A boot that cannot reach
-            the planner is the one moment where the exact failure is worth more
-            than a tidy line -- and when it gave none, saying which step is
-            hanging beats a bar that has stopped moving for no stated reason. */}
-        {error ? (
-          <p className="splash-error">{error}</p>
-        ) : stallNote ? (
-          <p className="splash-error">
-            {stallNote} Check that the API is running on port 8000.
-          </p>
-        ) : null}
+        {children}
       </div>
     </section>
   )

@@ -6019,6 +6019,47 @@ select {
   z-index: 1;
 }
 
+/* The boot screen is simply there on the first paint; a curtain has to arrive,
+   or the stage behind it would cut. */
+@keyframes splash-draw {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.splash-screen.is-entering {
+  animation: splash-draw 0.3s ease both;
+}
+
+/* The curtain's own clock: 1.5s to match TRANSITION_MS, which is the only
+   thing on this screen there is anything honest to time. */
+@keyframes splash-timed-bar {
+  from {
+    width: 4%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+.loading-bar-fill.is-timed {
+  width: 100%;
+  animation: splash-timed-bar 1.5s cubic-bezier(0.33, 0.9, 0.5, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-screen.is-entering {
+    animation: none;
+  }
+
+  .loading-bar-fill.is-timed {
+    animation: none;
+  }
+}
+
 .splash-screen.is-leaving {
   opacity: 0;
   visibility: hidden;

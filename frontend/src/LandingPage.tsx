@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 interface LandingPageProps {
   onExplore: () => void
 }
-
-/** Matches the .landing-screen exit transition in App.css. */
-const EXPLORE_DURATION_MS = 760
 
 /**
  * The way in.
@@ -25,16 +22,6 @@ const EXPLORE_DURATION_MS = 760
  */
 export default function LandingPage({ onExplore }: LandingPageProps) {
   const [isExploring, setIsExploring] = useState(false)
-  const exploreTimer = useRef<number | null>(null)
-
-  useEffect(() => {
-    if (!isExploring) return
-
-    exploreTimer.current = window.setTimeout(onExplore, EXPLORE_DURATION_MS)
-    return () => {
-      if (exploreTimer.current !== null) window.clearTimeout(exploreTimer.current)
-    }
-  }, [isExploring, onExplore])
 
   return (
     <section className={`landing-screen ${isExploring ? 'is-exiting' : ''}`}>
