@@ -23,15 +23,19 @@ LunaPath, Ay yüzeyi yükseklik verisinden türetilen analiz katmanları üzerin
 LunaPath **rover'ın üstünde çalışmaz**; yörünge verisinden **küresel rota planlayan**
 bir yer katmanı aracıdır. Bu yüzden:
 
-- **LiDAR yok, çünkü LunaPath rover'ın üstünde çalışmıyor.** Gerçek zamanlı algı,
-  engel kaçınma ve yerel yeniden planlama kapsam dışıdır.
-- LiDAR sisteme **algı olarak değil, bir kaynak bütçesi kalemi olarak** girer:
+- Operasyonel planlayıcı rover'ın üstünde çalışmaz; gerçek zamanlı engel kaçınma
+  ve yerel yeniden planlama hâlâ kapsam dışıdır. Ancak 3B görünüm, bu sınırı
+  görünür ve test edilebilir kılmak için metre ölçekli kayalar üzerinde 360°,
+  16 kanallı bir **yerel LiDAR algı simülasyonu** çalıştırır
+  (`frontend/src/lidarSimulation.ts`). Bu nokta bulutu global rotayı değiştirmez.
+- LiDAR planlayıcıya algı olarak değil, bir kaynak bütçesi kalemi olarak girer:
   `backend/app/sensor_payload.py` bir LiDAR taşımanın sürekli güç + ısıtıcı
   çekişini enerji bütçesine yansıtır.
-- `lunapath/src/virtual_lidar.py` bir **algı simülatörü değildir**. 80 m/px'lik
-  yörünge DEM'i gerçek bir LiDAR'ın gördüğü 30 cm'lik kayaları çözemez; bu modül
-  yalnızca `Corridor` sözleşmesinin bir yerel-katman tüketicisine yettiğini
-  kanıtlayan bir **arayüz provasıdır**.
+- `lunapath/src/virtual_lidar.py`, çözünürlüğü metadata'dan alan yörünge-DEM
+  tarayıcısıdır. Şu an kullanılan Site11 verisi 5 m/px'tir; onlarca metrelik
+  taramada eğim ve sırtları ölçebilir fakat gerçek bir LiDAR'ın gördüğü metre-altı
+  kayaları çözemez. Bu yerel engeller 3B sahnede açık kaya mesh'leriyle simüle
+  edilir; DEM taraması ayrıca `Corridor` sözleşmesinin tüketicisi olarak kalır.
 - Proje bir **"otonom navigasyon sistemi" değildir** — bkz.
   [docs/research/09_olgunluk_kiyaslama.md](docs/research/09_olgunluk_kiyaslama.md).
 
@@ -80,13 +84,9 @@ Depo kökünden (`ASTROHackathon/`):
 
 **Backend**
 
-```bash
-cd backend
+```powershell
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
-pip install -r ../lunapath/requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt -r lunapath\requirements.txt
 ```
 
 `process_lunar_data.py` backend modüllerini kullandığı için aynı ortamda her iki `requirements` dosyası pratikte birlikte kurulur.
@@ -125,23 +125,28 @@ sağlayıcı olarak `stub` seçilirse gerçek model hiç çağrılmaz.
 
 1. **Backend** (varsayılan port `8000`):
 
-   ```bash
+   ```powershell
    cd backend
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --env-file ../.env
+   ..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
+
+   Analiz asistanı için kökte `.env` oluşturduysanız komutun sonuna
+   `--env-file ../.env` ekleyin. Proje venv'inin Python'unu açıkça kullanmak,
+   sistem Python'undaki uyumsuz FastAPI/Starlette sürümlerinin devreye
+   girmesini önler.
 
    Açıklık: `http://127.0.0.1:8000/docs`
 
-   `--env-file` isteğe bağlı değildir: uygulama `.env` dosyasını **kendiliğinden
-   okumaz**, bu yüzden bayrak olmadan analiz asistanı yapılandırılmamış sayılır
-   ve `/api/ai/chat` yapılandırma hatası döner. Planlama, harita ve telemetri
-   bayraksız da normal çalışır.
+   `--env-file` yalnızca analiz asistanı için gereklidir: uygulama `.env`
+   dosyasını **kendiliğinden okumaz**, bu yüzden bayrak olmadan `/api/ai/chat`
+   yapılandırma hatası döner. Planlama, harita ve telemetri bayraksız da normal
+   çalışır.
 
 2. **Frontend** (geliştirme; projede port `3000`, `/api` → `localhost:8000`):
 
-   ```bash
+   ```powershell
    cd frontend
-   npm run dev
+   npm.cmd run dev
    ```
 
    Arayüzün her ekranı adresinde görünür, yani geri tuşu ekranlar arasında
@@ -161,9 +166,9 @@ sağlayıcı olarak `stub` seçilirse gerçek model hiç çağrılmaz.
 
 3. **DEM → ızgara** (isteğe bağlı; önce uygun GeoTIFF’i `lunapath/data/raw` veya üst dizindeki `data/raw` içine koyun; varsayılan dosya adı script içinde tanımlıdır):
 
-   ```bash
+   ```powershell
    cd lunapath/src
-   python process_lunar_data.py
+   ..\..\.venv\Scripts\python.exe process_lunar_data.py
    ```
 
 4. **Görsel özet** (işlenmiş `.npy` dosyaları hazırsa):

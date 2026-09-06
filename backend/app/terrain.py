@@ -22,7 +22,7 @@ that fetches one layer in isolation is never guessing.
 
 No-data convention: **NaN, and only NaN.** The grids carry two kinds of
 absent value -- NaN where a field is undefined, and +inf in ``cost`` where a
-cell is impassable (39 937 of them in the shipped grid). The JSON path
+cell is impassable (about 60 000 of them in the current shipped grid). The JSON path
 flattens both to ``null``; float32 would carry the infinity through to a
 colour ramp or a vertex position, where it is a silently broken render
 rather than a visible hole. Both become NaN here, and the count is

@@ -80,6 +80,12 @@ def find_dem_file(custom_path: str | None = None) -> Path:
         raise FileNotFoundError(f"Belirtilen DEM dosyasi bulunamadi: {p}")
 
     candidates = [
+        # Current working DEM is Site11. The optional NAC texture is separately
+        # georeferenced and the frontend only enables it for its exact window.
+        # This is a selection preference, not a resolution/project standard;
+        # --dem always overrides it and resolution still comes from transform.a.
+        RAW_DIR / "Site11_final_adj_5mpp_surf.tif",
+        RAW_DIR / "Site11_final_adj_5mpp_surf.tiff",
         RAW_DIR / "Site01_final_adj_5mpp_surf.tif",
         RAW_DIR / "Site01_final_adj_5mpp_surf.tiff",
         RAW_DIR / "LDEM_80S_80MPP_ADJ.tiff",
@@ -463,6 +469,7 @@ def make_cost_grid(
 
 def save_metadata(
     out_dir: Path,
+    source_dem: str,
     origin_x: float,
     origin_y: float,
     resolution: float,
@@ -475,6 +482,9 @@ def save_metadata(
 ) -> Path:
     """Grid metadata'sini JSON olarak diske yazar."""
     meta = {
+        # Provenance, not a project-wide standard: records which currently
+        # selected input produced this particular processed grid set.
+        "source_dem": source_dem,
         "origin": {"x": origin_x, "y": origin_y},
         "resolution_m": resolution,
         "shape": list(shape),
@@ -710,6 +720,7 @@ def main(
     # -- 6. Metadata ----------------------------------------------------------
     save_metadata(
         out_dir=PROCESSED_DIR,
+        source_dem=dem_file.name,
         origin_x=origin_x,
         origin_y=origin_y,
         resolution=resolution_m,

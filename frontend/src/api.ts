@@ -251,7 +251,7 @@ export interface RoverCatalogResponse {
 // null (`np.where(np.isfinite(...), layer, None)`) and every reader branches
 // on `typeof value === 'number'`, which is true for NaN. Leaving NaN in
 // would poison the colour ramps and range scans silently rather than
-// visibly -- cost alone carries 39 937 impassable cells.
+// visibly -- cost alone carries about 60 000 impassable cells in the current grid.
 function reshapeF32(buf: Float32Array, rows: number, cols: number): (number | null)[][] {
   const grid: (number | null)[][] = new Array(rows)
   for (let row = 0; row < rows; row += 1) {
@@ -387,6 +387,14 @@ export async function planRoute(
   goal: [number, number],
   weights: PlanWeights,
   roverId: string,
+  /**
+   * The same rock cells the 3D scene renders as obstacles (see
+   * TerrainCanvas3D's use of generateRockField), computed by the caller
+   * BEFORE planning and passed through here so the backend's A* actually
+   * routes around them instead of the route being decided first and the
+   * rocks drawn on top of it afterwards.
+   */
+  obstacleCells?: Array<[number, number]>,
 ): Promise<PlanResponse> {
   const r = await fetch(`${BASE}/plan`, {
     method: 'POST',
@@ -397,6 +405,9 @@ export async function planRoute(
       rover_id: roverId,
       weights,
       include_simulation: true,
+      ...(obstacleCells && obstacleCells.length > 0
+        ? { obstacle_cells: obstacleCells.map(([row, col]) => ({ row, col })) }
+        : {}),
     }),
   })
   if (!r.ok) {

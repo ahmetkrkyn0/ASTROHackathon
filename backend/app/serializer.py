@@ -36,15 +36,15 @@ if TYPE_CHECKING:
 # as the fallback's own fallback. (Round 3 review, L-7.)
 #
 # That drift is exactly why these are read, not trusted: the shipped window
-# has since moved again, from Site01 (-15500, -4000) to Site11 (-32500,
-# 11000). The literals track the current window so a metadata-less caller
+# has since moved again, from Site01 (-15500, -4000) to the current Site11
+# working window (-40000, 15500). The literals track the current window so a metadata-less caller
 # lands on the right site, but nothing in production depends on them.
 #
 # The y term is subtracted per row because rows increase southward, so the
 # origin (row 0) is the window's NORTH edge -- the convention grid_frame
 # defines and process_lunar_data writes. (Round 2 review, L-1.)
-_FALLBACK_ORIGIN_X_M: float = -32500.0
-_FALLBACK_ORIGIN_Y_M: float = 11000.0
+_FALLBACK_ORIGIN_X_M: float = -40000.0
+_FALLBACK_ORIGIN_Y_M: float = 15500.0
 _FALLBACK_RESOLUTION_M: float = 5.0
 _FALLBACK_ROWS: int = 500
 _FALLBACK_COLS: int = 500

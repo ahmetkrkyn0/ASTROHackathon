@@ -3,8 +3,6 @@ import React, {
   useEffect,
   useCallback,
   useState,
-  forwardRef,
-  useImperativeHandle,
 } from 'react'
 import type { Waypoint } from './api'
 import { drawOverlays } from './overlay/draw2d'
@@ -26,6 +24,13 @@ import {
   GOAL_CORAL,
   ROUTE_CYAN,
 } from './colormap'
+
+/**
+ * How long the planned route takes to sweep onto the map, in milliseconds.
+ * Fixed for the whole route rather than per waypoint, so route length does
+ * not change how long the answer takes to appear.
+ */
+const ROUTE_REVEAL_MS = 1100
 
 const CANVAS_SIZE = 500
 // Full resolution. fetchLayer reads the binary float32 layer, which carries
@@ -61,35 +66,36 @@ interface Props {
   viewMode: MapViewMode
   resolutionM: number
   onCellClick: (row: number, col: number) => void
-  onAnimationStepChange?: (step: number | null) => void
+  /**
+   * Playback cursor, owned by App's single mission clock -- see
+   * mission/playbackClock.ts. The map runs no timer of its own. It used to:
+   * it stepped a waypoint every 33 ms while the transport bar stepped one
+   * every 50 ms and the 3D view compressed the whole traverse into a fixed
+   * 10-45 second window, so the same route finished at three different
+   * times and none of them was the rover's speed.
+   */
+  playbackStep: number | null
   onHoverCellChange?: (cell: [number, number] | null) => void
 }
 
-export interface MapCanvasHandle {
-  startAnimation: () => void
-}
-
-const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
-  {
-    elevationGrid,
-    slopeGrid,
-    aspectGrid,
-    shadowGrid,
-    thermalGrid,
-    costGrid,
-    traversableGrid,
-    waypoints,
-    start,
-    goal,
-    clickMode,
-    viewMode,
-    resolutionM,
-    onCellClick,
-    onAnimationStepChange,
-    onHoverCellChange,
-  },
-  ref,
-) {
+function MapCanvas({
+  elevationGrid,
+  slopeGrid,
+  aspectGrid,
+  shadowGrid,
+  thermalGrid,
+  costGrid,
+  traversableGrid,
+  waypoints,
+  start,
+  goal,
+  clickMode,
+  viewMode,
+  resolutionM,
+  onCellClick,
+  playbackStep,
+  onHoverCellChange,
+}: Props) {
   // The marks features registered, read here rather than passed down: App
   // renders OverlayProvider and so cannot consume it, and the hook falls back
   // to one shared empty list outside a provider, which keeps this canvas
@@ -98,8 +104,6 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const baseImageRef = useRef<ImageData | null>(null)
-  const animationTimerRef = useRef<number | null>(null)
-  const [animStep, setAnimStep] = useState<number | null>(null)
   const [hoverCell, setHoverCell] = useState<[number, number] | null>(null)
 
   // The loaded grid's own row count, not CANVAS_SIZE. Every layer is
@@ -109,12 +113,35 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   const gridRows = elevationGrid?.length ?? 0
   const gridCols = elevationGrid?.[0]?.length ?? 0
 
-  const stopAnimation = useCallback(() => {
-    if (animationTimerRef.current !== null) {
-      window.clearTimeout(animationTimerRef.current)
-      animationTimerRef.current = null
+  // How much of the planned line has been drawn in.
+  //
+  // This is a ROUTE REVEAL, not the drive -- two different things that used
+  // to share one counter, which is how the map ended up either crawling for
+  // twenty minutes before showing the route it had found, or racing the
+  // rover marker along at a hundred times its own speed. The line is the
+  // planner's answer and wants to be legible immediately; the marker is the
+  // rover and belongs on the mission clock. So: the line sweeps in over a
+  // fixed budget no matter how long the route is, and then stays.
+  const [revealStep, setRevealStep] = useState(0)
+  useEffect(() => {
+    if (!waypoints || waypoints.length === 0) {
+      setRevealStep(0)
+      return
     }
-  }, [])
+    const total = waypoints.length - 1
+    // Time-based rather than one timeout per waypoint, so a 40-node route
+    // and a 400-node one take the same moment to appear.
+    let frame = 0
+    let startedAt: number | null = null
+    const tick = (timestamp: number) => {
+      if (startedAt === null) startedAt = timestamp
+      const progress = Math.min(1, (timestamp - startedAt) / ROUTE_REVEAL_MS)
+      setRevealStep(Math.round(progress * total))
+      if (progress < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [waypoints])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -141,7 +168,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     })
 
     baseImageRef.current = imageData
-    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell, gridRows, overlays)
+    redraw(ctx, imageData, waypoints, start, goal, revealStep, playbackStep, hoverCell, gridRows, overlays)
     // Overlay degerleri (waypoints/start/goal/animStep/hoverCell/overlays)
     // bilerek bagimlilikta degil: onlari bir sonraki efekt yeniden ciziyor.
     // Buraya eklemek, her hover'da -- ve her overlay degisikliginde, yani
@@ -163,53 +190,12 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       return
     }
 
-    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell, gridRows, overlays)
-  }, [animStep, goal, gridRows, hoverCell, overlays, start, waypoints])
-
-  useEffect(() => {
-    if (!waypoints || waypoints.length === 0) {
-      setAnimStep(null)
-      stopAnimation()
-    }
-  }, [stopAnimation, waypoints])
-
-  useEffect(() => {
-    onAnimationStepChange?.(animStep)
-  }, [animStep, onAnimationStepChange])
+    redraw(ctx, baseImageRef.current, waypoints, start, goal, revealStep, playbackStep, hoverCell, gridRows, overlays)
+  }, [playbackStep, goal, gridRows, hoverCell, overlays, revealStep, start, waypoints])
 
   useEffect(() => {
     onHoverCellChange?.(hoverCell)
   }, [hoverCell, onHoverCellChange])
-
-  const startAnimation = useCallback(() => {
-    if (!waypoints || waypoints.length === 0) {
-      return
-    }
-
-    stopAnimation()
-    let nextStep = 0
-    setAnimStep(0)
-
-    const tick = () => {
-      nextStep += 1
-      if (nextStep >= waypoints.length) {
-        setAnimStep(waypoints.length - 1)
-        animationTimerRef.current = null
-        return
-      }
-
-      setAnimStep(nextStep)
-      animationTimerRef.current = window.setTimeout(tick, 33)
-    }
-
-    animationTimerRef.current = window.setTimeout(tick, 66)
-  }, [stopAnimation, waypoints])
-
-  useImperativeHandle(ref, () => ({ startAnimation }), [startAnimation])
-
-  useEffect(() => {
-    return () => stopAnimation()
-  }, [stopAnimation])
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -409,7 +395,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       )}
     </div>
   )
-})
+}
 
 export default MapCanvas
 export { DOWNSAMPLE }
@@ -420,7 +406,10 @@ function redraw(
   waypoints: Waypoint[] | null,
   start: [number, number] | null,
   goal: [number, number] | null,
-  currentStep: number | null,
+  /** How much of the planned line has swept in; see revealStep. */
+  revealStep: number,
+  /** Where the rover is on the mission clock; see the playbackStep prop. */
+  roverStep: number | null,
   hoverCell: [number, number] | null,
   gridRows: number,
   overlays?: readonly OverlayCommand[],
@@ -439,7 +428,7 @@ function redraw(
   }
 
   if (waypoints && waypoints.length > 1) {
-    const drawUpTo = currentStep ?? waypoints.length - 1
+    const drawUpTo = Math.min(waypoints.length - 1, Math.max(revealStep, roverStep ?? 0))
 
     ctx.save()
     ctx.lineCap = 'round'
@@ -458,15 +447,29 @@ function redraw(
     let runStart = 1
     for (let index = 1; index <= drawUpTo; index += 1) {
       const level = waypoints[index].risk_level
+      // Ground already covered reads at full strength, the road ahead is held
+      // back. Without this the whole route looks identical the moment the
+      // reveal finishes and the marker is the only thing saying how far along
+      // the rover actually is.
+      const covered = roverStep === null || index <= roverStep
       const isLastSegment = index === drawUpTo
-      const runEnds = isLastSegment || waypoints[index + 1].risk_level !== level
+      // A run therefore ends at the rover as well as where the risk level
+      // changes: one path cannot carry two alpha values.
+      //
+      // isLastSegment stays first in the chain -- it short-circuits the
+      // waypoints[index + 1] read, which is undefined on the final segment.
+      const runEnds =
+        isLastSegment || waypoints[index + 1].risk_level !== level || index === roverStep
 
       if (!runEnds) {
         continue
       }
 
-      ctx.strokeStyle = riskToHex(level)
+      // Cyan is the calm trajectory; a risk colour is a departure from it, so
+      // LOW keeps the base line and the other three announce themselves.
+      ctx.strokeStyle = level === 'LOW' ? ROUTE_CYAN : riskToHex(level)
       ctx.setLineDash(riskToDash(level))
+      ctx.globalAlpha = covered ? 1 : 0.42
       ctx.beginPath()
       ctx.moveTo(waypoints[runStart - 1].col, waypoints[runStart - 1].row)
       for (let step = runStart; step <= index; step += 1) {
@@ -504,11 +507,12 @@ function redraw(
       runStart = index + 1
     }
 
+    ctx.globalAlpha = 1
     ctx.setLineDash([])
     ctx.restore()
 
-    if (currentStep !== null && currentStep < waypoints.length) {
-      const rover = waypoints[currentStep]
+    if (roverStep !== null && roverStep < waypoints.length) {
+      const rover = waypoints[roverStep]
       ctx.save()
       ctx.fillStyle = '#e7eaf1'
       ctx.shadowColor = ROUTE_CYAN

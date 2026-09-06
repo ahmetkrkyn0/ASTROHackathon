@@ -6144,3 +6144,372 @@ select {
     animation: none;
   }
 }
+
+/* ============================================================
+   3-D LiDAR simulation, rock perception and the mission clock.
+   Merged in from berke/lidar-simulation. Every selector below is
+   new to this file; nothing above is overridden.
+   ============================================================ */
+
+.terrain3d-root.is-picking canvas {
+  cursor: crosshair;
+}
+
+.terrain3d-rockbox-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.terrain3d-rockbox {
+  position: absolute;
+  display: none;
+  border: 1.5px solid rgba(255, 82, 82, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 8px rgba(255, 82, 82, 0.35);
+  border-radius: 2px;
+}
+
+.terrain3d-rockbox-label {
+  position: absolute;
+  left: 0;
+  top: -20px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: rgba(120, 20, 20, 0.85);
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+
+/* The mission clock block: what time it is on the rover's own timeline, how
+   fast that timeline is running, and the rover's actual ground speed. It
+   sits between the scrubber and the telemetry readouts because it explains
+   both of them. */
+.lp-playback-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex: none;
+  padding: 0 12px;
+  border-left: 1px solid var(--line-card);
+  border-right: 1px solid var(--line-card);
+}
+
+.lp-playback-scale {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.lp-scale-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-dimmest);
+  font-family: var(--font-data);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.lp-scale-btn:hover {
+  color: var(--text-2);
+  border-color: var(--line-card);
+}
+
+.lp-scale-btn.is-active {
+  color: var(--lavender-bright);
+  border-color: var(--line-accent-hover);
+}
+
+/* The clock survives longer than the per-waypoint telemetry: without it the
+   drive is an animation at an unknown rate, which is the thing this bar
+   exists to stop being true. */
+@media (max-width: 1440px) {
+  .lp-playback-readouts .lp-playback-stat:last-child {
+    display: none;
+  }
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+   3D ROVER COCKPIT & CAMERA SWITCHER STYLING
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.terrain3d-camera-switch {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  gap: 6px;
+  background: rgba(7, 13, 30, 0.88);
+  padding: 4px;
+  border-radius: 24px;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 15px rgba(56, 189, 248, 0.15);
+  backdrop-filter: blur(14px);
+}
+
+.terrain3d-cam-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-family: 'Outfit', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.terrain3d-cam-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.terrain3d-cam-btn.is-active {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(46, 229, 157, 0.2));
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+}
+
+.terrain3d-lidar {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 24;
+  width: min(330px, calc(100% - 32px));
+  padding: 12px;
+  border: 1px solid rgba(95, 244, 255, 0.28);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(8, 20, 30, 0.94), rgba(6, 11, 25, 0.9)),
+    repeating-linear-gradient(0deg, transparent 0 4px, rgba(95, 244, 255, 0.025) 5px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5), inset 0 0 24px rgba(34, 211, 238, 0.035);
+  color: #dffbff;
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.terrain3d-lidar.is-off {
+  width: 248px;
+  border-color: rgba(148, 163, 184, 0.2);
+  opacity: 0.78;
+}
+
+.terrain3d-lidar-head,
+.terrain3d-lidar-title,
+.terrain3d-lidar-footer {
+  display: flex;
+  align-items: center;
+}
+
+.terrain3d-lidar-head {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.terrain3d-lidar-title {
+  min-width: 0;
+  gap: 10px;
+}
+
+.terrain3d-lidar-title strong,
+.terrain3d-lidar-title small {
+  display: block;
+}
+
+.terrain3d-lidar-title strong {
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.terrain3d-lidar-title small {
+  margin-top: 2px;
+  color: rgba(165, 243, 252, 0.58);
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  letter-spacing: 0.09em;
+}
+
+.terrain3d-radar-icon {
+  position: relative;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(95, 244, 255, 0.48);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #8bfbff 0 1px, transparent 2px),
+    repeating-radial-gradient(circle, transparent 0 5px, rgba(95, 244, 255, 0.19) 6px 6.5px);
+}
+
+.terrain3d-radar-icon::before,
+.terrain3d-radar-icon::after {
+  position: absolute;
+  content: '';
+  background: rgba(95, 244, 255, 0.18);
+}
+
+.terrain3d-radar-icon::before { inset: 14px 2px auto; height: 1px; }
+.terrain3d-radar-icon::after { inset: 2px auto 2px 14px; width: 1px; }
+
+.terrain3d-radar-icon span {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(95, 244, 255, 0.74), transparent 23%);
+  animation: terrain3d-radar-sweep 0.2s linear infinite;
+}
+
+@keyframes terrain3d-radar-sweep {
+  to { transform: rotate(360deg); }
+}
+
+.terrain3d-lidar-toggle {
+  min-width: 48px;
+  padding: 5px 8px;
+  border: 1px solid rgba(46, 229, 157, 0.5);
+  border-radius: 999px;
+  background: rgba(46, 229, 157, 0.12);
+  box-shadow: 0 0 13px rgba(46, 229, 157, 0.12);
+  color: #70f4bd;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.terrain3d-lidar.is-off .terrain3d-lidar-toggle {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.08);
+  box-shadow: none;
+  color: #94a3b8;
+}
+
+.terrain3d-lidar-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  margin-top: 11px;
+  overflow: hidden;
+  border: 1px solid rgba(95, 244, 255, 0.11);
+  border-radius: 7px;
+  background: rgba(95, 244, 255, 0.09);
+}
+
+.terrain3d-lidar-grid div {
+  min-width: 0;
+  padding: 7px 6px;
+  background: rgba(5, 13, 24, 0.82);
+}
+
+.terrain3d-lidar-grid span,
+.terrain3d-lidar-grid strong {
+  display: block;
+  white-space: nowrap;
+}
+
+.terrain3d-lidar-grid span {
+  color: rgba(165, 243, 252, 0.47);
+  font-family: var(--font-mono, monospace);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+}
+
+.terrain3d-lidar-grid strong {
+  margin-top: 3px;
+  color: #d9fbff;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.terrain3d-lidar .is-danger {
+  color: #ff9b66;
+  text-shadow: 0 0 10px rgba(255, 112, 67, 0.38);
+}
+
+.terrain3d-lidar-footer {
+  gap: 10px;
+  margin-top: 9px;
+  color: rgba(203, 213, 225, 0.58);
+  font-size: 8px;
+  letter-spacing: 0.025em;
+}
+
+.terrain3d-lidar-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.terrain3d-lidar-footer i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.terrain3d-lidar-ramp-label {
+  gap: 5px;
+}
+
+/* Same jet stops the point cloud itself is coloured with (jetColor() in
+   lidarSimulation.ts) -- this swatch is the ramp's legend, not a decoration,
+   so it has to stay in sync with that function by eye if it ever changes. */
+.terrain3d-lidar-ramp {
+  width: 34px;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(
+    90deg,
+    #0000ff 0%,
+    #00ffff 25%,
+    #00ff00 50%,
+    #ffff00 75%,
+    #ff0000 100%
+  );
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.25);
+}
+
+.terrain3d-lidar-footer b {
+  margin-left: auto;
+  color: rgba(223, 251, 255, 0.78);
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .terrain3d-lidar {
+    bottom: 10px;
+    left: 10px;
+    width: min(300px, calc(100% - 20px));
+  }
+
+  .terrain3d-camera-switch {
+    top: 8px;
+  }
+
+  .terrain3d-cam-btn {
+    padding-inline: 9px;
+  }
+}
