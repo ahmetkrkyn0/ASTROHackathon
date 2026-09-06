@@ -971,8 +971,11 @@ select {
 /* Plan: 300px, up from 264. The rail holds two full-width picker buttons
    whose labels carry coordinates ("START 259, 252"), a four-row sequence
    list, and a 2x2 spec grid -- all of which were wrapping at 264. */
+/* PLAN: the same 584px the analysis rail takes in ANALYZE. Two stages of one
+   console reading 300 on one side and 584 on the other made the map jump width
+   on every mode switch, which is the kind of movement that reads as a bug. */
 .content-grid.no-right-rail {
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 530px minmax(0, 1fr);
 }
 
 /* Analyze: 340px, up from 288. This rail now carries the whole analysis on
@@ -2934,11 +2937,25 @@ select {
 }
 
 /* Selected Rover Card */
+/* Photograph and readout side by side. At a 300px rail this was a stack with a
+   64px thumbnail on top; at 584 the picture can be the size the hangar showed
+   it and the four numbers still get half the card. */
 .lp-selected-rover-card {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border-line);
   border-radius: var(--radius);
   padding: 14px;
+}
+
+.lp-rover-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .lp-rover-header {
@@ -2953,11 +2970,12 @@ select {
    square threw away the vehicle to keep some regolith. */
 .lp-rover-photo {
   flex: none;
-  /* 64, not 84. The rail is 300px and the card's inner width is about 205 of
-     them; at 84 the name had 109px left and "LPR-1 (Default)" broke across
-     three lines. */
-  width: 64px;
-  height: 46px;
+  /* Was 64x46 against a 300px rail. The rail is 584 now, so the photograph gets
+     to be one rather than an icon-sized crop of one. */
+  width: 208px;
+  height: auto;
+  align-self: stretch;
+  min-height: 132px;
   object-fit: cover;
   border-radius: var(--radius);
   background: var(--void);
@@ -2990,9 +3008,48 @@ select {
   color: var(--text-dim-2);
 }
 
+/* One column, not two. The photograph takes 208 of the card's ~490px, which
+   left the 2x2 cells 127px each -- enough to fit "Battery 5420 Wh" and not
+   enough to read it as a table. Stacked, every value lands on the same right
+   edge, which is the whole use of a spec list. */
 .lp-rover-metric-grid {
   display: grid;
-  gap: 7px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.lp-rover-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* The glyph is the same one the hangar's spec table uses for this reading, so
+   battery means the same picture on both screens. */
+.lp-metric-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
+  white-space: nowrap;
+}
+
+.lp-metric-name .lp-icon {
+  font-size: 15px;
+  color: var(--text-dimmest);
+}
+
+.lp-metric-val {
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .lp-rover-metric,

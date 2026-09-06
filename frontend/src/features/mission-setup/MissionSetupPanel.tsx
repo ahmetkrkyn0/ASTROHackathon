@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react'
-import type { PlanWeights } from '../../api'
-import { Icon } from '../../components/Fleet/SpecIcons'
+import type { PlanWeights, RoverEntry } from '../../api'
+import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
 import { getRoverMeta } from '../../components/Fleet/roverMeta'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
 
@@ -13,6 +13,18 @@ const WEIGHT_READOUT: Array<{ key: keyof PlanWeights; label: string }> = [
   { key: 'w_energy', label: 'Energy Use' },
   { key: 'w_shadow', label: 'Shadow Exposure' },
   { key: 'w_thermal', label: 'Thermal Risk' },
+]
+
+/** The four numbers the cockpit reports about the assigned vehicle. */
+const ROVER_METRICS: Array<{
+  icon: IconName
+  label: string
+  value: (r: RoverEntry) => string
+}> = [
+  { icon: 'battery', label: 'Battery', value: (r) => `${r.e_cap_wh.toFixed(0)} Wh` },
+  { icon: 'speed', label: 'Speed', value: (r) => `${r.v_max_ms.toFixed(2)} m/s` },
+  { icon: 'climb', label: 'Max slope', value: (r) => `${r.slope_max_deg.toFixed(0)}\u00b0` },
+  { icon: 'mass', label: 'Mass', value: (r) => `${r.mass_kg.toFixed(0)} kg` },
 ]
 
 export const MissionSetupPanel: React.FC = () => {
@@ -234,43 +246,36 @@ export const MissionSetupPanel: React.FC = () => {
           <span className="lp-meta-label">Assigned vehicle</span>
         </div>
 
-        {/* Selected Rover Specs Card */}
+        {/* Photograph left, everything read about the vehicle right. The rail
+            is wide enough for both now, and the picture is the same one the
+            hangar showed -- arriving in the cockpit to a 64px thumbnail of it
+            was the smallest this could usefully be. */}
         {selectedRover ? (
           <div className="lp-selected-rover-card">
-            {/* The photograph, not a glyph. A triangle in a box said "a vehicle
-                is assigned" and nothing about which one -- and the hangar has
-                just spent a full screen on this rover's picture, so arriving in
-                the cockpit to an abstract mark loses the thread. */}
-            <div className="lp-rover-header">
-              <img
-                className="lp-rover-photo"
-                src={getRoverMeta(selectedRover.id).image}
-                alt=""
-                loading="lazy"
-              />
+            <img
+              className="lp-rover-photo"
+              src={getRoverMeta(selectedRover.id).image}
+              alt=""
+              loading="lazy"
+            />
+
+            <div className="lp-rover-info">
               <div className="lp-rover-title-block">
                 <h3 className="lp-rover-card-name">{selectedRover.name}</h3>
                 <span className="lp-rover-model-code">{selectedRover.id.toUpperCase()}</span>
                 <span className="lp-rover-class">{getRoverMeta(selectedRover.id).roverClass}</span>
               </div>
-            </div>
 
-            <div className="lp-rover-metric-grid">
-              <div className="lp-rover-metric">
-                <span className="lp-metric-name">Battery</span>
-                <strong className="lp-metric-val">{selectedRover.e_cap_wh.toFixed(0)} Wh</strong>
-              </div>
-              <div className="lp-rover-metric">
-                <span className="lp-metric-name">Speed</span>
-                <strong className="lp-metric-val">{selectedRover.v_max_ms.toFixed(2)} m/s</strong>
-              </div>
-              <div className="lp-rover-metric">
-                <span className="lp-metric-name">Max Slope</span>
-                <strong className="lp-metric-val">{selectedRover.slope_max_deg.toFixed(0)}°</strong>
-              </div>
-              <div className="lp-rover-metric">
-                <span className="lp-metric-name">Mass</span>
-                <strong className="lp-metric-val">{selectedRover.mass_kg.toFixed(0)} kg</strong>
+              <div className="lp-rover-metric-grid">
+                {ROVER_METRICS.map(({ icon, label, value }) => (
+                  <div key={label} className="lp-rover-metric">
+                    <span className="lp-metric-name">
+                      <Icon name={icon} />
+                      {label}
+                    </span>
+                    <strong className="lp-metric-val">{value(selectedRover)}</strong>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
