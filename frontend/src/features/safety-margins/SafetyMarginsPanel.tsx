@@ -3,36 +3,56 @@ import { formatMargin, type MarginState, type RequirementView, type SafetyMargin
 import './safety-margins.css'
 
 /**
- * The rail readout: a verdict, the tightest margin, and twelve rows.
+ * The rail readout: a verdict, the tightest margin, and twelve rows that are
+ * drawn rather than listed.
  *
- * Deliberately NOT the evidence. The backend ships a claim boundary, a FRETISH
- * sentence per requirement and a monitor provenance block, and all of it is
- * worth reading -- in the mission report, which is a document. Pasted into a
- * 288 px rail it was three paragraphs of prose above the numbers it was meant
- * to qualify, which is how a caveat stops being read at all.
+ * `rho_normalized` is the contract's own comparison key -- robustness over the
+ * requirement's scale -- which means the twelve values are directly comparable
+ * to one another and to zero. That is a chart, not a column of numbers, so the
+ * rows carry a bar that diverges from a shared centre: right of it is margin,
+ * left of it is violation, and how far tells you by how much. Reading "which
+ * one is tight" off twelve right-aligned figures was work the eye should not
+ * have to do.
  *
- * What survives here is what an operator scans: did it pass, by how little,
- * and which requirement is the tight one.
+ * The evidence is not here. Each requirement's FRETISH sentence, the monitor
+ * provenance and the claim boundary are in the mission report, where the
+ * measure is wide enough to read them.
  */
 
 const STATE_META: Record<MarginState, { icon: IconName; label: string }> = {
   satisfied: { icon: 'check', label: 'Margin' },
-  boundary: { icon: 'warning', label: 'At limit' },
+  boundary: { icon: 'target', label: 'At limit' },
   violated: { icon: 'error', label: 'Violated' },
   pending: { icon: 'clock', label: 'Undecided' },
   'not-applicable': { icon: 'help', label: 'Not checked' },
 }
 
-const VERDICT_LABEL: Record<string, string> = {
-  satisfied: 'ALL REQUIREMENTS MET',
-  violated: 'REQUIREMENTS VIOLATED',
-  pending: 'VERDICT PENDING',
-  not_evaluated: 'NOT EVALUATED',
+const VERDICT_META: Record<string, { icon: IconName; text: string }> = {
+  satisfied: { icon: 'check', text: 'ALL REQUIREMENTS MET' },
+  violated: { icon: 'warning', text: 'REQUIREMENTS VIOLATED' },
+  pending: { icon: 'clock', text: 'VERDICT PENDING' },
+  not_evaluated: { icon: 'help', text: 'NOT EVALUATED' },
+}
+
+/**
+ * Half-width of the bar, as a fraction of the track. A normalised margin of 1
+ * fills its side; anything past that is clamped and flagged, because a bar
+ * that keeps growing stops being comparable and a violation at -2.6 would
+ * otherwise dwarf every other row into invisibility.
+ */
+function barWidth(rhoNormalized: number | null): number {
+  if (rhoNormalized === null) return 0
+  return Math.min(Math.abs(rhoNormalized), 1) * 50
 }
 
 function Requirement({ requirement }: { requirement: RequirementView }) {
   const meta = STATE_META[requirement.state]
   const untested = requirement.state === 'not-applicable'
+  const rho = requirement.rhoNormalized
+  const width = barWidth(rho)
+  const negative = rho !== null && rho < 0
+  const clamped = rho !== null && Math.abs(rho) > 1
+
   return (
     <li className={`lp-margin-row is-${requirement.state}`}>
       <Icon name={meta.icon} className="lp-margin-icon" />
@@ -41,21 +61,39 @@ function Requirement({ requirement }: { requirement: RequirementView }) {
       <span className="lp-margin-value">
         {untested ? meta.label : formatMargin(requirement)}
       </span>
+
+      {/* The bar spans the row under the label. A shared centre line is what
+          makes twelve requirements in five different units comparable at a
+          glance -- it is the only thing they have in common. */}
+      <span className="lp-margin-track" aria-hidden="true">
+        <span className="lp-margin-zero" />
+        {width > 0 ? (
+          <span
+            className={`lp-margin-bar ${negative ? 'is-negative' : 'is-positive'} ${clamped ? 'is-clamped' : ''}`}
+            style={negative
+              ? { right: '50%', width: `${width}%` }
+              : { left: '50%', width: `${width}%` }}
+          />
+        ) : null}
+      </span>
     </li>
   )
 }
 
 export function SafetyMarginsPanel({ view }: { view: SafetyMarginsView }) {
-  const verdict = VERDICT_LABEL[view.verdict] ?? view.verdict.toUpperCase()
+  const verdict = VERDICT_META[view.verdict] ?? { icon: 'help' as IconName, text: view.verdict.toUpperCase() }
   const untested = view.requirements.filter((r) => r.state === 'not-applicable').length
   const met = view.nApplicable !== null ? view.nApplicable - (view.nViolated ?? 0) : null
 
   return (
     <div className="lp-margins">
       <div className={`lp-margins-verdict is-${view.verdict}`}>
-        <span className="lp-margins-verdict-text">{verdict}</span>
+        <Icon name={verdict.icon} className="lp-margins-verdict-icon" />
+        <span className="lp-margins-verdict-text">{verdict.text}</span>
         {met !== null ? (
-          <span className="lp-margins-count">{met}/{view.nApplicable}</span>
+          <span className="lp-margins-count">
+            <b>{met}</b>/{view.nApplicable}
+          </span>
         ) : null}
       </div>
 
@@ -63,7 +101,8 @@ export function SafetyMarginsPanel({ view }: { view: SafetyMarginsView }) {
           margin is the number an operator actually plans against. */}
       {view.minMargin ? (
         <p className="lp-margins-tightest">
-          <span>Tightest</span>
+          <Icon name="target" />
+          <span className="lp-margins-tightest-label">Tightest</span>
           <b>{view.minMargin.id}</b>
           {view.minMargin.rho !== null ? (
             <span className="lp-margins-tightest-value">
@@ -84,13 +123,14 @@ export function SafetyMarginsPanel({ view }: { view: SafetyMarginsView }) {
       <p className="lp-margins-foot">
         {untested > 0 ? (
           <span className="lp-margins-untested">
-            {untested} untested, which is not passed.
+            <Icon name="help" />
+            {untested} untested — which is not passed.
           </span>
         ) : null}
-        {/* One line, not a paragraph: the claim boundary and the requirement
-            texts are in the report, and saying so is what keeps them findable
-            without putting them here. */}
-        <span>Runtime monitoring — full requirements and claim in the report.</span>
+        <span className="lp-margins-report">
+          <Icon name="report" />
+          Requirement text and claim in the mission report.
+        </span>
       </p>
     </div>
   )

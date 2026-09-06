@@ -1,47 +1,72 @@
-/* Formal safety margins (D3). Uses the console's own surfaces, ramp and risk
-   colours -- and risk colour only where it carries safety semantics, which
-   here is its actual meaning rather than decoration. */
+/* Formal safety margins (D3).
 
-.lp-margins {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+   Console rules throughout: flat surfaces, 2px radius, mono for measured data
+   only, and risk colour ONLY where it carries safety semantics -- which here
+   is its literal meaning, not decoration. */
+
+.lp-margins { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── Verdict ─────────────────────────────────────────────────────────────── */
 
 .lp-margins-verdict {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 8px 10px;
   border-radius: var(--radius);
-  border-left: 2px solid var(--line-card);
+  border-left: 2px solid var(--line-button);
   background: var(--bg-inset);
 }
 
+.lp-margins-verdict-icon { font-size: 15px; color: var(--text-dim); }
+
 .lp-margins-verdict-text {
   font-family: var(--font-data);
-  font-size: var(--fs-small);
-  letter-spacing: 0.06em;
+  font-size: var(--fs-tiny);
+  letter-spacing: 0.07em;
   color: var(--text-2);
 }
 
-.lp-margins-verdict.is-satisfied { border-left-color: var(--mint); }
+.lp-margins-count {
+  margin-left: auto;
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-margins-count b { color: var(--text); font-weight: 500; }
+
+.lp-margins-verdict.is-satisfied {
+  border-left-color: var(--mint);
+  background: rgba(95, 227, 176, 0.07);
+}
+.lp-margins-verdict.is-satisfied .lp-margins-verdict-icon,
 .lp-margins-verdict.is-satisfied .lp-margins-verdict-text { color: var(--mint-text); }
-.lp-margins-verdict.is-violated { border-left-color: var(--coral); }
+
+.lp-margins-verdict.is-violated {
+  border-left-color: var(--coral);
+  background: rgba(237, 133, 110, 0.08);
+}
+.lp-margins-verdict.is-violated .lp-margins-verdict-icon,
 .lp-margins-verdict.is-violated .lp-margins-verdict-text { color: var(--coral-text); }
 
-.lp-margins-count {
-  font-family: var(--font-data);
+.lp-margins-verdict.is-pending { border-left-color: var(--cyan); }
+.lp-margins-verdict.is-pending .lp-margins-verdict-icon { color: var(--cyan); }
+
+/* ── Tightest ────────────────────────────────────────────────────────────── */
+
+.lp-margins-tightest {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
   font-size: var(--fs-tiny);
   color: var(--text-dim);
 }
 
-.lp-margins-tightest {
-  margin: 0;
-  font-size: var(--fs-small);
-  color: var(--text-3);
-}
+.lp-margins-tightest svg { font-size: 13px; color: var(--text-dim); }
+.lp-margins-tightest-label { color: var(--text-dim); }
 
 .lp-margins-tightest b {
   font-family: var(--font-data);
@@ -51,29 +76,28 @@
 
 .lp-margins-tightest-value {
   font-family: var(--font-data);
-  margin-left: 6px;
+  margin-left: auto;
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
-.lp-margins-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
+/* ── The twelve rows ─────────────────────────────────────────────────────── */
+
+.lp-margins-list { list-style: none; margin: 0; padding: 0; }
 
 .lp-margin-row {
   display: grid;
-  grid-template-columns: 15px 52px minmax(0, 1fr) auto;
+  grid-template-columns: 15px 50px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  padding: 5px 2px;
+  gap: 4px 7px;
+  padding: 6px 0 7px;
   border-bottom: 1px solid var(--line-inner);
   font-size: var(--fs-small);
 }
 
 .lp-margin-row:last-child { border-bottom: none; }
+
+.lp-margin-icon { font-size: 13px; color: var(--text-dim); }
 
 .lp-margin-id {
   font-family: var(--font-data);
@@ -94,54 +118,86 @@
   color: var(--text-2);
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.lp-margin-row.is-satisfied .lp-margin-row.is-violated .lp-margin-row.is-violated .lp-margin-value { color: var(--coral-text); }
-.lp-margin-row.is-boundary .lp-margin-row.is-boundary .lp-margin-value { color: var(--cyan-text); }
-
-/* Untested and undecided are deliberately quiet rather than green: they are
-   not passes, and they are not failures either. */
-.lp-margin-row.is-not-applicable .lp-margin-name,
-.lp-margin-row.is-pending .lp-margin-name { color: var(--text-dim); }
-
-
-.lp-margin-icon {
-  color: var(--text-dim);
-  font-size: 13px;
+/* The bar spans the whole row beneath the label. A shared centre is the only
+   thing twelve requirements in five different units have in common. */
+.lp-margin-track {
+  position: relative;
+  grid-column: 2 / -1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-inset);
+  overflow: hidden;
 }
 
-.lp-margins-tightest {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 0;
-  font-size: var(--fs-tiny);
-  color: var(--text-dim);
+.lp-margin-zero {
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: var(--line-button);
 }
 
-.lp-margins-tightest b {
-  font-family: var(--font-data);
-  font-weight: 500;
-  color: var(--text-2);
-}
+.lp-margin-bar { position: absolute; top: 0; bottom: 0; }
 
-.lp-margins-tightest-value {
-  font-family: var(--font-data);
-  margin-left: auto;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
+.lp-margin-bar.is-positive { background: var(--mint); border-radius: 0 2px 2px 0; }
+.lp-margin-bar.is-negative { background: var(--coral); border-radius: 2px 0 0 2px; }
 
-/* One quiet line under the list. The claim boundary and the requirement texts
-   are in the report; this only says so. */
+/* Clamped at the track's edge, and said so: a bar that kept growing would
+   stop being comparable and squash every other row flat. */
+.lp-margin-bar.is-clamped { opacity: 0.9; }
+.lp-margin-bar.is-clamped::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: repeating-linear-gradient(
+    90deg, transparent 0 1px, var(--bg-surface) 1px 2px
+  );
+}
+.lp-margin-bar.is-positive.is-clamped::after { right: 0; }
+.lp-margin-bar.is-negative.is-clamped::after { left: 0; }
+
+.lp-margin-row.is-satisfied .lp-margin-icon { color: var(--mint); }
+.lp-margin-row.is-violated .lp-margin-icon { color: var(--coral); }
+.lp-margin-row.is-violated .lp-margin-value { color: var(--coral-text); }
+.lp-margin-row.is-violated .lp-margin-name { color: var(--text-2); }
+.lp-margin-row.is-boundary .lp-margin-icon,
+.lp-margin-row.is-boundary .lp-margin-value { color: var(--cyan-text); }
+
+/* Untested and undecided are quiet rather than green: neither is a pass, and
+   neither is a failure. Their track is empty, which is the honest drawing. */
+.lp-margin-row.is-not-applicable,
+.lp-margin-row.is-pending { opacity: 0.62; }
+
+.lp-margin-row.is-not-applicable .lp-margin-track,
+.lp-margin-row.is-pending .lp-margin-track { background: transparent; }
+
+.lp-margin-row.is-not-applicable .lp-margin-zero,
+.lp-margin-row.is-pending .lp-margin-zero { background: var(--line-inner); }
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+
 .lp-margins-foot {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   margin: 0;
   font-size: var(--fs-tiny);
   line-height: 1.45;
-  color: var(--text-dimmest);
 }
 
+.lp-margins-foot span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lp-margins-foot svg { flex: none; font-size: 12px; }
+
 .lp-margins-untested { color: var(--text-dim); }
+.lp-margins-report { color: var(--text-dimmest); }

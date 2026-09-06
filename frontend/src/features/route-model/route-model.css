@@ -1,25 +1,28 @@
-/* Route cost model: slip, risk appetite, roughness. Console surfaces only --
-   no new card aesthetic, and the validity label is part of every heading
-   rather than a badge that can be styled away. */
+/* Route cost model: slip, risk appetite, roughness.
+
+   Console rules: flat surfaces, 2px radius, mono for measured data only. No
+   risk colour anywhere in here -- this panel reports how a number was arrived
+   at, and confidence is not a safety verdict. */
 
 .lp-rm { display: flex; flex-direction: column; gap: 12px; }
 
 .lp-rm-section {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding-bottom: 10px;
+  gap: 8px;
+  padding-bottom: 11px;
   border-bottom: 1px solid var(--line-inner);
 }
 
-.lp-rm-section:last-child { border-bottom: none; padding-bottom: 0; }
+.lp-rm-section:last-of-type { border-bottom: none; padding-bottom: 0; }
 
 .lp-rm-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
 }
+
+.lp-rm-head-icon { font-size: 14px; color: var(--text-dim); }
 
 .lp-rm-head h4 {
   margin: 0;
@@ -28,16 +31,35 @@
   color: var(--text-2);
 }
 
-/* Never decorative: this is the difference between a measurement and a model. */
 .lp-rm-validity {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* The chip's border carries the claim: solid where the number was measured,
+   dashed where it was modelled. "Not measured" looks like a dashed edge, so
+   the distinction survives a glance without spending any colour on it. */
+.lp-rm-chip {
+  padding: 1px 5px;
+  border-radius: var(--radius);
   font-family: var(--font-data);
   font-size: var(--fs-tiny);
-  letter-spacing: 0.05em;
-  color: var(--text-dim);
+  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
-.lp-rm-validity-second { color: var(--text-dimmest); }
+.lp-rm-chip.is-measured {
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
+}
+
+.lp-rm-chip.is-model {
+  border: 1px dashed var(--line-button);
+  color: var(--text-dim);
+}
+
+/* ── Figures ─────────────────────────────────────────────────────────────── */
 
 .lp-rm-figures {
   display: grid;
@@ -46,7 +68,7 @@
   margin: 0;
 }
 
-.lp-rm-figure { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lp-rm-figure { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 
 .lp-rm-figure dt {
   font-size: var(--fs-tiny);
@@ -66,29 +88,70 @@
 
 .lp-rm-hint { font-size: var(--fs-tiny); color: var(--text-dimmest); }
 
-.lp-rm-line {
+/* ── The line that says what it cost ─────────────────────────────────────── */
+
+.lp-rm-cost {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
   margin: 0;
-  font-size: var(--fs-small);
-  line-height: 1.5;
-  color: var(--text-3);
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-size: var(--fs-tiny);
+  color: var(--text-dim);
 }
 
-.lp-rm-line b {
+.lp-rm-cost svg { font-size: 12px; color: var(--text-dim); }
+
+.lp-rm-cost b {
   font-family: var(--font-data);
   font-weight: 500;
+  font-size: var(--fs-small);
   color: var(--text-2);
+  font-variant-numeric: tabular-nums;
 }
 
+/* The arrow points from the mean-slip figure to the tail-priced one; `back`
+   is the only chevron in the set, so it is turned to face forward. */
+.lp-rm-arrow { transform: rotate(180deg); }
+
+/* Alpha changes the ranking cost and nothing else. The tag sits on the same
+   line as the two figures so the caveat cannot be read separately from them. */
+.lp-rm-scope-tag {
+  padding: 1px 5px;
+  border: 1px dashed var(--line-button);
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-dim);
+}
+
+/* ── A block the backend considered and did not apply ────────────────────── */
+
 .lp-rm-absent {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   margin: 0;
-  font-size: var(--fs-small);
+  padding: 7px 9px;
+  border: 1px dashed var(--line-inner);
+  border-radius: var(--radius);
+  font-size: var(--fs-tiny);
   line-height: 1.5;
   color: var(--text-dim);
 }
 
+.lp-rm-absent svg { flex: none; margin-top: 1px; font-size: 12px; color: var(--text-dimmest); }
 
 .lp-rm-foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin: 0;
   font-size: var(--fs-tiny);
   color: var(--text-dimmest);
 }
+
+.lp-rm-foot svg { flex: none; font-size: 12px; }

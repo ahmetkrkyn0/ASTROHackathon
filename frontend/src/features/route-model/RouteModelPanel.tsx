@@ -1,20 +1,30 @@
 import type { ReactNode } from 'react'
+import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
 import type { RouteModelView } from './routeModel'
 import './route-model.css'
 
 /**
- * The rail readout for slip, risk appetite and roughness.
+ * Slip, risk appetite and roughness: what the planner charged this route.
  *
- * Figures and their validity label, and nothing else. Each of these three
- * blocks ships a claim of eighty to a hundred and twenty words -- what the
- * slip curve is anchored to, where the risk sigma comes from, why a LOLA
- * roughness statistic is not the roughness of a cell -- and every one of those
- * sentences earns its place in the mission report. In a rail column they were
- * a wall of prose that buried the six numbers they qualify.
+ * Figures and their validity, and nothing else -- each of these blocks ships
+ * eighty to a hundred and twenty words of claim, and all of it is in the
+ * mission report where the measure is wide enough to read it.
  *
- * The validity labels stay, because a number from this backend is never shown
- * without one. What moves is the argument behind them.
+ * VALIDITY IS DRAWN, NOT JUST WRITTEN. The chip's border says how the number
+ * was arrived at: solid for MEASURED, dashed for MODEL. A dashed edge is what
+ * "not measured" looks like, so the distinction survives a glance rather than
+ * needing the word to be read -- and it costs no colour, which matters because
+ * this console spends risk colour only on safety semantics, and how confident
+ * a number is is not a safety verdict.
  */
+
+/** Solid border for a measurement, dashed for a model. */
+function Validity({ level }: { level: string }) {
+  const measured = level.toUpperCase().startsWith('MEASURED')
+  return (
+    <span className={`lp-rm-chip ${measured ? 'is-measured' : 'is-model'}`}>{level}</span>
+  )
+}
 
 function Figure({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -28,21 +38,34 @@ function Figure({ label, value, hint }: { label: string; value: string; hint?: s
 
 function Section({
   title,
+  icon,
   validity,
   children,
 }: {
   title: string
+  icon: IconName
   validity: ReactNode
   children: ReactNode
 }) {
   return (
     <section className="lp-rm-section">
       <header className="lp-rm-head">
+        <Icon name={icon} className="lp-rm-head-icon" />
         <h4>{title}</h4>
         <span className="lp-rm-validity">{validity}</span>
       </header>
       {children}
     </section>
+  )
+}
+
+/** A block the backend considered and did not apply. A slot, visibly empty. */
+function Absent({ children }: { children: ReactNode }) {
+  return (
+    <p className="lp-rm-absent">
+      <Icon name="info" />
+      <span>{children}</span>
+    </p>
   )
 }
 
@@ -53,7 +76,11 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
   return (
     <div className="lp-rm">
       {view.slip ? (
-        <Section title="Mobility · slip" validity={view.slip.validity ?? 'MODEL'}>
+        <Section
+          title="Mobility · slip"
+          icon="climb"
+          validity={<Validity level={view.slip.validity ?? 'MODEL'} />}
+        >
           {view.slip.applied ? (
             <>
               <dl className="lp-rm-figures">
@@ -67,21 +94,28 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
                 />
                 <Figure label="Wheel dist." value={n(view.slip.distanceFactor, 2, '×')} />
               </dl>
-              {/* The figure an operator plans against: what slip cost THIS
-                  route, rather than what slip is in general. */}
-              <p className="lp-rm-line">
-                Added <b>{n(view.slip.extraHours, 2)} h</b> ·{' '}
+              {/* What slip cost THIS route, which is the figure an operator
+                  plans against rather than what slip is in general. */}
+              <p className="lp-rm-cost">
+                <Icon name="clock" />
+                <b>{n(view.slip.extraHours, 2)} h</b>
+                <Icon name="energy" />
                 <b>{n(view.slip.extraDrawnWh, 0)} Wh</b>
+                <span>added by slip</span>
               </p>
             </>
           ) : (
-            <p className="lp-rm-absent">Not applied — this profile declares no slip curve.</p>
+            <Absent>Not applied — this profile declares no slip curve.</Absent>
           )}
         </Section>
       ) : null}
 
       {view.risk ? (
-        <Section title="Risk appetite" validity={view.risk.validity ?? 'MODEL'}>
+        <Section
+          title="Risk appetite"
+          icon="levels"
+          validity={<Validity level={view.risk.validity ?? 'MODEL'} />}
+        >
           {view.risk.applied && view.risk.alpha !== null ? (
             <>
               <dl className="lp-rm-figures">
@@ -94,15 +128,16 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
               </dl>
               {/* Both figures, always. The planner's clock does not move with
                   alpha, so the adjusted hours alone would be a schedule nobody
-                  is flying. "Ranking only" is the short form of the backend's
-                  scope sentence, which the report carries in full. */}
-              <p className="lp-rm-line">
-                Ranking only: <b>{n(view.risk.hours, 2)} h</b> →{' '}
+                  is flying. */}
+              <p className="lp-rm-cost is-ranking">
+                <span className="lp-rm-scope-tag">ranking only</span>
+                <b>{n(view.risk.hours, 2)} h</b>
+                <Icon name="back" className="lp-rm-arrow" />
                 <b>{n(view.risk.riskAdjustedHours, 2)} h</b>
               </p>
             </>
           ) : (
-            <p className="lp-rm-absent">Nominal — no tail pricing requested.</p>
+            <Absent>Nominal — no tail pricing requested.</Absent>
           )}
         </Section>
       ) : null}
@@ -110,11 +145,12 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
       {view.roughness ? (
         <Section
           title="Roughness"
+          icon="terrain"
           validity={
             <>
-              {view.roughness.validity ?? 'MEASURED'}
+              <Validity level={view.roughness.validity ?? 'MEASURED'} />
               {view.roughness.scaleValidity ? (
-                <span className="lp-rm-validity-second"> · scale {view.roughness.scaleValidity}</span>
+                <Validity level={`scale ${view.roughness.scaleValidity}`} />
               ) : null}
             </>
           }
@@ -132,20 +168,28 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
                     : `${view.roughness.cellsInPsr}`}
                 />
               </dl>
-              <p className="lp-rm-line">
-                {view.roughness.baselineM !== null ? `${view.roughness.baselineM} m baseline` : 'LOLA LDRM'}
-                {view.roughness.weight !== null ? ` · weight ${view.roughness.weight}` : ''}
+              <p className="lp-rm-cost">
+                <Icon name="layers" />
+                <span>
+                  {view.roughness.baselineM !== null
+                    ? `${view.roughness.baselineM} m baseline`
+                    : 'LOLA LDRM'}
+                  {view.roughness.weight !== null ? ` · weight ${view.roughness.weight}` : ''}
+                </span>
               </p>
             </>
           ) : (
             // The backend's reason names the cache file and the script that
             // builds it. That belongs in the report; the rail states the fact.
-            <p className="lp-rm-absent">Not applied — no roughness layer on this deployment.</p>
+            <Absent>Not applied — no roughness layer on this deployment.</Absent>
           )}
         </Section>
       ) : null}
 
-      <p className="lp-rm-foot">Claims and sources in the mission report.</p>
+      <p className="lp-rm-foot">
+        <Icon name="report" />
+        Claims and sources in the mission report.
+      </p>
     </div>
   )
 }
