@@ -195,6 +195,24 @@ export interface ReportCopy {
     terrain: string
     planner: string
     milestones: string
+    safety: string
+    costModel: string
+  }
+  /**
+   * Labels for the evidence the rail panels deliberately do not carry.
+   * The claim sentences themselves come from the backend and are printed in
+   * its own words, so only the scaffolding around them is translated.
+   */
+  evidence: {
+    requirement: string
+    margin: string
+    worstAt: string
+    untested: string
+    claimBoundary: string
+    monitor: string
+    scope: string
+    notApplied: string
+    sources: string
   }
   notes: {
     recharges: (n: string) => string
@@ -298,6 +316,19 @@ export const COPY: Record<ReportLang, ReportCopy> = {
       terrain: 'Terrain cut',
       planner: 'Planner evidence',
       milestones: 'Milestones',
+      safety: 'Formal safety requirements',
+      costModel: 'Cost model evidence',
+    },
+    evidence: {
+      requirement: 'Requirement',
+      margin: 'Margin',
+      worstAt: 'Tightest at',
+      untested: 'Could not be tested on this trace. Untested is not passed.',
+      claimBoundary: 'Claim boundary',
+      monitor: 'Monitor',
+      scope: 'Where it applies',
+      notApplied: 'Not applied',
+      sources: 'Sources',
     },
     notes: {
       recharges: (n) => `${n} recharge stops (dashed green)`,
@@ -398,6 +429,19 @@ export const COPY: Record<ReportLang, ReportCopy> = {
       terrain: 'Arazi kesiti',
       planner: 'Planlayıcı kanıtları',
       milestones: 'Kilometre taşları',
+      safety: 'Formal güvenlik gereksinimleri',
+      costModel: 'Maliyet modeli kanıtı',
+    },
+    evidence: {
+      requirement: 'Gereksinim',
+      margin: 'Marj',
+      worstAt: 'En dar nokta',
+      untested: 'Bu izde test edilemedi. Test edilmemiş, geçmiş değildir.',
+      claimBoundary: 'İddia sınırı',
+      monitor: 'İzleyici',
+      scope: 'Nereye giriyor',
+      notApplied: 'Uygulanmadı',
+      sources: 'Kaynaklar',
     },
     notes: {
       recharges: (n) => `${n} şarj molası (kesikli yeşil)`,

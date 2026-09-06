@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { PlanResponse } from '../../api'
 import type { RouteStatistics } from '../../net/types'
 import { riskToHex } from '../../colormap'
+import { CostModelEvidence, SafetyEvidence } from './EvidenceSections'
 import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
 import {
   COPY,
@@ -696,6 +697,18 @@ export const MissionReportModal: React.FC<Props> = ({
                       </div>
                     ))}
                   </dl>
+                </Section>
+
+                {/* The evidence the rail deliberately does not carry: the
+                    twelve requirements as written, and each cost block's claim
+                    boundary in the backend's own words. A report is where a
+                    sentence that long is actually read. */}
+                <Section label={t.sections.safety} icon="shield">
+                  <SafetyEvidence plan={plan} t={t} />
+                </Section>
+
+                <Section label={t.sections.costModel} icon="evidence">
+                  <CostModelEvidence plan={plan} t={t} />
                 </Section>
 
                 <Section label={t.sections.milestones} icon="flag">

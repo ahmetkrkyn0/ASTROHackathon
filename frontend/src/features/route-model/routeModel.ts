@@ -38,6 +38,8 @@ export interface SlipView {
   extraDrawnWh: number | null
   claim: string | null
   reason: string | null
+  /** Literature the curve is anchored to. Shown in the report, not the rail. */
+  references: string[]
 }
 
 export interface RiskView {
@@ -73,6 +75,7 @@ export interface RoughnessView {
   cellsInPsr: number | null
   claim: string | null
   reason: string | null
+  references: string[]
 }
 
 export interface RouteModelView {
@@ -93,6 +96,12 @@ function num(source: Record<string, unknown> | null, key: string): number | null
   if (!source) return null
   const value = source[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function strings(source: Record<string, unknown> | null, key: string): string[] {
+  if (!source) return []
+  const value = source[key]
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
 }
 
 function str(source: Record<string, unknown> | null, key: string): string | null {
@@ -123,6 +132,7 @@ export function readRouteModel(result: unknown): RouteModelView {
           extraDrawnWh: num(slipRoute, 'extra_drawn_wh'),
           claim: str(slipRoot, 'claim'),
           reason: str(slipRoot, 'reason'),
+          references: strings(slipRoot, 'references'),
         }
       : null,
     risk: riskRoot
@@ -159,6 +169,7 @@ export function readRouteModel(result: unknown): RouteModelView {
           cellsInPsr: num(roughRoute, 'cells_in_psr'),
           claim: str(roughRoot, 'claim'),
           reason: str(roughRoot, 'reason'),
+          references: strings(roughRoot, 'references'),
         }
       : null,
   }

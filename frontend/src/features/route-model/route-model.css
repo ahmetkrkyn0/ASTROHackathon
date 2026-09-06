@@ -86,21 +86,9 @@
   color: var(--text-dim);
 }
 
-/* Scope reads before the claim: it is what stops a risk-adjusted figure being
-   taken for the route's own physics. */
-.lp-rm-scope {
-  margin: 0;
-  padding: 6px 8px;
-  border-left: 2px solid var(--line-card);
-  background: var(--bg-inset);
-  font-size: var(--fs-tiny);
-  line-height: 1.5;
-  color: var(--text-3);
-}
 
-.lp-rm-claim {
+.lp-rm-foot {
   margin: 0;
   font-size: var(--fs-tiny);
-  line-height: 1.5;
   color: var(--text-dimmest);
 }

@@ -3,9 +3,19 @@ import type { RouteModelView } from './routeModel'
 import './route-model.css'
 
 /**
- * A number with its validity beside it, which is the only way a number from
- * this backend is allowed on screen.
+ * The rail readout for slip, risk appetite and roughness.
+ *
+ * Figures and their validity label, and nothing else. Each of these three
+ * blocks ships a claim of eighty to a hundred and twenty words -- what the
+ * slip curve is anchored to, where the risk sigma comes from, why a LOLA
+ * roughness statistic is not the roughness of a cell -- and every one of those
+ * sentences earns its place in the mission report. In a rail column they were
+ * a wall of prose that buried the six numbers they qualify.
+ *
+ * The validity labels stay, because a number from this backend is never shown
+ * without one. What moves is the argument behind them.
  */
+
 function Figure({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="lp-rm-figure">
@@ -55,70 +65,56 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
                     ? `at ${view.slip.maxSlipSlopeDeg.toFixed(1)}°`
                     : undefined}
                 />
-                <Figure label="Wheel distance" value={n(view.slip.distanceFactor, 2, '×')} />
+                <Figure label="Wheel dist." value={n(view.slip.distanceFactor, 2, '×')} />
               </dl>
-              {/* The one figure an operator plans against: what slip cost THIS
-                  route, as opposed to what slip is in general. */}
+              {/* The figure an operator plans against: what slip cost THIS
+                  route, rather than what slip is in general. */}
               <p className="lp-rm-line">
-                Slip added <b>{n(view.slip.extraHours, 2)} h</b> and{' '}
-                <b>{n(view.slip.extraDrawnWh, 0)} Wh</b> to this route.
+                Added <b>{n(view.slip.extraHours, 2)} h</b> ·{' '}
+                <b>{n(view.slip.extraDrawnWh, 0)} Wh</b>
               </p>
             </>
           ) : (
-            <p className="lp-rm-absent">
-              Not applied{view.slip.reason ? ` — ${view.slip.reason}` : ': this profile declares no slip curve.'}
-            </p>
+            <p className="lp-rm-absent">Not applied — this profile declares no slip curve.</p>
           )}
-          {view.slip.claim ? <p className="lp-rm-claim">{view.slip.claim}</p> : null}
         </Section>
       ) : null}
 
       {view.risk ? (
-        <Section title="Risk appetite · CVaR" validity={view.risk.validity ?? 'MODEL'}>
+        <Section title="Risk appetite" validity={view.risk.validity ?? 'MODEL'}>
           {view.risk.applied && view.risk.alpha !== null ? (
             <>
               <dl className="lp-rm-figures">
                 <Figure label="Alpha" value={view.risk.alpha.toFixed(3)} />
-                <Figure label="Tail multiplier" value={n(view.risk.multiplier, 3, '×')} />
+                <Figure label="Tail mult." value={n(view.risk.multiplier, 3, '×')} />
                 <Figure
                   label="Slip μ → tail"
                   value={`${n(view.risk.meanSlipMu)} → ${n(view.risk.meanSlipCvar)}`}
                 />
               </dl>
-              {/* Both numbers, and which is which. The risk-adjusted hours are
-                  not the mission's hours -- the planner's clock does not move
-                  with alpha -- so presenting only the adjusted figure would
-                  report a schedule nobody is flying. */}
+              {/* Both figures, always. The planner's clock does not move with
+                  alpha, so the adjusted hours alone would be a schedule nobody
+                  is flying. "Ranking only" is the short form of the backend's
+                  scope sentence, which the report carries in full. */}
               <p className="lp-rm-line">
-                Priced at the tail: <b>{n(view.risk.hours, 2)} h</b> →{' '}
-                <b>{n(view.risk.riskAdjustedHours, 2)} h</b>,{' '}
-                <b>{n(view.risk.drawnWh, 0)} Wh</b> →{' '}
-                <b>{n(view.risk.riskAdjustedDrawnWh, 0)} Wh</b>.
+                Ranking only: <b>{n(view.risk.hours, 2)} h</b> →{' '}
+                <b>{n(view.risk.riskAdjustedHours, 2)} h</b>
               </p>
             </>
           ) : (
-            <p className="lp-rm-absent">
-              Nominal — no risk appetite was requested, so the cost grid is the
-              ordinary one. α = 0.5 would not be the mean.
-            </p>
+            <p className="lp-rm-absent">Nominal — no tail pricing requested.</p>
           )}
-          {/* Scope before claim: it is the sentence that stops the adjusted
-              figures being read as the route's physics. */}
-          {view.risk.scope ? <p className="lp-rm-scope">{view.risk.scope}</p> : null}
-          {view.risk.claim ? <p className="lp-rm-claim">{view.risk.claim}</p> : null}
         </Section>
       ) : null}
 
       {view.roughness ? (
         <Section
-          title="Terrain roughness"
+          title="Roughness"
           validity={
             <>
               {view.roughness.validity ?? 'MEASURED'}
               {view.roughness.scaleValidity ? (
-                <span className="lp-rm-validity-second">
-                  {' '}· scale {view.roughness.scaleValidity}
-                </span>
+                <span className="lp-rm-validity-second"> · scale {view.roughness.scaleValidity}</span>
               ) : null}
             </>
           }
@@ -130,28 +126,26 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
                 <Figure label="Max" value={n(view.roughness.maxRoughnessM, 2, ' m')} />
                 <Figure
                   label="In PSR"
-                  // Null is not zero: without the PSR mask nobody checked.
+                  // Null is not zero: without the mask, nobody checked.
                   value={view.roughness.cellsInPsr === null
                     ? 'not checked'
-                    : `${view.roughness.cellsInPsr} cells`}
+                    : `${view.roughness.cellsInPsr}`}
                 />
               </dl>
               <p className="lp-rm-line">
-                {view.roughness.product ?? 'LOLA LDRM'}
-                {view.roughness.baselineM !== null
-                  ? ` · ${view.roughness.baselineM} m baseline`
-                  : ''}
+                {view.roughness.baselineM !== null ? `${view.roughness.baselineM} m baseline` : 'LOLA LDRM'}
                 {view.roughness.weight !== null ? ` · weight ${view.roughness.weight}` : ''}
               </p>
             </>
           ) : (
-            <p className="lp-rm-absent">
-              Not applied{view.roughness.reason ? ` — ${view.roughness.reason}` : '.'}
-            </p>
+            // The backend's reason names the cache file and the script that
+            // builds it. That belongs in the report; the rail states the fact.
+            <p className="lp-rm-absent">Not applied — no roughness layer on this deployment.</p>
           )}
-          {view.roughness.claim ? <p className="lp-rm-claim">{view.roughness.claim}</p> : null}
         </Section>
       ) : null}
+
+      <p className="lp-rm-foot">Claims and sources in the mission report.</p>
     </div>
   )
 }

@@ -65,7 +65,7 @@
 
 .lp-margin-row {
   display: grid;
-  grid-template-columns: 16px 54px 1fr auto;
+  grid-template-columns: 15px 52px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 5px 2px;
@@ -74,12 +74,6 @@
 }
 
 .lp-margin-row:last-child { border-bottom: none; }
-
-.lp-margin-icon {
-  display: flex;
-  color: var(--text-dim);
-  font-size: 14px;
-}
 
 .lp-margin-id {
   font-family: var(--font-data);
@@ -102,53 +96,52 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The reason spans the full row under it: it is a sentence, not a column. */
-.lp-margin-reason {
-  grid-column: 2 / -1;
-  font-size: var(--fs-tiny);
-  color: var(--text-dimmest);
-  line-height: 1.4;
-}
-
-.lp-margin-row.is-satisfied .lp-margin-icon { color: var(--mint); }
-.lp-margin-row.is-violated .lp-margin-icon { color: var(--coral); }
-.lp-margin-row.is-violated .lp-margin-value { color: var(--coral-text); }
-.lp-margin-row.is-boundary .lp-margin-icon { color: var(--cyan); }
-.lp-margin-row.is-boundary .lp-margin-value { color: var(--cyan-text); }
+.lp-margin-row.is-satisfied .lp-margin-row.is-violated .lp-margin-row.is-violated .lp-margin-value { color: var(--coral-text); }
+.lp-margin-row.is-boundary .lp-margin-row.is-boundary .lp-margin-value { color: var(--cyan-text); }
 
 /* Untested and undecided are deliberately quiet rather than green: they are
    not passes, and they are not failures either. */
 .lp-margin-row.is-not-applicable .lp-margin-name,
 .lp-margin-row.is-pending .lp-margin-name { color: var(--text-dim); }
 
-.lp-margins-note {
-  margin: 0;
-  font-size: var(--fs-tiny);
-  line-height: 1.5;
+
+.lp-margin-icon {
   color: var(--text-dim);
+  font-size: 13px;
 }
 
-.lp-margins-claim {
+.lp-margins-tightest {
   display: flex;
-  gap: 7px;
+  align-items: baseline;
+  gap: 6px;
   margin: 0;
-  padding: 7px 9px;
-  border-radius: var(--radius);
-  background: var(--bg-inset);
   font-size: var(--fs-tiny);
-  line-height: 1.5;
-  color: var(--text-3);
-}
-
-.lp-margins-claim svg {
-  flex: none;
-  margin-top: 1px;
   color: var(--text-dim);
 }
 
-.lp-margins-provenance {
-  margin: 0;
+.lp-margins-tightest b {
   font-family: var(--font-data);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.lp-margins-tightest-value {
+  font-family: var(--font-data);
+  margin-left: auto;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One quiet line under the list. The claim boundary and the requirement texts
+   are in the report; this only says so. */
+.lp-margins-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
   font-size: var(--fs-tiny);
+  line-height: 1.45;
   color: var(--text-dimmest);
 }
+
+.lp-margins-untested { color: var(--text-dim); }

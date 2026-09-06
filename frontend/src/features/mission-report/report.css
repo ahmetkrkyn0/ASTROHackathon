@@ -1022,3 +1022,156 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ── Evidence: formal safety + cost model ───────────────────────────────────
+   The prose the rail panels deliberately do not carry. Same three rules as the
+   rest of the report -- flat surfaces, 2px radius, mono for measured data --
+   and set at a readable measure rather than a rail's width, which is the whole
+   reason it lives here. */
+
+.lp-ev { display: flex; flex-direction: column; gap: 14px; }
+
+.lp-ev-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-small);
+}
+
+.lp-ev-table th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-card);
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.lp-ev-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line-inner);
+  vertical-align: top;
+  color: var(--text-3);
+}
+
+.lp-ev-table tbody tr:last-child td { border-bottom: none; }
+
+/* Numbers are measured data, so they are the only mono in the table. */
+.lp-ev-num {
+  font-family: var(--font-data);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-ev-id {
+  display: block;
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-dim);
+}
+
+/* The requirement as written. Set at a comfortable measure -- this is the
+   sentence that says what was actually checked. */
+.lp-ev-fretish {
+  display: block;
+  max-width: 62ch;
+  margin-top: 2px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.lp-ev-reason {
+  display: block;
+  margin-top: 3px;
+  font-size: var(--fs-tiny);
+  line-height: 1.45;
+  color: var(--text-dimmest);
+}
+
+.lp-ev-table tr.is-violated .lp-ev-num { color: var(--coral-text); }
+.lp-ev-table tr.is-boundary .lp-ev-num { color: var(--cyan-text); }
+.lp-ev-table tr.is-not-applicable .lp-ev-fretish { color: var(--text-dim); }
+
+.lp-ev-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-inner);
+}
+
+.lp-ev-block:last-child { border-bottom: none; padding-bottom: 0; }
+
+.lp-ev-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lp-ev-block-head h5 {
+  margin: 0;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.lp-ev-validity {
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.lp-ev-claim,
+.lp-ev-scope {
+  margin: 0;
+  max-width: 78ch;
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.lp-ev-scope {
+  padding: 7px 10px;
+  border-left: 2px solid var(--line-card);
+  background: var(--bg-inset);
+}
+
+.lp-ev-claim-label {
+  display: block;
+  margin-bottom: 3px;
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.lp-ev-meta {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-dimmest);
+}
+
+.lp-ev-refs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 78ch;
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+  color: var(--text-dimmest);
+}
+
+.lp-ev-refs-label {
+  font-family: var(--font-data);
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
