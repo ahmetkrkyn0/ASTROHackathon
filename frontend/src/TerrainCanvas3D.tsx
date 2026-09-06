@@ -28,6 +28,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { ClickMode, MapViewMode } from './MapCanvas'
 import type { Waypoint } from './api'
+import { Icon } from './components/Fleet/SpecIcons'
 import {
   buildLidarScanFromBackend,
   fetchBackendLidarScan,
@@ -1394,7 +1395,7 @@ export default function TerrainCanvas3D({
     // 1.5 x 1.5 x 2.5 m (L x W x H). The GLB is an AI-generated asset at an
     // arbitrary native scale, not metres, so it is uniformly rescaled here
     // so its longest horizontal dimension becomes this rover's real length.
-    // "Gerçek boyutlu" means it reads correctly next to the 0.3-2 m rocks
+    // "True to scale" means it reads correctly next to the 0.3-2 m rocks
     // and the physically-scaled terrain, not a claim that every proportion
     // is a laser-measured replica of the real rover.
     const ROVER_MODEL_LENGTH_M = 1.5
@@ -3220,26 +3221,26 @@ export default function TerrainCanvas3D({
         </aside>
       )}
 
-      {/* 3D Camera Mode Switcher (FPS vs Kuşbakışı Orbit) */}
+      {/* Camera mode: on the surface with the rover, or above it. */}
       {status === 'ready' && (
         <div className="terrain3d-camera-switch">
           <button
             type="button"
             className={`terrain3d-cam-btn ${cameraMode === 'fps' ? 'is-active' : ''}`}
             onClick={() => setCameraMode('fps')}
-            title="Birinci Şahıs (FPS) Yüzey Bakış Açısı - Düz Zemin"
+            title="First-person view from the surface, at rover eye height"
           >
-            <span className="cam-icon">🎯</span>
-            <span>FPS Bakış Açısı</span>
+            <Icon name="target" className="cam-icon" />
+            <span>First person</span>
           </button>
           <button
             type="button"
             className={`terrain3d-cam-btn ${cameraMode === 'orbit' ? 'is-active' : ''}`}
             onClick={() => setCameraMode('orbit')}
-            title="Kuşbakışı Yörünge İnceleme Görünümü"
+            title="Orbit view, looking down on the site"
           >
-            <span className="cam-icon">🛰️</span>
-            <span>Kuşbakışı (Orbit)</span>
+            <Icon name="map" className="cam-icon" />
+            <span>Orbit</span>
           </button>
         </div>
       )}

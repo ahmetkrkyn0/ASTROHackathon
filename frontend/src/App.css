@@ -6262,7 +6262,7 @@ select {
   background: transparent;
   border: 1px solid transparent;
   color: #94a3b8;
-  font-family: 'Outfit', -apple-system, sans-serif;
+  font-family: var(--font-body);
   font-size: 12px;
   font-weight: 600;
   padding: 6px 14px;
@@ -6343,7 +6343,7 @@ select {
 .terrain3d-lidar-title small {
   margin-top: 2px;
   color: rgba(165, 243, 252, 0.58);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-data);
   font-size: 8px;
   letter-spacing: 0.09em;
 }
@@ -6391,7 +6391,7 @@ select {
   background: rgba(46, 229, 157, 0.12);
   box-shadow: 0 0 13px rgba(46, 229, 157, 0.12);
   color: #70f4bd;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-data);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.1em;
@@ -6430,7 +6430,7 @@ select {
 
 .terrain3d-lidar-grid span {
   color: rgba(165, 243, 252, 0.47);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-data);
   font-size: 7px;
   letter-spacing: 0.08em;
 }
@@ -6438,7 +6438,7 @@ select {
 .terrain3d-lidar-grid strong {
   margin-top: 3px;
   color: #d9fbff;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-data);
   font-size: 11px;
   font-weight: 700;
 }
@@ -6494,7 +6494,7 @@ select {
 .terrain3d-lidar-footer b {
   margin-left: auto;
   color: rgba(223, 251, 255, 0.78);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-data);
   font-weight: 700;
 }
 
