@@ -905,7 +905,7 @@ export default function App() {
             <BottomDock />
 
             {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
-            <footer className="lp-status-bar">
+            <footer className={`lp-status-bar ${missionMode === 'analyze' ? 'is-analyze' : ''}`}>
               <div className="lp-status-left">
                 <div className="lp-scale">
                   <span className="lp-scale-rule" aria-hidden="true" />

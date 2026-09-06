@@ -964,7 +964,7 @@ select {
      read as a distribution, and every milestone wrapped. It carries six
      sections of analysis against the left rail's controls, so it is the wider
      of the two now. */
-  grid-template-columns: 300px minmax(0, 1fr) 400px;
+  grid-template-columns: 300px minmax(0, 1fr) 584px;
   overflow: hidden;
 }
 
@@ -978,8 +978,15 @@ select {
 /* Analyze: 340px, up from 288. This rail now carries the whole analysis on
    its own -- route metrics, the profile comparison and the cost readout --
    with no left rail sharing the reporting. */
+/* ANALYZE: the rail runs up to the Mission Report button above it.
+   584 = the top bar's 24px right padding plus the fixed width of its right
+   cluster (report, systems, status, data link). That cluster is content-sized
+   and right-aligned, so its left edge sits the same distance from the window
+   edge at every viewport width -- which is why a fixed column can line up with
+   it and stay lined up. The report button now sits directly over the analysis
+   it opens. */
 .content-grid.no-left-rail {
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 584px;
 }
 
 .left-rail,
@@ -4129,8 +4136,7 @@ select {
   align-items: baseline;
   gap: 14px;
   flex: none;
-  min-width: 0;
-  flex: 0 1 auto;
+  flex: none;
 }
 
 .lp-playback-stat {
@@ -5637,11 +5643,11 @@ select {
 
    `crosshair` stays as the fallback: a browser that refuses the data URI gets
    the old behaviour rather than an arrow. */
-.map-canvas.is-picking-start {
+.lp-map-pick-start {
   cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2226%22%20height%3D%2226%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2305070d%22%20stroke-width%3D%223.4%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%235fe3b0%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E") 13 13, crosshair;
 }
 
-.map-canvas.is-picking-goal {
+.lp-map-pick-goal {
   cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2226%22%20height%3D%2226%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2305070d%22%20stroke-width%3D%223.4%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%23ed856e%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E") 13 13, crosshair;
 }
 
@@ -5813,4 +5819,20 @@ select {
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   font-weight: 700;
+}
+
+
+/* ── The strip in ANALYZE ──
+   Moving the strip under the map cost it the rails' width, and pulling the
+   analysis rail out to the Mission Report button cost it 584 more: at 1680 it
+   has 1096px for a scale, a four-item risk key, the transport and three
+   readouts, and everything clipped -- "Caution" lost its last two letters and
+   the slope readout vanished entirely.
+
+   The risk key is what goes. It is the only thing on the strip repeated
+   elsewhere: the rail's RISK DISTRIBUTION carries the same four colours with
+   their share of the route beside them, which is the legend plus the data. In
+   PLAN there is no rail and no transport, so the strip keeps it. */
+.lp-status-bar.is-analyze .lp-risk-legend {
+  display: none;
 }

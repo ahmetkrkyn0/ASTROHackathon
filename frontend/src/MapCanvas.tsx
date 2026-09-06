@@ -364,12 +364,15 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
             ? 'Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time.'
             : `Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time. Press Enter to place ${clickMode === 'start' ? 'Start' : 'Goal'} at the cursor.`
         }
+        /* Deliberately NOT `map-canvas`: App.css already owns that name with an
+           `aspect-ratio: 1/1` and a `calc(100vh - 130px)` cap, and borrowing it
+           for a cursor squared the terrain and took ~500px off its width. */
         className={
           clickMode === 'start'
-            ? 'map-canvas is-picking-start'
+            ? 'lp-map-pick-start'
             : clickMode === 'goal'
-              ? 'map-canvas is-picking-goal'
-              : 'map-canvas'
+              ? 'lp-map-pick-goal'
+              : undefined
         }
         style={{
           width: '100%',
