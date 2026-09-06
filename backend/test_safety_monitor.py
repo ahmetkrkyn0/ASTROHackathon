@@ -460,7 +460,7 @@ def _bound(rover_id: str, **kwargs):
 
 def test_catalogue_thresholds_come_from_the_rover():
     viper = _bound("nasa_viper")
-    assert [rid for rid in viper] == [f"LP-R{i:02d}" for i in range(1, 12)]
+    assert [rid for rid in viper] == [f"LP-R{i:02d}" for i in range(1, 13)]
     assert viper["LP-R01"].threshold == 96.0 and viper["LP-R01"].requirement.rover_parameter == "h_max_shadow_h"
     assert viper["LP-R02"].threshold == 20.0
     assert viper["LP-R03"].threshold == 6.0 and viper["LP-R03"].threshold_source == "catalogue"
@@ -659,7 +659,7 @@ def test_fret_export_carries_every_requirement_with_fret_like_fields():
     assert doc["project"] == "LunaPath"
     assert "not exported from the FRET tool" in doc["provenance"]["method"]
     reqs = doc["requirements"]
-    assert [r["reqid"] for r in reqs] == [f"LP-R{i:02d}" for i in range(1, 12)]
+    assert [r["reqid"] for r in reqs] == [f"LP-R{i:02d}" for i in range(1, 13)]
     for r in reqs:
         assert r["fulltext"].startswith(("The rover shall", "In ", "Upon "))
         assert r["rationale"]

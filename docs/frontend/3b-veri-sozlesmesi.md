@@ -1421,6 +1421,198 @@ oynatır; kurtarma politikasının kendi riski `survival.rollout`'tur). Varsayı
 `survival.p_safe` + `best_action_name`; replan panelinde `recovery_suggestion` (eylem + hedef piksel + `P_safe`);
 SHERPA kartında `faults`. Her sayının yanında `validity: MODEL` ve `failure_model.source` (varsayım).
 
+## Termal operasyon zarfı ve tolere edilebilir saplanma süresi — NASA JSC'nin VIPER çerçeveleri (5 Eylül 2026 eki, C6)
+
+Termal denetim artık **zamanlı**: rover'ın iç sıcaklığı kataloğun `thermal_tau_s` zaman sabitiyle birinci
+dereceden gevşeyerek `surface_to_inner(yüzey(t))` hedefine gider; yüzey(t) 4-B maliyet küpünün zaten entegre
+ettiği regolit dinamiğidir (aynı dizi, `cost_cube.surface_temperature_series`). Her (dilim, kaba blok) için
+`max_dwell_h` — nominal iç sıcaklıkla o dilimde bloğa varan rover'ın zarfı (batarya ∩ elektronik) terk etmesine
+kalan saat — kapalı formla hesaplanır. Planlayıcı isteğe bağlı olarak **iç sıcaklığı etikette taşır** ve zarf
+dışına çıkan her geçişi (bekleme **ya da hamle**) reddeder; `/api/replan` saplanma anından itibaren iki geri
+sayım verir (termal dwell + A1'in haven penceresi = JSC'nin "tolerable entrenched time" tanımı). Kaynak: Slusser
+vd., ICES-2025-376 (NASA JSC/MSFC). Rapor: [thermal_dwell_report.md](../research/thermal_dwell_report.md).
+
+Kurallar:
+
+- **`require_thermal_dwell` verilmezse planlayıcı bit-eşittir** (standart üç 4-B rota 41 / 116 / 8 hamle, 2-B SHA
+  kilitleri testte). Dwell küpü, rota iç sıcaklık izi ve `thermal_dwell` bloğu **her zaman** raporlanır (rover
+  `thermal_tau_s` ilan ediyorsa; LUVMI-M'de `dwell_model.model: "unavailable"` + neden, kısıt istenirse 422).
+- **Model MODEL/UNCALIBRATED'dır:** `validity: "MODEL"`, `thermal_lag_validity: "UNCALIBRATED"` her blokta; hiçbir
+  yerde termal doğruluk iddiası yok. `surface_to_inner` işarete göre parçalıdır (LPR-1/VIPER: yüzey < 0 → +60 K,
+  ≥ 0 → −40 K): batarya zarfına giren yüzey bantları **−60…−25 °C** ve **40…75 °C**; −25…0 °C yüzeyler iç
+  sıcaklığı 35–60 °C'ye atar ("sıcak-sınırlı" kararı ofset modelinin artefaktıdır, aşırı ısınma değil).
+- **Isıtıcı yalnız etiketli varsayımla sıcaklık modeline girer:** `heater_model: "none"` (varsayılan; ısıtıcı
+  yalnız enerji modelinde) ya da `"thermostat_assumed"` (ısıtıcı iç sıcaklığı zarfın alt sınırında tutar; her
+  yanıtta `heater_source` `"assumption: …"`). Kataloğa alan eklenmedi.
+- **Başlangıç iç sıcaklığı** `initial_inner_c` (varsayılan zarf orta noktası: LPR-1/VIPER 17,5 °C, Yutu-2 10 °C).
+  Dwell küpü "nominalle varan rover" içindir; `path_inner_c` rotanın gerçek entegrasyonudur.
+- **Kısıt kalışa değil sıcaklığa bağlıdır:** ilk sürümdeki "kalış ≤ max_dwell" kuralını planlayıcı iki karanlık
+  blok arasında ileri-geri hamleyle boşa çıkarıyordu (testte bulundu); gölgede kıpırdanmak da soğutur. Kalış
+  bütçesini aşan bekleme zaten zarf dışına çıkar ve reddedilir. Baskınlıkta termal marj ekseni kabadır (zarf
+  genişliğinin %10'u): kısıt tam değerle denetlenir, budama kaba.
+- **JSC'nin sayıları alıntıdır** (`quoted`): kutupta maksimum Güneş yüksekliği 1,5°, 16 azimut × 6 eğim = 96
+  durum, "aviyonik kutusu AFT 65 °C → 77 °C, 12 °C aşım" örneği. JSC'nin zarf eksenleri (eğim × rover
+  başlığına göre Güneş azimutu, maksimum yükseklikte) rover gövdesi ister; bizim eksenlerimiz Güneş yüksekliği ×
+  Güneş'e paralel eğim (heat1d transient'i). Aynı yöntem, bizim model; karşılaştırma değil.
+
+### `POST /api/plan-4d` — üç yeni istek alanı
+
+```json
+{"start": {"row": 358, "col": 494}, "goal": {"row": 206, "col": 426}, "rover_id": "lpr_1",
+ "start_utc": "2026-09-28T00:00:00",
+ "require_thermal_dwell": true, "initial_inner_c": 17.5, "heater_model": "thermostat_assumed"}
+```
+
+| Alan | Tür | Anlam |
+|---|---|---|
+| `require_thermal_dwell` | bool, varsayılan `false` | İç sıcaklığı zarf dışına çıkaran her geçişi reddet. `thermal_tau_s` olmayan rover'da 422. |
+| `initial_inner_c` | float −150…150, isteğe bağlı | İlk dilimde iç sıcaklık (°C); yoksa zarf orta noktası. Zarf dışı verilirse kısıt hemen gerekçeli 404. |
+| `heater_model` | `"none"` \| `"thermostat_assumed"` | Isıtıcının sıcaklık modeline girişi (yukarıda). |
+
+### `POST /api/plan-4d` — `thermal_dwell` bloğu (her zaman), dört yeni liste, `metrics` alanları
+
+```json
+"thermal_dwell": {
+  "model": "inner_temperature_first_order_lag_v1", "validity": "MODEL", "thermal_lag_validity": "UNCALIBRATED",
+  "requested": false, "applied": false,
+  "dwell_model": {"model": "inner_temperature_first_order_lag_v1", "n_start_bins": 120, "n_slices": 120, "slices_per_bin": 1,
+                  "blocks": [125, 125], "n_states": 1875000, "slice_hours": 0.0359, "tau_s": 7200.0, "initial_inner_c": 17.5,
+                  "initial_outside_envelope": false, "heater_model": "none", "heater_source": null,
+                  "envelope": {"lo_c": 0.0, "hi_c": 35.0, "lo_component": "battery", "hi_component": "battery"}, "compute_ms": 641.2},
+  "envelope": {"lo_c": 0.0, "hi_c": 35.0, "lo_component": "battery", "hi_component": "battery"},
+  "initial_inner_c": 17.5, "heater_model": "none", "heater_source": null, "tau_s": 7200.0,
+  "cube": {"slice": 0, "traversable_blocks": 11402, "lookahead_h": 4.31, "fraction_unlimited": 0.032, "fraction_cold_limited": 0.960,
+           "fraction_hot_limited": 0.008, "finite_median_h": 0.547, "finite_p5_h": 0.36, "finite_p95_h": 1.9},
+  "route": {"wait_steps": 0, "max_stay_h": 0.0, "min_dwell_margin_h": 0.36, "min_margin_state": 12, "min_margin_side": "cold",
+            "min_margin_component": "battery", "states_past_thermal_dwell": 0, "open_ended_states": 3,
+            "inner": {"min_c": -15.66, "max_c": 17.5, "states_outside": 34, "first_exit_h": 0.666, "side": "cold", "component": "battery",
+                      "target_rule": "the arrival block's surface, slice by slice (the planner's shadow-clock rule)"}},
+  "shadow_model": {"model": "spice_horizon", "time_varying": true, "start_utc": "2026-09-28T00:00:00"},
+  "scope": "...", "quoted": {"max_polar_sun_elevation_deg": 1.5, "case_matrix": 96, "...": "..."}, "references": ["..."], "claim": "MODEL, uncalibrated: ..."
+},
+"path_stay_hours": [0.0, 0.0, "..."], "path_max_dwell_h": [0.55, null, "..."], "path_dwell_margin_h": [0.55, null, "..."],
+"path_inner_c": [17.5, 12.3, "..."],
+"metrics": {"min_dwell_margin_h": 0.36, "states_past_thermal_dwell": 0, "max_stay_h": 0.0, "thermal_dwell_enforced": false,
+            "edges_rejected": {"thermal_dwell": 0, "...": "..."}, "...": "..."}
+```
+
+| Alan | Anlam |
+|---|---|
+| `thermal_dwell.dwell_model` | Küpün kimliği ve boyutları; `model: "unavailable"` + `reason` (τ'suz rover) olabilir; `compute_ms` küp süresi. |
+| `thermal_dwell.cube` | Dilim 0'da geçilebilir blokların dwell dağılımı: sınırsız (hedef zarf içinde, ufuk boyunca çıkmıyor) / soğuk-sınırlı / sıcak-sınırlı kesirleri, sonlu dwell medyanı ve p5/p95, ufuk (`lookahead_h`). |
+| `thermal_dwell.route` | Rotanın kalışları bütçelerine karşı (`min_dwell_margin_h`, en dar durumun yanı/bileşeni, bütçeyi aşan durum sayısı — kısıt açıkken 0) ve `inner`: rota boyunca entegre iç sıcaklık (min/maks, zarf dışı durum sayısı, ilk çıkış saati ve yanı/bileşeni). |
+| `path_stay_hours`, `path_max_dwell_h`, `path_dwell_margin_h`, `path_inner_c` | Durum başına: bloktaki kesintisiz hareketsiz saat; kalışın başladığı dilimdeki blok bütçesi (`null` = açık uçlu); fark; iç sıcaklık. τ'suz rover'da hepsi `null`. |
+| `metrics.*` | `min_dwell_margin_h`, `states_past_thermal_dwell`, `max_stay_h`, `thermal_dwell_enforced`; `edges_rejected.thermal_dwell` reddedilen geçiş sayısı (bekleme + hamle). |
+| `safety_margins.requirements[LP-R12]` | Yeni gereksinim `thermal_dwell`: "The rover shall always satisfy stay_h <= max_dwell_h", STL `always (dwell_margin_h >= 0)`; sinyal `path_dwell_margin_h` (açık uçlu = +∞); 2-B izlerde ve τ'suz rover'da `applicable: false`. D3'ün LP-R04/R05 değerleri (statik) **değişmedi**. |
+| 404 | `require_thermal_dwell` ile bulunamazsa gerekçeye "Thermal dwell: N transitions were refused … at the first slice X percent of the passable blocks allow an unlimited stay, Y percent are cold-limited (median finite dwell Z h)" cümlesi eklenir. |
+
+### `GET /api/cell-telemetry?row=&col=&thermal_dwell=true&start_utc=&t_hours=0&lookahead_hours=24&initial_inner_c=&heater_model=none`
+
+```json
+"thermal_dwell": {
+  "max_dwell_h": 0.2661, "open_ended": false, "side": "cold", "component": "battery", "initial_inner_c": 17.5, "initial_outside_envelope": false,
+  "heater_model": "none", "heater_source": null, "lookahead_h": 24.0, "slice_hours": 0.5,
+  "inner_equilibrium_c": {"peak": -86.4, "cold_end": -89.99}, "envelope_verdict": {"peak": "cold", "cold_end": "cold"},
+  "surface_c": {"sunlit_peak": -146.4, "cold_end": -149.99, "base_shadow_ratio": 0.61, "series_min": -183.1, "series_max": -146.4, "shadow_fraction": 1.0},
+  "envelope": {"lo_c": 0.0, "hi_c": 35.0, "lo_component": "battery", "hi_component": "battery"}, "thermal_lag_validity": "UNCALIBRATED",
+  "dwell_model": {"model": "inner_temperature_first_order_lag_v1", "validity": "MODEL", "...": "..."},
+  "shadow_model": {"model": "spice_horizon", "time_varying": true}, "start_utc": "2026-09-28T00:00:00", "t_hours": 0.0, "row": 358, "col": 494,
+  "tolerable_entrenched": {
+    "thermal": {"max_dwell_h": 0.2661, "tolerable_h": 0.2661, "remaining_h": 0.2661, "used_fraction": 0.0, "level": "ok", "open_ended": false, "side": "cold", "component": "battery"},
+    "haven": {"tolerable_h": 12.4, "hours_until_earthset": 184.6, "time_to_safe_haven_h": null, "is_safe_haven": false, "note": "...", "remaining_h": 12.4, "level": "ok"},
+    "overall": {"tolerable_h": 0.2661, "remaining_h": 0.2661, "used_fraction": 0.0, "level": "ok", "open_ended": false, "limiting": "thermal"}}
+},
+"thermal_dwell_model": {"model": "inner_temperature_first_order_lag_v1", "validity": "MODEL", "shadow_model": {"...": "..."}, "...": "..."}
+```
+
+| Alan | Anlam |
+|---|---|
+| `thermal_dwell` | `thermal_dwell=true` ile: hücrenin kendi gölge serisi (ufuk küpünden tek profil; epok yoksa statik + neden) → yüzey serisi → dwell. `max_dwell_h` `null` ise `open_ended` (ufuk içinde çıkmıyor) ya da `dwell_model.model: "unavailable"` (τ yok; yalnız `envelope_verdict`). `envelope_verdict` D3'ün statik okumasıdır (tepe ve soğuk uç: `inside`/`cold`/`hot`). `tolerable_entrenched`: JSC'nin tanımıyla iki geri sayım (`haven` A1 + A4'ten; çekirdek/ufuk küpü yoksa `null`), `overall` küçüğü ve `limiting`. Aksi hâlde `null`, nedeni `thermal_dwell_model.reason`. Mevcut alanlar aynen. |
+
+### `POST /api/replan` — `state.entrenched_hours` → `entrenchment` bloğu ve `entrenchment` tetikleyicisi
+
+```json
+{"current": {"row": 186, "col": 34}, "goal": {"row": 494, "col": 450}, "rover_id": "lpr_1", "utc": "2026-09-13T00:00:00",
+ "state": {"entrenched_hours": 0.5, "actual_inner_c": 12.0, "actual_soc": 0.8, "planned_soc": 0.85},
+ "heater_model": "none", "dwell_lookahead_hours": 24}
+```
+
+```json
+"entrenchment": {
+  "entrenched_hours": 0.5,
+  "thermal": {"max_dwell_h": 0.62, "open_ended": false, "side": "cold", "component": "battery", "initial_inner_c": 12.0, "initial_outside_envelope": false,
+              "lookahead_h": 24.0, "envelope_verdict": {"peak": "cold", "cold_end": "cold"}, "heater_model": "none", "heater_source": null,
+              "inner_source": "state.actual_inner_c", "tolerable_h": 0.62, "remaining_h": 0.12, "used_fraction": 0.806, "level": "critical", "open_ended": false},
+  "haven": {"tolerable_h": 0.0, "hours_until_earthset": 184.6, "time_to_safe_haven_h": null, "is_safe_haven": false,
+            "note": "no safe haven is reachable before the Earth sets: the haven clock has already run out", "remaining_h": -0.5, "level": "fail"},
+  "overall": {"tolerable_h": 0.0, "remaining_h": -0.5, "used_fraction": null, "level": "fail", "open_ended": false, "limiting": "haven"},
+  "levels": ["ok", "warning", "critical", "fail"],
+  "thresholds": {"warning_fraction": 0.5, "critical_fraction": 0.8, "source": "LunaPath's own level fractions; the framing is JSC's tolerable entrenched time"},
+  "quoted": {"tolerable_entrenched_time": "...", "caveats": "..."}, "current_pixel": [186, 34], "utc": "2026-09-13T00:00:00",
+  "shadow_model": {"model": "spice_horizon", "time_varying": true}
+},
+"entrenchment_model": {"model": "inner_temperature_first_order_lag_v1", "validity": "MODEL", "...": "..."},
+"triggers": [{"trigger_id": "entrenchment", "detail": "entrenched 0.50 h of 0.00 h tolerable (inf percent used, -0.50 h left): level fail"}]
+```
+
+| Alan | Anlam |
+|---|---|
+| `state.entrenched_hours` | Rover'ın hareket edemediği süre (h). Verilince ve `utc` varsa: mevcut hücrenin termal dwell'i (`state.actual_inner_c` varsa oradan, yoksa nominal) ve haven penceresi hesaplanır; `state.tolerable_entrenched_hours` (verilmemişse) bloğun `overall.tolerable_h`'ı ile doldurulur ve `entrenchment` tetikleyicisi koşar. |
+| `entrenchment.*.level` | `ok` (< %50 kullanıldı), `warning` (%50–80), `critical` (%80–100), `fail` (≥ %100). Tetikleyici `critical` ve `fail`'de ateşler (replan); `warning` yalnız raporlanır. Eşik kesirleri bizim seçimimizdir (`thresholds.source`). |
+| `entrenchment.haven` | JSC'nin tanımı: Dünya bağlantısına kalan saat (A4) − en yakın haven'a sürüş saati (A1). Sonlu Dünya batışına karşı ulaşılabilir haven yoksa bütçe **0** ("saat zaten dolmuş"), Dünya batmıyorsa `null` (açık uçlu). Çekirdek/ufuk küpü yoksa `null`. |
+| `entrenchment_model` | `unavailable` + neden: `state.entrenched_hours` yok, `utc` yok, grid yok. |
+| `evaluated` / `skipped` | `entrenchment` bütçe sonluysa `evaluated`'a, aksi hâlde `skipped`'a (`missing: ["tolerable_entrenched_hours"]`) girer. Mevcut alanlar aynen. |
+
+### `GET /api/thermal-dwell?start_utc=&rover_id=&t_hours=0&lookahead_hours=24&slice_hours=0.5&coarsen=4&initial_inner_c=&heater_model=none&format=json|f32&field=max_dwell_h|side|open_ended`
+
+```json
+{"rover_id": "lpr_1", "rover_name": "LPR-1 (Varsayilan)", "start_utc": "2026-09-28T00:00:00", "t_hours": 0.0, "lookahead_hours": 24.0,
+ "dwell_model": {"model": "inner_temperature_first_order_lag_v1", "validity": "MODEL", "n_slices": 48, "slice_hours": 0.5, "...": "..."},
+ "shadow_model": {"model": "spice_horizon", "time_varying": true},
+ "summary": {"slice": 0, "traversable_blocks": 11402, "lookahead_h": 24.0, "fraction_unlimited": 0.03, "fraction_cold_limited": 0.96, "fraction_hot_limited": 0.01,
+             "finite_median_h": 0.55, "finite_p5_h": 0.36, "finite_p95_h": 1.9},
+ "grid": {"rows": 125, "cols": 125, "resolution_m": 20.0, "coarsen": 4, "downsample": 4},
+ "fields": {"max_dwell_h": {"units": "h", "min": 0.27, "max": 24.0, "nodata": 4223, "binary_url": "/api/thermal-dwell?...&format=f32&field=max_dwell_h"},
+            "side": {"units": "code", "min": 0.0, "max": 2.0, "nodata": 4223, "binary_url": "..."},
+            "open_ended": {"units": "boolean", "min": 0.0, "max": 1.0, "nodata": 4223, "binary_url": "..."}},
+ "binary_format": {"dtype": "float32", "endian": "little", "order": "row-major", "shape": [125, 125], "nodata": "NaN"},
+ "quoted": {"...": "..."}, "claim": "..."}
+```
+
+| Alan | Anlam |
+|---|---|
+| `fields.max_dwell_h` | **Kaba** gridde (H/coarsen × W/coarsen), `t_hours` dilimine varan rover'ın dwell'i; açık uçlu bloklar `lookahead` kalanına **kapatılır** (`open_ended` alanı 1,0 der); geçilmez blok NaN. `format=f32` ile `/api/layers` tel biçimi, `X-Layer-Validity: MODEL`, `X-Layer-Downsample: coarsen`. |
+| `fields.side` | 0 ufuk içinde çıkmıyor, 1 soğuk, 2 sıcak. |
+| Hatalar | τ'suz rover 422 (+ neden); `t_hours`/`lookahead_hours` > 168 422; küp bütçesi (`_check_cube_budget`) 422. |
+
+### `GET /api/thermal-envelope?rover_id=&initial_inner_c=&heater_model=none`
+
+```json
+{"rover_id": "lpr_1", "rover_name": "LPR-1 (Varsayilan)", "model": "inner_temperature_first_order_lag_v1", "validity": "MODEL", "thermal_lag_validity": "UNCALIBRATED",
+ "dwell_model": {"model": "inner_temperature_first_order_lag_v1", "validity": "MODEL", "tau_s": 7200.0},
+ "envelope": {"lo_c": 0.0, "hi_c": 35.0, "lo_component": "battery", "hi_component": "battery"}, "initial_inner_c": 17.5, "heater_model": "none", "heater_source": null,
+ "axes": {"el_deg": {"edges": [-3.0, -2.5, "...", 3.0], "label": "Sun elevation at the site (deg)"},
+          "s_par_deg": {"edges": [-30.0, -27.5, "...", 30.0], "label": "terrain slope along the Sun's azimuth (deg, positive toward the Sun)"}},
+ "counts": {"unlimited": 19, "cold_limited": 173, "hot_limited": 13, "unsampled": 83},
+ "cells": [{"el_bin": 7, "s_par_bin": 22, "el_mid_deg": 0.75, "s_par_mid_deg": 26.25, "samples": 412, "surface_c_max": 28.2, "surface_c_mean": 9.4,
+            "inner_c": -11.8, "verdict": "cold_limited", "dwell_h": 2.31, "side": "cold", "component": "battery"}, "..."],
+ "verdicts": ["unlimited", "cold_limited", "hot_limited", "unsampled"], "method": "...",
+ "meta": {"lat_deg": -88.9205, "slopes_deg": [0.0, 2.5, "...", 30.0], "ndays": 13, "solver": "crank-nicolson", "n_samples": 235159, "bins_visited": 205, "bins_total": 288, "seconds": 233.3, "...": "..."},
+ "quoted": {"...": "..."}, "claim": "..."}
+```
+
+| Alan | Anlam |
+|---|---|
+| `cells[*]` | Kutu başına heat1d transient'inin **maksimum** yüzey sıcaklığı, iç sıcaklık, karar (`unlimited` = hedef zarf içinde; `cold_limited`/`hot_limited` = `initial_inner_c`'den sınıra `dwell_h` saat; `unsampled` = heat1d izi bu geometriye hiç düşmedi) ve yan/bileşen. JSC'nin grafiğinin bizim modeldeki karşılığı; 12 × 24 kutu. |
+| Kaynak | `scripts/build_thermal_envelope_cache.py` (heat1d GitHub main, ≈ 1–4 dk) → `lunapath/data/processed/thermal_envelope_heat1d.npz` + meta (gitignore). Önbellek yoksa 422 + yönlendirme; sentetik matris **üretilmez**. |
+
+**Frontend'in çizebileceği (kod değişmeden):** `GET /api/thermal-dwell` `max_dwell_h` katmanını (kaba grid) ısı haritası,
+`side`'ı renk kodu olarak; rota kartında `thermal_dwell.route.inner` (ilk zarf çıkışı saati, min iç sıcaklık) ve
+`path_inner_c` profili; hücre kartında `thermal_dwell.max_dwell_h` + `tolerable_entrenched.overall` (seviye ve
+sınırlayıcı); replan panelinde `entrenchment` geri sayımı (iki bar: termal ve haven; `warning/critical/fail` rengi);
+ayrı bir "zarf" panelinde `GET /api/thermal-envelope` kutu matrisi (JSC'nin Fig. 6'sının bizim eksenlerimizdeki
+karşılığı). Her sayının yanında `validity: MODEL`, `thermal_lag_validity: UNCALIBRATED` ve varsa `heater_source`.
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,

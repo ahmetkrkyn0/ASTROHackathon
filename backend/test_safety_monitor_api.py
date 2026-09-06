@@ -17,7 +17,7 @@ from test_plan_4d_endpoint import _earth_series_closing_at, _fake_safe_haven_map
 SHAPE = (16, 16)
 _client = TestClient(app)
 
-REQ_IDS = [f"LP-R{i:02d}" for i in range(1, 12)]
+REQ_IDS = [f"LP-R{i:02d}" for i in range(1, 13)]
 
 
 def _grids():

@@ -566,6 +566,53 @@
           "telemetry"
         ]
       }
+    },
+    {
+      "reqid": "LP-R12",
+      "name": "thermal_dwell",
+      "parent_reqid": null,
+      "project": "LunaPath",
+      "fulltext": "The rover shall always satisfy stay_h <= max_dwell_h",
+      "rationale": "JSC's tolerable entrenched time (C6, ICES-2025-376): a stationary rover may not outlast the time its inner temperature takes to leave the battery/electronics envelope in that block.",
+      "comments": "dwell_margin_h is path_dwell_margin_h from /api/plan-4d (the block's max_dwell_h at the slice the stay began, minus the consecutive stationary hours; open-ended dwell = +inf) or the telemetry sample's own dwell_margin_h. MODEL, uncalibrated (thermal_dwell.THERMAL_DWELL_CLAIM); rovers without thermal_tau_s never carry the signal and report the requirement as not applicable.",
+      "semantics": {
+        "type": "nasa",
+        "scope": null,
+        "condition": null,
+        "component": "rover",
+        "timing": "always",
+        "response": "stay_h <= max_dwell_h",
+        "variables": [
+          "dwell_margin_h"
+        ],
+        "ftLTL": "G (max_dwell_h - stay_h >= 0)",
+        "stl": "always (dwell_margin_h >= 0)",
+        "monitored_stl": "always (dwell_margin_h >= 0)"
+      },
+      "monitor": {
+        "class": "safety",
+        "signal": "dwell_margin_h",
+        "unit": "h",
+        "rover_parameter": null,
+        "threshold_source": "fixed",
+        "thresholds_by_rover": {
+          "lpr_1": 0.0,
+          "luvmi_m": 0.0,
+          "nasa_viper": 0.0,
+          "cnsa_yutu_2": 0.0
+        },
+        "formula_by_rover": {
+          "lpr_1": "always (dwell_margin_h >= 0)",
+          "luvmi_m": "always (dwell_margin_h >= 0)",
+          "nasa_viper": "always (dwell_margin_h >= 0)",
+          "cnsa_yutu_2": "always (dwell_margin_h >= 0)"
+        },
+        "normalizer": "hours_per_day",
+        "trace_kinds": [
+          "4d",
+          "telemetry"
+        ]
+      }
     }
   ]
 }

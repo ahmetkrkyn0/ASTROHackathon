@@ -413,6 +413,7 @@ SIGNAL_NAMES: tuple[str, ...] = (
     "moving",
     "earth_link_h",
     "haven_margin_h",
+    "dwell_margin_h",
     "dist_to_goal_m",
     "at_goal",
 )
@@ -433,6 +434,7 @@ SAMPLE_KEYS: tuple[str, ...] = (
     "charging",
     "earth_link_h",
     "haven_margin_h",
+    "dwell_margin_h",
     "dist_to_goal_m",
     "at_goal",
 )
@@ -687,8 +689,13 @@ def trace_from_plan4d(
     resolution_m: float,
     rover: Mapping[str, Any] | None = None,
     path_time_to_haven_h: Sequence[float | None] | None = None,
+    path_dwell_margin_h: Sequence[float | None] | None = None,
 ) -> Trace:
     """A ``/api/plan-4d`` route as a trace, on the planner's coarse grid.
+
+    *path_dwell_margin_h* (C6) is the planner's per-state thermal dwell
+    margin; None entries (open-ended dwell) are +inf. Without it the
+    ``dwell_margin_h`` signal is absent and LP-R12 is not applicable.
 
     Time is the slice clock; the shadow counter is the planner's own
     ``path_dark_hours``; a move whose arrival cell does not see the Earth
@@ -775,6 +782,11 @@ def trace_from_plan4d(
                 margins.append(float(deadline) - float(tts))
         columns["haven_margin_h"] = margins
         notes["haven_unreachable_states"] = unreachable
+    if path_dwell_margin_h is not None:
+        if len(path_dwell_margin_h) != n:
+            raise ValueError("path_dwell_margin_h must match path_states")
+        columns["dwell_margin_h"] = [math.inf if v is None else float(v) for v in path_dwell_margin_h]
+        notes["dwell_source"] = "planner path_dwell_margin_h (open-ended dwell = +inf)"
     return _finish_trace(
         "4d",
         t,
@@ -896,6 +908,7 @@ def trace_from_samples(
         ("lateral_slope_deg", "lateral_slope_deg"),
         ("earth_link_h", "earth_link_h"),
         ("haven_margin_h", "haven_margin_h"),
+        ("dwell_margin_h", "dwell_margin_h"),
         ("dist_to_goal_m", "dist_to_goal_m"),
     ):
         values = numeric(key)
@@ -1124,6 +1137,23 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ft_ltl="G (at_goal -> soc_pct >= soc_min)", stl_text="always (at_goal -> (soc_pct >= soc_min))", normalizer="threshold",
         trace_kinds=("2d", "4d", "telemetry"),
         notes="Scope at_goal is a sample mask; inapplicable when the goal is never reached (LP-R10 reports that).",
+    ),
+    Requirement(
+        id="LP-R12", name="thermal_dwell", cls="safety", scope=None, condition=None, timing="always",
+        response="stay_h <= max_dwell_h",
+        rationale=(
+            "JSC's tolerable entrenched time (C6, ICES-2025-376): a stationary rover may not outlast the "
+            "time its inner temperature takes to leave the battery/electronics envelope in that block."
+        ),
+        signal="dwell_margin_h", unit="h", kind="lower", rover_parameter=None,
+        ft_ltl="G (max_dwell_h - stay_h >= 0)", stl_text="always (dwell_margin_h >= 0)", normalizer="hours_per_day",
+        trace_kinds=("4d", "telemetry"),
+        notes=(
+            "dwell_margin_h is path_dwell_margin_h from /api/plan-4d (the block's max_dwell_h at the slice the "
+            "stay began, minus the consecutive stationary hours; open-ended dwell = +inf) or the telemetry "
+            "sample's own dwell_margin_h. MODEL, uncalibrated (thermal_dwell.THERMAL_DWELL_CLAIM); rovers "
+            "without thermal_tau_s never carry the signal and report the requirement as not applicable."
+        ),
     ),
 )
 

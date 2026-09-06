@@ -207,6 +207,25 @@ FAILURE_MODEL_SOURCE: str = (
     "catalogue publishes either number"
 )
 
+# ── C6: the heater in the temperature model ─────────────────────────────────
+# Every profile publishes a heater power (p_heater_w, p_shadow_w) and a shadow
+# endurance (h_max_shadow_h), and the energy model drains the heater in
+# shadow -- but no profile publishes how many kelvin that power buys the
+# battery, so the temperature model has no heater at all (D3 measured the
+# consequence: every route's inner temperature leaves the envelope). The
+# thermal dwell model (app/thermal_dwell.py) therefore offers the heater only
+# as an EXPLICIT assumption a caller switches on (heater_model =
+# "thermostat_assumed"), reported with this source string; no profile field
+# is invented and the default remains "none".
+HEATER_THERMOSTAT_ASSUMPTION_SOURCE: str = (
+    "assumption: the survival heater holds the inner temperature at the lower bound of "
+    "the tightest declared operating envelope (bat_op_min_c / elec_op_min_c) for as long "
+    "as the battery lasts -- the reading of a catalogue that publishes a heater power "
+    "(p_heater_w, p_shadow_w) and a shadow endurance (h_max_shadow_h) but no W-to-K "
+    "coefficient; the energy the heater draws is already in cost_engine.housekeeping_power_w. "
+    "Not a rover specification: no profile publishes a thermostat set point"
+)
+
 # Multi-rover catalogue
 ROVERS: dict[str, dict[str, Any]] = {
     "lpr_1": {

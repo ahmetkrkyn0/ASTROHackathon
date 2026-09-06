@@ -25,6 +25,7 @@ from typing import Any
 import numpy as np
 
 from .cost_engine import edge_travel_time_s, lateral_slope_tan
+from .thermal_dwell import route_dwell_report
 
 # Every reason this planner can refuse an edge. Declared once so the metrics
 # always carry the full set of keys and a caller can tell "checked, none"
@@ -60,6 +61,11 @@ REJECTION_KEYS: tuple[str, ...] = (
     # execution failure probability over max_failure_probability, refused
     # only when a survival field and a beta are given.
     "failure_probability",
+    # The thermal dwell (C6): a WAIT that would keep the rover stationary in
+    # a block longer than its inner temperature allows there (the cell's
+    # max_dwell_h at the slice the stay began), refused only under
+    # require_thermal_dwell with a dwell cube.
+    "thermal_dwell",
 )
 
 
@@ -95,6 +101,7 @@ def no_path_reason_4d(
     haven = rejections.get("safe_haven_deadline", 0)
     corridor = rejections.get("continuous_illumination", 0)
     risk = rejections.get("failure_probability", 0)
+    dwell = rejections.get("thermal_dwell", 0)
 
     parts: list[str] = []
     # The envelope first: when the battery or the darkness closed the route,
@@ -135,6 +142,14 @@ def no_path_reason_4d(
             "over max_failure_probability (the chance constraint: every fault "
             "branch is closed with the recovery policy's P_safe)"
         )
+    if dwell:
+        parts.append(
+            f"{dwell} transitions (waits or moves) would have left the rover's inner "
+            "temperature outside its battery/electronics envelope (require_thermal_dwell: "
+            "the thermal dwell -- the inner temperature relaxes toward each occupied "
+            "block's surface-derived target with the rover's thermal_tau_s, and a stay "
+            "in a block may not outlast max_dwell_h there; MODEL, uncalibrated)"
+        )
     if lateral:
         parts.append(
             f"{lateral} edges exceeded the {rover['slope_lateral_max_deg']} deg "
@@ -163,7 +178,7 @@ def no_path_reason_4d(
     lead = "No path found"
     if horizon and not (
         lateral or along or blocked or unknown or soc or endurance or dte or haven
-        or corridor or risk
+        or corridor or risk or dwell
     ):
         lead = "No path found within the time horizon"
     return (
@@ -327,6 +342,7 @@ def _empty(
     continuous_illumination_enforced: bool = False,
     survival_enforced: bool = False,
     start_recovery_prob: float | None = None,
+    thermal_dwell_enforced: bool = False,
 ) -> dict[str, Any]:
     """A failed plan.
 
@@ -346,6 +362,11 @@ def _empty(
         "path_haven_margin_h": None,
         "path_survival_prob": None,
         "path_recovery_prob": None,
+        # The thermal dwell (C6): None without a dwell cube.
+        "path_stay_hours": None,
+        "path_max_dwell_h": None,
+        "path_dwell_margin_h": None,
+        "path_inner_c": None,
         "metrics": {
             "wait_steps": 0,
             "move_steps": 0,
@@ -376,6 +397,11 @@ def _empty(
             "min_recovery_prob": None,
             "start_recovery_prob": start_recovery_prob,
             "survival_enforced": bool(survival_enforced),
+            # The thermal dwell (C6): None without a dwell cube.
+            "min_dwell_margin_h": None,
+            "states_past_thermal_dwell": None,
+            "max_stay_h": None,
+            "thermal_dwell_enforced": bool(thermal_dwell_enforced),
         },
         "error": error,
     }
@@ -418,10 +444,25 @@ _DARK_RATIO_THRESHOLD: float = 0.5
 # here, so the pre-B1 search is reproduced bit for bit either way.
 _SURVIVAL_DOMINANCE_TOL: float = 0.01
 _SURVIVAL_BINS: int = 1000
+# The thermal axis (C6). Under require_thermal_dwell a label whose inner
+# temperature sits within a tenth of the envelope width of a cheaper
+# label's margin is pruned, and the key bins the margin in tenths of the
+# width. Finer settings (one percent, 400 bins, the battery axis's) let the
+# label count explode on Site11's day route -- the inner temperature of two
+# paths meeting at one node differs by tens of kelvin when one came through
+# sunlight and the other through shadow, so almost nothing was pruned: the
+# first real-grid run passed 2.3 GB and ten minutes without finishing; at
+# five percent and 20 bins the infeasible day route took 156 s to refuse.
+# The CONSTRAINT is still checked on the exact value; only the pruning is
+# coarse, so a warmer route within 3.5 K of a cheaper colder one may be
+# dropped. Without the constraint the tolerance is infinite and the key
+# constant: the pre-C6 search bit for bit.
+_THERMAL_MARGIN_TOL_FRAC: float = 0.10
+_THERMAL_MARGIN_BINS: int = 10
 
 
 def _dominated(
-    front: list[tuple[float, float, float, float]],
+    front: list[tuple[float, float, float, float, float]],
     g: float,
     battery: float,
     dark: float,
@@ -430,21 +471,29 @@ def _dominated(
     strict: bool = False,
     surv: float = 1.0,
     surv_tol: float = _SURVIVAL_DOMINANCE_TOL,
+    margin: float = 0.0,
+    margin_tol: float = math.inf,
 ) -> bool:
     """True if some label in *front* is at least as good on every axis.
 
     A label is (cost so far, battery Wh, continuous shadow hours, execution
-    survival). Lower cost, more battery, less shadow and more survival all
-    dominate, each within its tolerance. With *strict* the label must be
-    beaten on at least one axis beyond the tolerance, which is how a label
-    already in the front is told apart from a genuine dominator at pop time.
+    survival, thermal margin -- the inner temperature's distance to the
+    nearer envelope bound). Lower cost, more battery, less shadow, more
+    survival and more thermal margin all dominate, each within its
+    tolerance. With *strict* the label must be beaten on at least one axis
+    beyond the tolerance, which is how a label already in the front is told
+    apart from a genuine dominator at pop time. The thermal axis (C6) is
+    live only under require_thermal_dwell: its default tolerance is
+    infinite, so without the constraint every comparison here is the pre-C6
+    one.
     """
-    for other_g, other_battery, other_dark, other_surv in front:
+    for other_g, other_battery, other_dark, other_surv, other_margin in front:
         if (
             other_g <= g + 1e-12
             and other_battery >= battery - battery_tol
             and other_dark <= dark + dark_tol
             and other_surv >= surv - surv_tol
+            and other_margin >= margin - margin_tol
         ):
             if not strict:
                 return True
@@ -453,13 +502,14 @@ def _dominated(
                 or other_battery > battery + battery_tol
                 or other_dark < dark - dark_tol
                 or other_surv > surv + surv_tol
+                or other_margin > margin + margin_tol
             ):
                 return True
     return False
 
 
 def _insert_label(
-    front: list[tuple[float, float, float, float]],
+    front: list[tuple[float, float, float, float, float]],
     g: float,
     battery: float,
     dark: float,
@@ -467,19 +517,22 @@ def _insert_label(
     dark_tol: float,
     surv: float = 1.0,
     surv_tol: float = _SURVIVAL_DOMINANCE_TOL,
+    margin: float = 0.0,
+    margin_tol: float = math.inf,
 ) -> None:
     """Add a non-dominated label and drop the ones it dominates."""
     front[:] = [
-        (other_g, other_battery, other_dark, other_surv)
-        for other_g, other_battery, other_dark, other_surv in front
+        (other_g, other_battery, other_dark, other_surv, other_margin)
+        for other_g, other_battery, other_dark, other_surv, other_margin in front
         if not (
             g <= other_g + 1e-12
             and battery >= other_battery - battery_tol
             and dark <= other_dark + dark_tol
             and surv >= other_surv - surv_tol
+            and margin >= other_margin - margin_tol
         )
     ]
-    front.append((g, battery, dark, surv))
+    front.append((g, battery, dark, surv, margin))
 
 
 def astar_4d(
@@ -505,8 +558,38 @@ def astar_4d(
     require_continuous_illumination: bool = False,
     survival_field: Any | None = None,
     max_failure_probability: float | None = None,
+    max_dwell_cube: Any | None = None,
+    require_thermal_dwell: bool = False,
 ) -> dict[str, Any]:
     """Plan through space and time. Returns path_states, path_pixels, metrics.
+
+    The thermal dwell (C6)
+    ----------------------
+    *max_dwell_cube* is a ``thermal_dwell.DwellCube``: for every (start
+    slice, block) the hours a rover arriving there with its nominal inner
+    temperature may stand still before that temperature leaves the tightest
+    declared battery/electronics envelope, plus the per-slice inner
+    temperature TARGET the cube was built from. Given, the route is always
+    REPORTED -- ``path_stay_hours`` (consecutive stationary hours in the
+    current block), ``path_max_dwell_h`` (the block's budget at the slice
+    the stay began; None where open-ended), ``path_dwell_margin_h``,
+    ``path_inner_c`` (the inner temperature integrated along the route),
+    and ``metrics.min_dwell_margin_h`` / ``states_past_thermal_dwell`` /
+    ``max_stay_h`` -- computed from the finished route, so the search itself
+    is untouched. With *require_thermal_dwell* it is ENFORCED: every label
+    carries its inner temperature, relaxed toward the occupied block's
+    target slice by slice (a wait: the block waited in; a move: the arrival
+    block, the planner's shadow-clock rule), and any transition -- wait or
+    move -- after which it would sit outside the envelope is refused
+    (tallied as ``thermal_dwell``). A stay longer than the block's dwell is
+    exactly such a wait; enforcing the temperature rather than the stay
+    also closes the loophole a stay rule leaves open, where a rover
+    shuffles between two dark blocks to reset its clock while freezing all
+    the same (found by the first version of this constraint's test). The
+    fifth label axis is the thermal margin (distance to the nearer bound,
+    more is better); without the constraint it has an infinite dominance
+    tolerance and a constant key, so the search is the pre-C6 one bit for
+    bit.
 
     The chance constraint (B1)
     --------------------------
@@ -689,6 +772,15 @@ def astar_4d(
             f"max_failure_probability must lie strictly between 0 and 1, not {beta}",
             survival_enforced=True,
         )
+    dwell_cube = max_dwell_cube
+    enforce_dwell = bool(require_thermal_dwell)
+    if enforce_dwell and dwell_cube is None:
+        return _empty(
+            "max_dwell_cube is required to enforce the thermal dwell "
+            "(require_thermal_dwell=True without a cube to check against: the rover "
+            "declares no thermal_tau_s, or no dwell cube was built)",
+            thermal_dwell_enforced=True,
+        )
     haven_fields = tts is not None
     enforce_haven = bool(require_safe_haven)
     if enforce_haven and not haven_fields:
@@ -835,6 +927,25 @@ def astar_4d(
     h_max_shadow = float(rover["h_max_shadow_h"])
     track = shadow is not None
     surv_tol = _SURVIVAL_DOMINANCE_TOL if enforce_surv else math.inf
+    # The thermal axis (C6): live only under the dwell constraint, where two
+    # labels at one node with different inner temperatures genuinely differ
+    # in what they may still do. Tolerance one percent of the envelope width
+    # (the battery axis's order), key in 400 bins of it.
+    if enforce_dwell:
+        env_width = max(1e-9, float(dwell_cube.envelope.hi) - float(dwell_cube.envelope.lo))
+        margin_tol = _THERMAL_MARGIN_TOL_FRAC * env_width
+        inner0 = float(dwell_cube.initial_inner_c)
+        if not dwell_cube.inside(inner0):
+            return _empty(
+                f"Start inner temperature {inner0:.2f} C is already outside the "
+                f"[{dwell_cube.envelope.lo:g}, {dwell_cube.envelope.hi:g}] C envelope: under "
+                "require_thermal_dwell no transition can begin from outside it",
+                thermal_dwell_enforced=True,
+            )
+    else:
+        env_width = 1.0
+        margin_tol = math.inf
+        inner0 = 0.0
     # The move factor depends on the label only through its battery, and
     # labels at one node differ by less than the key's resolution; memoised
     # at that resolution (a quarter percent of capacity) so the fault
@@ -884,8 +995,19 @@ def astar_4d(
         # key is the pre-B1 one and the cheapest label's product is reported.
         return int(surv * _SURVIVAL_BINS) if enforce_surv else 0
 
-    def label_of(r: int, c: int, t: int, battery_wh: float, dark_h: float, surv: float = 1.0):
-        return (r, c, t, battery_key(battery_wh), dark_key(dark_h), surv_key(surv))
+    def thermal_margin(inner_c: float) -> float:
+        # Distance to the nearer envelope bound; a constant without the
+        # constraint so the fifth axis never separates labels then. (C6.)
+        return dwell_cube.margin_c(inner_c) if enforce_dwell else 0.0
+
+    def inner_key(inner_c: float) -> int:
+        # Part of the label key only under the dwell constraint (C6).
+        return int(thermal_margin(inner_c) / env_width * _THERMAL_MARGIN_BINS) if enforce_dwell else 0
+
+    def label_of(
+        r: int, c: int, t: int, battery_wh: float, dark_h: float, surv: float = 1.0, inner_c: float = 0.0
+    ):
+        return (r, c, t, battery_key(battery_wh), dark_key(dark_h), surv_key(surv), inner_key(inner_c))
 
     def envelope_after(
         exposure: float,
@@ -914,14 +1036,15 @@ def astar_4d(
         return new_battery, new_dark, None
 
     # -- Label-setting A* ---------------------------------------------------
-    start_label = label_of(start[0], start[1], 0, battery0, 0.0, 1.0)
+    start_label = label_of(start[0], start[1], 0, battery0, 0.0, 1.0, inner0)
     g_score: dict[tuple, float] = {start_label: 0.0}
     battery_of: dict[tuple, float] = {start_label: battery0}
     dark_of: dict[tuple, float] = {start_label: 0.0}
     surv_of: dict[tuple, float] = {start_label: 1.0}
+    inner_of: dict[tuple, float] = {start_label: inner0}
     came_from: dict[tuple, tuple] = {}
-    fronts: dict[tuple[int, int, int], list[tuple[float, float, float, float]]] = {
-        (start[0], start[1], 0): [(0.0, battery0, 0.0, 1.0)]
+    fronts: dict[tuple[int, int, int], list[tuple[float, float, float, float, float]]] = {
+        (start[0], start[1], 0): [(0.0, battery0, 0.0, 1.0, thermal_margin(inner0))]
     }
     closed: set[tuple] = set()
     counter = 0
@@ -933,20 +1056,28 @@ def astar_4d(
 
     def push(
         r: int, c: int, t: int, g_new: float, battery_wh: float, dark_h: float, parent: tuple,
-        surv: float = 1.0,
+        surv: float = 1.0, inner_c: float = 0.0,
     ) -> None:
         nonlocal counter
         node = (r, c, t)
         front = fronts.setdefault(node, [])
-        if _dominated(front, g_new, battery_wh, dark_h, battery_tol, dark_tol, surv=surv, surv_tol=surv_tol):
+        margin = thermal_margin(inner_c)
+        if _dominated(
+            front, g_new, battery_wh, dark_h, battery_tol, dark_tol,
+            surv=surv, surv_tol=surv_tol, margin=margin, margin_tol=margin_tol,
+        ):
             return
-        _insert_label(front, g_new, battery_wh, dark_h, battery_tol, dark_tol, surv=surv, surv_tol=surv_tol)
-        label = label_of(r, c, t, battery_wh, dark_h, surv)
+        _insert_label(
+            front, g_new, battery_wh, dark_h, battery_tol, dark_tol,
+            surv=surv, surv_tol=surv_tol, margin=margin, margin_tol=margin_tol,
+        )
+        label = label_of(r, c, t, battery_wh, dark_h, surv, inner_c)
         if g_new < g_score.get(label, math.inf):
             g_score[label] = g_new
             battery_of[label] = battery_wh
             dark_of[label] = dark_h
             surv_of[label] = surv
+            inner_of[label] = inner_c
             came_from[label] = parent
             counter += 1
             h = heuristic(r, c)
@@ -956,11 +1087,12 @@ def astar_4d(
         _f, _h, _n, label = heapq.heappop(heap)
         if label in closed:
             continue
-        row, col, slice_index, _bkey, _dkey, _skey = label
+        row, col, slice_index, _bkey, _dkey, _skey, _ykey = label
         current_g = g_score[label]
         battery_wh = battery_of[label]
         dark_h = dark_of[label]
         surv = surv_of[label]
+        inner_c = inner_of[label]
         # A label pushed earlier may have been dominated since by a better
         # one at the same node; expanding it would only re-derive worse
         # successors.
@@ -974,6 +1106,8 @@ def astar_4d(
             strict=True,
             surv=surv,
             surv_tol=surv_tol,
+            margin=thermal_margin(inner_c),
+            margin_tol=margin_tol,
         ):
             continue
         closed.add(label)
@@ -1013,11 +1147,21 @@ def astar_4d(
                     # Waiting into a dark voxel is leaving the corridor. (A2.)
                     rejections["continuous_illumination"] += 1
                 else:
-                    # No fault on a wait: the survival product is unchanged.
-                    push(
-                        row, col, slice_index + 1,
-                        current_g + wait_step, new_battery, new_dark, label, surv,
+                    # The inner temperature after one more slice in this
+                    # block (C6); a wait that leaves the envelope is refused
+                    # -- which is exactly a stay past the block's dwell.
+                    new_inner = (
+                        dwell_cube.inner_after(inner_c, slice_index, slice_index + 1, row, col)
+                        if enforce_dwell else inner_c
                     )
+                    if enforce_dwell and not dwell_cube.inside(new_inner):
+                        rejections["thermal_dwell"] += 1
+                    else:
+                        # No fault on a wait: the survival product is unchanged.
+                        push(
+                            row, col, slice_index + 1,
+                            current_g + wait_step, new_battery, new_dark, label, surv, new_inner,
+                        )
 
         # MOVE edges
         for d_row, d_col, diagonal in _OFFSETS:
@@ -1155,8 +1299,19 @@ def astar_4d(
                     rejections["failure_probability"] += 1
                     continue
 
+            # The thermal envelope (C6): the inner temperature relaxes toward
+            # the arrival block's target for the slices the move takes, and a
+            # move after which it sits outside the envelope is refused. A
+            # move through shadow cools the rover as surely as a wait does.
+            new_inner = inner_c
+            if enforce_dwell:
+                new_inner = dwell_cube.inner_after(inner_c, slice_index, arrival, nr, nc)
+                if not dwell_cube.inside(new_inner):
+                    rejections["thermal_dwell"] += 1
+                    continue
+
             step = travel_h * (1.0 + 0.5 * (from_cost + to_cost))
-            push(nr, nc, arrival, current_g + step, new_battery, new_dark, label, new_surv)
+            push(nr, nc, arrival, current_g + step, new_battery, new_dark, label, new_surv, new_inner)
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     if goal_label is None:
@@ -1169,6 +1324,7 @@ def astar_4d(
             continuous_illumination_enforced=enforce_corridor,
             survival_enforced=enforce_surv,
             start_recovery_prob=start_recovery,
+            thermal_dwell_enforced=enforce_dwell,
         )
 
     labels: list[tuple] = [goal_label]
@@ -1176,7 +1332,12 @@ def astar_4d(
         labels.append(came_from[labels[-1]])
     labels.reverse()
 
-    states: list[tuple[int, int, int]] = [(r, c, t) for r, c, t, _b, _d, _s in labels]
+    states: list[tuple[int, int, int]] = [(r, c, t) for r, c, t, _b, _d, _s, _y in labels]
+    # The dwell and the inner temperature along the route (C6), from the
+    # finished route -- so the report is the same whether or not the
+    # constraint was enforced (enforced, every inner value is inside).
+    dwell_report = None if dwell_cube is None else route_dwell_report(states, slice_hours, dwell_cube)
+    path_inner_c = None if dwell_cube is None else [round(v, 4) for v in dwell_cube.inner_along(states)]
     batteries = [battery_of[label] for label in labels]
     darks = [dark_of[label] for label in labels]
     survivals = [surv_of[label] for label in labels]
@@ -1278,6 +1439,15 @@ def astar_4d(
         # the state itself. None without a survival field.
         "path_survival_prob": path_survival_prob,
         "path_recovery_prob": path_recovery_prob,
+        # One entry per state (C6): consecutive stationary hours in the
+        # current block, the block's dwell budget at the slice the stay began
+        # (None where open-ended) and their difference. None without a cube.
+        "path_stay_hours": None if dwell_report is None else dwell_report["path_stay_hours"],
+        "path_max_dwell_h": None if dwell_report is None else dwell_report["path_max_dwell_h"],
+        "path_dwell_margin_h": None if dwell_report is None else dwell_report["path_dwell_margin_h"],
+        # One entry per state (C6): the inner temperature, integrated along
+        # the route toward each occupied block's target. None without a cube.
+        "path_inner_c": path_inner_c,
         "metrics": {
             "wait_steps": wait_steps,
             "move_steps": len(states) - 1 - wait_steps,
@@ -1328,6 +1498,16 @@ def astar_4d(
                 None if start_recovery is None else round(float(start_recovery), 6)
             ),
             "survival_enforced": enforce_surv,
+            # The thermal dwell (C6): the tightest margin between a stay and
+            # its block's budget, how many states overran it (0 whenever
+            # enforced), the longest stay, and whether the rule was in force.
+            # None without a cube.
+            "min_dwell_margin_h": None if dwell_report is None else dwell_report["min_dwell_margin_h"],
+            "states_past_thermal_dwell": (
+                None if dwell_report is None else dwell_report["states_past_thermal_dwell"]
+            ),
+            "max_stay_h": None if dwell_report is None else dwell_report["max_stay_h"],
+            "thermal_dwell_enforced": enforce_dwell,
         },
         "error": None,
     }

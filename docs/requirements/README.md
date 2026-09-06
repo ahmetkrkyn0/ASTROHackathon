@@ -1,6 +1,6 @@
 # LunaPath güvenlik gereksinimleri — FRETISH + STL (D3)
 
-`lunapath.fret.json` LunaPath'in 11 güvenlik/görev gereksinimini NASA FRET'in
+`lunapath.fret.json` LunaPath'in 12 güvenlik/görev gereksinimini NASA FRET'in
 yapılandırılmış doğal dili **FRETISH** kalıbında, her birinin elle yazılmış
 zamansal-mantık çevirisiyle (ftLTL + STL) ve hangi sinyalle, hangi birimde,
 hangi rover parametresine karşı denetlendiğiyle taşır. Dosya
@@ -67,6 +67,7 @@ Eşikler rover kataloğundan (`backend/app/constants.py`) okunur; `soc_min` =
 | LP-R09 | The rover shall always satisfy time_to_haven_h <= hours_until_earthset | `always (haven_margin_h >= 0)` | haven marjı (h) | — | 0 |
 | LP-R10 | The rover shall eventually satisfy at_goal | `eventually (dist_to_goal_m <= 0)` | hedefe kalan mesafe (m) | — | 0 |
 | LP-R11 | In at_goal mode the rover shall always satisfy soc_pct >= soc_min | `always (at_goal → (soc_pct >= S))` | varış SOC'si (yüzde puanı) | `soc_min_pct` | 20 / 20 / 20 / 30 |
+| LP-R12 | The rover shall always satisfy stay_h <= max_dwell_h | `always (dwell_margin_h >= 0)` | termal dwell marjı: bloğun `max_dwell_h`'ı − kesintisiz hareketsiz saat (h; açık uçlu = +∞) | — (C6, MODEL/UNCALIBRATED; `thermal_tau_s` olmayan rover'da uygulanamaz) | 0 |
 
 LP-R08 ve LP-R09 yalnızca zamanlı izlerde (4-B plan, telemetri) uygulanabilir;
 2-B rotalarda `applicable: false`. LP-R10 görev sınıfıdır (`class: mission`) ve
@@ -88,6 +89,7 @@ LP-R08 ve LP-R09 yalnızca zamanlı izlerde (4-B plan, telemetri) uygulanabilir;
 | `moving` | adım > 0 | hücre değişti | `moving` |
 | `earth_link_h` | — | `path_hours_until_earthset` / −süre | `earth_link_h` |
 | `haven_margin_h` | — | `path_haven_margin_h` | `haven_margin_h` |
+| `dwell_margin_h` (C6) | — | `path_dwell_margin_h` (açık uçlu = +∞; küp yoksa sinyal yok) | `dwell_margin_h` |
 | `dist_to_goal_m` | planlanan uzunluk − katedilen | aynı | `dist_to_goal_m` |
 | `at_goal` | `dist_to_goal_m ≤ 0` | son durum | `at_goal` ya da `dist ≤ 0` |
 

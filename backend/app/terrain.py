@@ -108,6 +108,10 @@ LAYER_UNITS: dict[str, str] = {
     # by the manifest -- they depend on a goal, an epoch and a battery.
     "survival_probability": "fraction",
     "best_action": "code",
+    # The thermal dwell (C6): served by GET /api/thermal-dwell, never by the
+    # manifest -- it depends on an epoch, a rover and an inner temperature.
+    "max_dwell_h": "h",
+    "dwell_side": "code",
 }
 
 #: What each layer means to someone building the scene, in one line.
@@ -154,6 +158,17 @@ LAYER_DESCRIPTIONS: dict[str, str] = {
         "The recovery policy's action code at that block, hour and charge: 0-7 a move "
         "(N, S, W, E, NW, NE, SW, SE), 8 wait, 254 already safe, 255 none (failed or "
         "impassable)."
+    ),
+    "max_dwell_h": (
+        "Hours a rover arriving at this coarse block at the requested hour with its "
+        "nominal inner temperature may stand still before the first-order lag toward the "
+        "cell's surface-derived inner temperature leaves the tightest declared "
+        "battery/electronics envelope (C6; MODEL, uncalibrated). Capped at the lookahead "
+        "where open-ended; NaN where the block is impassable."
+    ),
+    "dwell_side": (
+        "Which side of the envelope the dwell ends on: 0 none within the lookahead, "
+        "1 cold, 2 hot. NaN where impassable."
     ),
 }
 

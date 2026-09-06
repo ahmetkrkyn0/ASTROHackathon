@@ -107,6 +107,88 @@ def build_shadow_series(
     }
 
 
+def cell_shadow_series(
+    metadata: dict[str, Any],
+    row: int,
+    col: int,
+    n_slices: int,
+    slice_hours: float,
+    start_utc: str | None,
+    base_value: float,
+) -> tuple[list[float], dict[str, Any]]:
+    """``(shadow_series, provenance)`` for ONE fine cell (C6).
+
+    The same contract as :func:`build_shadow_series` -- binary per slice
+    from the horizon cube and the Sun's track, or the long-run
+    ``base_value`` repeated with a reason when there is no epoch, no cube or
+    no kernels -- but reading a single cell's horizon profile out of the
+    memory-mapped cube, so a hover or a telemetry tick pays for one profile
+    rather than a 500 x 500 mask per slice.
+    """
+    static = [float(base_value)] * int(n_slices)
+    if start_utc is None:
+        return static, {
+            "model": "static",
+            "time_varying": False,
+            "reason": (
+                "no start epoch given; illumination is a function of time and "
+                "cannot vary without one"
+            ),
+        }
+    cache_path = horizon_cache_path(metadata)
+    if cache_path is None:
+        return static, {
+            "model": "static",
+            "time_varying": False,
+            "reason": (
+                f"no {HORIZON_CACHE_FILENAME} beside the processed grids; run "
+                "scripts/build_horizon_cache.py to enable time-varying shadow"
+            ),
+        }
+    try:
+        from .ephemeris import (
+            sun_azel_from_vector,
+            sun_vector_body,
+            true_azimuth_to_grid_azimuth,
+            true_north_grid_azimuth,
+            utc_to_et,
+        )
+        from .illumination import illuminated_mask
+
+        horizon = np.load(cache_path, mmap_mode="r")
+        profile = np.asarray(horizon[:, int(row) : int(row) + 1, int(col) : int(col) + 1])
+        lat_deg, lon_deg = _window_centre_latlon(metadata)
+        crs_wkt = metadata.get("crs")
+        north_grid_az = (
+            true_north_grid_azimuth(lat_deg, lon_deg, str(crs_wkt))
+            if crs_wkt and crs_wkt != "unknown"
+            else 0.0
+        )
+        start = _parse_start_utc(start_utc)
+        from datetime import timedelta
+
+        series: list[float] = []
+        for index in range(int(n_slices)):
+            moment = start + timedelta(hours=float(slice_hours) * index)
+            et = utc_to_et(moment.strftime("%Y-%m-%dT%H:%M:%S"))
+            true_az, elev = sun_azel_from_vector(sun_vector_body(et), lat_deg, lon_deg)
+            grid_az = true_azimuth_to_grid_azimuth(true_az, north_grid_az)
+            lit = bool(illuminated_mask(profile, grid_az, elev)[0, 0])
+            series.append(0.0 if lit else 1.0)
+    except Exception as exc:  # noqa: BLE001 - spiceypy raises assorted builtins
+        return static, {
+            "model": "static",
+            "time_varying": False,
+            "reason": f"real illumination unavailable ({exc})",
+        }
+    return series, {
+        "model": "spice_horizon",
+        "time_varying": True,
+        "horizon_cache": cache_path,
+        "start_utc": start_utc,
+    }
+
+
 def _spice_shadow_series(
     base_shadow: np.ndarray,
     metadata: dict[str, Any],

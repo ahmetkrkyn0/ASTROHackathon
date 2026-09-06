@@ -36,6 +36,7 @@ from .cost_cube import (
     build_wait_cost_cube,
     coarsen_grid,
     coarsen_traversable,
+    surface_temperature_series,
 )
 from .cost_engine import edge_travel_time_s, gross_energy_per_metre_wh
 from .corridor import build_corridor
@@ -56,6 +57,7 @@ from .illumination_series import (
     _parse_start_utc,
     body_track_for_series,
     build_shadow_series,
+    cell_shadow_series,
     horizon_cache_path,
     sun_track_for_series,
 )
@@ -64,6 +66,24 @@ from .thermal_model import (
     REGOLITH_THERMAL_TAU_S,
     relax_surface_c,
     shadowed_equilibrium_c,
+    sunlit_peak_from_annual_peak_c,
+)
+from .thermal_dwell import (
+    DEFAULT_DWELL_LOOKAHEAD_H,
+    DEFAULT_DWELL_SLICE_H,
+    JSC_QUOTED,
+    THERMAL_DWELL_CLAIM,
+    THERMAL_DWELL_VALIDITY,
+    build_dwell_cube,
+    cell_dwell,
+    dwell_unavailable_reason,
+    entrenchment_block,
+    envelope_cache_path,
+    envelope_matrix,
+    load_envelope_cache,
+    route_dwell_report,
+    route_inner_trace,
+    thermal_dwell_block,
 )
 from .pathfinder import astar
 from .localization import evaluate_pose
@@ -538,6 +558,19 @@ class ReplanRequest(BaseModel):
     survival_horizon_hours: Optional[float] = Field(default=None, gt=0.0, le=MAX_SURVIVAL_HORIZON_HOURS)
     failure_rate_per_km: Optional[float] = Field(default=None, ge=0.0, le=50.0)
     recovery_hours: Optional[float] = Field(default=None, gt=0.0, le=72.0)
+    # Entrenchment (C6): with state.entrenched_hours and utc the backend
+    # counts the immobilised rover down against the block's thermal dwell
+    # (from state.actual_inner_c when given) and the safe-haven window.
+    heater_model: Literal["none", "thermostat_assumed"] = Field(
+        default="none",
+        description="How the heater enters the entrenchment countdown's temperature model (see /api/plan-4d).",
+    )
+    dwell_lookahead_hours: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        le=168.0,
+        description="How far the countdown's surface series looks ahead from utc; default 24 h.",
+    )
 
     _check_state = field_validator("state")(_reject_non_finite_telemetry)
 
@@ -690,6 +723,37 @@ class Plan4DRequest(BaseModel):
         description=(
             "The field's horizon; default the plan's horizon plus the recovery "
             "time plus the fastest drive to the goal."
+        ),
+    )
+    # The thermal dwell (C6). The dwell cube and the route's inner
+    # temperature are always reported when the rover declares a thermal lag;
+    # this makes them a constraint: no transition may leave the envelope.
+    require_thermal_dwell: bool = Field(
+        default=False,
+        description=(
+            "Refuse any wait or move after which the rover's inner temperature -- relaxed "
+            "toward each occupied block's surface-derived target with the rover's "
+            "thermal_tau_s -- would sit outside its battery/electronics envelope; a stay "
+            "longer than the block's max_dwell_h is exactly such a wait. MODEL, uncalibrated. "
+            "A rover without thermal_tau_s (LUVMI-M) is a 422."
+        ),
+    )
+    initial_inner_c: Optional[float] = Field(
+        default=None,
+        ge=-150.0,
+        le=150.0,
+        description=(
+            "Inner temperature at the first slice, degC; default the midpoint of the "
+            "tightest declared envelope (LPR-1 and VIPER 17.5 C)."
+        ),
+    )
+    heater_model: Literal["none", "thermostat_assumed"] = Field(
+        default="none",
+        description=(
+            "'none' (default): the heater is counted in the energy model only, as before. "
+            "'thermostat_assumed': the ASSUMPTION that the survival heater holds the inner "
+            "temperature at the envelope's lower bound (no rover publishes a W-to-K link); "
+            "reported with its source string on every response that used it."
         ),
     )
 
@@ -970,6 +1034,18 @@ def get_cell_telemetry(
     recovery_hours: Optional[float] = Query(default=None, gt=0.0, le=72.0),
     safe_set: Literal["leg", "haven"] = Query(default="leg"),
     coarsen: int = Query(default=4, ge=1, le=16),
+    thermal_dwell: bool = Query(
+        default=False,
+        description=(
+            "Also compute the thermal dwell card (C6) for this fine cell: how long a rover "
+            "arriving at t_hours after start_utc may stand here before its inner temperature "
+            "leaves the envelope, the equilibrium verdicts, and the tolerable entrenched time "
+            "(thermal dwell and safe-haven window). Without start_utc the shadow series is static."
+        ),
+    ),
+    lookahead_hours: float = Query(default=DEFAULT_DWELL_LOOKAHEAD_H, gt=0.0, le=168.0),
+    initial_inner_c: Optional[float] = Query(default=None, ge=-150.0, le=150.0),
+    heater_model: Literal["none", "thermostat_assumed"] = Query(default="none"),
 ):
     grids = _active_grids(request)
     metadata = grids["metadata"]
@@ -1089,6 +1165,30 @@ def get_cell_telemetry(
                 "horizon_hours": round(field.horizon_hours, 4),
             }
 
+    # The thermal dwell card (C6), on request: the cell's own surface series
+    # from start_utc + t_hours, the rover's lag, and the two countdowns.
+    dwell_card = None
+    dwell_model: dict[str, Any] = {"model": "unavailable", "reason": "not requested (thermal_dwell=false)"}
+    if thermal_dwell:
+        dwell_card, dwell_model = _cell_dwell_card(
+            grids, rover, row, col, start_utc, float(t_hours), float(lookahead_hours), initial_inner_c, heater_model
+        )
+        if dwell_card["dwell_model"]["model"] == "unavailable":
+            dwell_card["tolerable_entrenched"] = None
+        else:
+            haven_countdown = _haven_countdown(grids, rover["id"], row, col, start_utc, float(t_hours))
+            countdown = entrenchment_block(
+                0.0,
+                {
+                    "max_dwell_h": dwell_card["max_dwell_h"],
+                    "open_ended": dwell_card["open_ended"],
+                    "side": dwell_card["side"],
+                    "component": dwell_card["component"],
+                },
+                haven_countdown,
+            )
+            dwell_card["tolerable_entrenched"] = {key: countdown[key] for key in ("thermal", "haven", "overall")}
+
     return {
         "row": row,
         "col": col,
@@ -1132,6 +1232,13 @@ def get_cell_telemetry(
         # null with the reason in survival_model unless survival=true.
         "survival": survival_card,
         "survival_model": survival_model,
+        # The thermal dwell card (C6): "a rover arriving here at t_hours with
+        # this inner temperature may stand still for max_dwell_h before its
+        # inner temperature leaves the envelope", the equilibrium verdicts
+        # (D3's static reading) and the tolerable entrenched time (thermal
+        # and haven countdowns); null unless thermal_dwell=true.
+        "thermal_dwell": dwell_card,
+        "thermal_dwell_model": dwell_model,
     }
 
 
@@ -1362,6 +1469,153 @@ def _state_with_comm(
     return merged
 
 
+def _cell_sunlit_peak_c(grids: dict, row: int, col: int) -> float:
+    """The uncorrected sunlit peak of one fine cell: the stored statistic
+    when the loader published it, the inversion of a shadow-corrected field
+    otherwise, the field itself when it was never corrected (the same
+    selection cost_cube.surface_temperature_series makes for a grid)."""
+    sunlit = grids.get("thermal_sunlit_peak")
+    if sunlit is not None:
+        return float(np.asarray(sunlit)[row, col])
+    thermal = float(np.asarray(grids["thermal"])[row, col])
+    if grids["metadata"].get("thermal_shadow_coupled"):
+        base = float(np.asarray(grids["shadow_ratio"])[row, col])
+        return float(sunlit_peak_from_annual_peak_c(np.array([thermal]), np.array([base]))[0])
+    return thermal
+
+
+def _cell_dwell_card(
+    grids: dict,
+    rover: dict,
+    row: int,
+    col: int,
+    start_utc: str | None,
+    t_hours: float,
+    lookahead_hours: float,
+    initial_inner_c: float | None,
+    heater_model: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """``(card, model)`` for one fine cell (C6): the cell's own shadow series
+    from ``start_utc + t_hours`` (static, with the reason, when it cannot be
+    time-varying), its surface series with the regolith lag, and the rover's
+    dwell from the given or nominal inner temperature. The card is returned
+    even when no dwell can be timed (verdict only); ``model`` says why."""
+    metadata = grids["metadata"]
+    n_slices = max(1, int(math.ceil(float(lookahead_hours) / DEFAULT_DWELL_SLICE_H)))
+    base = float(np.asarray(grids["shadow_ratio"])[row, col])
+    epoch = None
+    if start_utc:
+        epoch = _shift_utc(start_utc, float(t_hours)) if t_hours else start_utc
+    series, provenance = cell_shadow_series(
+        metadata, row, col, n_slices, DEFAULT_DWELL_SLICE_H, epoch, base_value=base
+    )
+    card = cell_dwell(
+        _cell_sunlit_peak_c(grids, row, col),
+        base,
+        series,
+        DEFAULT_DWELL_SLICE_H,
+        rover,
+        initial_inner_c=initial_inner_c,
+        heater_model=heater_model,
+    )
+    card["shadow_model"] = {k: v for k, v in provenance.items() if k != "horizon_cache"}
+    card["start_utc"] = start_utc
+    card["t_hours"] = float(t_hours)
+    card["row"], card["col"] = int(row), int(col)
+    model = dict(card["dwell_model"])
+    model["shadow_model"] = card["shadow_model"]
+    return card, model
+
+
+def _haven_countdown(
+    grids: dict, rover_id: str, row: int, col: int, utc: str | None, t_hours: float = 0.0
+) -> dict[str, Any] | None:
+    """JSC's tolerable entrenched time proper (C6): the Earth link left at
+    this cell (A4) minus the drive to the nearest safe haven (A1). None when
+    either cannot be known (no epoch, cube or kernels); a finite Earthset
+    with no reachable haven is a budget of zero, not 'no limit'."""
+    if not utc:
+        return None
+    try:
+        epoch = _shift_utc(utc, float(t_hours)) if t_hours else utc
+        window = _comm_window_or_none(grids, row, col, epoch)
+        _layers, tts, info = safe_haven_for_grids(grids, rover_id, epoch)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.warning("haven countdown unavailable: %s", exc)
+        return None
+    if window is None or tts is None:
+        return None
+    link_h = float(window["trigger_minutes_remaining"]) / 60.0
+    to_haven = float(tts[row, col])
+    if not math.isfinite(link_h):
+        tolerable: float | None = None
+        note = "the Earth link is open-ended within the window: no haven deadline"
+    elif not math.isfinite(to_haven):
+        tolerable = 0.0
+        note = "no safe haven is reachable before the Earth sets: the haven clock has already run out"
+    else:
+        tolerable = max(0.0, link_h - to_haven)
+        note = "hours of Earth link left minus the driving hours to the nearest safe haven"
+    return {
+        "tolerable_h": tolerable,
+        "hours_until_earthset": None if not math.isfinite(link_h) else round(link_h, 4),
+        "time_to_safe_haven_h": None if not math.isfinite(to_haven) else round(to_haven, 4),
+        "is_safe_haven": bool(to_haven <= 1e-9),
+        "h_max_shadow_h": info.get("h_max_shadow_h"),
+        "note": note,
+        "source": "A1 time_to_safe_haven_h and A4 comm window at this cell",
+    }
+
+
+def _entrenchment_for_replan(
+    req: "ReplanRequest", state: dict[str, float]
+) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, float]]:
+    """``(block, model, state)`` for POST /api/replan (C6): the entrenchment
+    countdown from ``state.entrenched_hours`` at the rover's cell and epoch,
+    and the state with ``tolerable_entrenched_hours`` filled in (unless the
+    caller supplied it) so the entrenchment trigger can run."""
+    unavailable = {"model": "unavailable", "validity": THERMAL_DWELL_VALIDITY}
+    entrenched = state.get("entrenched_hours")
+    if entrenched is None:
+        return None, {**unavailable, "reason": "state.entrenched_hours not given"}, state
+    if not req.utc:
+        return None, {
+            **unavailable,
+            "reason": "the entrenchment countdown needs utc: the thermal dwell and the haven window are functions of the epoch",
+        }, state
+    grids = _current_grids()
+    if grids is None:
+        return None, {**unavailable, "reason": "grids not loaded"}, state
+    rover = get_rover(req.rover_id)
+    row, col = _to_pixel(req.current, "current", grids["metadata"])
+    lookahead = DEFAULT_DWELL_LOOKAHEAD_H if req.dwell_lookahead_hours is None else float(req.dwell_lookahead_hours)
+    card, model = _cell_dwell_card(
+        grids, rover, row, col, req.utc, 0.0, lookahead, state.get("actual_inner_c"), req.heater_model
+    )
+    thermal = None
+    if card["dwell_model"]["model"] != "unavailable":
+        thermal = {
+            key: card.get(key)
+            for key in (
+                "max_dwell_h", "open_ended", "side", "component", "initial_inner_c",
+                "initial_outside_envelope", "lookahead_h", "envelope_verdict", "heater_model", "heater_source",
+            )
+        }
+        thermal["inner_source"] = "state.actual_inner_c" if state.get("actual_inner_c") is not None else "nominal (envelope midpoint)"
+    haven = _haven_countdown(grids, req.rover_id, row, col, req.utc)
+    block = entrenchment_block(float(entrenched), thermal, haven)
+    block["current_pixel"] = [int(row), int(col)]
+    block["utc"] = req.utc
+    block["shadow_model"] = card["shadow_model"]
+    merged = dict(state)
+    tolerable = block["overall"]["tolerable_h"]
+    if tolerable is not None and "tolerable_entrenched_hours" not in merged:
+        merged["tolerable_entrenched_hours"] = float(tolerable)
+    return block, model, merged
+
+
 @app.post("/api/replan")
 def replan(req: ReplanRequest, request: Request):
     """Re-plan from the rover's current position when a trigger fires."""
@@ -1372,6 +1626,9 @@ def replan(req: ReplanRequest, request: Request):
             row, col = _to_pixel(req.current, "current", grids["metadata"])
             window = _comm_window_or_none(grids, row, col, req.utc)
     state = _state_with_comm(req.state, window)
+    # The entrenchment countdown (C6): fills tolerable_entrenched_hours from
+    # the thermal dwell and the haven window before the triggers run.
+    entrenchment, entrenchment_model, state = _entrenchment_for_replan(req, state)
     evaluation = evaluate_triggers_detailed(state, get_rover(req.rover_id))
     fired = evaluation["fired"]
 
@@ -1433,6 +1690,10 @@ def replan(req: ReplanRequest, request: Request):
             ),
             "recovery_suggestion": suggestion,
             "survival_model": survival_model,
+            # The entrenchment countdown (C6); null with the reason in
+            # entrenchment_model unless state.entrenched_hours and utc.
+            "entrenchment": entrenchment,
+            "entrenchment_model": entrenchment_model,
         }
 
     plan_request = PlanRequest(
@@ -1458,6 +1719,10 @@ def replan(req: ReplanRequest, request: Request):
         # arg-min action, where it leads and P_safe; null unless requested.
         "recovery_suggestion": suggestion,
         "survival_model": survival_model,
+        # The entrenchment countdown (C6): thermal dwell and haven window
+        # from the moment the rover stopped moving, with the level.
+        "entrenchment": entrenchment,
+        "entrenchment_model": entrenchment_model,
     }
 
 
@@ -2239,12 +2504,20 @@ def plan_4d(req: Plan4DRequest, request: Request):
     )
     illum_series = [1.0 - snapshot for snapshot in shadow_series]
 
+    # The per-slice surface temperature on the planner's grid, computed once
+    # (C6): the cost cube prices it and the thermal dwell integrates the
+    # rover's inner temperature against it, so the two see one surface.
+    surface_series = surface_temperature_series(
+        grids_for_plan, shadow_series, coarsen=req.coarsen, slice_hours=slice_hours
+    )
+
     cost_cube = build_cost_cube(
         grids_for_plan,
         shadow_series,
         rover,
         weights_dict,
         coarsen=req.coarsen,
+        surface_series=surface_series,
         # The thermal state is integrated across slices with the regolith
         # time constant, so the cube needs to know how long a slice is.
         # (Round 4 review, H-1 and H-3.)
@@ -2395,6 +2668,29 @@ def plan_4d(req: Plan4DRequest, request: Request):
                 ),
             )
 
+    # The thermal dwell (C6): the rover's inner temperature against the same
+    # surface series the cube priced. Always built when the rover declares a
+    # thermal lag (reported on every plan), enforced on request.
+    dwell_reason = dwell_unavailable_reason(rover)
+    dwell_cube = None
+    if dwell_reason is None:
+        dwell_cube = build_dwell_cube(
+            surface_series,
+            slice_hours,
+            rover,
+            coarse_traversable,
+            initial_inner_c=req.initial_inner_c,
+            heater_model=req.heater_model,
+        )
+    if req.require_thermal_dwell and dwell_cube is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"require_thermal_dwell needs a thermal dwell cube and none can be built for "
+                f"{rover['name']}: {dwell_reason}"
+            ),
+        )
+
     result = astar_4d(
         cost_cube,
         wait_cube,
@@ -2422,6 +2718,8 @@ def plan_4d(req: Plan4DRequest, request: Request):
         require_continuous_illumination=req.require_continuous_illumination,
         survival_field=survival_field,
         max_failure_probability=req.max_failure_probability,
+        max_dwell_cube=dwell_cube,
+        require_thermal_dwell=req.require_thermal_dwell,
     )
     if result["error"]:
         # move_count already accounted for the edge gates, so a failure here
@@ -2504,6 +2802,23 @@ def plan_4d(req: Plan4DRequest, request: Request):
                 f"{survival_info.get('failure_model', {}).get('rate_per_km')} per km, "
                 f"{survival_info.get('n_states')} states)."
             )
+        # And for the thermal dwell (C6): how many transitions it refused, and
+        # what the cube says about the passable blocks at the first slice.
+        if req.require_thermal_dwell and dwell_cube is not None:
+            refused = int(result["metrics"]["edges_rejected"].get("thermal_dwell", 0))
+            summary = dwell_cube.summary(0)
+            median = summary.get("finite_median_h")
+            detail += (
+                f" Thermal dwell: {refused} transitions were refused because {rover['name']}'s "
+                f"inner temperature would leave its [{dwell_cube.envelope.lo:g}, "
+                f"{dwell_cube.envelope.hi:g}] C envelope (heater_model {dwell_cube.heater_model}, "
+                f"start {dwell_cube.initial_inner_c:g} C, tau {dwell_cube.tau_s:g} s); at the first "
+                f"slice {100.0 * (summary.get('fraction_unlimited') or 0.0):.0f} percent of the passable "
+                f"blocks allow an unlimited stay, {100.0 * (summary.get('fraction_cold_limited') or 0.0):.0f} "
+                "percent are cold-limited"
+                + ("" if median is None else f" (median finite dwell {median:.2f} h)")
+                + "; MODEL, uncalibrated."
+            )
         # And for the corridor: how much of the lit volume survives pruning,
         # and where the start and the goal stand with respect to it.
         if req.require_continuous_illumination:
@@ -2561,6 +2876,34 @@ def plan_4d(req: Plan4DRequest, request: Request):
     )
     metrics["max_dwell_hours"] = corridor_block["route"]["max_dwell_hours"]
 
+    # The thermal dwell along the route (C6): the stays against their
+    # budgets and the inner temperature integrated with the same lag.
+    dwell_route = None if dwell_cube is None else route_dwell_report(result["path_states"], slice_hours, dwell_cube)
+    inner_trace = (
+        None
+        if dwell_cube is None
+        else route_inner_trace(
+            result["path_states"],
+            surface_series,
+            slice_hours,
+            rover,
+            initial_inner_c=req.initial_inner_c,
+            heater_model=req.heater_model,
+        )
+    )
+    thermal_block = thermal_dwell_block(
+        dwell_cube,
+        dwell_route,
+        requested=req.require_thermal_dwell,
+        applied=bool(req.require_thermal_dwell and dwell_cube is not None),
+        reason=dwell_reason,
+        inner_trace=inner_trace,
+        rover=rover,
+        heater_model=req.heater_model,
+        initial_inner_c=req.initial_inner_c,
+        shadow_model={k: v for k, v in shadow_provenance.items() if k != "horizon_cache"},
+    )
+
     # The formal safety catalogue on the planner's own per-state arrays (D3).
     safety_block = _safety_margins_4d(result, geometry, grids_for_plan, rover, slice_hours, req.coarsen)
 
@@ -2595,6 +2938,14 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # far and each state's own P_safe; None when no field was built.
         "path_survival_prob": result["path_survival_prob"],
         "path_recovery_prob": result["path_recovery_prob"],
+        # One entry per state (C6): consecutive stationary hours in the
+        # current block, the block's dwell budget at the slice the stay began
+        # (None where open-ended), their difference, and the inner temperature
+        # integrated along the route. None when the rover declares no lag.
+        "path_stay_hours": result["path_stay_hours"],
+        "path_max_dwell_h": result["path_max_dwell_h"],
+        "path_dwell_margin_h": result["path_dwell_margin_h"],
+        "path_inner_c": result["path_inner_c"],
         "survival": {
             **survival_block(
                 survival_field,
@@ -2610,6 +2961,10 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # (D3): rho per requirement in hours / degC / pct / deg, the smallest
         # normalised margin, and the verdict of a runtime monitor.
         **({"safety_margins": safety_block} if safety_block is not None else {}),
+        # The thermal dwell (C6): the model, the cube's summary at the first
+        # slice, the route's stays and inner temperature, JSC's quoted
+        # figures and the claim; always present.
+        "thermal_dwell": thermal_block,
         # CMU's continuous-illumination corridor (A2): volume, pruning,
         # components, where the start/goal/route stand, dwell, provenance.
         "illumination_corridor": corridor_block,
@@ -3153,6 +3508,7 @@ def _safety_margins_4d(
             geometry.resolution_m,
             rover,
             path_time_to_haven_h=result.get("path_time_to_haven_h"),
+            path_dwell_margin_h=result.get("path_dwell_margin_h"),
         )
         return evaluate_catalogue(trace, rover)
     except Exception:  # noqa: BLE001 - reported, never fatal
@@ -4962,6 +5318,166 @@ def survival_endpoint(
             "nodata": "NaN",
         },
         "claim": survival_block(survival_field, None, None, requested=True)["claim"],
+    }
+
+
+_DWELL_FIELDS: tuple[str, ...] = ("max_dwell_h", "side", "open_ended")
+_DWELL_UNITS: dict[str, str] = {"max_dwell_h": "h", "side": "code", "open_ended": "boolean"}
+
+
+@app.get("/api/thermal-dwell")
+def thermal_dwell_endpoint(
+    start_utc: str = Query(..., description="UTC instant the surface series starts, e.g. '2026-09-28T00:00:00'."),
+    rover_id: str = DEFAULT_ROVER_ID,
+    t_hours: float = Query(0.0, ge=0.0, le=168.0),
+    lookahead_hours: float = Query(DEFAULT_DWELL_LOOKAHEAD_H, gt=0.0, le=168.0),
+    slice_hours: float = Query(DEFAULT_DWELL_SLICE_H, gt=0.0, le=24.0),
+    coarsen: int = Query(4, ge=1, le=16),
+    initial_inner_c: Optional[float] = Query(default=None, ge=-150.0, le=150.0),
+    heater_model: Literal["none", "thermostat_assumed"] = Query("none"),
+    format: str = Query("json", pattern="^(json|f32)$"),
+    field: str = Query("max_dwell_h", pattern="^(max_dwell_h|side|open_ended)$"),
+):
+    """The thermal dwell layer (C6) at one hour: for every coarse block the
+    hours a rover arriving there at ``t_hours`` after ``start_utc`` with the
+    given (or nominal) inner temperature may stand still before that
+    temperature leaves its envelope (``max_dwell_h``, capped at the
+    lookahead where open-ended), which side ends it (``side``: 0 none, 1
+    cold, 2 hot) and whether it is open-ended within the lookahead
+    (``open_ended``). ``/api/layers`` wire format, ``X-Layer-Validity:
+    MODEL``; a rover without a thermal lag is a 422 with the reason.
+    """
+    grids = _get_grids()
+    rover = get_rover(rover_id)
+    reason = dwell_unavailable_reason(rover)
+    if reason is not None:
+        raise HTTPException(status_code=422, detail=f"no thermal dwell for {rover['name']}: {reason}")
+    grids_for_plan = grids_for_rover(grids, rover_id, PlanWeights().model_dump())
+    metadata = grids_for_plan["metadata"]
+    geometry = _coarse_geometry(grids_for_plan, coarsen)
+    n_slices = max(2, int(math.ceil((float(t_hours) + float(lookahead_hours)) / float(slice_hours))))
+    _check_cube_budget(n_slices, geometry.traversable.shape)
+    base_shadow = np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64)
+    shadow_series, shadow_provenance = build_shadow_series(
+        base_shadow, metadata, n_slices, float(slice_hours), start_utc
+    )
+    surface = surface_temperature_series(
+        grids_for_plan, shadow_series, coarsen=coarsen, slice_hours=float(slice_hours)
+    )
+    cube = build_dwell_cube(
+        surface, float(slice_hours), rover, geometry.traversable,
+        initial_inner_c=initial_inner_c, heater_model=heater_model,
+    )
+    assert cube is not None
+    t_index = min(n_slices - 1, int(round(float(t_hours) / float(slice_hours))))
+    b = cube.bin_of(t_index)
+    dwell = cube.max_dwell_h[b].astype(np.float64)
+    open_ended = np.where(np.isnan(dwell), np.nan, np.isinf(dwell).astype(np.float64))
+    capped = np.where(np.isinf(dwell), float(cube.lookahead_h[b]), dwell)
+    side = np.where(np.isnan(dwell), np.nan, cube.side[b].astype(np.float64))
+    data = {"max_dwell_h": capped, "side": side, "open_ended": open_ended}
+    resolution_m = float(metadata["resolution_m"]) * coarsen
+
+    if format == "f32":
+        layer = data[field]
+        return Response(
+            content=encode_layer_f32(layer),
+            media_type=BINARY_MEDIA_TYPE,
+            headers=binary_layer_headers(
+                field, layer, coarsen, float(metadata["resolution_m"]), THERMAL_DWELL_VALIDITY
+            ),
+        )
+
+    fields: dict[str, Any] = {}
+    for name in _DWELL_FIELDS:
+        layer = data[name]
+        stats = layer_stats(layer)
+        query = {
+            "start_utc": start_utc,
+            "rover_id": rover_id,
+            "t_hours": t_hours,
+            "lookahead_hours": lookahead_hours,
+            "slice_hours": slice_hours,
+            "coarsen": coarsen,
+            "heater_model": heater_model,
+            "format": "f32",
+            "field": name,
+        }
+        if initial_inner_c is not None:
+            query["initial_inner_c"] = initial_inner_c
+        fields[name] = {
+            "units": _DWELL_UNITS[name],
+            "min": stats["min"],
+            "max": stats["max"],
+            "nodata": stats["nodata"],
+            "binary_url": f"/api/thermal-dwell?{urlencode(query)}",
+        }
+    return {
+        "rover_id": rover_id,
+        "rover_name": rover["name"],
+        "start_utc": start_utc,
+        "t_hours": float(t_hours),
+        "lookahead_hours": float(lookahead_hours),
+        "dwell_model": cube.info(),
+        "shadow_model": {k: v for k, v in shadow_provenance.items() if k != "horizon_cache"},
+        "summary": cube.summary(t_index),
+        "grid": {
+            "rows": int(dwell.shape[0]),
+            "cols": int(dwell.shape[1]),
+            "resolution_m": resolution_m,
+            "coarsen": int(coarsen),
+            "downsample": int(coarsen),
+        },
+        "fields": fields,
+        "binary_format": {
+            "dtype": "float32",
+            "endian": "little",
+            "order": "row-major",
+            "shape": [int(dwell.shape[0]), int(dwell.shape[1])],
+            "nodata": "NaN",
+        },
+        "quoted": JSC_QUOTED,
+        "claim": THERMAL_DWELL_CLAIM,
+    }
+
+
+@app.get("/api/thermal-envelope")
+def thermal_envelope_endpoint(
+    rover_id: str = DEFAULT_ROVER_ID,
+    initial_inner_c: Optional[float] = Query(default=None, ge=-150.0, le=150.0),
+    heater_model: Literal["none", "thermostat_assumed"] = Query("none"),
+):
+    """The counterpart of JSC's unlimited-operations envelope on LunaPath's
+    model (C6): heat1d's transient at the site's latitude binned by (Sun
+    elevation, Sun-parallel slope), each bin's maximum surface temperature
+    mapped to the rover's inner temperature and read against its envelope
+    -- unlimited / cold-limited / hot-limited (with the dwell from the
+    given inner temperature) / unsampled. Served from the cache
+    ``scripts/build_thermal_envelope_cache.py`` writes; a 422 with the
+    reason when it is absent (never a synthetic matrix).
+    """
+    grids = _current_grids()
+    metadata = {} if grids is None else grids["metadata"]
+    path = envelope_cache_path(metadata)
+    if path is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "no thermal envelope cache beside the processed grids; run "
+                "scripts/build_thermal_envelope_cache.py (needs heat1d GitHub main with slope support, "
+                "about a minute) to enable /api/thermal-envelope"
+            ),
+        )
+    cache = load_envelope_cache(path)
+    rover = get_rover(rover_id)
+    matrix = envelope_matrix(cache, rover, initial_inner_c=initial_inner_c, heater_model=heater_model)
+    return {
+        "rover_id": rover_id,
+        "rover_name": rover["name"],
+        **matrix,
+        "meta": cache.get("meta", {}),
+        "quoted": JSC_QUOTED,
+        "claim": THERMAL_DWELL_CLAIM,
     }
 
 

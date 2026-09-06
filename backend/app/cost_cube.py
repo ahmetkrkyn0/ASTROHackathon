@@ -77,6 +77,82 @@ def coarsen_traversable(traversable: np.ndarray, factor: int) -> np.ndarray:
     return blocks.all(axis=(1, 3))
 
 
+def surface_temperature_series(
+    base_grids: Mapping[str, Any],
+    shadow_ratio_series: Sequence[np.ndarray],
+    coarsen: int = 1,
+    slice_hours: float = 1.0,
+    tau_s: float = REGOLITH_THERMAL_TAU_S,
+    couple_thermal: bool = True,
+) -> np.ndarray:
+    """(T, H', W') surface temperature per slice, in Celsius (float64).
+
+    This is the thermal state :func:`build_cost_cube` prices every slice
+    at, factored out so the thermal dwell model (C6) can integrate the
+    rover's inner temperature against the SAME surface the cube saw.
+
+    The sunlit-peak field: data_loader publishes it directly -- it is the
+    single stored statistic everything else is derived from -- so normally
+    there is nothing to invert; the inversion is the fallback for a caller
+    that assembled ``base_grids`` by hand from a corrected field. The
+    initial state is the equilibrium under the cell's LONG-RUN illumination:
+    starting every cell at its annual peak would assume the traverse begins
+    at the hottest moment of the year, and the long-run equilibrium is the
+    honest "we do not know where in the cycle this is" prior. Each slice
+    then has an equilibrium target set by its own illumination and the
+    surface relaxes toward it with the regolith time constant ``tau_s``
+    (UNCALIBRATED; see thermal_model.REGOLITH_LAG_VALIDITY). With
+    ``couple_thermal=False`` every slice is the stored (coarsened) field.
+    """
+    if len(shadow_ratio_series) == 0:
+        raise ValueError("shadow_ratio_series must contain at least one snapshot")
+    slope = np.asarray(base_grids["slope"], dtype=np.float64)
+    thermal = np.asarray(base_grids["thermal"], dtype=np.float64)
+    metadata = base_grids["metadata"]
+    base_shadow = np.asarray(
+        base_grids.get("shadow_ratio", shadow_ratio_series[0]), dtype=np.float64
+    )
+    already_coupled = bool(metadata.get("thermal_shadow_coupled", False))
+    for index, snapshot in enumerate(shadow_ratio_series):
+        if np.asarray(snapshot).shape != slope.shape:
+            raise ValueError(
+                f"shadow snapshot {index} has shape {np.asarray(snapshot).shape}, "
+                f"expected {slope.shape}"
+            )
+
+    thermal_c = coarsen_grid(thermal, coarsen, how="mean")
+    base_shadow_c = coarsen_grid(base_shadow, coarsen, how="mean")
+    if not couple_thermal:
+        return np.stack([thermal_c.copy() for _ in shadow_ratio_series], axis=0)
+
+    sunlit = base_grids.get("thermal_sunlit_peak")
+    if sunlit is not None:
+        sunlit_c = coarsen_grid(np.asarray(sunlit, dtype=np.float64), coarsen)
+    elif already_coupled:
+        sunlit_c = np.asarray(
+            sunlit_peak_from_annual_peak_c(thermal_c, base_shadow_c), dtype=np.float64
+        )
+    else:
+        sunlit_c = thermal_c
+    surface_state = np.asarray(
+        shadowed_equilibrium_c(sunlit_c, base_shadow_c), dtype=np.float64
+    )
+    dt_s = max(0.0, float(slice_hours)) * 3600.0
+
+    out: list[np.ndarray] = []
+    for snapshot in shadow_ratio_series:
+        shadow_c = coarsen_grid(np.asarray(snapshot, dtype=np.float64), coarsen)
+        # Where this slice's illumination would take the surface if it were
+        # held there indefinitely, and how far the surface actually gets in
+        # one slice.
+        target = np.asarray(shadowed_equilibrium_c(sunlit_c, shadow_c), dtype=np.float64)
+        surface_state = np.asarray(
+            relax_surface_c(surface_state, target, dt_s, tau_s), dtype=np.float64
+        )
+        out.append(surface_state)
+    return np.stack(out, axis=0)
+
+
 def build_cost_cube(
     base_grids: Mapping[str, Any],
     shadow_ratio_series: Sequence[np.ndarray],
@@ -90,8 +166,17 @@ def build_cost_cube(
     slope_sigma: np.ndarray | None = None,
     roughness: np.ndarray | None = None,
     roughness_scale: "RoughnessScale | None" = None,
+    surface_series: np.ndarray | None = None,
 ) -> np.ndarray:
     """(T, H', W') cost cube, one slice per shadow-ratio snapshot.
+
+    Surface series (C6)
+    -------------------
+    *surface_series* is the ``(T, H', W')`` per-slice surface temperature
+    :func:`surface_temperature_series` produces for these very arguments.
+    Given, it is used as is (the thermal dwell model reads the same array,
+    so the cube and the dwell see one surface); omitted, it is computed
+    here. Either way the slices are identical bit for bit.
 
     Roughness (C4)
     --------------
@@ -142,17 +227,9 @@ def build_cost_cube(
         raise ValueError("shadow_ratio_series must contain at least one snapshot")
 
     slope = np.asarray(base_grids["slope"], dtype=np.float64)
-    thermal = np.asarray(base_grids["thermal"], dtype=np.float64)
     traversable = np.asarray(base_grids["traversable"], dtype=bool)
     metadata = base_grids["metadata"]
     resolution_m = float(metadata["resolution_m"])
-    # The long-run illumination the stored thermal field was corrected
-    # against. A caller assembling base_grids by hand may not carry one, in
-    # which case the first snapshot is the best available stand-in.
-    base_shadow = np.asarray(
-        base_grids.get("shadow_ratio", shadow_ratio_series[0]), dtype=np.float64
-    )
-    already_coupled = bool(metadata.get("thermal_shadow_coupled", False))
 
     for index, snapshot in enumerate(shadow_ratio_series):
         if np.asarray(snapshot).shape != slope.shape:
@@ -162,9 +239,7 @@ def build_cost_cube(
             )
 
     slope_c = coarsen_grid(slope, coarsen, how="max")       # worst case per block
-    thermal_c = coarsen_grid(thermal, coarsen, how="mean")
     traversable_c = coarsen_traversable(traversable, coarsen)
-    base_shadow_c = coarsen_grid(base_shadow, coarsen, how="mean")
     resolution_c = resolution_m * max(1, int(coarsen))
     sigma_c = None
     if slope_sigma is not None:
@@ -190,28 +265,27 @@ def build_cost_cube(
         with np.errstate(all="ignore"):
             roughness_c = coarsen_grid(roughness_fine, coarsen, how="max")
 
-    # The sunlit-peak field. data_loader publishes it directly -- it is the
-    # single stored statistic everything else is derived from -- so normally
-    # there is nothing to invert. The inversion is the fallback for a caller
-    # that assembled `base_grids` by hand from a corrected field.
-    sunlit = base_grids.get("thermal_sunlit_peak")
-    if sunlit is not None:
-        sunlit_c = coarsen_grid(np.asarray(sunlit, dtype=np.float64), coarsen)
-    elif already_coupled:
-        sunlit_c = np.asarray(
-            sunlit_peak_from_annual_peak_c(thermal_c, base_shadow_c), dtype=np.float64
+    # The per-slice surface temperature: the same array the thermal dwell
+    # model (C6) integrates, computed once when the caller did not. (The
+    # sunlit-peak selection and the long-run-equilibrium prior live in
+    # surface_temperature_series.)
+    if surface_series is None:
+        surface = surface_temperature_series(
+            base_grids,
+            shadow_ratio_series,
+            coarsen=coarsen,
+            slice_hours=slice_hours,
+            tau_s=tau_s,
+            couple_thermal=couple_thermal,
         )
     else:
-        sunlit_c = thermal_c
-    # Initial state: the equilibrium under the cell's LONG-RUN illumination.
-    # Starting every cell at its annual peak would assume the traverse begins
-    # at the hottest moment of the year; starting at the long-run equilibrium
-    # is the honest "we do not know where in the cycle this is" prior.
-    surface_state = np.asarray(
-        shadowed_equilibrium_c(sunlit_c, base_shadow_c), dtype=np.float64
-    )
-    dt_s = max(0.0, float(slice_hours)) * 3600.0
-
+        surface = np.asarray(surface_series, dtype=np.float64)
+        expected = (len(shadow_ratio_series),) + slope_c.shape
+        if surface.shape != expected:
+            raise ValueError(
+                f"surface_series {surface.shape} must be {expected}: one coarse "
+                "surface temperature grid per shadow snapshot"
+            )
     cost_map = default_cost_map(
         rover, weights, risk_alpha=risk_alpha, roughness_scale=roughness_scale
     )
@@ -227,22 +301,9 @@ def build_cost_cube(
     # array ops per slice rather than the ~22 s that made the optimisation
     # necessary in the first place.
     slices: list[np.ndarray] = []
-    for snapshot in shadow_ratio_series:
+    for index, snapshot in enumerate(shadow_ratio_series):
         shadow_c = coarsen_grid(np.asarray(snapshot, dtype=np.float64), coarsen)
-        if couple_thermal:
-            # Where this slice's illumination would take the surface if it
-            # were held there indefinitely, and how far the surface actually
-            # gets in one slice.
-            target = np.asarray(
-                shadowed_equilibrium_c(sunlit_c, shadow_c), dtype=np.float64
-            )
-            surface_state = np.asarray(
-                relax_surface_c(surface_state, target, dt_s, tau_s),
-                dtype=np.float64,
-            )
-            thermal_slice = surface_state
-        else:
-            thermal_slice = thermal_c
+        thermal_slice = surface[index]
 
         # The per-slice temperature is a COST, never a veto. Round 4 also
         # ANDed ``thermal_slice >= THERMAL_MIN_TRAVERSABLE_C`` into this
