@@ -43,9 +43,15 @@
   transition: none;
 }
 
-.chat-launcher svg {
-  width: 22px;
-  height: 22px;
+/* The mark fills most of the button, because it is the product's mark and the
+   button is 46px. Width-driven with `height: auto`, so the artwork's own
+   proportions decide the rest rather than a square box squashing it. */
+.chat-launcher-mark {
+  width: 34px;
+  height: auto;
+  /* A dragged launcher carries an inline transform on the button; nothing here
+     may add its own or the two fight over the same property. */
+  pointer-events: none;
 }
 
 /* No lift on hover any more: the drag offset is a transform on this element,
@@ -85,10 +91,12 @@
 }
 
 /* One dot, no count: an answer arrived while the window was hidden. */
+/* Bottom-right, not top: the mark carries a bright cyan bead in its upper
+   right, and two dots in one corner is two signals competing to be read. */
 .chat-launcher-dot {
   position: absolute;
-  top: 9px;
-  right: 9px;
+  bottom: 7px;
+  right: 7px;
   width: 8px;
   height: 8px;
   border-radius: 50%;
