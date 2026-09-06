@@ -3818,6 +3818,49 @@ select {
   cursor: pointer;
 }
 
+/* The mission clock block: what time it is on the rover's own timeline, how
+   fast that timeline is running, and the rover's actual ground speed. It
+   sits between the scrubber and the telemetry readouts because it explains
+   both of them. */
+.lp-playback-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex: none;
+  padding: 0 12px;
+  border-left: 1px solid var(--line-card);
+  border-right: 1px solid var(--line-card);
+}
+
+.lp-playback-scale {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.lp-scale-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-dimmest);
+  font-family: var(--font-data);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.lp-scale-btn:hover {
+  color: var(--text-2);
+  border-color: var(--line-card);
+}
+
+.lp-scale-btn.is-active {
+  color: var(--lavender-bright);
+  border-color: var(--line-accent-hover);
+}
+
 .lp-playback-readouts {
   display: flex;
   align-items: baseline;
@@ -3850,6 +3893,15 @@ select {
    the numbers are the point, dragging is the convenience. */
 @media (max-width: 1200px) {
   .lp-playback-slider-block {
+    display: none;
+  }
+}
+
+/* The clock survives longer than the per-waypoint telemetry: without it the
+   drive is an animation at an unknown rate, which is the thing this bar
+   exists to stop being true. */
+@media (max-width: 1440px) {
+  .lp-playback-readouts .lp-playback-stat:last-child {
     display: none;
   }
 }

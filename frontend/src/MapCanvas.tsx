@@ -61,6 +61,13 @@ interface Props {
   resolutionM: number
   onCellClick: (row: number, col: number) => void
   onAnimationStepChange?: (step: number | null) => void
+  /**
+   * Playback cursor, owned by App's single mission clock. When provided this
+   * replaces the internal timer below: the map, the 3D scene and the
+   * transport bar have to be showing the same moment, and three independent
+   * timers is exactly how they stopped being.
+   */
+  playbackStep?: number | null
   onHoverCellChange?: (cell: [number, number] | null) => void
 }
 
@@ -85,6 +92,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     resolutionM,
     onCellClick,
     onAnimationStepChange,
+    playbackStep,
     onHoverCellChange,
   },
   ref,
@@ -99,6 +107,9 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   const baseImageRef = useRef<ImageData | null>(null)
   const animationTimerRef = useRef<number | null>(null)
   const [animStep, setAnimStep] = useState<number | null>(null)
+  // The controlled cursor wins whenever App supplies one; the internal
+  // timer stays only for the imperative startAnimation() handle.
+  const drawStep = playbackStep !== undefined ? playbackStep : animStep
   const [hoverCell, setHoverCell] = useState<[number, number] | null>(null)
 
   // The loaded grid's own row count, not CANVAS_SIZE. Every layer is
@@ -139,7 +150,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     })
 
     baseImageRef.current = imageData
-    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell, gridRows, overlays)
+    redraw(ctx, imageData, waypoints, start, goal, drawStep, hoverCell, gridRows, overlays)
     // Overlay degerleri (waypoints/start/goal/animStep/hoverCell/overlays)
     // bilerek bagimlilikta degil: onlari bir sonraki efekt yeniden ciziyor.
     // Buraya eklemek, her hover'da -- ve her overlay degisikliginde, yani
@@ -161,8 +172,8 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       return
     }
 
-    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell, gridRows, overlays)
-  }, [animStep, goal, gridRows, hoverCell, overlays, start, waypoints])
+    redraw(ctx, baseImageRef.current, waypoints, start, goal, drawStep, hoverCell, gridRows, overlays)
+  }, [drawStep, goal, gridRows, hoverCell, overlays, start, waypoints])
 
   useEffect(() => {
     if (!waypoints || waypoints.length === 0) {

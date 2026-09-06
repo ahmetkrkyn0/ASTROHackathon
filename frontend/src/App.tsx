@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import './App.css'
 import LandingPage from './LandingPage'
 import MapCanvas, {
@@ -10,6 +18,13 @@ import MapCanvas, {
 import { generateRockField, type RockDescriptor } from './lidarSimulation'
 import SpaceBackdrop from './SpaceBackdrop'
 import TerrainCanvas3D from './TerrainCanvas3D'
+import {
+  advancePlaybackHours,
+  hoursForStep,
+  NOMINAL_ROVER_SPEED_MS,
+  resolvePlaybackState,
+  stepForHours,
+} from './mission/playbackClock'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -155,17 +170,6 @@ export default function App() {
   const [, setPlanning] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
   const [focusTelemetry, setFocusTelemetry] = useState<FocusTelemetry>(DEFAULT_FOCUS_TELEMETRY)
-  const [routePlaybackStep, setRoutePlaybackStep] = useState<number | null>(null)
-  // 3D playback runs on its own clock, in simulated route hours rather than
-  // a fixed per-tick step count: the backend's kinematic planner already
-  // charges real time per segment (rover speed, slope, even recharge stops
-  // -- see Waypoint.elapsed_hours), so driving this clock against that
-  // timeline is what makes the rover arrive "at the real physics-implied
-  // pace" instead of visually snapping between 5 m grid nodes at a fixed
-  // frame rate. MapCanvas's own 2D playback (routePlaybackStep, above) is
-  // untouched -- this is additive, not a replacement.
-  const [playbackHours, setPlaybackHours] = useState(0)
-  const [isPlaying3D, setIsPlaying3D] = useState(false)
   // Computed once per plan, BEFORE calling planRoute, and handed to both the
   // backend (as obstacle_cells, so A* actually routes around them) and
   // TerrainCanvas3D (as the exact rocks to render) -- the same list either
@@ -194,28 +198,54 @@ export default function App() {
     [dismissToast],
   )
 
-  // Advance playbackHours in real wall-clock time while the 3D view is
-  // showing and a route is playing. Compressed into a fixed watch-length
-  // window (nobody watches a multi-hour traverse in real time), but the
-  // RELATIVE pacing within that window still comes straight from the
-  // planner's own elapsed_hours -- a segment the rover takes longer over
-  // (steep, or a recharge stop) still takes proportionally longer on screen.
+  // ONE mission clock, in the planner's own elapsed hours, shared by the 2D
+  // map, the 3D scene and the transport bar.
+  //
+  // There used to be three, and none of them was the rover's speed:
+  // MapCanvas stepped a waypoint every 33 ms, the transport bar every 50 ms,
+  // and the 3D view compressed the whole traverse into a fixed 10-45 second
+  // window. A 230 m route that the planner charges ~20 minutes for finished
+  // in under two seconds -- somewhere north of 500x real time, with the
+  // factor depending on the route, so nothing on screen could be read as a
+  // duration. At timeScale 1 the rover now crosses the ground at exactly the
+  // 0.2 m/s the planner charged it for, and any speed-up is a number the
+  // operator chose and can see.
+  const [playbackHours, setPlaybackHours] = useState(0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [timeScale, setTimeScale] = useState(1)
+
   const totalPlaybackHours = planResult?.waypoints[planResult.waypoints.length - 1]?.elapsed_hours ?? 0
+
+  // Read inside the animation frame without making the loop depend on them:
+  // re-creating the loop on every waypoint or scale change would reset its
+  // frame timing and stutter the drive.
+  const waypointsRef = useRef<Waypoint[] | null>(null)
+  waypointsRef.current = planResult?.waypoints ?? null
+  const timeScaleRef = useRef(timeScale)
+  timeScaleRef.current = timeScale
+  const roverSpeedRef = useRef(NOMINAL_ROVER_SPEED_MS)
+
   useEffect(() => {
-    if (!isPlaying3D || dimension !== '3d' || totalPlaybackHours <= 0) return
-    const playbackSeconds = Math.min(45, Math.max(10, totalPlaybackHours * 6))
-    const hoursPerMs = totalPlaybackHours / (playbackSeconds * 1000)
+    if (!isPlaying || totalPlaybackHours <= 0) return
 
     let raf = 0
     let lastTs: number | null = null
     const tick = (ts: number) => {
       if (lastTs === null) lastTs = ts
-      const dt = ts - lastTs
+      // Clamped: a backgrounded tab hands back one enormous delta on
+      // return, which would teleport the rover to the end of the route.
+      const deltaMs = Math.min(ts - lastTs, 250)
       lastTs = ts
-      setPlaybackHours((prev) => {
-        const next = prev + dt * hoursPerMs
+      setPlaybackHours((previous) => {
+        const next = advancePlaybackHours(
+          waypointsRef.current,
+          previous,
+          deltaMs,
+          roverSpeedRef.current,
+          timeScaleRef.current,
+        )
         if (next >= totalPlaybackHours) {
-          setIsPlaying3D(false)
+          setIsPlaying(false)
           return totalPlaybackHours
         }
         return next
@@ -224,26 +254,33 @@ export default function App() {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [isPlaying3D, dimension, totalPlaybackHours])
+  }, [isPlaying, totalPlaybackHours])
 
-  // The waypoint at/just before playbackHours, plus how far along (0-1) the
-  // rover is toward the next one -- TerrainCanvas3D lerps position between
-  // them with this fraction rather than snapping node to node.
-  const { activeWaypoint3D, roverFraction3D } = useMemo(() => {
-    const wps = planResult?.waypoints
-    if (!wps || wps.length === 0) return { activeWaypoint3D: null, roverFraction3D: 0 }
-    let index = 0
-    for (let i = 0; i < wps.length; i++) {
-      if (wps[i].elapsed_hours <= playbackHours) index = i
-      else break
-    }
-    const current = wps[index]
-    const next = wps[index + 1]
-    if (!next) return { activeWaypoint3D: current, roverFraction3D: 0 }
-    const span = next.elapsed_hours - current.elapsed_hours
-    const fraction = span > 1e-9 ? Math.min(1, Math.max(0, (playbackHours - current.elapsed_hours) / span)) : 0
-    return { activeWaypoint3D: current, roverFraction3D: fraction }
-  }, [planResult, playbackHours])
+  // Everything derived from the clock: which waypoint the rover is on, how
+  // far between it and the next, whether this segment is a recharge stop,
+  // and the ground speed the planner's own timeline implies.
+  const playbackState = useMemo(
+    () => resolvePlaybackState(planResult?.waypoints, playbackHours, roverSpeedRef.current),
+    [planResult, playbackHours],
+  )
+  const activeWaypoint3D = playbackState.activeWaypoint
+  const roverFraction3D = playbackState.roverFraction
+
+  // Seeking by waypoint index (what the transport bar's scrubber offers)
+  // means moving the CLOCK to that waypoint's own timestamp, so every other
+  // reader of the clock follows without a second source of truth.
+  const seekPlaybackStep: Dispatch<SetStateAction<number | null>> = useCallback((update) => {
+    const waypoints = waypointsRef.current
+    if (!waypoints || waypoints.length === 0) return
+    setPlaybackHours((previousHours) => {
+      const nextStep =
+        typeof update === 'function' ? update(stepForHours(waypoints, previousHours)) : update
+      return hoursForStep(waypoints, nextStep)
+    })
+  }, [])
+  // The 2D map and every panel that reads "which waypoint are we on" follow
+  // the same clock rather than a timer of their own.
+  const routePlaybackStep = playbackState.stepIndex
 
   useEffect(() => {
     // Diziyi burada yakaliyoruz, temizlikte degil: .current yalnizca push ile
@@ -374,7 +411,8 @@ export default function App() {
     (row: number, col: number) => {
       setPlanResult(null)
       setPlanError(null)
-      setRoutePlaybackStep(null)
+      setIsPlaying(false)
+      setPlaybackHours(0)
 
       if (clickMode === 'start') {
         setStart([row, col])
@@ -394,8 +432,7 @@ export default function App() {
       setWeights(rover.default_weights)
       setPlanResult(null)
       setPlanError(null)
-      setRoutePlaybackStep(null)
-      setIsPlaying3D(false)
+      setIsPlaying(false)
       setPlaybackHours(0)
       setMissionMode('plan')
     },
@@ -410,8 +447,7 @@ export default function App() {
     setPlanning(true)
     setPlanError(null)
     setPlanResult(null)
-    setRoutePlaybackStep(null)
-    setIsPlaying3D(false)
+    setIsPlaying(false)
     setPlaybackHours(0)
 
     // Seed the rock field from start/goal alone, BEFORE the route exists --
@@ -463,9 +499,8 @@ export default function App() {
         setPlanning(false)
         setMissionMode('analyze')
         window.setTimeout(() => {
-          mapRef.current?.startAnimation()
           setPlaybackHours(0)
-          setIsPlaying3D(true)
+          setIsPlaying(true)
         }, 100)
       }, 750)
     } catch (error) {
@@ -484,8 +519,7 @@ export default function App() {
     setPlanError(null)
     setClickMode('idle')
     setHoverPoint(null)
-    setRoutePlaybackStep(null)
-    setIsPlaying3D(false)
+    setIsPlaying(false)
     setPlaybackHours(0)
     setObstacleRocks(null)
     setMissionMode('plan')
@@ -509,6 +543,10 @@ export default function App() {
   // yokken efekt her render'da yeniden kosardi.
   const waypoints = useMemo(() => planResult?.waypoints ?? [], [planResult])
   const selectedRover = rovers.find((entry) => entry.id === selectedRoverId) ?? null
+  // The clock's recharge-stop test compares against the selected rover's own
+  // top speed; a ref rather than a dependency so changing rover never
+  // restarts the animation frame loop mid-drive.
+  roverSpeedRef.current = selectedRover?.v_max_ms ?? NOMINAL_ROVER_SPEED_MS
 
   // Telemetry sync
   useEffect(() => {
@@ -623,19 +661,42 @@ export default function App() {
       planRoute: handlePlan,
       resetMission: handleReset,
       setMissionMode,
-      setPlaybackStep: setRoutePlaybackStep,
+      setPlaybackStep: seekPlaybackStep,
+      setPlaying: setIsPlaying,
+      setTimeScale,
+      seekPlayback: setPlaybackHours,
       setPayloadW,
       setHeaterW,
       setViewMode,
       setDimension,
       toggleHud,
     }),
-    [handlePlan, handleReset, handleRoverSelect, toggleHud],
+    [handlePlan, handleReset, handleRoverSelect, seekPlaybackStep, toggleHud],
   )
 
   const missionRuntimeValue: MissionRuntime = useMemo(
-    () => ({ routePlaybackStep, payloadW, heaterW }),
-    [heaterW, payloadW, routePlaybackStep],
+    () => ({
+      routePlaybackStep,
+      payloadW,
+      heaterW,
+      playbackHours,
+      playbackTotalHours: totalPlaybackHours,
+      isPlaying,
+      timeScale,
+      isRecharging: playbackState.isRecharging,
+      groundSpeedMs: playbackState.groundSpeedMs,
+    }),
+    [
+      heaterW,
+      isPlaying,
+      payloadW,
+      playbackHours,
+      playbackState.groundSpeedMs,
+      playbackState.isRecharging,
+      routePlaybackStep,
+      timeScale,
+      totalPlaybackHours,
+    ],
   )
 
   return (
@@ -775,7 +836,7 @@ export default function App() {
                     viewMode={viewMode}
                     resolutionM={focusTelemetry.resolutionM}
                     onCellClick={handleCellClick}
-                    onAnimationStepChange={setRoutePlaybackStep}
+                    playbackStep={routePlaybackStep}
                     onHoverCellChange={setHoverPoint}
                   />
                 ) : (
@@ -784,7 +845,7 @@ export default function App() {
                     waypoints={planResult?.waypoints ?? null}
                     activeWaypoint={activeWaypoint3D}
                     roverFraction={roverFraction3D}
-                    isPlaying={isPlaying3D}
+                    isPlaying={isPlaying}
                     obstacleRocks={obstacleRocks}
                     clickMode={clickMode}
                     onCellClick={handleCellClick}

@@ -163,6 +163,26 @@ export interface MissionRuntime {
   routePlaybackStep: number | null
   payloadW: number
   heaterW: number
+  /**
+   * The mission clock, in the planner's own elapsed hours. ONE clock for the
+   * 2D map, the 3D scene and the transport bar: they ran on three unrelated
+   * timers before (33 ms per waypoint in MapCanvas, 50 ms in the transport
+   * bar, and the whole traverse compressed into 10-45 s in the 3D view), so
+   * the same route finished at three different times and none of them was
+   * the rover's own speed.
+   */
+  playbackHours: number
+  playbackTotalHours: number
+  isPlaying: boolean
+  /**
+   * Simulated seconds per wall-clock second. 1 means the rover crosses the
+   * ground at exactly the speed the planner charged it for.
+   */
+  timeScale: number
+  /** True while the clock is skipping a stationary recharge stop. */
+  isRecharging: boolean
+  /** Ground speed the planner's own timeline implies right now, m/s. */
+  groundSpeedMs: number
 }
 
 /**
@@ -207,6 +227,12 @@ export interface MissionActions {
    * passed.
    */
   setPlaybackStep: Dispatch<SetStateAction<number | null>>
+  /** Start or stop the mission clock. */
+  setPlaying: (playing: boolean) => void
+  /** Simulated seconds per wall-clock second; 1 is real time. */
+  setTimeScale: (scale: number) => void
+  /** Jump the mission clock to an absolute elapsed-hours position. */
+  seekPlayback: (hours: number) => void
   setPayloadW: (watts: number) => void
   setHeaterW: (watts: number) => void
   setViewMode: (mode: ViewModeId) => void
