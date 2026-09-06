@@ -24,6 +24,13 @@ import {
   ROUTE_CYAN,
 } from './colormap'
 
+/**
+ * How long the planned route takes to sweep onto the map, in milliseconds.
+ * Fixed for the whole route rather than per waypoint, so route length does
+ * not change how long the answer takes to appear.
+ */
+const ROUTE_REVEAL_MS = 1100
+
 const CANVAS_SIZE = 500
 // Full resolution. fetchLayer reads the binary float32 layer, which carries
 // the whole 500x500 grid in 1.00 MB and is exempt from the MAX_LAYER_CELLS
@@ -104,6 +111,36 @@ function MapCanvas({
   // nothing at zero -- there is no base map to be out of register with yet.
   const gridRows = elevationGrid?.length ?? 0
 
+  // How much of the planned line has been drawn in.
+  //
+  // This is a ROUTE REVEAL, not the drive -- two different things that used
+  // to share one counter, which is how the map ended up either crawling for
+  // twenty minutes before showing the route it had found, or racing the
+  // rover marker along at a hundred times its own speed. The line is the
+  // planner's answer and wants to be legible immediately; the marker is the
+  // rover and belongs on the mission clock. So: the line sweeps in over a
+  // fixed budget no matter how long the route is, and then stays.
+  const [revealStep, setRevealStep] = useState(0)
+  useEffect(() => {
+    if (!waypoints || waypoints.length === 0) {
+      setRevealStep(0)
+      return
+    }
+    const total = waypoints.length - 1
+    // Time-based rather than one timeout per waypoint, so a 40-node route
+    // and a 400-node one take the same moment to appear.
+    let frame = 0
+    let startedAt: number | null = null
+    const tick = (timestamp: number) => {
+      if (startedAt === null) startedAt = timestamp
+      const progress = Math.min(1, (timestamp - startedAt) / ROUTE_REVEAL_MS)
+      setRevealStep(Math.round(progress * total))
+      if (progress < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [waypoints])
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) {
@@ -129,7 +166,7 @@ function MapCanvas({
     })
 
     baseImageRef.current = imageData
-    redraw(ctx, imageData, waypoints, start, goal, playbackStep, hoverCell, gridRows, overlays)
+    redraw(ctx, imageData, waypoints, start, goal, revealStep, playbackStep, hoverCell, gridRows, overlays)
     // Overlay degerleri (waypoints/start/goal/animStep/hoverCell/overlays)
     // bilerek bagimlilikta degil: onlari bir sonraki efekt yeniden ciziyor.
     // Buraya eklemek, her hover'da -- ve her overlay degisikliginde, yani
@@ -151,8 +188,8 @@ function MapCanvas({
       return
     }
 
-    redraw(ctx, baseImageRef.current, waypoints, start, goal, playbackStep, hoverCell, gridRows, overlays)
-  }, [playbackStep, goal, gridRows, hoverCell, overlays, start, waypoints])
+    redraw(ctx, baseImageRef.current, waypoints, start, goal, revealStep, playbackStep, hoverCell, gridRows, overlays)
+  }, [playbackStep, goal, gridRows, hoverCell, overlays, revealStep, start, waypoints])
 
   useEffect(() => {
     onHoverCellChange?.(hoverCell)
@@ -267,7 +304,10 @@ function redraw(
   waypoints: Waypoint[] | null,
   start: [number, number] | null,
   goal: [number, number] | null,
-  currentStep: number | null,
+  /** How much of the planned line has swept in; see revealStep. */
+  revealStep: number,
+  /** Where the rover is on the mission clock; see the playbackStep prop. */
+  roverStep: number | null,
   hoverCell: [number, number] | null,
   gridRows: number,
   overlays?: readonly OverlayCommand[],
@@ -286,7 +326,7 @@ function redraw(
   }
 
   if (waypoints && waypoints.length > 1) {
-    const drawUpTo = currentStep ?? waypoints.length - 1
+    const drawUpTo = Math.min(waypoints.length - 1, Math.max(revealStep, roverStep ?? 0))
 
     ctx.save()
     ctx.lineCap = 'round'
@@ -297,9 +337,14 @@ function redraw(
     for (let index = 1; index <= drawUpTo; index += 1) {
       const previous = waypoints[index - 1]
       const current = waypoints[index]
-      
+
       // Base cyan trajectory with risk color accenting
       ctx.strokeStyle = current.risk_level === 'LOW' ? ROUTE_CYAN : riskToHex(current.risk_level)
+      // Ground already covered reads at full strength, the road ahead is
+      // held back. Without this the whole route looks identical the moment
+      // the reveal finishes and the marker is the only thing saying how far
+      // along the rover actually is.
+      ctx.globalAlpha = roverStep !== null && index > roverStep ? 0.42 : 1
       ctx.lineWidth = 2.8
       ctx.beginPath()
       ctx.moveTo(previous.col, previous.row)
@@ -309,8 +354,8 @@ function redraw(
 
     ctx.restore()
 
-    if (currentStep !== null && currentStep < waypoints.length) {
-      const rover = waypoints[currentStep]
+    if (roverStep !== null && roverStep < waypoints.length) {
+      const rover = waypoints[roverStep]
       ctx.save()
       ctx.fillStyle = '#e7eaf1'
       ctx.shadowColor = ROUTE_CYAN
