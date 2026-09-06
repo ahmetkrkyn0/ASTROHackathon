@@ -6376,11 +6376,23 @@ select {
   inset: 3px;
   border-radius: 50%;
   background: conic-gradient(from 0deg, rgba(95, 244, 255, 0.74), transparent 23%);
-  animation: terrain3d-radar-sweep 0.2s linear infinite;
+  /* The sensor really does turn at 5 Hz, and this was set to 0.2s to match it
+     exactly. Five revolutions a second is not a sweep any eye can follow --
+     the wedge smears into a flat ring and the icon stops reading as a moving
+     thing at all. The header states the true rate in words ("5 HZ"), which is
+     where a number belongs; the icon's job is only to say the sensor is
+     turning, so it turns slowly enough to be seen doing it. */
+  animation: terrain3d-radar-sweep 2s linear infinite;
 }
 
 @keyframes terrain3d-radar-sweep {
   to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terrain3d-radar-icon span {
+    animation: none;
+  }
 }
 
 .terrain3d-lidar-toggle {

@@ -23,6 +23,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
+import { createSky } from './sky'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
@@ -190,218 +191,64 @@ async function fetchF32(url: string): Promise<Float32Array> {
 
 // ── 3D Deep Space Environment Generators ──────────────────────────────────────
 
-function createStarfieldTexture(): THREE.Texture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return new THREE.Texture()
-  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-  grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)')
-  grad.addColorStop(0.15, 'rgba(240, 245, 255, 0.9)')
-  grad.addColorStop(0.4, 'rgba(180, 220, 255, 0.35)')
-  grad.addColorStop(0.7, 'rgba(120, 170, 255, 0.08)')
-  grad.addColorStop(1, 'rgba(0, 0, 0, 0)')
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 64, 64)
-  return new THREE.CanvasTexture(canvas)
-}
-
-function createStarfield(count = 3500, radius = 70000): THREE.Points {
-  const geometry = new THREE.BufferGeometry()
-  const positions = new Float32Array(count * 3)
-  const colors = new Float32Array(count * 3)
-  const colorObj = new THREE.Color()
-
-  const starPalettes = [
-    new THREE.Color(0xffffff), // Pure white
-    new THREE.Color(0xdbeafe), // O/B blue-white
-    new THREE.Color(0x93c5fd), // High-temp electric blue
-    new THREE.Color(0xfef08a), // Solar yellow
-    new THREE.Color(0xfdcba8), // K-type orange
-    new THREE.Color(0xfca5a5), // Red giant
-  ]
-
-  for (let i = 0; i < count; i++) {
-    const u = Math.random()
-    const v = Math.random()
-    const theta = u * 2.0 * Math.PI
-    const phi = Math.acos(2.0 * v - 1.0)
-    const r = radius * (0.95 + Math.random() * 0.1)
-
-    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta)
-    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
-    positions[i * 3 + 2] = r * Math.cos(phi)
-
-    const pick = Math.random()
-    if (pick < 0.55) colorObj.copy(starPalettes[0])
-    else if (pick < 0.75) colorObj.copy(starPalettes[1])
-    else if (pick < 0.88) colorObj.copy(starPalettes[2])
-    else if (pick < 0.95) colorObj.copy(starPalettes[3])
-    else if (pick < 0.98) colorObj.copy(starPalettes[4])
-    else colorObj.copy(starPalettes[5])
-
-    const brightness = 0.5 + Math.random() * 0.5
-    colors[i * 3] = colorObj.r * brightness
-    colors[i * 3 + 1] = colorObj.g * brightness
-    colors[i * 3 + 2] = colorObj.b * brightness
-  }
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-
-  const material = new THREE.PointsMaterial({
-    size: 26,
-    map: createStarfieldTexture(),
-    transparent: true,
-    vertexColors: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  })
-
-  return new THREE.Points(geometry, material)
-}
-
-function createMilkyWayDust(count = 2000, radius = 68000): THREE.Points {
-  const geometry = new THREE.BufferGeometry()
-  const positions = new Float32Array(count * 3)
-  const colors = new Float32Array(count * 3)
-
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2
-    const spread = (Math.random() - 0.5) * 0.28
-    const r = radius * (0.92 + Math.random() * 0.16)
-
-    const bx = Math.cos(angle) * r
-    const by = spread * r
-    const bz = Math.sin(angle) * r
-
-    const cosInc = Math.cos(0.6)
-    const sinInc = Math.sin(0.6)
-    const x = bx
-    const y = by * cosInc - bz * sinInc
-    const z = by * sinInc + bz * cosInc
-
-    positions[i * 3] = x
-    positions[i * 3 + 1] = y
-    positions[i * 3 + 2] = z
-
-    const t = Math.random()
-    colors[i * 3] = 0.35 * t + 0.15
-    colors[i * 3 + 1] = 0.45 * t + 0.25
-    colors[i * 3 + 2] = 0.85 * t + 0.35
-  }
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-
-  const material = new THREE.PointsMaterial({
-    size: 40,
-    map: createStarfieldTexture(),
-    transparent: true,
-    vertexColors: true,
-    blending: THREE.AdditiveBlending,
-    opacity: 0.35,
-    depthWrite: false,
-  })
-
-  return new THREE.Points(geometry, material)
-}
-
-function createEarth(span: number): { group: THREE.Group; mesh: THREE.Mesh } {
+function createEarth(span: number): { group: THREE.Group; sprite: THREE.Sprite } {
   const group = new THREE.Group()
 
+  // The asset is a PHOTOGRAPH of the Earth as a disc on a black starfield, and
+  // it is 1024 square -- not the 2:1 an equirectangular sphere map has to be.
+  // Wrapped onto a SphereGeometry, its black corners land across whole regions
+  // of the globe: that is what read as "one side of the Earth is dark". Not a
+  // lighting problem at all, and no amount of emissive fixed it, because the
+  // darkness was the texture's own background being painted onto the sphere.
+  //
+  // So it does not go on a sphere. A photo of a lit disc, atmospheric limb
+  // already baked in, IS the image of a distant planet -- it only needs to be
+  // held up facing the viewer, which is exactly what a Sprite does, and what
+  // the sun flare beside it already does. The sphere's slow spin goes with it:
+  // the Earth hangs all but motionless over the lunar south pole, so nobody
+  // could have seen it turn even if the texture had been right.
   const canvas = document.createElement('canvas')
   canvas.width = 1024
-  canvas.height = 512
+  canvas.height = 1024
   const ctx = canvas.getContext('2d')!
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
 
-  const oceanGrad = ctx.createLinearGradient(0, 0, 0, 512)
-  oceanGrad.addColorStop(0, '#0a1d4a')
-  oceanGrad.addColorStop(0.5, '#0e2b6e')
-  oceanGrad.addColorStop(1, '#0a1d4a')
-  ctx.fillStyle = oceanGrad
-  ctx.fillRect(0, 0, 1024, 512)
-
-  ctx.fillStyle = '#1e3a29'
-  ctx.beginPath()
-  ctx.ellipse(560, 220, 160, 100, 0.2, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(530, 310, 80, 90, -0.1, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(280, 200, 90, 110, -0.25, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(330, 340, 70, 100, 0.2, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.fillStyle = '#785428'
-  ctx.beginPath()
-  ctx.ellipse(520, 250, 70, 35, 0.05, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(750, 360, 60, 45, 0.1, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.fillStyle = '#f8fafc'
-  ctx.beginPath()
-  ctx.ellipse(512, 18, 480, 26, 0, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(512, 496, 440, 30, 0, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.72)'
-  ctx.beginPath()
-  ctx.ellipse(340, 180, 120, 35, 0.3, 0, Math.PI * 2)
-  ctx.ellipse(600, 260, 180, 40, -0.2, 0, Math.PI * 2)
-  ctx.ellipse(260, 310, 100, 25, 0.15, 0, Math.PI * 2)
-  ctx.ellipse(720, 170, 140, 30, 0.25, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)'
-  ctx.lineWidth = 10
-  ctx.beginPath()
-  ctx.arc(380, 210, 40, 0, Math.PI * 1.5)
-  ctx.stroke()
-  ctx.beginPath()
-  ctx.arc(680, 230, 45, Math.PI * 0.5, Math.PI * 2)
-  ctx.stroke()
-
-  const textureLoader = new THREE.TextureLoader()
-  const earthTexture = textureLoader.load('/textures/earth_disc.jpg')
-  earthTexture.colorSpace = THREE.SRGBColorSpace
-
-  const earthRadius = span * 0.18
-  const earthGeo = new THREE.SphereGeometry(earthRadius, 48, 48)
-  const earthMat = new THREE.MeshStandardMaterial({
-    map: earthTexture,
-    roughness: 0.55,
-    metalness: 0.05,
-    emissive: new THREE.Color(0x112244),
-    emissiveIntensity: 0.12,
+  new THREE.TextureLoader().load('/textures/earth_disc.jpg', (loaded) => {
+    ctx.drawImage(loaded.image as CanvasImageSource, 0, 0, 1024, 1024)
+    // Cut the square photo down to its own disc. A JPEG carries no alpha, so
+    // without this the sprite is a black tile with a planet in the middle of
+    // it. The fade band sits just outside the limb, where the frame has
+    // already fallen off to space, so the corners and the photo's own stars
+    // go (the scene draws its own) without biting into the atmosphere glow.
+    const alpha = ctx.createRadialGradient(512, 512, 462, 512, 512, 500)
+    alpha.addColorStop(0, 'rgba(0, 0, 0, 1)')
+    alpha.addColorStop(1, 'rgba(0, 0, 0, 0)')
+    ctx.globalCompositeOperation = 'destination-in'
+    ctx.fillStyle = alpha
+    ctx.fillRect(0, 0, 1024, 1024)
+    ctx.globalCompositeOperation = 'source-over'
+    loaded.dispose()
+    texture.needsUpdate = true
   })
-  const mesh = new THREE.Mesh(earthGeo, earthMat)
-  group.add(mesh)
 
-  const atmoGeo = new THREE.SphereGeometry(earthRadius * 1.06, 48, 48)
-  const atmoMat = new THREE.MeshBasicMaterial({
-    color: 0x38bdf8,
-    transparent: true,
-    opacity: 0.45,
-    blending: THREE.AdditiveBlending,
-    side: THREE.BackSide,
-  })
-  const atmoMesh = new THREE.Mesh(atmoGeo, atmoMat)
-  group.add(atmoMesh)
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }),
+  )
+  // Measured off the file: the planet's limb sits at r=428 of 512, so it
+  // fills 84% of the frame it was photographed in and the sprite has to be
+  // scaled up by that much to leave the Earth the size in the sky the old
+  // sphere (radius span * 0.18) drew it. The alpha cut above is placed off
+  // the same measurement -- brightness is 10/255 at r=462 and 3/255 by 500,
+  // so the band it fades across is already space.
+  const diameter = (span * 0.36) / 0.836
+  sprite.scale.set(diameter, diameter, 1)
+  group.add(sprite)
 
-  // Position Earth high in the upper-right sky above the lunar horizon (matching user screenshot)
+  // High in the upper-right sky, above the lunar horizon.
   group.position.set(span * 1.5, span * 1.05, -span * 2.4)
-  mesh.rotation.z = THREE.MathUtils.degToRad(23.4)
 
-  return { group, mesh }
+  return { group, sprite }
 }
 
 function createSunFlareSprite(): THREE.Sprite {
@@ -1210,6 +1057,8 @@ export default function TerrainCanvas3D({
   // "where the rover currently is" always reads as the rocks travelling
   // with it, no matter how wide the radius or how coarse the recentring.
   const lastRockFieldWaypointsRef = useRef<Waypoint[] | null | undefined>(undefined)
+  /** The mesh.scale.z the current rock field was placed against. */
+  const lastRockFieldScaleRef = useRef<number | null>(null)
   // Where the gravel layer was last built. Unlike the navigation rocks --
   // anchored to the route so they stay put while the rover drives past --
   // gravel is a distance-graded LOD around the sensor and has to follow it,
@@ -1257,7 +1106,6 @@ export default function TerrainCanvas3D({
     terrainNet: THREE.LineSegments
     rockBoxContainer: HTMLDivElement
     rockBoxPool: HTMLDivElement[]
-    earthMesh?: THREE.Mesh
     sunSprite?: THREE.Sprite
     camera?: THREE.PerspectiveCamera
     controls?: OrbitControls
@@ -1274,16 +1122,23 @@ export default function TerrainCanvas3D({
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0x020308)
 
-    // Deep space celestial environment: Starfield & Milky Way
-    const starfield = createStarfield(3500, 70000)
-    scene.add(starfield)
-
-    const milkyWay = createMilkyWayDust(2000, 68000)
-    scene.add(milkyWay)
-
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000)
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+
+    // The real sky, built after the renderer because star sizes are in pixels
+    // and it owns the device pixel ratio. The catalogue loads in the
+    // background; the scene does not wait on it.
+    const skyAbort = new AbortController()
+    const sky = createSky(renderer.getPixelRatio(), skyAbort.signal)
+    scene.add(sky.group)
+    sky.ready.catch((error: unknown) => {
+      if (skyAbort.signal.aborted) return
+      // A sky that fails to load costs the scene its backdrop and nothing
+      // else, so it is reported rather than thrown -- the terrain, the route
+      // and the rover are all still there to fly.
+      console.error('[sky] star catalogue unavailable', error)
+    })
     renderer.outputColorSpace = THREE.SRGBColorSpace
     // No tone mapping: the point of this scene is a hard terminator between
     // lit and unlit ground, and a filmic curve lifts the black side off zero.
@@ -1816,7 +1671,6 @@ export default function TerrainCanvas3D({
         terrainNet,
         rockBoxContainer,
         rockBoxPool,
-        earthMesh: earth.mesh,
         sunSprite: sunFlare,
         camera,
         controls,
@@ -1824,9 +1678,10 @@ export default function TerrainCanvas3D({
         dispose: () => {
           geometry.dispose()
           material.dispose()
-          starfield.geometry.dispose()
-          milkyWay.geometry.dispose()
-          earth.mesh.geometry.dispose()
+          skyAbort.abort()
+          sky.dispose()
+          earth.sprite.material.map?.dispose()
+          earth.sprite.material.dispose()
           rockGroup.children.forEach((rock) => {
             if (rock instanceof THREE.Mesh) rock.geometry.dispose()
           })
@@ -1995,9 +1850,6 @@ export default function TerrainCanvas3D({
       // "surface" view back to staring down at the orbit target.
       if (controls.enabled) controls.update()
       const state = sceneRef.current
-      if (state?.earthMesh) {
-        state.earthMesh.rotation.y += 0.0004
-      }
       // Orbit mode draws the rover oversized so a 1.5 m vehicle is findable
       // across a 2.5 km overview. Held at a fixed 10x that also meant the
       // rover was a 15 m monster the moment anyone zoomed in to look at it
@@ -2556,7 +2408,21 @@ export default function TerrainCanvas3D({
       // a route is genuinely (re)planned), this builds one field sized to
       // the route's own bounding box exactly once, and touches it again
       // only when the route changes -- never while just driving it.
-      const shouldRebuildRocks = lastRockFieldWaypointsRef.current !== (waypoints ?? null)
+      // Rocks are placed at sampleTerrainHeight(), which already multiplies by
+      // the field's verticalScale -- and that is mesh.scale.z: 1.0 in FPS mode,
+      // the vertical exaggeration in orbit. Rebuilding only when the route
+      // changed meant switching to orbit raised the terrain out from under a
+      // field still sitting at its unexaggerated heights, and every rock sank
+      // beneath the surface it was resting on. The scale a field was built for
+      // is therefore part of what makes that field stale, exactly as its route
+      // is. Rebuilding rather than just lifting each rock is deliberate: the
+      // bedding normal from sampleTerrainNormal() is stretched by the same
+      // scale, so a rock moved without being re-seated would sit at the wrong
+      // angle on every slope.
+      const verticalScale = terrain.verticalScale
+      const shouldRebuildRocks =
+        lastRockFieldWaypointsRef.current !== (waypoints ?? null) ||
+        lastRockFieldScaleRef.current !== verticalScale
 
       let fieldCenterX = roverX
       let fieldCenterZ = roverZ
@@ -2583,6 +2449,7 @@ export default function TerrainCanvas3D({
 
       if (shouldRebuildRocks) {
         lastRockFieldWaypointsRef.current = waypoints ?? null
+        lastRockFieldScaleRef.current = verticalScale
         for (const child of [...state.rockGroup.children]) {
           state.rockGroup.remove(child)
           if (child instanceof THREE.Mesh) child.geometry.dispose()
