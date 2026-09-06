@@ -18,6 +18,7 @@ import { PoseLoop } from './pose-loop'
 import { Replan } from './replan'
 import { RosShowcase } from './ros-showcase'
 import { RouteAnalysis } from './route-analysis'
+import { RiskSweep } from './risk-sweep'
 import { RouteModel } from './route-model'
 import { SafetyMargins } from './safety-margins'
 import { TimeAxis } from './time-axis'
@@ -181,6 +182,7 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // else.
   { id: 'uncertainty', slot: 'rightRail', Component: Uncertainty, modes: ['analyze'], group: 'systems' },
   { id: 'stress-test', slot: 'rightRail', Component: StressTest, modes: ['analyze'], group: 'systems' },
+  { id: 'risk-sweep', slot: 'rightRail', Component: RiskSweep, modes: ['analyze'], group: 'systems' },
   // Offline evidence, so it belongs to no mission mode: the figures are the
   // same in plan and analyze because an external validation result does not
   // depend on the route on screen.

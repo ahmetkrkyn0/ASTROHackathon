@@ -1,0 +1,149 @@
+/* Risk appetite sweep (B2). Console rules; lavender because a sweep is a
+   comparison of preferences, not a hazard reading. */
+
+.lp-rs { display: flex; flex-direction: column; gap: 9px; }
+
+.lp-rs-run {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+.lp-rs-run:hover:not(:disabled) { border-color: var(--lavender); color: var(--text); }
+.lp-rs-run:disabled { opacity: 0.45; cursor: default; }
+
+.lp-rs-running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-size: var(--fs-tiny);
+  color: var(--text-dim);
+}
+
+.lp-rs-spinner {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--line-button);
+  border-top-color: var(--lavender);
+  border-radius: 50%;
+  animation: lp-rs-spin 900ms linear infinite;
+}
+
+@keyframes lp-rs-spin { to { transform: rotate(360deg); } }
+
+.lp-rs-cancel {
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-tiny);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.lp-rs-result { display: flex; flex-direction: column; gap: 7px; }
+
+.lp-rs-nominal { margin: 0; font-size: var(--fs-tiny); color: var(--text-dim); }
+.lp-rs-nominal b {
+  font-family: var(--font-data);
+  font-weight: 500;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-rs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+
+/* How much of the route MOVED is the headline: alpha answers which route you
+   take, not what that route costs. */
+.lp-rs-row {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  align-items: center;
+  gap: 4px 7px;
+  font-size: var(--fs-tiny);
+}
+
+.lp-rs-alpha {
+  font-family: var(--font-data);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-rs-track {
+  position: relative;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--bg-inset);
+}
+
+.lp-rs-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 2px;
+  background: var(--lavender);
+}
+
+.lp-rs-moved {
+  font-family: var(--font-data);
+  color: var(--text-2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-rs-delta {
+  grid-column: 2 / -1;
+  font-family: var(--font-data);
+  color: var(--text-dimmest);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-rs-note,
+.lp-rs-stale,
+.lp-rs-failure {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+}
+
+.lp-rs-note svg,
+.lp-rs-stale svg,
+.lp-rs-failure svg { flex: none; margin-top: 1px; font-size: 12px; }
+
+.lp-rs-note { color: var(--text-dimmest); }
+.lp-rs-stale { color: var(--text-dim); }
+
+.lp-rs-failure.is-absent {
+  padding: 7px 9px;
+  border: 1px dashed var(--line-inner);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+
+.lp-rs-failure.is-error {
+  padding: 7px 9px;
+  border-left: 2px solid var(--coral);
+  border-radius: var(--radius);
+  background: rgba(237, 133, 110, 0.08);
+  color: var(--coral-text);
+}
+
+@media (prefers-reduced-motion: reduce) { .lp-rs-spinner { animation: none; } }
