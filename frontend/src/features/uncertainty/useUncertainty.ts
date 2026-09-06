@@ -66,6 +66,12 @@ export function useUncertainty() {
     return {
       path_states: waypoints.map((waypoint, index) => [waypoint.row, waypoint.col, index]),
       rover_id: roverId,
+      // The states above are fine cells, so the grid they are counted in has
+      // to be the fine one. The endpoint defaults to 4, where a state is a
+      // 20 m block and is traversable only if all sixteen 5 m cells inside it
+      // are -- which a 2-D route can legitimately violate, and which comes
+      // back as "state N is not traversable" for a route that plainly is.
+      coarsen: 1,
       slice_hours: sliceHours,
       start_utc: missionTime,
     }

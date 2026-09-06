@@ -22,6 +22,7 @@ import { SafetyMargins } from './safety-margins'
 import { TimeAxis } from './time-axis'
 import { Uncertainty } from './uncertainty'
 import { SolvingIndicator } from './solving-indicator'
+import { StressTest } from './stress-test'
 
 /**
  * Where a feature mounts.
@@ -172,6 +173,7 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // blocks the route -- an unavailable ensemble costs this panel and nothing
   // else.
   { id: 'uncertainty', slot: 'rightRail', Component: Uncertainty, modes: ['analyze'], group: 'systems' },
+  { id: 'stress-test', slot: 'rightRail', Component: StressTest, modes: ['analyze'], group: 'systems' },
   // Analyze only. The cost under the pointer is worth reading in both modes,
   // but it is the last primary occupant of the right rail, and leaving it
   // registered in plan would keep a 288px column open for one hover readout.

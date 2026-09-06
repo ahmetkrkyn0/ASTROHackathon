@@ -1,0 +1,223 @@
+/* SHERPA Monte Carlo stress test (B5).
+
+   Console rules: flat, 2px radius, mono for data only. Lavender is the accent
+   for the rate bars -- a completion rate is a measurement, not a safety
+   verdict, so it takes the interaction accent rather than risk colour. Coral
+   appears only on the failure-cause counts, which are safety semantics. */
+
+.lp-st { display: flex; flex-direction: column; gap: 10px; }
+
+.lp-st-run {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+.lp-st-run:hover:not(:disabled) { border-color: var(--lavender); color: var(--text); }
+.lp-st-run:disabled { opacity: 0.45; cursor: default; }
+
+.lp-st-running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-size: var(--fs-tiny);
+  color: var(--text-dim);
+}
+
+.lp-st-spinner {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--line-button);
+  border-top-color: var(--lavender);
+  border-radius: 50%;
+  animation: lp-st-spin 900ms linear infinite;
+}
+
+@keyframes lp-st-spin { to { transform: rotate(360deg); } }
+
+.lp-st-cancel {
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-tiny);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.lp-st-result { display: flex; flex-direction: column; gap: 11px; }
+
+/* ── Rates, with their interval ──────────────────────────────────────────── */
+
+.lp-st-rate { display: flex; flex-direction: column; gap: 3px; }
+
+.lp-st-rate-head { display: flex; align-items: baseline; justify-content: space-between; }
+.lp-st-rate-label { font-size: var(--fs-tiny); color: var(--text-dim); }
+
+.lp-st-rate-value {
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-st-rate-track {
+  position: relative;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+/* Behind the estimate, so how well the rate is pinned down reads at the same
+   time as the rate itself. */
+.lp-st-rate-ci {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(186, 175, 245, 0.25);
+}
+
+.lp-st-rate-fill {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: 2px;
+  background: var(--lavender);
+}
+
+.lp-st-rate-foot {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-dimmest);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Histograms, from the backend's own bins ─────────────────────────────── */
+
+.lp-st-block { display: flex; flex-direction: column; gap: 4px; }
+.lp-st-block-label { font-size: var(--fs-tiny); color: var(--text-dim); }
+
+.lp-st-hist { display: flex; flex-direction: column; gap: 2px; }
+
+.lp-st-hist-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 34px;
+  padding: 0 1px;
+  border-bottom: 1px solid var(--line-inner);
+}
+
+.lp-st-hist-bar {
+  flex: 1;
+  min-width: 0;
+  min-height: 1px;
+  background: var(--cyan);
+  opacity: 0.55;
+  border-radius: 1px 1px 0 0;
+}
+
+.lp-st-hist-axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-dimmest);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Failures ────────────────────────────────────────────────────────────── */
+
+.lp-st-failures {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.lp-st-failures li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-tiny);
+  color: var(--text-3);
+}
+
+/* Safety semantics, so risk colour is correct here. */
+.lp-st-failures b {
+  font-family: var(--font-data);
+  font-weight: 500;
+  color: var(--coral-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Verdict, notes, states ──────────────────────────────────────────────── */
+
+.lp-st-verdict,
+.lp-st-note,
+.lp-st-stale,
+.lp-st-failure {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+}
+
+.lp-st-verdict svg,
+.lp-st-note svg,
+.lp-st-stale svg,
+.lp-st-failure svg { flex: none; margin-top: 1px; font-size: 12px; }
+
+.lp-st-verdict {
+  padding: 7px 9px;
+  border-left: 2px solid var(--line-card);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text-3);
+}
+
+.lp-st-note { color: var(--text-dimmest); }
+.lp-st-stale { color: var(--text-dim); }
+
+.is-stale { opacity: 0.5; }
+
+.lp-st-failure.is-absent {
+  padding: 7px 9px;
+  border: 1px dashed var(--line-inner);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+
+.lp-st-failure.is-error {
+  padding: 7px 9px;
+  border-left: 2px solid var(--coral);
+  border-radius: var(--radius);
+  background: rgba(237, 133, 110, 0.08);
+  color: var(--coral-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-st-spinner { animation: none; }
+}
