@@ -1210,6 +1210,8 @@ export default function TerrainCanvas3D({
   // "where the rover currently is" always reads as the rocks travelling
   // with it, no matter how wide the radius or how coarse the recentring.
   const lastRockFieldWaypointsRef = useRef<Waypoint[] | null | undefined>(undefined)
+  /** The mesh.scale.z the current rock field was placed against. */
+  const lastRockFieldScaleRef = useRef<number | null>(null)
   // Where the gravel layer was last built. Unlike the navigation rocks --
   // anchored to the route so they stay put while the rover drives past --
   // gravel is a distance-graded LOD around the sensor and has to follow it,
@@ -2556,7 +2558,21 @@ export default function TerrainCanvas3D({
       // a route is genuinely (re)planned), this builds one field sized to
       // the route's own bounding box exactly once, and touches it again
       // only when the route changes -- never while just driving it.
-      const shouldRebuildRocks = lastRockFieldWaypointsRef.current !== (waypoints ?? null)
+      // Rocks are placed at sampleTerrainHeight(), which already multiplies by
+      // the field's verticalScale -- and that is mesh.scale.z: 1.0 in FPS mode,
+      // the vertical exaggeration in orbit. Rebuilding only when the route
+      // changed meant switching to orbit raised the terrain out from under a
+      // field still sitting at its unexaggerated heights, and every rock sank
+      // beneath the surface it was resting on. The scale a field was built for
+      // is therefore part of what makes that field stale, exactly as its route
+      // is. Rebuilding rather than just lifting each rock is deliberate: the
+      // bedding normal from sampleTerrainNormal() is stretched by the same
+      // scale, so a rock moved without being re-seated would sit at the wrong
+      // angle on every slope.
+      const verticalScale = terrain.verticalScale
+      const shouldRebuildRocks =
+        lastRockFieldWaypointsRef.current !== (waypoints ?? null) ||
+        lastRockFieldScaleRef.current !== verticalScale
 
       let fieldCenterX = roverX
       let fieldCenterZ = roverZ
@@ -2583,6 +2599,7 @@ export default function TerrainCanvas3D({
 
       if (shouldRebuildRocks) {
         lastRockFieldWaypointsRef.current = waypoints ?? null
+        lastRockFieldScaleRef.current = verticalScale
         for (const child of [...state.rockGroup.children]) {
           state.rockGroup.remove(child)
           if (child instanceof THREE.Mesh) child.geometry.dispose()
