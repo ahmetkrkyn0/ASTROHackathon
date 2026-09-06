@@ -17,7 +17,7 @@
  * constants below are the scale's floor written out.
  */
 import React from 'react'
-import { fmt } from './format'
+import { fmt, fmtPct, type ReportLang } from './format'
 import { useChartWidth } from './useChartSize'
 
 export interface Point {
@@ -187,6 +187,15 @@ export interface LineAreaProps {
   formatX?: (v: number) => string
   title: string
   height?: number
+  /**
+   * The chart's own copy, in the report's language.
+   *
+   * A prop rather than a context read: these components are pure functions of
+   * their input, which is the only reason they can be tested at all in a
+   * project with no jsdom. The English default keeps every call site that has
+   * nothing to say about language working unchanged.
+   */
+  emptyLabel?: string
 }
 
 /**
@@ -207,10 +216,11 @@ export const LineArea: React.FC<LineAreaProps> = ({
   formatX,
   title,
   height = 180,
+  emptyLabel = 'Not enough points to plot.',
 }) => {
   const [ref, width] = useChartWidth()
 
-  if (points.length < 2) return <p className="lp-report-empty">Not enough points to plot.</p>
+  if (points.length < 2) return <p className="lp-report-empty">{emptyLabel}</p>
 
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)
@@ -291,6 +301,7 @@ export interface SegmentedProfileProps {
   formatY?: (v: number) => string
   formatX?: (v: number) => string
   height?: number
+  emptyLabel?: string
 }
 
 /**
@@ -307,10 +318,11 @@ export const SegmentedProfile: React.FC<SegmentedProfileProps> = ({
   formatY,
   formatX,
   height = 180,
+  emptyLabel = 'No elevation data.',
 }) => {
   const [ref, width] = useChartWidth()
 
-  if (points.length < 2) return <p className="lp-report-empty">No elevation data.</p>
+  if (points.length < 2) return <p className="lp-report-empty">{emptyLabel}</p>
 
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)
@@ -356,7 +368,10 @@ export interface BarRow {
 }
 
 /** Horizontal bars for a distribution whose categories are ordered. */
-export const HBars: React.FC<{ rows: BarRow[]; unit?: string }> = ({ rows, unit = '%' }) => {
+export const HBars: React.FC<{ rows: BarRow[]; lang?: ReportLang }> = ({
+  rows,
+  lang = 'en',
+}) => {
   const max = Math.max(...rows.map((r) => r.pct), 1)
   return (
     <div className="lp-hbars">
@@ -369,11 +384,8 @@ export const HBars: React.FC<{ rows: BarRow[]; unit?: string }> = ({ rows, unit 
               style={{ width: `${(r.pct / max) * 100}%`, background: r.color }}
             />
           </div>
-          <span className="lp-hbar-val">
-            {fmt(r.pct)}
-            {unit}
-          </span>
-          <span className="lp-hbar-count">{r.value}</span>
+          <span className="lp-hbar-val">{fmtPct(r.pct, 1, lang)}</span>
+          <span className="lp-hbar-count">{fmt(r.value, 0, lang)}</span>
         </div>
       ))}
     </div>
@@ -387,7 +399,10 @@ export interface Segment {
 }
 
 /** One bar carrying the whole route, split by category share. */
-export const StackedBar: React.FC<{ segments: Segment[] }> = ({ segments }) => {
+export const StackedBar: React.FC<{ segments: Segment[]; lang?: ReportLang }> = ({
+  segments,
+  lang = 'en',
+}) => {
   const shown = segments.filter((s) => s.pct > 0)
   return (
     <div className="lp-stacked-block">
@@ -397,7 +412,7 @@ export const StackedBar: React.FC<{ segments: Segment[] }> = ({ segments }) => {
             key={s.label}
             className="lp-stacked-seg"
             style={{ width: `${s.pct}%`, background: s.color }}
-            title={`${s.label}: ${fmt(s.pct)}%`}
+            title={`${s.label}: ${fmtPct(s.pct, 1, lang)}`}
           />
         ))}
       </div>
@@ -406,7 +421,7 @@ export const StackedBar: React.FC<{ segments: Segment[] }> = ({ segments }) => {
           <li key={s.label}>
             <span className="lp-legend-swatch" style={{ background: s.color }} />
             {s.label}
-            <strong>{fmt(s.pct)}%</strong>
+            <strong>{fmtPct(s.pct, 1, lang)}</strong>
           </li>
         ))}
       </ul>
@@ -428,11 +443,14 @@ export interface Slice {
  * for the same reason the area fills are faint -- one dominant slice at a
  * heavy stroke turned the card into a large bright disc.
  */
-export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel: string }> = ({
-  slices,
-  centerValue,
-  centerLabel,
-}) => {
+export const Donut: React.FC<{
+  slices: Slice[]
+  centerValue: string
+  centerLabel: string
+  /** The energy unit. Not translated -- Wh is Wh -- but the share is. */
+  unit?: string
+  lang?: ReportLang
+}> = ({ slices, centerValue, centerLabel, unit = 'Wh', lang = 'en' }) => {
   const total = slices.reduce((sum, s) => sum + s.value, 0)
   const R = 48
   const C = 2 * Math.PI * R
@@ -495,9 +513,11 @@ export const Donut: React.FC<{ slices: Slice[]; centerValue: string; centerLabel
               <span className="lp-legend-swatch" style={{ background: s.color }} />
               {s.label}
             </span>
-            <strong className="lp-donut-tile-val">{fmt(s.value)} Wh</strong>
+            <strong className="lp-donut-tile-val">
+              {fmt(s.value, 1, lang)} {unit}
+            </strong>
             <span className="lp-donut-tile-share">
-              %{total > 0 ? fmt((s.value / total) * 100) : '--'}
+              {total > 0 ? fmtPct((s.value / total) * 100, 1, lang) : '--'}
             </span>
           </li>
         ))}
@@ -518,7 +538,22 @@ export const LimitGauge: React.FC<{
   unit: string
   label: string
   exceeded: boolean | null
-}> = ({ value, limit, unit, label, exceeded }) => {
+  lang?: ReportLang
+  noLimitLabel?: string
+  exceededLabel?: string
+  /** Takes the share already formatted, so the sign sits where it belongs. */
+  usedLabel?: (pct: string) => string
+}> = ({
+  value,
+  limit,
+  unit,
+  label,
+  exceeded,
+  lang = 'en',
+  noLimitLabel = 'No shadow limit is defined for this rover.',
+  exceededLabel = 'Limit exceeded — the route is not safe as planned.',
+  usedLabel = (pct) => `${pct} of the limit used.`,
+}) => {
   const pct = limit && limit > 0 ? Math.min(100, (value / limit) * 100) : 0
   const color = exceeded ? 'var(--risk-crit)' : pct > 75 ? 'var(--risk-med)' : 'var(--risk-low)'
   return (
@@ -526,7 +561,7 @@ export const LimitGauge: React.FC<{
       <div className="lp-gauge-head">
         <span className="lp-kpi-label">{label}</span>
         <strong className="lp-gauge-val" style={{ color }}>
-          {fmt(value, 2)} / {limit === null ? '--' : fmt(limit, 1)} {unit}
+          {fmt(value, 2, lang)} / {limit === null ? '--' : fmt(limit, 1, lang)} {unit}
         </strong>
       </div>
       <div className="lp-gauge-track">
@@ -534,10 +569,10 @@ export const LimitGauge: React.FC<{
       </div>
       <span className="lp-gauge-note">
         {limit === null
-          ? 'No shadow limit is defined for this rover.'
+          ? noLimitLabel
           : exceeded
-            ? 'Limit exceeded — the route is not safe as planned.'
-            : `${fmt(pct, 0)}% of the limit used.`}
+            ? exceededLabel
+            : usedLabel(fmtPct(pct, 0, lang))}
       </span>
     </div>
   )

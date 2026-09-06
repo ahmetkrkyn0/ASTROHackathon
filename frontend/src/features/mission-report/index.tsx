@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { REPORT_LAUNCHER_SLOT_ID } from '../../components/TopBar/TopBar'
+import { Icon } from '../../components/Fleet/SpecIcons'
+import { COPY, readLang } from '../../i18n/reportCopy'
 import { useAskAssistant } from '../../intent/AssistantAskContext'
 import { useMission } from '../../mission/MissionContext'
 import { useMissionRuntime } from '../../mission/MissionRuntimeContext'
+import { useTerrainManifest } from '../../mission/useTerrainManifest'
 import { MissionReportModal } from './MissionReportModal'
 import { useMissionReport } from './useMissionReport'
 import './report.css'
@@ -19,10 +22,44 @@ import './report.css'
  * recomputed from the plan in one pass.
  */
 export function MissionReport() {
-  const { planResult } = useMission()
+  const { planResult, roverId, weights } = useMission()
   const { routePlaybackStep, payloadW, heaterW } = useMissionRuntime()
   const { isOpen, open, close } = useMissionReport(planResult, routePlaybackStep)
   const requestAsk = useAskAssistant()
+
+  /**
+   * The region the route was planned over.
+   *
+   * From the manifest, because that is the only place the extent and the
+   * resolution are measured rather than assumed -- never hard-coded, and never
+   * a site name, which this system does not record anywhere.
+   *
+   * The hook shares one in-flight request across every consumer, so asking for
+   * it here costs nothing the 3-D view and the corridor were not already
+   * paying.
+   */
+  const { manifest } = useTerrainManifest(roverId, weights)
+  const region = useMemo(() => {
+    if (!manifest) return null
+    const { rows, cols, resolution_m } = manifest.grid
+    // Measurements, not a sentence: the modal owns the language, so it owns
+    // the separators too.
+    return {
+      widthKm: (cols * resolution_m) / 1000,
+      heightKm: (rows * resolution_m) / 1000,
+      resolutionM: resolution_m,
+    }
+  }, [manifest])
+
+  /**
+   * The launcher's own language.
+   *
+   * Read at mount rather than shared with the modal: the button lives in the
+   * top bar and the modal owns the switch, so a context spanning the two would
+   * exist for one string. Whatever the operator last chose is what the button
+   * says next time the cockpit loads.
+   */
+  const [launcherCopy] = useState(() => COPY[readLang()])
 
   /**
    * The bar's anchor, found after it has mounted.
@@ -62,12 +99,10 @@ export function MissionReport() {
       type="button"
       className="lp-report-launcher"
       onClick={open}
-      title="Open the post-drive mission report"
+      title={launcherCopy.launcherTitle}
     >
-      <span className="lp-report-launcher-icon" aria-hidden="true">
-        ▤
-      </span>
-      Mission Report
+      <Icon name="report" className="lp-report-launcher-icon" />
+      {launcherCopy.launcher}
     </button>
   )
 
@@ -84,6 +119,7 @@ export function MissionReport() {
           heaterW={heaterW}
           onClose={close}
           onAskAssistant={askAssistant}
+          region={region}
         />
       )}
     </>

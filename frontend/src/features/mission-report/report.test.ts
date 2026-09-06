@@ -12,6 +12,14 @@ import {
   type VerdictReasonCode,
 } from './report'
 import verdictCases from './verdictCases.json'
+import {
+  COPY,
+  REPORT_LANGS,
+  VERDICT_MEANING,
+  fmtNum,
+  fmtPct,
+  reasonText,
+} from '../../i18n/reportCopy'
 
 const SUMMARY: SimSummary = {
   total_distance_km: 1,
@@ -76,7 +84,7 @@ describe('decideVerdict', () => {
   it('blocks a stranded route', () => {
     const result = decideVerdict(plan({ stranded: true, stranded_at_step: 12 }))
     expect(result.verdict).toBe('NO-GO')
-    expect(result.reasons[0].text).toContain('12')
+    expect(reasonText(result.reasons[0], 'en')).toContain('12')
   })
 
   it('blocks a breached shadow limit', () => {
@@ -90,7 +98,7 @@ describe('decideVerdict', () => {
       plan({}, { execution: { stranded: false, planned_nodes: 90, executable_nodes: 40, truncated: true, reason: 'battery' } }),
     )
     expect(result.verdict).toBe('NO-GO')
-    expect(result.reasons[0].text).toContain('40/90')
+    expect(reasonText(result.reasons[0], 'en')).toContain('40/90')
   })
 
   // The distinction the whole verdict rests on: a soft finding must not
@@ -101,8 +109,10 @@ describe('decideVerdict', () => {
 
   it('lists blocking reasons before warnings', () => {
     const result = decideVerdict(plan({ stranded: true, total_recharges: 2 }))
-    expect(result.reasons[0].text).toContain('ran out of energy')
-    expect(result.reasons[result.reasons.length - 1].text).toContain('recharge')
+    expect(reasonText(result.reasons[0], 'en')).toContain('ran out of energy')
+    expect(reasonText(result.reasons[result.reasons.length - 1], 'en')).toContain(
+      'recharge',
+    )
   })
 })
 
@@ -214,6 +224,79 @@ describe('verdict parity cases', () => {
       expect(result.reasons.map((reason) => reason.code)).toEqual(one.codes)
     })
   }
+})
+
+describe('report copy', () => {
+  // Every code, in every language. A reason with no sentence renders as an
+  // empty bullet in a PDF -- silent, and only ever seen by whoever the report
+  // was exported for.
+  it('renders every reason code in both languages', () => {
+    const samples = PARITY_CASES.flatMap((one) => {
+      const summary: Record<string, unknown> = { ...PARITY_BASE, ...one.summary }
+      for (const key of one.absent) delete summary[key]
+      return decideVerdict({
+        status: 'success',
+        astar_metrics: {} as PlanResponse['astar_metrics'],
+        summary: summary as unknown as SimSummary,
+        geojson: {},
+        waypoints: [],
+        ...(one.execution ? { execution: one.execution } : {}),
+      }).reasons
+    })
+
+    const covered = new Set(samples.map((reason) => reason.code))
+    for (const code of VERDICT_REASON_CODES) expect(covered).toContain(code)
+
+    for (const lang of REPORT_LANGS) {
+      for (const reason of samples) {
+        const text = reasonText(reason, lang)
+        expect(text.length).toBeGreaterThan(0)
+        // A template that lost its value renders the literal word, and that is
+        // what a missing interpolation looks like from the outside.
+        expect(text).not.toContain('undefined')
+        expect(text).not.toContain('NaN')
+      }
+    }
+  })
+
+  it('states what every verdict means, in both languages', () => {
+    for (const lang of REPORT_LANGS) {
+      const meanings = Object.values(VERDICT_MEANING[lang])
+      expect(meanings).toHaveLength(3)
+      expect(new Set(meanings).size).toBe(3)
+      for (const line of meanings) expect(line.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('carries the same keys in both languages', () => {
+    // Turkish is written by hand beside English; a key added to one and not
+    // the other is the failure this catches.
+    const walk = (value: unknown, trail: string): string[] => {
+      if (typeof value !== 'object' || value === null) return [trail]
+      return Object.entries(value).flatMap(([key, inner]) =>
+        walk(inner, trail ? `${trail}.${key}` : key),
+      )
+    }
+    expect(walk(COPY.tr, '').sort()).toEqual(walk(COPY.en, '').sort())
+  })
+
+  // Turkish moves both separators and puts the percent sign in front. Getting
+  // that backwards is the tell that a report was translated word by word.
+  it('formats numbers the way each language writes them', () => {
+    expect(fmtNum(3.47, 2, 'en')).toBe('3.47')
+    expect(fmtNum(3.47, 2, 'tr')).toBe('3,47')
+    expect(fmtPct(70, 1, 'en')).toBe('70.0%')
+    expect(fmtPct(70, 1, 'tr')).toBe('%70,0')
+    // Above a thousand the fraction stops carrying information.
+    expect(fmtNum(2665, 1, 'en')).toBe('2,665')
+    expect(fmtNum(2665, 1, 'tr')).toBe('2.665')
+    expect(fmtNum(Number.NaN, 1, 'en')).toBe('--')
+    expect(fmtNum(Number.NaN, 1, 'tr')).toBe('--')
+    // Intl prints negative zero as "-0", and a chart axis that opens below the
+    // origin lands on exactly that. The battery axis read "-0%" once.
+    expect(fmtNum(-0, 0, 'en')).toBe('0')
+    expect(fmtPct(-0, 0, 'tr')).toBe('%0')
+  })
 })
 
 describe('ASSISTANT_QUESTION', () => {

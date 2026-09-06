@@ -45,7 +45,7 @@
 }
 
 .lp-report-launcher-icon {
-  font-size: var(--fs-strong);
+  font-size: 17px;
 }
 
 .lp-report-scrim {
@@ -114,18 +114,152 @@
 
 .lp-report-header-right {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 18px;
 }
 
-.lp-report-verdict {
-  padding: 6px 12px;
-  border: 1px solid;
-  border-radius: var(--radius);
+/* What the mission recorded: rover, region, and when this was produced.
+   Mono, because every value in it is a measurement or a timestamp. */
+.lp-report-meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 12px;
+  align-content: start;
   font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+
+.lp-report-meta > div {
+  display: contents;
+}
+
+.lp-report-meta dt {
+  margin: 0;
+  color: var(--text-dim-2);
+}
+
+.lp-report-meta dd {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.lp-report-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Two buttons, each naming its own language. A single toggle labelled with
+   the OTHER language is the classic ambiguity -- nobody agrees whether it
+   shows the current state or the action it performs. */
+.lp-report-langs {
+  display: flex;
+  margin-right: 6px;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* Both buttons keep one width whichever is active. The glyph only appears on
+   the selected one, so without a floor the group changed width on every
+   switch and the toolbar beside it shuffled. */
+.lp-report-lang {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 58px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-body);
   font-size: var(--fs-small);
   font-weight: 600;
+  letter-spacing: var(--track-normal);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.lp-report-lang + .lp-report-lang {
+  border-left: 1px solid var(--line-card);
+}
+
+.lp-report-lang:hover {
+  color: var(--text);
+}
+
+.lp-report-lang.is-active {
+  background: rgba(186, 175, 245, 0.14);
+  color: var(--lavender-bright);
+}
+
+.lp-report-lang .lp-icon {
+  font-size: 15px;
+}
+
+/* ── The verdict ─────────────────────────────────────────────────────────
+   The one element in this report allowed to shout, and the only reason a
+   reader opens it in a hurry. It sits between the header and the body at full
+   width rather than as a chip beside the title, because a three-letter token
+   in a corner is a label and the decision is the document.
+
+   The border colour arrives inline from VERDICT_COLOR; everything else is
+   here. No glow -- App.css:184 is explicit that this system has two shadows
+   and neither is coloured. */
+.lp-report-verdict-panel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line-card);
+  /* Overridden inline per verdict; declared so the shape never depends on it. */
+  border-left: 3px solid var(--line-card);
+  background: var(--bg-card);
+}
+
+.lp-report-verdict-icon {
+  flex: 0 0 auto;
+  font-size: 30px;
+}
+
+.lp-report-verdict-panel.is-go .lp-report-verdict-icon {
+  color: var(--risk-low);
+}
+
+.lp-report-verdict-panel.is-go-with-risk .lp-report-verdict-icon {
+  color: var(--risk-med);
+}
+
+.lp-report-verdict-panel.is-no-go .lp-report-verdict-icon {
+  color: var(--risk-crit);
+}
+
+.lp-report-verdict-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* The token itself: a contract value shared with the backend, never
+   translated, and set in mono because that is what it is. */
+.lp-report-verdict {
+  font-family: var(--font-data);
+  font-size: var(--fs-title);
+  font-weight: 700;
   letter-spacing: var(--track-caps);
+  line-height: 1.15;
+}
+
+/* What it means. The UI review asked for exactly this line: GO and NO-GO are
+   recognisable only to someone who already knows the product. */
+.lp-report-verdict-meaning {
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--text-2);
 }
 
 /* Export sits beside the close button, not buried in the body: it is
@@ -138,6 +272,9 @@
 }
 
 .lp-report-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 12px;
   background: transparent;
   border: 1px solid var(--line-button);
@@ -153,7 +290,15 @@
   color: var(--text);
 }
 
+.lp-report-action .lp-icon,
+.lp-report-close .lp-icon {
+  font-size: 16px;
+}
+
 .lp-report-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 14px;
   background: var(--bg-raised);
   border: 1px solid var(--line-button);
@@ -202,12 +347,32 @@
 
 .lp-report-card-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--line-inner);
+}
+
+/* The glyph and the label travel together, so the note and the action still
+   sit at the far edge of the header. */
+.lp-report-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* Named for the QUANTITY rather than the card: the battery profile carries
+   the same mark the battery KPI does, so a reader learns one glyph per
+   reading instead of one per box. Neutral by default -- the readings that
+   carry a colour carry it in their own chart, and a rainbow of card headers
+   would compete with that. */
+.lp-report-card-icon {
+  flex: 0 0 auto;
+  font-size: 17px;
+  color: var(--text-3);
 }
 
 .lp-report-card-note {
@@ -225,15 +390,36 @@
 }
 
 .lp-report-ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 12px;
   background: var(--bg-raised);
   border: 1px solid var(--line-button);
   border-radius: var(--radius);
   color: var(--text-2);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-micro);
   white-space: nowrap;
   cursor: pointer;
+}
+
+.lp-report-ask .lp-icon {
+  font-size: 15px;
+}
+
+/* The assistant answers only in Turkish -- its grounding layer matches Turkish
+   morphology to block fabricated numbers -- so an English report says which
+   language is coming back BEFORE the operator presses. The same badge the chat
+   panel carries, for the same reason. */
+.lp-report-ask-lang {
+  padding: 0 4px;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  color: var(--text-muted);
 }
 
 .lp-report-ask:hover {
@@ -289,6 +475,20 @@
   gap: 4px;
   padding: 10px 12px;
   background: var(--bg-inset);
+}
+
+/* .lp-kpi-label is shared with the rail panels (App.css:2590), so the row is
+   made here rather than by editing that rule and moving the whole cockpit. */
+.lp-report-kpi .lp-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lp-report-kpi-icon {
+  flex: 0 0 auto;
+  font-size: 14px;
+  color: var(--text-dim-2);
 }
 
 /* ── Charts ─────────────────────────────────────────────────────────────── */
@@ -352,9 +552,13 @@
   gap: 12px;
 }
 
+/* Note 30 of the UI review: the risk split is the reading the verdict rests
+   on, and at 12px with small legend text it was the quietest thing in the
+   report. Thicker bar, and the shares set at the size the KPI values use --
+   it stays in its column, it just stops whispering. */
 .lp-stacked-bar {
   display: flex;
-  height: 12px;
+  height: 20px;
   background: var(--bg-inset);
   border: 1px solid var(--line-inner);
   overflow: hidden;
@@ -383,9 +587,9 @@
 
 .lp-stacked-legend strong {
   font-family: var(--font-data);
-  font-size: var(--fs-small);
+  font-size: var(--fs-value);
   color: var(--text);
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .lp-legend-swatch {
@@ -488,6 +692,9 @@
 /* ── Details ────────────────────────────────────────────────────────────── */
 
 .lp-report-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   align-self: flex-start;
   padding: 8px 12px;
   background: transparent;
@@ -497,6 +704,23 @@
   font-family: var(--font-body);
   font-size: var(--fs-small);
   cursor: pointer;
+}
+
+/* One glyph for both states. Two characters baked into two sentences meant
+   the arrow could disagree with the state it was describing. */
+.lp-report-toggle-icon {
+  font-size: 17px;
+  transition: transform 140ms ease;
+}
+
+.lp-report-toggle[aria-expanded='true'] .lp-report-toggle-icon {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-report-toggle-icon {
+    transition: none;
+  }
 }
 
 .lp-report-toggle:hover {
@@ -654,7 +878,9 @@
   .lp-report-figure,
   .lp-report-kpi .lp-kpi-val,
   .lp-report-table td,
-  .lp-report-dl dd {
+  .lp-report-dl dd,
+  .lp-report-meta dd,
+  .lp-report-verdict-meaning {
     color: #111;
   }
 
@@ -664,7 +890,15 @@
   .lp-report-dl dt,
   .lp-kpi-label,
   .lp-gauge-note,
-  .lp-donut-tile-share {
+  .lp-donut-tile-share,
+  .lp-report-meta dt {
+    color: #555;
+  }
+
+  /* The glyphs are ink, and on paper they are the only thing telling a
+     scanned column of cards apart at a glance. */
+  .lp-report-card-icon,
+  .lp-report-kpi-icon {
     color: #555;
   }
 
@@ -688,10 +922,18 @@
     border-color: #ddd;
   }
 
-  /* The verdict is the one thing a reader must not miss on paper either. */
+  /* The verdict is the one thing a reader must not miss on paper either.
+     Its panel keeps its rule and its glyph keeps its colour; the token was
+     already the heaviest text in the document and stays that way. */
   .lp-report-verdict {
-    border-width: 2pt;
     font-weight: 700;
+  }
+
+  .lp-report-verdict-panel {
+    border-left-width: 3pt;
+    border-bottom: 1pt solid #ddd;
+    background: none;
+    padding: 8pt 0;
   }
 
   /* Colour that carries a reading survives the browser's ink-saving. */
@@ -704,6 +946,8 @@
   .lp-legend-swatch,
   .lp-reason-dot,
   .lp-report-verdict,
+  .lp-report-verdict-panel,
+  .lp-report-verdict-icon,
   .lp-chart,
   .lp-donut {
     -webkit-print-color-adjust: exact;
@@ -721,11 +965,18 @@
   .lp-report-close,
   .lp-report-toggle,
   .lp-report-actions,
+  .lp-report-langs,
+  .lp-report-ask,
   .lp-report-launcher {
     display: none !important;
   }
 
   /* A card split across a page break loses the pairing of chart and caption. */
+  .lp-report-verdict-panel {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
   .lp-report-card {
     break-inside: avoid;
     page-break-inside: avoid;

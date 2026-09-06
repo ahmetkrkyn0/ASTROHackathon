@@ -34,11 +34,35 @@ export const VERDICT_REASON_CODES = [
 
 export type VerdictReasonCode = (typeof VERDICT_REASON_CODES)[number]
 
-export interface VerdictReason {
-  code: VerdictReasonCode
-  /** Why, in the operator's language. */
-  text: string
-}
+/**
+ * A finding: its code, and the measurements it rests on.
+ *
+ * Deliberately not a sentence. The prose lives in `i18n/reportCopy.ts`, which
+ * is what lets the report be read in two languages, and it puts this file in
+ * the same shape as `backend/app/report.py` -- which has carried codes rather
+ * than sentences from the start, because `ai_grounding` blocks any digit it
+ * did not register.
+ *
+ * A discriminated union rather than a loose value bag, so `reasonText` is
+ * exhaustive: adding a code without a sentence in both languages is a type
+ * error, not an empty line in a printed report.
+ */
+export type VerdictReason =
+  | { code: 'STRANDED'; step: number | null }
+  | {
+      code: 'EXECUTION_TRUNCATED'
+      executable: number
+      planned: number
+      /** The server's own wording, passed through untranslated. */
+      reason: string | null
+    }
+  | { code: 'SHADOW_LIMIT_EXCEEDED'; shadowH: number; limitH: number | null }
+  | { code: 'CRITICAL_STEPS'; count: number }
+  | { code: 'HIGH_RISK_STEPS'; count: number }
+  | { code: 'BATTERY_WATCH'; pct: number }
+  | { code: 'PEAK_POWER_EXCEEDED'; count: number }
+  | { code: 'RECHARGES_REQUIRED'; count: number }
+  | { code: 'NO_VIOLATION' }
 
 export interface VerdictResult {
   verdict: Verdict
@@ -70,63 +94,43 @@ export function decideVerdict(plan: PlanResponse): VerdictResult {
   const warnings: VerdictReason[] = []
 
   if (s.stranded) {
-    blocking.push({
-      code: 'STRANDED',
-      text: `Rover ran out of energy at step ${s.stranded_at_step ?? '?'} — the route cannot be completed.`,
-    })
+    blocking.push({ code: 'STRANDED', step: s.stranded_at_step ?? null })
   }
   if (plan.execution?.truncated) {
     blocking.push({
       code: 'EXECUTION_TRUNCATED',
-      text:
-        `Route truncated: ${plan.execution.executable_nodes}/${plan.execution.planned_nodes} nodes are drivable` +
-        (plan.execution.reason ? ` (${plan.execution.reason}).` : '.'),
+      executable: plan.execution.executable_nodes,
+      planned: plan.execution.planned_nodes,
+      reason: plan.execution.reason ?? null,
     })
   }
   if (s.shadow_limit_exceeded) {
     blocking.push({
       code: 'SHADOW_LIMIT_EXCEEDED',
-      text: `Continuous shadow ${s.max_continuous_shadow_h.toFixed(1)} h against a rover limit of ${s.shadow_limit_h?.toFixed(1)} h.`,
+      shadowH: s.max_continuous_shadow_h,
+      limitH: s.shadow_limit_h ?? null,
     })
   }
   if (s.critical_steps_count > 0) {
-    blocking.push({
-      code: 'CRITICAL_STEPS',
-      text: `${s.critical_steps_count} steps at CRITICAL risk.`,
-    })
+    blocking.push({ code: 'CRITICAL_STEPS', count: s.critical_steps_count })
   }
 
   if (s.high_or_above_steps_count > 0) {
-    warnings.push({
-      code: 'HIGH_RISK_STEPS',
-      text: `${s.high_or_above_steps_count} steps at HIGH risk or above.`,
-    })
+    warnings.push({ code: 'HIGH_RISK_STEPS', count: s.high_or_above_steps_count })
   }
   if (s.min_battery_pct < BATTERY_WATCH_PCT) {
-    warnings.push({
-      code: 'BATTERY_WATCH',
-      text: `Battery fell to ${s.min_battery_pct.toFixed(1)}% at its lowest.`,
-    })
+    warnings.push({ code: 'BATTERY_WATCH', pct: s.min_battery_pct })
   }
   if (s.peak_power_exceeded_steps > 0) {
-    warnings.push({
-      code: 'PEAK_POWER_EXCEEDED',
-      text: `Peak power budget exceeded on ${s.peak_power_exceeded_steps} steps.`,
-    })
+    warnings.push({ code: 'PEAK_POWER_EXCEEDED', count: s.peak_power_exceeded_steps })
   }
   if (s.total_recharges > 0) {
-    warnings.push({
-      code: 'RECHARGES_REQUIRED',
-      text: `The route needs ${s.total_recharges} recharge stops.`,
-    })
+    warnings.push({ code: 'RECHARGES_REQUIRED', count: s.total_recharges })
   }
 
   if (blocking.length > 0) return { verdict: 'NO-GO', reasons: [...blocking, ...warnings] }
   if (warnings.length > 0) return { verdict: 'GO-WITH-RISK', reasons: warnings }
-  return {
-    verdict: 'GO',
-    reasons: [{ code: 'NO_VIOLATION', text: 'No driving constraint was violated.' }],
-  }
+  return { verdict: 'GO', reasons: [{ code: 'NO_VIOLATION' }] }
 }
 
 /**
