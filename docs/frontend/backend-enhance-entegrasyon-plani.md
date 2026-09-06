@@ -20,6 +20,12 @@ Amaç mevcut ürünü yeniden tasarlamak değildir.
 
 Amaç backend özelliklerini frontend’e kayıpsız şekilde taşımaktır.
 
+Bu sürümde çalışma **iki kişi** üzerine kurgulanmıştır.
+
+Somut iş bölümü, dosya sahipliği ve çakışma kuralları için:
+
+§28 (paralel çalışma planı), §29 (Faz 0), §31 (conflict avoidance).
+
 ---
 
 # 1. Kesin kapsam
@@ -2078,128 +2084,512 @@ Bu durumlar birbirine karıştırılmamalıdır.
 
 ---
 
-# 28. Parallel çalışma planı — 3 kişi
+# 28. Paralel çalışma planı — 2 kişi
 
-Üç kişi için önerilen domain ownership aşağıdadır.
+Bu bölüm iki kişilik çalışma içindir.
 
-Bu ownership dosya ownership’i değildir.
+Bölme, "12 feature'ı 6+6 yapalım" değildir.
 
-Aynı repo structure içinde uygulanacaktır.
+Doğru soru şudur:
 
----
+**hangi dikişte en az dosya paylaşılır?**
 
-## TRACK A — Mission Constraints + Environment Data
-
-Ana sorumluluk:
-
-- A4 Earth Visibility
-- A1 Safe Haven
-- A2 Illumination Corridor
-- C4 Roughness + PSR
-- planner request integration for these capabilities
-- map layer registration
-- common time-axis environment data
-- related cell telemetry
-- related mission infeasible states
-
-Ek sorumluluk:
-
-Shared capability / availability modeline katkı.
+Bu kod tabanında o dikiş nettir.
 
 ---
 
-## TRACK B — Route Analysis + Risk + Uncertainty
+## Dikiş
 
-Ana sorumluluk:
+```
+KİŞİ A                              KİŞİ B
+Haritaya çizilen                    Rotadan çıkan
++ plan isteğine giren               + rotadan sonra gelen
+─────────────────────               ─────────────────────
+raster katmanlar                    route result blokları
+zaman ekseni / cube'ler             post-route analiz job'ları
+hücre telemetrisi                   rota profil dizileri + playback
+çevresel kısıt anahtarları          kanıt / provenance sunumu
+MapCanvas, layer-picker             route-analysis, mission-report
+```
 
-- B3 DEM Uncertainty
-- B5 Monte Carlo
-- D3 Formal Safety
-- C3 Slip
-- B2 CVaR
-- route profile integration
-- safety margin model
-- uncertainty bands
-- risk sweep
-- robustness results
+Temel kural:
 
-Ek sorumluluk:
+**Bir feature'ın sonucunu kim gösteriyorsa, o feature'ın istek alanını da o gönderir.**
 
-Common provenance presentation.
+Bu yüzden B1'in β kısıtı ve C6'nın termal alanları B'ye aittir; sonuç bloğu B'de.
 
----
+A o feature'lardan yalnızca *katmanı* alır.
 
-## TRACK C — Survival + Thermal + System Integration
-
-Ana sorumluluk:
-
-- B1 Survival / Recovery
-- C6 Thermal Dwell
-- D2 MoonPlanBench artifact
-- advanced replan state
-- long-running request behavior
-- 3D/time-dependent parity review
-- AI context compatibility
-- final integration audit
-
-Ek sorumluluk:
-
-Semantic error model ve final feature completeness audit.
+Bir `GET` katman isteği plan `POST`'undan tamamen bağımsızdır; bu yüzden bölünebilir.
 
 ---
 
-# 29. İlk paralel aşama
+## TRACK A — Arazi, Kısıt ve Zaman
 
-Kod başlamadan üç kişi de farklı açıdan güncel frontend discovery yapmalıdır.
+### Feature sahipliği
 
-### Track A
+| Kod | Feature | A'nın payı |
+|---|---|---|
+| A4 | Earth Visibility | tam — katman, seri, comm-window, kısıt |
+| A1 | Safe Haven | tam — 4 katman, kısıt, NaN semantiği |
+| A2 | Illumination Corridor | tam — cube, zaman dilimi, kısıt |
+| C4 | Roughness + PSR | tam — 2 katman, `w_roughness`, psr-validation |
+| B3 | DEM Uncertainty | **katman yarısı** — `p_traversable`, `slope_sigma`, `elevation_sigma`, `slope_sigma_nasa`, uncertainty-series |
+| B1 | Survival | **katman yarısı** — `GET /api/survival` (`p_safe`, `best_action`) |
+| C6 | Thermal Dwell | **katman yarısı** — `GET /api/thermal-dwell`, `GET /api/thermal-envelope` |
+| — | Hücre telemetrisi | tam — tek panel, tek sahip |
 
-Map/layer/time architecture’ı inceler.
+### Endpoint sahipliği
 
-### Track B
+```
+GET  /api/earth-series          GET  /api/safe-haven
+GET  /api/comm-window           GET  /api/illumination-corridor
+GET  /api/uncertainty-series    GET  /api/psr-validation
+GET  /api/survival              GET  /api/thermal-dwell
+GET  /api/thermal-envelope      GET  /api/terrain
+GET  /api/layers/{ad}           GET  /api/cell-telemetry
+```
 
-Route/result/analysis architecture’ı inceler.
+### Dosya sahipliği
 
-### Track C
+A dışında kimse bu dosyalara dokunmaz:
 
-Mission state/request/error/assistant architecture’ı inceler.
+```
+frontend/src/MapCanvas.tsx
+frontend/src/colormap.ts
+frontend/src/features/layer-picker/
+frontend/src/features/layer-provenance/
+frontend/src/features/time-axis/
+frontend/src/features/mission-context/          ← hücre telemetrisi
+frontend/src/features/illumination-corridor/    ← YENİ
+frontend/src/features/safe-haven/               ← YENİ
+frontend/src/mission/useTerrainManifest.ts
+frontend/src/net/terrain.ts
+frontend/src/net/series.ts
+```
 
-Sonuçlar kısa bir ortak integration note’ta birleştirilir.
+### A'nın koruması gereken dört semantik
 
-Hiç kimse kendi başına yeni architecture icat etmez.
+1. **NaN ≠ 0.** `time_to_safe_haven = NaN` → "Ulaşılabilir Safe Haven yok". `0.0 h` yalandır.
+2. **320 m ≠ 5 m.** Coarse ürünler blok sınırlarını koruyarak çizilir, fine raster gibi gerilmez.
+3. **`best_action` kategoriktir.** Yön/bekle semantiği renk rampasına ezilmez.
+4. **PSR yasak bölge değildir.** Katman açık diye path selection kısıtlanmaz.
+
+---
+
+## TRACK B — Rota Analizi ve Kanıt
+
+### Feature sahipliği
+
+| Kod | Feature | B'nin payı |
+|---|---|---|
+| D3 | Formal Safety | tam — 12 requirement, `safety_margins`, safety-check |
+| C3 | Slip | tam — rover modeli, rota bloğu, eğim-slip eğrisi |
+| B2 | CVaR | tam — `risk_alpha`, `risk` bloğu, risk-sweep |
+| B5 | Monte Carlo | tam — stress-test, histogram, fan chart |
+| B3 | DEM Uncertainty | **rota yarısı** — `POST /api/dem-uncertainty`, p5/p50/p95 bandı |
+| B1 | Survival | **rota yarısı** — β kısıtı, `survival` bloğu, recovery_suggestion |
+| C6 | Thermal Dwell | **rota yarısı** — `thermal_dwell` bloğu, entrenchment |
+| D2 | MoonPlanBench | tam — offline artifact |
+| — | Rota profil dizileri + playback bağlama | tam |
+
+### Endpoint sahipliği
+
+```
+POST /api/stress-test      POST /api/dem-uncertainty
+POST /api/safety-check     POST /api/risk-sweep
+POST /api/plan             POST /api/plan-4d
+POST /api/compare          POST /api/plan-multi
+POST /api/replan
+```
+
+### Dosya sahipliği
+
+B dışında kimse bu dosyalara dokunmaz:
+
+```
+frontend/src/features/route-analysis/
+frontend/src/features/mission-report/
+frontend/src/features/profile-compare/
+frontend/src/features/playback/
+frontend/src/features/replan/
+frontend/src/features/cost-explain/
+frontend/src/features/mission-validation/
+frontend/src/features/safety-margins/     ← YENİ (D3)
+frontend/src/features/stress-test/        ← YENİ (B5)
+frontend/src/features/risk/               ← YENİ (B2)
+frontend/src/net/plan4d.ts
+frontend/src/net/compare.ts
+frontend/src/net/replan.ts
+```
+
+### B'nin koruması gereken beş semantik
+
+1. **404 ≠ hata.** Kısıt altında rota yoksa "No feasible route under selected mission constraints."
+2. **`monitored ≠ proven`.** D3 STL robustness'tir. Rho işareti korunur: pozitif = marj, negatif = ihlal.
+3. **CVaR fizik değildir.** Risk kapalıysa `risk_alpha` **hiç gönderilmez**; `0.5` nötr değildir.
+4. **Completion ≠ safety.** B5 sonucu route status'ü ezmez.
+5. **MODEL ≠ MEASURED.** C3 slip ve C6 termal MODEL/UNCALIBRATED'dır.
+
+---
+
+## Bölünen üç feature — kesim çizgisi
+
+B1, B3 ve C6 iki kişi arasında bölünmüştür.
+
+Bölünmüş feature, iki kişinin çarpışacağı yerdir; bu yüzden kesim açıkça yazılır.
+
+| Feature | A yapar | B yapar | Ortak dosya |
+|---|---|---|---|
+| B3 | `p_traversable`, `slope_sigma`, `elevation_sigma`, `slope_sigma_nasa` katmanları + uncertainty-series | `POST /api/dem-uncertainty`, rota p5/p50/p95 bandı | yok |
+| B1 | `GET /api/survival` katmanı (`p_safe`, `best_action`) + hücre telemetrisi alanları | planner β alanları, `survival` bloğu, `recovery_suggestion` | yok |
+| C6 | `GET /api/thermal-dwell`, `GET /api/thermal-envelope` katmanları | planner termal alanları, `thermal_dwell` bloğu, entrenchment | yok |
+
+Her üçünde de A'nın işi salt okunur bir `GET` katmanı, B'nin işi plan isteği ve sonucudur.
+
+İkisi aynı dosyaya yazmaz.
+
+Bölünmüş feature'ın **provenance metni B'ye aittir** — aynı model için iki farklı açıklama yazılmasın diye.
+
+---
+
+## Faz eşlemesi
+
+§32'deki M0–M10, iki kişi için beş faza indirilir.
+
+| Faz | KİŞİ A | KİŞİ B |
+|---|---|---|
+| **F0** | merge + 13 endpoint doğrulama + fixture yakalama | `.gitattributes` + dört primitif + App.tsx'in son hali |
+| **F1** | yeni katmanların `layer-picker`'a kaydı, manifest'e çözünürlük/validity alanları, `roughness` + `psr` + `earth_visibility` çizimi | `safety_margins`, `slip_model`, `risk`, `roughness` bloklarının parse'ı ve gösterimi |
+| **F2** | A4 + A1 tam, C4 `w_roughness` | B2 `risk_alpha` + risk-sweep, B3 rota bandı |
+| **F3** | A2 corridor, thermal-dwell + survival katmanları, ortak `missionTime` bağlama | B5 stress-test, B1 survival bloğu + β, C6 termal blok + entrenchment, D2 |
+| **F4** | hücre telemetrisi tamamlama, 2D/3D parity | hata durumları, §45 audit, performans |
+
+**F1'in bu kadar erken olmasının sebebi:**
+
+Sözleşmeye göre `risk`, `roughness`, `survival`, `thermal_dwell` blokları ve `safety_margins` ile `slip_model` **her plan yanıtında, istek alanı gerekmeden** gelir.
+
+Yani merge biter bitmez altı feature'ın veri tarafı hazırdır; iş sadece parse edip göstermektir.
+
+Yeni endpoint çağırmak, yeni istek alanı göndermek, yeni katman indirmek gerekmez.
+
+Bu, planın tamamındaki en yüksek getirili iştir.
+
+---
+
+# 29. Faz 0 — çakışmasız başlangıç
+
+Bu fazda iki kişi paralel çalışır ama **hiç aynı dosyaya dokunmaz**.
+
+Feature işi başlamadan bitmesi gereken kapı budur.
+
+---
+
+## Doğrulanmış zemin
+
+Bu doküman backend'i var kabul eder.
+
+Bugün itibarıyla o backend **çalışma dalında değildir**.
+
+| | Çalışma dalı | `origin/berke-3d-backendEnhance` |
+|---|---|---|
+| §42'deki 13 endpoint | **0** | **13** |
+| `docs/frontend/3b-veri-sozlesmesi.md` | 326 satır | **1620 satır** |
+| B2 / C4 / B1 / C6 sözleşmeleri | yok | var |
+
+Yani §4'ün "authoritative source" dediği sözleşme de, uygulanacak backend de o daldadır.
+
+Merge'ün boyutu:
+
+```
+merge-base : d401854  (3 Eylül 2026)
+çalışma dalı : +125 commit
+enhance      : +12 commit
+enhance'in dokunduğu frontend dosyası : 0
+```
+
+Çakışma yüzeyi tamamen backend'dedir ve dört dosyadır:
+
+```
+backend/app/constants.py
+backend/app/main.py          ← asıl iş
+backend/app/scenarios.py
+backend/requirements.txt
+```
+
+AI modülleri (`ai_*.py`, `report.py`, `profile_comparison.py`) enhance dalında yoktur.
+
+Silinmiş değildirler; dal onlar eklenmeden önce ayrılmıştır.
+
+Üç yollu merge onları korur.
+
+Dikkat gereken tek yer `main.py`'dır: enhance sürümünde AI router bağlantısı bulunmayacaktır.
+
+§23'ün "mevcut AI assistant korunacak" maddesi tam olarak burada kazanılır veya kaybedilir.
+
+---
+
+## KİŞİ A — backend'i getir ve kanıtla
+
+1. Backend enhance dalının merge'ü. Çakışan dosyaları çöz, `main.py`'da AI router bağlantısının hayatta kaldığını doğrula.
+
+2. Backend'i ayağa kaldır, **13 endpoint'in her birine tek tek istek at**. Cevap vermeyen veya cache isteyen hangisi, listele.
+
+3. Her endpoint'in **gerçek yanıtını** `frontend/src/net/__fixtures__/` altına kaydet.
+
+İki kişi de bu fixture'lara karşı test yazacak.
+
+§4 sözleşmeden alan adı tahmin etmeyi yasaklıyor; fixture bunu imkânsız kılar.
+
+4. Hangi endpoint'in preprocessing cache'i olmadığı için `unavailable` döndüğünü yaz.
+
+Bu liste §5.1 capability modelinin girdisidir.
+
+**Çıktı:** çalışan backend + 13 fixture + unavailable listesi.
+
+---
+
+## KİŞİ B — paylaşılan primitifleri yaz
+
+Backend gerekmez.
+
+Sözleşme dokümanı yeterlidir.
+
+1. `.gitattributes` + satır sonu normalizasyonu (§31.1). **Tek başına, ilk commit.**
+
+2. `mission/capability.ts` — §5.1 durum makinesi.
+
+`unavailable ≠ error` ayrımı tip seviyesinde zorunlu olsun.
+
+3. `net/errors.ts` — §5.3 semantic error taksonomisi.
+
+404'ün "İstek başarısız" olarak görünmesi bu dosyada engellenir.
+
+4. `mission/routeIdentity.ts` — §5.4.
+
+Rota kimliği = rover + start + goal + weights + aktif ileri kısıtların hash'i.
+
+Post-analiz sonuçları bu kimliğe bağlanır.
+
+Kimlik değişince stale olur; görsel katman değişince olmaz.
+
+5. `features/analysis-job/` — §26 job yaşam döngüsü.
+
+Sahte yüzde üretmesi **imkânsız** olsun: tipte `percent` alanı bulunmasın.
+
+6. `App.tsx`'e **tek ve son dokunuş**: `missionTime` ve `routeIdentity` mission state'e eklenir.
+
+Bundan sonra App.tsx kapalıdır (§31.3).
+
+**Çıktı:** dört primitif + normalize edilmiş satır sonları + App.tsx'in son hali.
+
+---
+
+## Faz 0 kapısı
+
+Şu üçü doğru değilse paralel feature işi başlamaz:
+
+- [ ] Merge'den sonra mevcut PLAN → Generate → ANALYZE akışı bozulmadan çalışıyor
+- [ ] AI assistant çalışıyor (§23)
+- [ ] `typecheck` + `test` + `lint` + `build` yeşil, baseline'dan kötü değil
 
 ---
 
 # 30. Shared foundation merge gate
 
-Feature branch’leri tam hız paralel gitmeden önce aşağıdaki contract’lar stabil hale gelmelidir:
+Feature dalları tam hız paralel gitmeden önce aşağıdaki contract'lar stabil olmalıdır.
 
-- capability state
-- validity/provenance representation
-- semantic errors
-- layer metadata
-- route identity/invalidation
-- mission-time identity
-- analysis job lifecycle
+İki kişilik çalışmada bu kapı üç kişilikten **daha** kritiktir: hakem yoktur.
 
-Bu foundation mümkün olduğunca küçük olmalıdır.
+İyi haber şu ki bu primitiflerin bir kısmı kod tabanında zaten mevcuttur.
 
-Ama bütün feature branch’lerin aynı temel kavramları farklı şekillerde implement etmesini engellemelidir.
+| Foundation | Kodda karşılığı | Durum | Sahip |
+|---|---|---|---|
+| validity / provenance sunumu | `features/layer-provenance/` | **var** — genişletilecek | B |
+| layer metadata | `mission/useTerrainManifest.ts` | **var** — çözünürlük + validity alanı eklenecek | A |
+| ortak mission-time | `features/time-axis/useTimeAxis.ts` | **kısmen** — feature-local, paylaşıma çıkarılacak | A |
+| katman kaydı | `features/layer-picker/` | **var** — yeni katmanlar kaydedilecek | A |
+| binary f32 pipeline | `net/terrain.ts` içinde kısmi | genişletilecek | A |
+| capability state | — | yazılacak | B |
+| semantic errors | — | yazılacak | B |
+| route identity / invalidation | — | yazılacak | B |
+| analysis job lifecycle | — | yazılacak | B |
+
+Mevcut olanlar **yeniden yazılmaz**, genişletilir.
+
+Foundation mümkün olduğunca küçük olmalıdır.
+
+Ama iki feature dalının aynı temel kavramları iki farklı şekilde implement etmesini engellemelidir.
 
 ---
 
-# 31. Conflict avoidance
+# 31. Conflict avoidance — dosya seviyesinde kurallar
 
-Paralel çalışan kişiler:
+Bu bölüm iki kişilik çalışmanın en kritik parçasıdır.
 
-- aynı shared primitive’i iki kez yazmamalı,
+Genel öğüt değil, kuraldır.
+
+---
+
+## 31.1 Satır sonları — feature işinden önceki ilk commit
+
+Repoda `.gitattributes` **yoktur** ve dağılım şöyledir:
+
+```
+frontend/src altında:  LF-only 126   CRLF-only 9   MIXED 1
+```
+
+O 9 CRLF dosyanın içinde **App.tsx ve features/registry.ts** vardır.
+
+`mission/types.ts` ise tek MIXED dosyadır.
+
+Yani en çok dokunulan paylaşılan dosyalar, standart dışı olanlardır.
+
+İki kişi paralel çalışırken bu hayalet çakışma üretir: kimsenin değiştirmediği satırlar conflict olarak gelir.
+
+**Yapılacak, tek commit, içinde başka hiçbir şey olmadan:**
+
+```
+# .gitattributes
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.glb binary
+*.tif binary
+```
+
+sonra:
+
+```
+git add --renormalize .
+```
+
+---
+
+## 31.2 Kapalı dosyalar
+
+Faz 0 bittikten sonra aşağıdakiler kilitlidir.
+
+Değişiklik gerekiyorsa iki kişi konuşur, tek kişi yapar, küçük ve izole commit olarak **önce** merge edilir.
+
+| Dosya | Neden | Kural |
+|---|---|---|
+| `App.tsx` | Tek mission state boğazı (§31.3) | Faz 0'dan sonra dokunulmaz |
+| `App.css` | 6000+ satır, kaskad sırası kırılgan | **Yeni kural yazılmaz** — her feature kendi `.css`'ini alır |
+| `mission/types.ts` | İki taraf da state eklemek ister | Faz 0'da bir kez, sonra kapalı |
+| `net/types.ts` | İki taraf da tip eklemek ister | **Bölünür** — her feature tipini kendi klasöründe tanımlar |
+
+---
+
+## 31.3 Yeni state App.tsx'e gitmez
+
+`App.tsx` mission state nesnesini tek elden kurar.
+
+Yeni feature state'i oraya eklemek, iki kişinin **her gün** aynı dosyada çakışması demektir.
+
+Kod tabanında doğru desen zaten vardır:
+
+`useCorridor`, `useTimeAxis`, `useLayerProvenance`
+
+Hepsi `useMission()`'dan okur, kendi verisini kendi çeker, kendi state'ini kendi tutar.
+
+Yeni feature'lar bu deseni izler.
+
+Mission state'e yalnızca **iki** yeni alan girer, o da Faz 0'da:
+
+`missionTime` ve `routeIdentity`
+
+Başka hiçbir feature state'i oraya eklenmez.
+
+---
+
+## 31.4 Plan isteği — append-only katkı listesi
+
+İki kişi de plan isteğine alan ekleyecektir.
+
+A: çevresel kısıtlar.
+
+B: risk / survival / termal.
+
+Ortak bir request builder'ı ikisi de düzenlerse her gün çakışır.
+
+Çözüm, kod tabanının kendi registry desenidir:
+
+```ts
+// features/plan-request/contributors.ts
+export const PLAN_REQUEST_CONTRIBUTORS: PlanRequestContributor[] = [
+  earthVisibilityContributor,       // A
+  safeHavenContributor,             // A
+  illuminationCorridorContributor,  // A
+  roughnessWeightContributor,       // A
+  riskContributor,                  // B
+  survivalContributor,              // B
+  thermalDwellContributor,          // B
+]
+```
+
+Her contributor `{ enabled: boolean, fields(): object | null }` döndürür.
+
+`enabled` false ise `null` döner ve **alan isteğe hiç girmez**.
+
+§2'deki non-regression kuralı böylece tipte garanti altına alınır.
+
+Dosya append-only olduğu için çakışması önemsizdir: ikisini de tut, bitti.
+
+---
+
+## 31.5 Registry ve CSS
+
+`features/registry.ts` append-only'dir.
+
+İki kişi de listenin sonuna satır ekler.
+
+Çakışma olursa ikisini de tut.
+
+Yeni panel **kendi `.css` dosyasını** alır; `App.css`'e kural yazılmaz.
+
+Yeni kanıt/doğrulama panelleri `group: 'systems'` ile kaydedilir — Systems & Evidence çekmecesine gider, varsayılan kokpiti şişirmez (§38).
+
+---
+
+## 31.6 İsim çakışması — corridor
+
+`frontend/src/features/corridor/` **rota koridorudur**: yarı genişlik, eğim, enerji.
+
+`/api/plan` yanıtındaki `corridor` bloğunu okur.
+
+A2'nin *illumination corridor*'ı **değildir**.
+
+A2 ayrı bir klasöre gider:
+
+`features/illumination-corridor/`
+
+Aynı isme iki anlam yüklemek §31'in yasakladığı şeyin ta kendisidir.
+
+---
+
+## 31.7 Kavram düzeyinde çakışma
+
+Paralel çalışan iki kişi:
+
+- aynı shared primitive'i iki kez yazmamalı,
 - aynı API response için farklı type oluşturmamalı,
-- aynı backend field’a farklı human meaning vermemeli,
+- aynı backend field'a farklı human meaning vermemeli,
 - ayrı time controller oluşturmamalı,
 - ayrı provenance badge sistemi oluşturmamalı,
 - ayrı analysis job state machine oluşturmamalı.
 
 Shared contract değişikliği gerekiyorsa küçük, izole commit olarak önce merge edilmelidir.
+
+---
+
+## 31.8 Günlük ritim
+
+- Gün başında ikisi de ortak entegrasyon dalından rebase eder.
+- Feature dalları küçük ve sık merge edilir; iki gün açık kalan dal yoktur.
+- Paylaşılan primitif değişikliği ayrı, tek amaçlı commit olarak **önce** gider.
+- Pull sonrası vite yeniden başlatılır (stale module graph).
+- Gün sonunda her iki taraf da non-regression paketini çalıştırır (§34).
 
 ---
 
