@@ -1,0 +1,106 @@
+/* Route cost model: slip, risk appetite, roughness. Console surfaces only --
+   no new card aesthetic, and the validity label is part of every heading
+   rather than a badge that can be styled away. */
+
+.lp-rm { display: flex; flex-direction: column; gap: 12px; }
+
+.lp-rm-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-inner);
+}
+
+.lp-rm-section:last-child { border-bottom: none; padding-bottom: 0; }
+
+.lp-rm-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lp-rm-head h4 {
+  margin: 0;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+/* Never decorative: this is the difference between a measurement and a model. */
+.lp-rm-validity {
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.lp-rm-validity-second { color: var(--text-dimmest); }
+
+.lp-rm-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.lp-rm-figure { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.lp-rm-figure dt {
+  font-size: var(--fs-tiny);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lp-rm-figure dd {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-rm-hint { font-size: var(--fs-tiny); color: var(--text-dimmest); }
+
+.lp-rm-line {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.lp-rm-line b {
+  font-family: var(--font-data);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.lp-rm-absent {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+/* Scope reads before the claim: it is what stops a risk-adjusted figure being
+   taken for the route's own physics. */
+.lp-rm-scope {
+  margin: 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--line-card);
+  background: var(--bg-inset);
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.lp-rm-claim {
+  margin: 0;
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+  color: var(--text-dimmest);
+}

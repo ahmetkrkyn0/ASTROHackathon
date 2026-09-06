@@ -16,6 +16,7 @@ import { PoseLoop } from './pose-loop'
 import { Replan } from './replan'
 import { RosShowcase } from './ros-showcase'
 import { RouteAnalysis } from './route-analysis'
+import { RouteModel } from './route-model'
 import { SafetyMargins } from './safety-margins'
 import { TimeAxis } from './time-axis'
 import { SolvingIndicator } from './solving-indicator'
@@ -116,6 +117,11 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // behind a control. It renders nothing when a response carries no block, so
   // an older backend costs the rail nothing.
   { id: 'safety-margins', slot: 'rightRail', Component: SafetyMargins, modes: ['analyze'] },
+  // Slip, risk appetite and measured roughness -- three blocks that also
+  // arrive unasked, kept as one panel with three labelled sections rather
+  // than three cards, since each is a handful of numbers and the plan warns
+  // against turning new capability into rail clutter.
+  { id: 'route-model', slot: 'rightRail', Component: RouteModel, modes: ['analyze'] },
   // analyze only, from App.tsx's `missionMode === 'analyze' && planResult`
   // guard. Only the mode half becomes a registration: the bar already
   // renders nothing without waypoints, so knowing what an empty route looks
