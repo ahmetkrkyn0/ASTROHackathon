@@ -4,6 +4,7 @@ import { MissionConstraints } from './mission-constraints'
 import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
 import { Assistant } from './assistant'
+import { Benchmark } from './benchmark'
 import { CorridorFeature } from './corridor'
 import { CostExplain } from './cost-explain'
 import { LayerPicker } from './layer-picker'
@@ -174,6 +175,10 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // else.
   { id: 'uncertainty', slot: 'rightRail', Component: Uncertainty, modes: ['analyze'], group: 'systems' },
   { id: 'stress-test', slot: 'rightRail', Component: StressTest, modes: ['analyze'], group: 'systems' },
+  // Offline evidence, so it belongs to no mission mode: the figures are the
+  // same in plan and analyze because an external validation result does not
+  // depend on the route on screen.
+  { id: 'benchmark', slot: 'leftRail', Component: Benchmark, group: 'systems' },
   // Analyze only. The cost under the pointer is worth reading in both modes,
   // but it is the last primary occupant of the right rail, and leaving it
   // registered in plan would keep a 288px column open for one hover readout.
