@@ -24,7 +24,7 @@ import './report.css'
 export function MissionReport() {
   const { planResult, roverId, weights } = useMission()
   const { routePlaybackStep, payloadW, heaterW } = useMissionRuntime()
-  const { isOpen, open, close } = useMissionReport(planResult, routePlaybackStep)
+  const { isOpen, isWaiting, open, close } = useMissionReport(planResult, routePlaybackStep)
   const requestAsk = useAskAssistant()
 
   /**
@@ -97,7 +97,7 @@ export function MissionReport() {
   const launcher = !isOpen && (
     <button
       type="button"
-      className="lp-report-launcher"
+      className={`lp-report-launcher ${isWaiting ? 'is-waiting' : ''}`}
       onClick={open}
       title={launcherCopy.launcherTitle}
     >

@@ -48,6 +48,42 @@
   font-size: 17px;
 }
 
+/* A report is ready and nobody has looked at it.
+
+   This used to be an auto-opening modal, which covered the map at the exact
+   moment the operator had finished watching a rover drive across it. The
+   button asks instead.
+
+   A box-shadow ring and nothing else. App.css:2519 gives the slot
+   `display: contents`, so this button IS the flex item in .lp-topbar-right --
+   animating transform, border-width or padding would shove Systems, Mission
+   and Data link sideways sixty times a second. A shadow costs no layout. */
+@keyframes lp-report-waiting {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(186, 175, 245, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(186, 175, 245, 0.06);
+  }
+}
+
+.lp-report-launcher.is-waiting {
+  border-color: var(--lavender);
+  color: var(--text);
+  animation: lp-report-waiting 1.6s ease-in-out infinite;
+}
+
+/* Guarded per feature, as every other animation in this codebase is. The
+   button still says it is waiting -- it keeps the lit border -- it just stops
+   moving. */
+@media (prefers-reduced-motion: reduce) {
+  .lp-report-launcher.is-waiting {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(186, 175, 245, 0.18);
+  }
+}
+
 .lp-report-scrim {
   position: fixed;
   inset: 0;
