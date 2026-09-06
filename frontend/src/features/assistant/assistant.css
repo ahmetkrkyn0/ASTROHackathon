@@ -200,10 +200,17 @@
   gap: 6px;
 }
 
+/* Both header buttons rest on --line-button rather than a 0.4-alpha hairline.
+   App.css:325-348 is normative about it: a control at rest needs a faint fill,
+   a --line-button edge and a --text-2 label, because hover is not a channel
+   that exists on touch or before the pointer has arrived. */
 .chat-reset-position {
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
   border-radius: var(--radius);
-  border: 1px solid rgba(186, 175, 245, 0.4);
+  border: 1px solid rgba(186, 175, 245, 0.55);
   background: rgba(186, 175, 245, 0.1);
   color: var(--lavender-bright);
   font-family: var(--font-body);
@@ -211,6 +218,11 @@
   cursor: pointer;
   white-space: nowrap;
   transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.chat-reset-position .lp-icon,
+.chat-new .lp-icon {
+  font-size: 15px;
 }
 
 .chat-reset-position:hover {
@@ -226,25 +238,40 @@
   place-items: center;
   padding: 0;
   border-radius: var(--radius);
-  border: 1px solid rgba(29, 36, 50, 0.4);
-  background: rgba(8, 11, 18, 0.7);
-  color: var(--text-muted);
+  border: 1px solid var(--line-button);
+  background: var(--bg-raised);
+  color: var(--text-2);
   cursor: pointer;
   transition: border-color 0.16s ease, color 0.16s ease;
 }
 
-.chat-minimize svg {
-  width: 16px;
-  height: 16px;
+.chat-minimize .lp-icon {
+  font-size: 17px;
 }
 
 .chat-minimize:hover {
-  border-color: rgba(186, 175, 245, 0.45);
+  border-color: var(--lavender);
   color: var(--text);
 }
 
-.chat-identity .panel-title {
-  font-size: var(--fs-value);
+/* The panel names its product because it can be dragged anywhere over the map,
+   at which point nothing else on screen says what it belongs to. Set in the
+   condensed label face at the bottom of the text ramp: it identifies the panel,
+   it is not something to read. */
+.lp-assistant-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  color: var(--text-dim-2);
+  white-space: nowrap;
+}
+
+.lp-assistant-mark .lp-icon {
+  font-size: 14px;
+  color: var(--text-3);
 }
 
 .chat-header-actions {
@@ -254,31 +281,15 @@
   gap: 6px;
 }
 
-.chat-readonly {
+.chat-new {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: var(--font-label);
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-normal);
-  color: var(--text-dimmest);
-  white-space: nowrap;
-}
-
-.chat-readonly-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--safe);
-  box-shadow: 0 0 0 3px rgba(74, 143, 216, 0.12);
-}
-
-.chat-new {
-  padding: 4px 10px;
+  padding: 4px 9px;
   border-radius: var(--radius);
-  border: 1px solid rgba(29, 36, 50, 0.4);
-  background: rgba(8, 11, 18, 0.7);
-  color: var(--text-muted);
+  border: 1px solid var(--line-button);
+  background: var(--bg-raised);
+  color: var(--text-2);
   font-family: var(--font-body);
   font-size: var(--fs-small);
   cursor: pointer;
@@ -287,7 +298,7 @@
 }
 
 .chat-new:hover:not(:disabled) {
-  border-color: rgba(186, 175, 245, 0.45);
+  border-color: var(--lavender);
   color: var(--text);
 }
 
@@ -306,10 +317,17 @@
 }
 
 .chat-level-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-family: var(--font-label);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-normal);
   color: var(--text-dimmest);
+}
+
+.chat-level-label .lp-icon {
+  font-size: 15px;
 }
 
 .chat-level-flag {
@@ -319,23 +337,38 @@
 
 .chat-levels {
   display: flex;
-  border: 1px solid var(--line-card);
+  border: 1px solid var(--line-button);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
 .chat-level-option {
   flex: 1;
-  padding: 5px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-2);
   font-family: var(--font-body);
   font-size: var(--fs-micro);
-  letter-spacing: var(--track-caps);
+  letter-spacing: var(--track-normal);
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.14s ease, color 0.14s ease;
+}
+
+.chat-level-option .lp-icon {
+  font-size: 15px;
+}
+
+/* A hairline between the three. A real border rather than an inset shadow, so
+   it does not collide with the ring on .is-suggested below. */
+.chat-level-option + .chat-level-option {
+  border-left: 1px solid var(--line-card);
 }
 
 .chat-level-option:hover {
@@ -349,9 +382,11 @@
 
 /* The default is shown as a suggestion until the operator confirms it, so a
    visual default never passes for a choice they made. */
+/* Was `border-style: dashed` on a rule whose base is `border: 0`, so the hint
+   marking the suggested level drew nothing at all. An inset ring needs no
+   border box to hang on. */
 .chat-level-option.is-suggested {
-  border-style: dashed;
-  border-color: rgba(186, 175, 245, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(186, 175, 245, 0.4);
 }
 
 /* ── Conversation viewport ──────────────────────────────────────────────── */
@@ -369,11 +404,41 @@
   padding-right: 4px;
 }
 
-.chat-intro {
+/* Everything the log shows before the first question. One flex column, so the
+   bands below space themselves and the whole thing scrolls as one. */
+.lp-assistant-empty {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 2px;
+  gap: 12px;
+}
+
+/* The opening line, marked rather than quoted: the badge says who is speaking,
+   which is what the border-left rule here used to be doing less clearly. */
+.chat-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 0;
+}
+
+.lp-assistant-intro-mark {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--lavender);
+  font-size: 16px;
+}
+
+.lp-assistant-intro-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .chat-intro-title {
@@ -381,39 +446,52 @@
   font-family: var(--font-display);
   font-size: var(--fs-strong);
   font-weight: 600;
-  color: rgba(199, 205, 219, 0.92);
+  line-height: 1.35;
+  color: var(--text);
 }
 
 .chat-intro-copy {
   margin: 0;
   font-size: var(--fs-body);
   line-height: 1.55;
-  color: var(--text-muted-2);
+  color: var(--text-3);
 }
 
+/* One grouped list, not a scatter of pills. Eleven separate boxes at 2px radius
+   read as debris; sharing edges inside a single outline reads as a menu, which
+   is what it is. */
 .chat-suggestions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
+  flex-direction: column;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
 .chat-suggestion {
-  padding: 5px 9px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line-card);
-  background: none;
-  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 0;
+  border-top: 1px solid var(--line-card);
+  border-radius: 0;
+  background: var(--bg-card);
+  color: var(--text-2);
   font-family: var(--font-body);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-body);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.14s ease, color 0.14s ease;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.chat-suggestion:first-child {
+  border-top: 0;
 }
 
 .chat-suggestion:hover:not(:disabled) {
-  border-color: var(--line-accent-hover);
-  color: var(--lavender-bright);
+  background: var(--bg-raised);
+  color: var(--text);
 }
 
 .chat-suggestion:disabled {
@@ -421,16 +499,88 @@
   cursor: default;
 }
 
+/* The glyph's colour is the one that quantity already has on the map and in the
+   report, so a chip teaches the same colour language rather than a new one. */
+.lp-assistant-chip-icon {
+  flex: 0 0 auto;
+  font-size: 18px;
+}
+
+.lp-assistant-chip-icon.is-route {
+  color: var(--text-2);
+}
+
+.lp-assistant-chip-icon.is-energy {
+  color: var(--mint);
+}
+
+.lp-assistant-chip-icon.is-risk {
+  color: var(--risk-high);
+}
+
+.lp-assistant-chip-icon.is-cell {
+  color: var(--lavender);
+}
+
+.lp-assistant-chip-icon.is-compare {
+  color: var(--cyan);
+}
+
+/* Product help is not a measurement, so it takes no reading's colour. */
+.lp-assistant-chip-icon.is-guide {
+  color: var(--text-3);
+}
+
+.lp-assistant-chip-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .chat-intro-note,
 .chat-intro-blocked {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-small);
   line-height: 1.5;
   color: var(--text-dimmest);
 }
 
+.chat-intro-note .lp-icon {
+  flex: 0 0 auto;
+  font-size: 15px;
+}
+
 .chat-intro-blocked {
   color: rgba(186, 175, 245, 0.82);
+}
+
+/* The one warm moment in the panel, and the only centred block -- which is what
+   marks it as the empty state rather than as content.
+
+   The artwork removes itself when the file is not on disk (ChatPanel sets
+   `hidden` from the img's onError), the same way SpaceBackdrop falls back to
+   its poster: a fresh clone that has not pulled the asset gets the headline and
+   no broken frame. */
+/* The empty state opens on the artwork, so it is the one block that centres --
+   everything under it is a left-aligned reading column. */
+.lp-assistant-hero {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 0;
+}
+
+/* A transparent PNG, so the panel's own ground shows through and the artwork
+   stays correct if --bg-inset is ever retoned. The cap is what stops it filling
+   the screen under the 980px breakpoint, where the panel becomes a full-screen
+   utility and `width: 100%` alone would scale it to the viewport. */
+.lp-assistant-hero-art {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  height: auto;
 }
 
 /* ── Messages ───────────────────────────────────────────────────────────── */
@@ -525,10 +675,18 @@
 
 .chat-notice-title {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.45;
   color: rgba(214, 151, 112, 0.95);
+}
+
+.chat-notice-title .lp-icon {
+  flex: 0 0 auto;
+  font-size: 16px;
 }
 
 .chat-notice-copy {
@@ -566,10 +724,17 @@
 
 .chat-warning-tag {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding-top: 1px;
   font-family: var(--font-label);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
+}
+
+.chat-warning-tag .lp-icon {
+  font-size: 14px;
 }
 
 .chat-warning-copy {
@@ -605,10 +770,18 @@
 /* ── Limitations and evidence ───────────────────────────────────────────── */
 
 .chat-block-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-family: var(--font-label);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-normal);
   color: var(--text-dimmest);
+}
+
+.chat-block-title .lp-icon {
+  flex: 0 0 auto;
+  font-size: 14px;
 }
 
 .chat-limitations {
@@ -761,30 +934,56 @@
   border-top: 1px solid rgba(29, 36, 50, 0.24);
 }
 
+/* The mark, the textarea and Gonder in one frame. The frame is what takes the
+   focus ring, via :focus-within, so focusing the textarea lights the whole
+   control the operator sees rather than a box inside it. Bottom-aligned: the
+   textarea grows upward to COMPOSER_MAX_PX and the button stays on the last
+   line. */
+.lp-assistant-field {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-button);
+  background: var(--bg-card);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.lp-assistant-field:focus-within {
+  border-color: var(--lavender);
+  box-shadow: 0 0 0 3px rgba(186, 175, 245, 0.16);
+}
+
+.lp-assistant-field-mark {
+  flex: 0 0 auto;
+  margin-bottom: 7px;
+  font-size: 17px;
+  color: var(--text-dim-2);
+}
+
 .chat-input {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   box-sizing: border-box;
   /* Height is driven by content, so a manual resize handle would fight it. */
   resize: none;
   overflow-y: auto;
   max-height: 122px;
-  padding: 9px 12px;
-  border-radius: var(--radius);
-  border: 1px solid rgba(29, 36, 50, 0.34);
-  background: rgba(8, 11, 18, 0.72);
-  color: rgba(199, 205, 219, 0.92);
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
   font-family: var(--font-body);
   font-size: var(--fs-strong);
   line-height: 1.5;
 }
 
-.chat-input:focus {
-  outline: none;
-  border-color: rgba(186, 175, 245, 0.55);
-}
-
+/* The frame draws focus for the whole control, so the field inside it must not
+   draw a second one. */
+.chat-input:focus,
 .chat-input:focus-visible {
-  box-shadow: 0 0 0 3px rgba(186, 175, 245, 0.16);
+  outline: none;
 }
 
 .chat-input:disabled {
@@ -792,10 +991,10 @@
   cursor: not-allowed;
 }
 
+/* The hint alone, now that Gönder has moved inside the field above. */
 .chat-composer-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
 
@@ -805,20 +1004,35 @@
   color: var(--text-dimmest);
 }
 
+/* The primary action, and the second of the two places the accent is spent --
+   the other is the chosen explanation level. A flat fill, not a glow:
+   App.css:184-189 is explicit that there are two shadows in this system and
+   neither is coloured. */
 .chat-send {
-  padding: 7px 16px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
   border-radius: var(--radius);
-  border: 1px solid rgba(186, 175, 245, 0.42);
-  background: rgba(50, 43, 87, 0.5);
-  color: rgba(199, 205, 219, 0.95);
+  border: 1px solid var(--lavender);
+  background: var(--lavender);
+  color: var(--void);
   font-family: var(--font-body);
   font-size: var(--fs-body);
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background 0.16s ease;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.chat-send .lp-icon {
+  font-size: 16px;
 }
 
 .chat-send:hover:not(:disabled) {
-  background: rgba(76, 76, 138, 0.6);
+  background: var(--lavender-bright);
+  border-color: var(--lavender-bright);
 }
 
 .chat-send:disabled {
@@ -885,7 +1099,9 @@
   font-size: var(--fs-small);
   font-weight: 600;
   letter-spacing: var(--track-normal);
-  color: var(--chat-muted, var(--text-muted));
+  /* Was var(--chat-muted, var(--text-muted)); --chat-muted is declared nowhere
+     in the project, so the fallback was the only value this ever had. */
+  color: var(--text-muted);
 }
 
 .lp-assistant-divider::before,
@@ -909,44 +1125,16 @@
   letter-spacing: var(--track-normal);
 }
 
-.chat-panel .panel-kicker {
-  order: 2;
-  margin: 5px 0 0;
-  color: var(--text-dim-2);
-  font-family: var(--font-label);
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-caps);
-}
-
 .chat-identity {
   display: flex;
   flex-direction: column;
+  gap: 3px;
   min-width: 0;
-}
-
-/* The opening line is quoted from the assistant, so it gets the rule a quote
-   gets, not a card. */
-.chat-intro {
-  border-left: 2px solid var(--line-accent);
-  padding: 2px 0 2px 11px;
-}
-
-.chat-intro-copy,
-.chat-intro-title {
-  font-size: var(--fs-small);
-  line-height: 1.65;
-  color: var(--text-3);
-}
-
-.chat-intro-title {
-  font-family: var(--font-body);
-  font-weight: 500;
-  color: var(--text-2);
 }
 
 /* Declares the panel's language, because it differs from the rest of the
    application. A badge rather than a sentence: it has to survive beside a
-   title in a 360px panel. */
+   title in a 394px panel. */
 .chat-lang-tag {
   display: inline-block;
   margin-left: 8px;

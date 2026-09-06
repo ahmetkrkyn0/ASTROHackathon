@@ -1,10 +1,10 @@
 """Source assertions over the assistant feature module.
 
-The frontend has no test runner -- no vitest, no jest, no config, and eslint is
-not installed either (see docs/frontend/FRONTEND_MODULAR_SHELL.md §13). The
-only executable checks are `npm run typecheck` and `npm run build`, and neither
-of them can say whether a chip is offered before a route exists or whether a
-local marker reaches the wire.
+The frontend now has vitest and eslint (package.json), which it did not when
+this file was written. What it still has is no jsdom and no testing-library,
+so nothing can render a component -- and none of `npm run typecheck`, `lint`,
+`test` or `build` can say whether a chip is offered before a route exists or
+whether a local marker reaches the wire.
 
 So these are source assertions, and they are deliberately narrow: each one
 pins a decision that has a reason, not a spelling. They run in the backend
@@ -61,16 +61,28 @@ def test_the_panel_receives_the_mode_rather_than_deriving_a_second_one():
 
 # ── before a route: the guide ────────────────────────────────────────────────
 
-def test_the_planning_identity_is_the_mission_guide():
+def test_the_planning_identity_is_a_title_only():
     assert "title: 'Görev Rehberi'" in CHAT_PANEL
-    assert "kicker: 'Planlama desteği'" in CHAT_PANEL
-    # The read-only badge is not mode-specific and stays where it was.
-    assert "Salt okunur" in CHAT_PANEL
 
 
-def test_the_analysis_identity_is_unchanged():
+def test_the_analysis_identity_keeps_its_title():
     assert "title: 'Analiz Asistanı'" in CHAT_PANEL
-    assert "kicker: 'Görev karar desteği'" in CHAT_PANEL
+
+
+def test_neither_identity_carries_a_kicker():
+    """Two lines under the title, both removed in the UI review.
+
+    The kicker restated the mode the title already names, and the read-only
+    badge restated a guarantee that is structural rather than advisory: there
+    is no route-planning tool in ai_tools.py, so no model output can move the
+    route whether or not a badge says so. The claim itself did not go -- it is
+    the header's title attribute now -- but the phrase did.
+
+    Asserted as absence, so putting either back is a failing test rather than a
+    quiet drift back to the old header.
+    """
+    for gone in ("Planlama desteği", "Görev karar desteği", "Salt okunur"):
+        assert gone not in CHAT_PANEL, gone
 
 
 def test_the_planning_empty_state_names_what_the_guide_covers():

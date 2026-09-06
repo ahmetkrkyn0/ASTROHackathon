@@ -7,6 +7,7 @@ import {
   type AiChatResponse,
   type ExplanationLevel,
 } from '../../api/assistant'
+import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
 import type { AssistantAsk } from '../../intent/types'
 import { windowMessages, type AiMissionSnapshot } from './aiContext'
 import type { AssistantMode } from './useAssistant'
@@ -35,11 +36,23 @@ interface ChatTurn {
 /** Which analysis the operator asked for, when that is actually knowable. */
 type PendingIntent = 'generic' | 'cell' | 'compare' | 'guide'
 
+/**
+ * What a chip's glyph is coloured by.
+ *
+ * Not decoration and not variety: each tone is the colour that quantity already
+ * carries on the map and in the report, so a chip teaches the same colour
+ * language the rest of the cockpit speaks. `guide` is the exception and is
+ * deliberately neutral -- product help is not a measurement.
+ */
+type SuggestionTone = 'route' | 'energy' | 'risk' | 'cell' | 'compare' | 'guide'
+
 interface Suggestion {
   id: string
   label: string
   query: string
   intent: PendingIntent
+  icon: IconName
+  tone: SuggestionTone
   note?: string
 }
 
@@ -65,13 +78,37 @@ const SEVERITY_LABEL: Record<string, string> = {
   critical: 'Kritik',
 }
 
+// A third channel, after the word and the colour. The shapes escalate on their
+// own -- circle, triangle, filled disc -- so the order survives a monochrome
+// screen and every dichromacy.
+const SEVERITY_ICON: Record<string, IconName> = {
+  info: 'info',
+  caution: 'warning',
+  critical: 'error',
+}
+
 // An explicit choice, never inferred from what the operator types. Nothing is
 // sent until one of these is confirmed, so a visual default never passes for a
 // decision the operator made.
-const LEVELS: Array<{ id: ExplanationLevel; label: string; hint: string }> = [
-  { id: 'L1', label: 'Basit', hint: 'Sade dil, en fazla üç büyüklük' },
-  { id: 'L2', label: 'Mühendislik', hint: 'İlgili büyüklükler ve gerekçe' },
-  { id: 'L3', label: 'Teknik', hint: 'Veri yoğun, provenance ayrıntılı' },
+const LEVELS: Array<{
+  id: ExplanationLevel
+  label: string
+  hint: string
+  icon: IconName
+}> = [
+  { id: 'L1', label: 'Basit', hint: 'Sade dil, en fazla üç büyüklük', icon: 'guide' },
+  {
+    id: 'L2',
+    label: 'Mühendislik',
+    hint: 'İlgili büyüklükler ve gerekçe',
+    icon: 'engineering',
+  },
+  {
+    id: 'L3',
+    label: 'Teknik',
+    hint: 'Veri yoğun, provenance ayrıntılı',
+    icon: 'analytics',
+  },
 ]
 
 // A comparison is measured at ~21 s. The note appears only where a comparison
@@ -96,10 +133,9 @@ const PENDING_STAGE: Record<PendingIntent, string> = {
  */
 const IDENTITY: Record<
   AssistantMode,
-  { kicker: string; title: string; introTitle: string; introCopy: string }
+  { title: string; introTitle: string; introCopy: string }
 > = {
   planning: {
-    kicker: 'Planlama desteği',
     title: 'Görev Rehberi',
     introTitle: 'Göreve nereden başlamak istersin?',
     introCopy:
@@ -107,7 +143,6 @@ const IDENTITY: Record<
       '2D/3D görünüm ve rota üretme akışı hakkında yardımcı olabilirim.',
   },
   analysis: {
-    kicker: 'Görev karar desteği',
     title: 'Analiz Asistanı',
     introTitle: 'Bu görev hakkında ne öğrenmek istiyorsun?',
     introCopy:
@@ -119,6 +154,18 @@ const IDENTITY: Record<
 const ROLE_LABEL: Record<AssistantMode, string> = {
   planning: 'LunaPath Görev Rehberi',
   analysis: 'LunaPath Analiz Asistanı',
+}
+
+/**
+ * The minimize control's accessible name, per mode.
+ *
+ * Written out rather than built as `${title}ni`, which is only correct for one
+ * of the two: "Görev Rehberi" takes -ni, but "Analiz Asistanı" already ends in
+ * ı and takes -nı, so the concatenation produced "Analiz Asistanıni".
+ */
+const MINIMIZE_LABEL: Record<AssistantMode, string> = {
+  planning: 'Görev Rehberini küçült',
+  analysis: 'Analiz Asistanını küçült',
 }
 
 /** Marks the boundary in the transcript. Local only; never sent. */
@@ -141,36 +188,50 @@ const PLANNING_SUGGESTIONS: readonly Suggestion[] = [
     label: 'Bu ekranı nasıl kullanırım?',
     query: 'Bu ekranı nasıl kullanacağım?',
     intent: 'guide',
+    icon: 'help',
+    tone: 'guide',
   },
   {
     id: 'guide-rover',
     label: 'Rover seçimlerini açıkla',
     query: 'Rover seçimi neyi değiştiriyor?',
     intent: 'guide',
+    icon: 'rover',
+    tone: 'guide',
   },
   {
     id: 'guide-priority',
     label: 'Route priorities ne işe yarıyor?',
     query: 'Rota öncelikleri ne işe yarıyor?',
     intent: 'guide',
+    // The same glyph the weight sliders carry, so the chip points at the
+    // control it is about.
+    icon: 'tune',
+    tone: 'guide',
   },
   {
     id: 'guide-layer',
     label: 'Katmanları açıkla',
     query: 'Harita katmanları ne gösteriyor?',
     intent: 'guide',
+    icon: 'layers',
+    tone: 'guide',
   },
   {
     id: 'guide-endpoints',
     label: 'Start ve Goal nasıl seçilir?',
     query: 'Start ve Goal nasıl seçiliyor?',
     intent: 'guide',
+    icon: 'pin',
+    tone: 'guide',
   },
   {
     id: 'guide-view',
     label: '2D ve 3D farkı nedir?',
     query: '2D ve 3D görünüm arasındaki fark ne?',
     intent: 'guide',
+    icon: 'cube',
+    tone: 'guide',
   },
 ]
 
@@ -391,6 +452,11 @@ export default function ChatPanel({
   useEffect(() => {
     const node = scrollRef.current
     if (!node || !nearBottomRef.current) return
+    // Nothing has been said yet, so there is nothing to follow. The empty state
+    // is now tall enough to scroll -- chips, then the artwork -- and without
+    // this the panel opened parked at its own bottom, with the opening line and
+    // the first chips above the fold.
+    if (turns.length === 0 && !pending) return
     const last = lastTurnRef.current
     // A long answer is revealed from its first line rather than its last.
     if (last && last.offsetHeight > node.clientHeight * 0.75) {
@@ -574,18 +640,24 @@ export default function ChatPanel({
         label: 'Rotayı özetle',
         query: 'Mevcut rotayı özetle.',
         intent: 'generic',
+        icon: 'map',
+        tone: 'route',
       })
       items.push({
         id: 'energy',
         label: 'Enerji ve bataryayı açıkla',
         query: 'Bu rotanın enerji tüketimini ve batarya durumunu açıkla.',
         intent: 'generic',
+        icon: 'battery',
+        tone: 'energy',
       })
       items.push({
         id: 'risk',
         label: 'Riskleri açıkla',
         query: 'Bu rotadaki riskleri açıkla.',
         intent: 'generic',
+        icon: 'warning',
+        tone: 'risk',
       })
     }
     if (mission.focusedCell !== null) {
@@ -602,6 +674,8 @@ export default function ChatPanel({
         // and both numbers are the operator's own click, not a computed value.
         query: `Satır ${row}, sütun ${col} hücresini analiz et.`,
         intent: 'cell',
+        icon: 'target',
+        tone: 'cell',
       })
     }
     if (mission.start !== null && mission.goal !== null) {
@@ -610,6 +684,8 @@ export default function ChatPanel({
         label: 'Görev profillerini karşılaştır',
         query: 'Dört görev profilini karşılaştır.',
         intent: 'compare',
+        icon: 'chart',
+        tone: 'compare',
         note: COMPARE_NOTE,
       })
     }
@@ -622,14 +698,29 @@ export default function ChatPanel({
   return (
     <section className="rail-section chat-panel" aria-label={identity.title}>
       {/* The header is the drag handle. useDraggableWindow ignores a press
-          that starts on a button, so the two controls it carries still take
-          their own clicks. */}
+          that starts on a button, so the controls it carries -- reset, new
+          conversation and minimize -- still take their own clicks. It has to
+          stay a <header> element: shouldStartDrag resolves the handle with
+          closest(), and useDraggableWindow.test pins that. */}
       <header
         className={`chat-header ${dragHandleProps ? 'is-draggable' : ''}`}
         {...dragHandleProps}
       >
-        <div className="chat-identity">
-          <p className="panel-kicker">{identity.kicker}</p>
+        {/* The panel names its product because it is draggable: once it has
+            been moved it can sit anywhere over the map, with nothing else
+            around it saying what it belongs to.
+
+            The crescent is Material's dark_mode glyph, which the shadow layer
+            reached for first because it is a moon. Reused rather than redrawn;
+            if that entry ever stops being a crescent this mark needs its own. */}
+        <div
+          className="chat-identity"
+          title="Asistan görevi yalnızca okur; rotayı değiştiremez."
+        >
+          <span className="lp-assistant-mark">
+            <Icon name="shadow" />
+            LunaPath
+          </span>
           <h2 className="panel-title">
             {identity.title}
             {/* The rest of the cockpit is English; this panel is not. Saying so
@@ -641,10 +732,6 @@ export default function ChatPanel({
           </h2>
         </div>
         <div className="chat-header-actions">
-          <span className="chat-readonly" title="Asistan görevi okur; rotayı değiştirmez">
-            <span className="chat-readonly-dot" aria-hidden="true" />
-            Salt okunur
-          </span>
           {/* One row, so the reset does not push the header into a third
               line in a 394px window. It appears only once the window has
               actually been moved: a panel dragged somewhere awkward is
@@ -657,6 +744,7 @@ export default function ChatPanel({
                 onClick={onResetPosition}
                 title="Pencereyi eski yerine getir"
               >
+                <Icon name="restart" />
                 Yerine al
               </button>
             )}
@@ -666,6 +754,7 @@ export default function ChatPanel({
               onClick={startNewChat}
               disabled={turns.length === 0 && !pending}
             >
+              <Icon name="add" />
               Yeni sohbet
             </button>
           </div>
@@ -677,25 +766,17 @@ export default function ChatPanel({
             type="button"
             className="chat-minimize"
             onClick={onMinimize}
-            aria-label={`${identity.title}ni Küçült`}
-            title={`${identity.title}ni Küçült`}
+            aria-label={MINIMIZE_LABEL[mode]}
+            title={MINIMIZE_LABEL[mode]}
           >
-            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-              <path
-                d="M4 6.5 8 10.5 12 6.5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <Icon name="close" />
           </button>
         )}
       </header>
 
       <div className="chat-level">
         <span className="chat-level-label" id="chat-level-label">
+          <Icon name="levels" />
           Nasıl anlatayım?
           {!levelChosen && <em className="chat-level-flag"> · seçim bekleniyor</em>}
         </span>
@@ -717,6 +798,7 @@ export default function ChatPanel({
               onClick={() => chooseLevel(option.id)}
               onKeyDown={(event) => handleLevelKey(event, index)}
             >
+              <Icon name={option.icon} />
               {option.label}
             </button>
           ))}
@@ -725,12 +807,46 @@ export default function ChatPanel({
 
       <div className="chat-log" ref={scrollRef} onScroll={handleScroll}>
         {turns.length === 0 && !pending && (
-          <div className="chat-intro">
-            <p className="chat-intro-title">Bu görev hakkında ne öğrenmek istiyorsun?</p>
-            <p className="chat-intro-copy">
-              Mevcut rotayı, seçili arazi noktasını ve görev profillerini
-              deterministik LunaPath analizleri üzerinden açıklayabilirim.
-            </p>
+          <div className="lp-assistant-empty">
+            {/* The one warm moment in the panel, and the first thing in it.
+
+                The mockup puts this last, under the chips, with its own
+                headline. That composition needs the ~1600px the mockup is drawn
+                at; this window is 640px, and below the chips the artwork was
+                cut to its top edge -- empty sky and a stray blue dot, which
+                reads as a broken image rather than as an illustration. Leading
+                with it costs nothing: what scrolls instead is the tail of a
+                list whose first items are already visible.
+
+                Its headline went with the move. IDENTITY.introTitle below says
+                the same thing per mode and says it better, so keeping both was
+                one idea printed twice.
+
+                It removes itself if the file is not on disk (onError sets
+                `hidden`), the same way SpaceBackdrop falls back to its poster. */}
+            <div className="lp-assistant-hero">
+              <img
+                className="lp-assistant-hero-art"
+                src="/ui/chatbot_hero.png"
+                alt=""
+                onError={(event) => {
+                  event.currentTarget.hidden = true
+                }}
+              />
+            </div>
+            {/* Read from IDENTITY rather than written here. Both strings were
+                already declared per mode and the panel rendered the analysis
+                pair in both, so the guide used to open by offering to explain a
+                route that did not exist yet. */}
+            <div className="chat-intro">
+              <span className="lp-assistant-intro-mark">
+                <Icon name="spark" />
+              </span>
+              <div className="lp-assistant-intro-copy">
+                <p className="chat-intro-title">{identity.introTitle}</p>
+                <p className="chat-intro-copy">{identity.introCopy}</p>
+              </div>
+            </div>
             {suggestions.length > 0 ? (
               <>
                 <div className="chat-suggestions">
@@ -743,19 +859,25 @@ export default function ChatPanel({
                       disabled={!levelChosen || pending}
                       onClick={() => void send(item.query, item.intent)}
                     >
-                      {item.label}
+                      <Icon
+                        name={item.icon}
+                        className={`lp-assistant-chip-icon is-${item.tone}`}
+                      />
+                      <span className="lp-assistant-chip-label">{item.label}</span>
                     </button>
                   ))}
                 </div>
                 {suggestions.some((item) => item.id === 'compare') && (
-                  <p className="chat-intro-note">{COMPARE_NOTE}</p>
+                  <p className="chat-intro-note">
+                    <Icon name="info" />
+                    {COMPARE_NOTE}
+                  </p>
                 )}
               </>
             ) : (
               <p className="chat-intro-blocked">
                 Önce bir rota oluştur veya haritada bir başlangıç/hedef noktası seç.
               </p>
-
             )}
             {!levelChosen && (
               <p className="chat-intro-blocked">
@@ -813,32 +935,40 @@ export default function ChatPanel({
       </p>
 
       <div className="chat-composer">
-        <textarea
-          ref={composerRef}
-          className="chat-input"
-          aria-label="Görev sorusu"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={levelChosen ? 'Görev hakkında sor…' : 'Önce anlatım seviyesini seç'}
-          rows={1}
-          maxLength={MAX_AI_MESSAGE_CHARS}
-          disabled={pending || !levelChosen}
-        />
-        <div className="chat-composer-foot">
-          <span className="chat-hint">
-            {draft.length >= COUNTER_THRESHOLD
-              ? `${remaining} karakter kaldı`
-              : 'Enter gönder · Shift+Enter yeni satır'}
-          </span>
+        {/* One field rather than a box with a button under it. The textarea
+            still grows to COMPOSER_MAX_PX and then scrolls; the frame around it
+            is what carries the focus ring, so the mark and the send control
+            move with it instead of sitting outside the thing being focused. */}
+        <div className="lp-assistant-field">
+          <Icon name="spark" className="lp-assistant-field-mark" />
+          <textarea
+            ref={composerRef}
+            className="chat-input"
+            aria-label="Görev sorusu"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={levelChosen ? 'Görev hakkında sor…' : 'Önce anlatım seviyesini seç'}
+            rows={1}
+            maxLength={MAX_AI_MESSAGE_CHARS}
+            disabled={pending || !levelChosen}
+          />
           <button
             type="button"
             className="chat-send"
             onClick={() => void send(draft, 'generic')}
             disabled={!canSend}
           >
+            <Icon name="send" />
             Gönder
           </button>
+        </div>
+        <div className="chat-composer-foot">
+          <span className="chat-hint">
+            {draft.length >= COUNTER_THRESHOLD
+              ? `${remaining} karakter kaldı`
+              : 'Enter gönder · Shift+Enter yeni satır'}
+          </span>
         </div>
       </div>
     </section>
@@ -853,7 +983,10 @@ function AssistantTurn({ turn }: { turn: ChatTurn }) {
       <>
         <span className="chat-role">{roleLabel}</span>
         <div className="chat-notice is-caution">
-          <p className="chat-notice-title">{TRANSPORT_TITLE}</p>
+          <p className="chat-notice-title">
+            <Icon name="error" />
+            {TRANSPORT_TITLE}
+          </p>
           <p className="chat-notice-copy">{TRANSPORT_HINT}</p>
         </div>
       </>
@@ -897,6 +1030,7 @@ function AssistantTurn({ turn }: { turn: ChatTurn }) {
           {warnings.map((warning) => (
             <li key={warning.code} className={`chat-warning is-${warning.severity}`}>
               <span className="chat-warning-tag">
+                <Icon name={SEVERITY_ICON[warning.severity] ?? 'info'} />
                 {SEVERITY_LABEL[warning.severity] ?? warning.severity}
               </span>
               <span className="chat-warning-copy">{warning.message}</span>
@@ -915,7 +1049,10 @@ function AssistantTurn({ turn }: { turn: ChatTurn }) {
 
       {turn.limitations && turn.limitations.length > 0 && (
         <div className="chat-limitations">
-          <span className="chat-block-title">Sınırlamalar</span>
+          <span className="chat-block-title">
+            <Icon name="limits" />
+            Sınırlamalar
+          </span>
           <ul>
             {turn.limitations.map((limitation) => (
               <li key={limitation.code}>{limitation.message}</li>
@@ -926,7 +1063,10 @@ function AssistantTurn({ turn }: { turn: ChatTurn }) {
 
       {turn.evidence && turn.evidence.length > 0 && (
         <div className="chat-evidence">
-          <span className="chat-block-title">Kanıtlar</span>
+          <span className="chat-block-title">
+            <Icon name="evidence" />
+            Kanıtlar
+          </span>
           {turn.evidence.map((item, index) => (
             <div key={`${item.source}-${index}`} className="chat-evidence-row">
               <span className="chat-evidence-label">{item.label}</span>
