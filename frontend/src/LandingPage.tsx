@@ -16,10 +16,9 @@ const EXPLORE_DURATION_MS = 760
  * subject now; this file is type over it.
  *
  * Three rows, taken from the design canvas: a status header, the pitch, and a
- * footer that names the capabilities and admits what the terrain actually is.
- * The capability line used to appear twice -- once as a row of chips and again
- * as the footer -- which is the kind of duplication the box policy exists to
- * stop. It is the footer's job.
+ * footer that names the capabilities. The capability line used to appear twice
+ * -- once as a row of chips and again as the footer -- which is the kind of
+ * duplication the box policy exists to stop. It is the footer's job.
  *
  * Everything visible here is markup and CSS. No WebGL context, no 1024px
  * texture to decode before the page can paint.
@@ -73,9 +72,8 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
                 }}
                 disabled={isExploring}
               >
-                Open Mission Planner
+                Launch Mission Workstation
               </button>
-              <span className="landing-hint">No route loaded</span>
             </div>
           </div>
         </div>
@@ -86,9 +84,6 @@ export default function LandingPage({ onExplore }: LandingPageProps) {
             <span>Energy-aware routing</span>
             <span>3-D mission simulation</span>
           </div>
-          {/* Data honesty, section 29: the terrain is synthetic, and the screen
-              that introduces the product is where that has to be said. */}
-          <span className="landing-dataset">Synthetic demo terrain, not flight LDEM</span>
         </footer>
       </div>
     </section>

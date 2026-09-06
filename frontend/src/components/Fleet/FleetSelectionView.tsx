@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import type { RoverEntry } from '../../api'
 import RoutePriorities from '../../features/mission-setup/RoutePriorities'
+import { Icon, type IconName } from './SpecIcons'
 
 interface FleetSelectionViewProps {
   rovers: RoverEntry[]
@@ -12,6 +13,8 @@ interface FleetSelectionViewProps {
 interface RoverDetailMeta {
   agency: string
   agencyColor: string
+  /** One word for what kind of vehicle this is, for the deploy block. */
+  roverClass: string
   highlight: string
   payload: string
   image: string
@@ -22,6 +25,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   lpr_1: {
     agency: 'ESA / LUNAPATH',
     agencyColor: '#4fd8f0',
+    roverClass: 'Exploration',
     highlight: 'Flagship Autonomous Polar Explorer',
     payload: '360° LiDAR Turret, Panoramic Stereo NavCam, Deep Regolith Temperature Probes',
     image: '/rovers/lpr_1.jpg',
@@ -31,6 +35,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   luvmi_m: {
     agency: 'LUNAPATH EXP',
     agencyColor: '#b3a5ff',
+    roverClass: 'Scout',
     highlight: 'Agile Crater Descent Micro-Rover',
     payload: 'High-Torque Mesh Wheels, Micro-LiDAR, Stereo Camera Mast, Rock Abrasion Tool',
     image: '/rovers/luvmi_m.jpg',
@@ -40,6 +45,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   luvm_m: {
     agency: 'LUNAPATH EXP',
     agencyColor: '#b3a5ff',
+    roverClass: 'Scout',
     highlight: 'Agile Crater Descent Micro-Rover',
     payload: 'High-Torque Mesh Wheels, Micro-LiDAR, Stereo Camera Mast, Rock Abrasion Tool',
     image: '/rovers/luvmi_m.jpg',
@@ -49,6 +55,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   nasa_viper: {
     agency: 'NASA',
     agencyColor: '#e8c85a',
+    roverClass: 'Prospector',
     highlight: 'Subsurface Volatiles Prospector',
     payload: 'The TRIDENT 1-Meter Hammer Drill, Neutron Spectrometer System (NSS), NIRVSS',
     image: '/rovers/nasa_viper.jpg',
@@ -58,6 +65,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   viper: {
     agency: 'NASA',
     agencyColor: '#e8c85a',
+    roverClass: 'Prospector',
     highlight: 'Subsurface Volatiles Prospector',
     payload: 'The TRIDENT 1-Meter Hammer Drill, Neutron Spectrometer System (NSS), NIRVSS',
     image: '/rovers/nasa_viper.jpg',
@@ -67,6 +75,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   cnsa_yutu_2: {
     agency: 'CNSA',
     agencyColor: '#ee5a52',
+    roverClass: 'Endurance',
     highlight: 'Far-Side Lunar Endurance Rover',
     payload: 'Lunar Penetrating Radar (LPR), Visible & Near-Infrared Imaging Spectrometer (VNIS)',
     image: '/rovers/cnsa_yutu_2.jpg',
@@ -76,6 +85,7 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
   yutu_2: {
     agency: 'CNSA',
     agencyColor: '#ee5a52',
+    roverClass: 'Endurance',
     highlight: 'Far-Side Lunar Endurance Rover',
     payload: 'Lunar Penetrating Radar (LPR), Visible & Near-Infrared Imaging Spectrometer (VNIS)',
     image: '/rovers/cnsa_yutu_2.jpg',
@@ -83,6 +93,18 @@ const ROVER_META: Record<string, RoverDetailMeta> = {
       'Lightweight solar-powered lunar rover holding world records for lunar surface operational longevity on the rugged terrain of the Moon.',
   },
 }
+
+/** The four numbers every rover card prints, each with the glyph that names it. */
+const SPEC_ROWS: Array<{
+  icon: IconName
+  label: string
+  value: (r: RoverEntry) => string
+}> = [
+  { icon: 'battery', label: 'Battery capacity', value: (r) => `${r.e_cap_wh.toFixed(0)} Wh` },
+  { icon: 'speed', label: 'Max speed', value: (r) => `${r.v_max_ms.toFixed(2)} m/s` },
+  { icon: 'climb', label: 'Max climb slope', value: (r) => `${r.slope_max_deg.toFixed(0)}\u00b0` },
+  { icon: 'mass', label: 'Total mass', value: (r) => `${r.mass_kg.toFixed(0)} kg` },
+]
 
 function getRoverMeta(id: string): RoverDetailMeta {
   const norm = id.toLowerCase().trim()
@@ -100,15 +122,53 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
   onSelectRover,
   onDeployToMap,
 }) => {
+  /* Which rover the carousel is showing. Deliberately NOT derived from
+     `selectedRover`: browsing and choosing are separate acts here. If moving the
+     carousel also selected, the scroll-to-dock below would fire on every arrow
+     press and drag the screen to the weights while you were still reading
+     rovers. You look with the arrows; you commit with the button. */
+  const [viewIndex, setViewIndex] = useState(0)
+
+  /* The catalogue loads asynchronously and "Change vehicle" can come back here
+     with a different list, so an index that was valid once need not stay valid. */
+  useEffect(() => {
+    if (viewIndex > rovers.length - 1) setViewIndex(0)
+  }, [rovers.length, viewIndex])
+
+  const step = useCallback(
+    (delta: number) => {
+      if (rovers.length === 0) return
+      setViewIndex((i) => (i + delta + rovers.length) % rovers.length)
+    },
+    [rovers.length],
+  )
+
+  /* Arrow keys move the carousel, as they would in any gallery. Ignored while
+     the caret is in a field so typing a weight into the dock's number boxes
+     does not also flip the rover. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
+      if (e.key === 'ArrowLeft') step(-1)
+      else if (e.key === 'ArrowRight') step(1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [step])
+
+  const rover = rovers[viewIndex]
+  if (!rover) return null
+
+  const meta = getRoverMeta(rover.id)
+  const selectedMeta = selectedRover ? getRoverMeta(selectedRover.id) : null
+  const isSelected = rover.id === selectedRover?.id
+
   return (
     <div className="lp-fleet-view">
       {/* ── Top Header Banner ── */}
       <header className="lp-fleet-header">
         <div className="lp-fleet-header-content">
-          <div className="lp-fleet-badge-row">
-            <span className="lp-fleet-phase-badge">Fleet command</span>
-            <span className="lp-fleet-site-badge">SITE 11 · LUNAR SOUTH POLE (89.5°S)</span>
-          </div>
           <h1 className="lp-fleet-headline">Select Mission Exploration Rover</h1>
           <p className="lp-fleet-subhead">
             Each rover possesses distinct mass, climbing capabilities, battery storage, and scientific payloads.
@@ -117,101 +177,120 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
         </div>
       </header>
 
-      {/* ── 4-Column Rover Fleet Showcase ── */}
-      <div className="lp-fleet-grid">
-        {rovers.map((rover) => {
-          const isSelected = rover.id === selectedRover?.id
-          const meta = getRoverMeta(rover.id)
+      {/* ── One rover, full size, with the fleet reachable either side ── */}
+      <div className="lp-fleet-carousel">
+        <button
+          type="button"
+          className="lp-carousel-arrow"
+          onClick={() => step(-1)}
+          disabled={rovers.length < 2}
+          aria-label="Previous rover"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M15 4 7 12l8 8" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+        </button>
 
-          return (
-            <article
-              key={rover.id}
-              className={`lp-fleet-card ${isSelected ? 'is-selected' : ''}`}
+        <article className={`lp-fleet-card ${isSelected ? 'is-selected' : ''}`}>
+          {/* Rover Photographic Showcase Frame */}
+          <div className="lp-card-photo-box">
+            <img src={meta.image} alt={rover.name} className="lp-card-photo" />
+            <div className="lp-card-photo-gradient" />
+
+            {/* Agency & Status Badges */}
+            <div className="lp-card-photo-badges">
+              <span
+                className="lp-card-agency"
+                style={{ borderColor: meta.agencyColor, color: meta.agencyColor }}
+              >
+                {meta.agency}
+              </span>
+              {isSelected && (
+                <span className="lp-card-active-pill">
+                  <span className="lp-pulse-dot" />
+                  SELECTED VEHICLE
+                </span>
+              )}
+            </div>
+
+            <div className="lp-card-photo-footer">
+              <span className="lp-card-highlight">{meta.highlight}</span>
+            </div>
+          </div>
+
+          {/* Rover Identity & Description */}
+          <div className="lp-card-body">
+            <div className="lp-card-title-row">
+              <h2 className="lp-card-name">{rover.name}</h2>
+              <span className="lp-card-code">{rover.id.toUpperCase()}</span>
+            </div>
+
+            <p className="lp-card-description">{meta.description}</p>
+
+            {/* Key Technical Specifications Table */}
+            <div className="lp-card-specs-grid">
+              {SPEC_ROWS.map(({ icon, label, value }) => (
+                <div key={label} className="lp-card-spec-item">
+                  <span className="lp-card-spec-k">
+                    <Icon name={icon} />
+                    {label}
+                  </span>
+                  <strong className="lp-card-spec-v">{value(rover)}</strong>
+                </div>
+              ))}
+            </div>
+
+            {/* Scientific Payload Suite */}
+            <div className="lp-card-payload-box">
+              <span className="lp-card-payload-title">Science and sensor suite</span>
+              <p className="lp-card-payload-text">{meta.payload}</p>
+            </div>
+          </div>
+
+          {/* Card Selection Action Footer */}
+          <div className="lp-card-action-bar">
+            <button
+              type="button"
+              className={`lp-card-select-btn ${isSelected ? 'is-selected' : ''}`}
               onClick={() => onSelectRover(rover)}
             >
-              {/* Rover Photographic Showcase Frame */}
-              <div className="lp-card-photo-box">
-                <img
-                  src={meta.image}
-                  alt={rover.name}
-                  className="lp-card-photo"
-                  loading="lazy"
-                />
-                <div className="lp-card-photo-gradient" />
-                
-                {/* Agency & Status Badges */}
-                <div className="lp-card-photo-badges">
-                  <span
-                    className="lp-card-agency"
-                    style={{ borderColor: meta.agencyColor, color: meta.agencyColor }}
-                  >
-                    {meta.agency}
-                  </span>
-                  {isSelected && (
-                    <span className="lp-card-active-pill">
-                      <span className="lp-pulse-dot" />
-                      SELECTED VEHICLE
-                    </span>
-                  )}
-                </div>
+              {isSelected ? '✓ Assigned For Mission' : 'Select Rover'}
+            </button>
+          </div>
+        </article>
 
-                <div className="lp-card-photo-footer">
-                  <span className="lp-card-highlight">{meta.highlight}</span>
-                </div>
-              </div>
+        <button
+          type="button"
+          className="lp-carousel-arrow"
+          onClick={() => step(1)}
+          disabled={rovers.length < 2}
+          aria-label="Next rover"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m9 4 8 8-8 8" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+        </button>
+      </div>
 
-              {/* Rover Identity & Description */}
-              <div className="lp-card-body">
-                <div className="lp-card-title-row">
-                  <h2 className="lp-card-name">{rover.name}</h2>
-                  <span className="lp-card-code">{rover.id.toUpperCase()}</span>
-                </div>
-
-                <p className="lp-card-description">{meta.description}</p>
-
-                {/* Key Technical Specifications Table */}
-                <div className="lp-card-specs-grid">
-                  <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">Battery capacity</span>
-                    <strong className="lp-card-spec-v">{rover.e_cap_wh.toFixed(0)} Wh</strong>
-                  </div>
-                  <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">Max speed</span>
-                    <strong className="lp-card-spec-v">{rover.v_max_ms.toFixed(2)} m/s</strong>
-                  </div>
-                  <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">Max climb slope</span>
-                    <strong className="lp-card-spec-v">{rover.slope_max_deg.toFixed(0)}°</strong>
-                  </div>
-                  <div className="lp-card-spec-item">
-                    <span className="lp-card-spec-k">Total mass</span>
-                    <strong className="lp-card-spec-v">{rover.mass_kg.toFixed(0)} kg</strong>
-                  </div>
-                </div>
-
-                {/* Scientific Payload Suite */}
-                <div className="lp-card-payload-box">
-                  <span className="lp-card-payload-title">Science and sensor suite</span>
-                  <p className="lp-card-payload-text">{meta.payload}</p>
-                </div>
-              </div>
-
-              {/* Card Selection Action Footer */}
-              <div className="lp-card-action-bar">
-                <button
-                  type="button"
-                  className={`lp-card-select-btn ${isSelected ? 'is-selected' : ''}`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onSelectRover(rover)
-                  }}
-                >
-                  {isSelected ? '✓ Assigned For Mission' : 'Select Rover'}
-                </button>
-              </div>
-            </article>
-          )
-        })}
+      {/* The rest of the fleet. Showing one rover at a time costs you the sense
+          that there are four; this is what pays it back, and it doubles as the
+          way to jump straight to one rather than stepping past the others. */}
+      <div className="lp-fleet-thumbs" aria-label="Rover catalogue">
+        {rovers.map((r, i) => (
+          <button
+            key={r.id}
+            type="button"
+            className={`lp-fleet-thumb ${i === viewIndex ? 'is-current' : ''} ${
+              r.id === selectedRover?.id ? 'is-assigned' : ''
+            }`}
+            onClick={() => setViewIndex(i)}
+            aria-current={i === viewIndex ? 'true' : undefined}
+            aria-label={r.id === selectedRover?.id ? `${r.name} (selected for mission)` : r.name}
+          >
+            <img src={getRoverMeta(r.id).image} alt="" loading="lazy" />
+            <span className="lp-fleet-thumb-name">{r.name}</span>
+          </button>
+        ))}
       </div>
 
       {/* ── Mission Parameters & Deployment Dock ──
@@ -221,34 +300,73 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
           weights -- it reads the mission context directly, so nothing about
           them passes through this component. */}
       <section className="lp-fleet-bottom-dock">
-        <div className="lp-dock-priorities-col">
-          <div className="lp-dock-section-title">
-            <span className="lp-meta-label">Route priorities</span>
-            <span className="lp-dock-hint">
-              What the A* solver optimises for on this rover's transit
-            </span>
+        <header className="lp-dock-header">
+          <div className="lp-dock-header-text">
+            <h2 className="lp-dock-title">
+              <Icon name="tune" />
+              Mission Configuration
+            </h2>
+            <p className="lp-dock-subtitle">
+              Set your exploration profile and route priorities for the selected rover.
+            </p>
           </div>
-          <RoutePriorities />
-        </div>
+          <span className="lp-dock-tagline">Real science. A brighter tomorrow.</span>
+        </header>
 
-        {/* Big Deployment Action Button */}
-        <div className="lp-dock-action-col">
-          <div className="lp-dock-rover-summary">
-            <span className="lp-meta-label">Ready to deploy</span>
-            <strong className="lp-dock-rover-name">
-              {selectedRover ? selectedRover.name : 'Choose a vehicle above'}
-            </strong>
+        <div className="lp-dock-body">
+          <div className="lp-dock-priorities-col">
+            <RoutePriorities />
           </div>
 
-          <button
-            type="button"
-            className="lp-deploy-btn"
-            onClick={onDeployToMap}
-            disabled={!selectedRover}
-          >
-            <span>Deploy Rover & Open Surface Map</span>
-            <span className="lp-deploy-arrow">→</span>
-          </button>
+          {/* What you are about to send, and where it goes. The column used to
+              be a label, a name and a button; a rover is picked several screens
+              of scrolling above this, so the deploy button is worth naming the
+              vehicle, its class and the two numbers that decide a traverse. */}
+          <div className="lp-dock-action-col">
+            <div className="lp-dock-ready">
+              <span className={`lp-dock-ready-state ${selectedRover ? 'is-ready' : ''}`}>
+                <span className="lp-pulse-dot" />
+                {selectedRover ? 'Mission ready' : 'Awaiting rover'}
+              </span>
+
+              <span className="lp-meta-label">Selected rover</span>
+
+              {selectedRover && selectedMeta ? (
+                <>
+                  <div className="lp-dock-rover-id">
+                    <span
+                      className="lp-card-agency"
+                      style={{ borderColor: selectedMeta.agencyColor, color: selectedMeta.agencyColor }}
+                    >
+                      {selectedMeta.agency}
+                    </span>
+                    <strong className="lp-dock-rover-name">{selectedRover.name}</strong>
+                  </div>
+                  <span className="lp-dock-rover-facts">
+                    {selectedMeta.roverClass} &middot; {selectedRover.mass_kg.toFixed(0)} kg &middot;{' '}
+                    {selectedRover.e_cap_wh.toFixed(0)} Wh
+                  </span>
+                </>
+              ) : (
+                <strong className="lp-dock-rover-name is-empty">Choose a vehicle above</strong>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="lp-deploy-btn"
+              onClick={onDeployToMap}
+              disabled={!selectedRover}
+            >
+              <span>Deploy Rover &amp; Open Surface Map</span>
+              <span className="lp-deploy-arrow">&rarr;</span>
+            </button>
+
+            <p className="lp-dock-deploy-note">
+              <Icon name="map" />
+              Configure the rover and generate an optimal route on the lunar surface map.
+            </p>
+          </div>
         </div>
       </section>
     </div>
@@ -256,4 +374,3 @@ export const FleetSelectionView: React.FC<FleetSelectionViewProps> = ({
 }
 
 export default FleetSelectionView
-
