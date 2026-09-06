@@ -395,6 +395,15 @@ export async function planRoute(
    * rocks drawn on top of it afterwards.
    */
   obstacleCells?: Array<[number, number]>,
+  /**
+   * Advanced planner constraints, already reduced to the fields the backend
+   * takes -- see features/plan-request. Merged in as given and never
+   * defaulted: several of these have no neutral value, so a constraint that
+   * is off must contribute no key at all rather than a "nominal" one. With
+   * none enabled this is `{}` and the body is byte-for-byte the old one,
+   * which is the non-regression rule the integration plan opens with.
+   */
+  advanced?: Record<string, unknown>,
 ): Promise<PlanResponse> {
   const r = await fetch(`${BASE}/plan`, {
     method: 'POST',
@@ -408,6 +417,7 @@ export async function planRoute(
       ...(obstacleCells && obstacleCells.length > 0
         ? { obstacle_cells: obstacleCells.map(([row, col]) => ({ row, col })) }
         : {}),
+      ...(advanced ?? {}),
     }),
   })
   if (!r.ok) {

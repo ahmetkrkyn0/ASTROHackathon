@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react'
 import type { MissionMode } from '../mission/types'
+import { MissionConstraints } from './mission-constraints'
 import { MissionContextFeature } from './mission-context'
 import { MissionSnapshot } from './mission-snapshot'
 import { Assistant } from './assistant'
@@ -157,6 +158,11 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // Plan only: it asks what would force a new route from where the rover is,
   // which is a question about a route still being decided.
   { id: 'replan', slot: 'leftRail', Component: Replan, modes: ['plan'], group: 'systems' },
+  // Plan only, and in the drawer: these change how a route is ranked and when
+  // it is feasible, but the moment-to-moment task is still a rover and two
+  // endpoints. An operator who never opens the drawer gets exactly the product
+  // that existed before the constraints did.
+  { id: 'mission-constraints', slot: 'leftRail', Component: MissionConstraints, modes: ['plan'], group: 'systems' },
   { id: 'mission-validation', slot: 'rightRail', Component: MissionValidation, group: 'systems' },
   { id: 'corridor', slot: 'rightRail', Component: CorridorFeature, group: 'systems' },
   { id: 'pose-loop', slot: 'rightRail', Component: PoseLoop, group: 'systems' },

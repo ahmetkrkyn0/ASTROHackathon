@@ -57,6 +57,7 @@ import { OverlayProvider } from './overlay/OverlayProvider'
 import { FEATURES, selectFeatures } from './features/registry'
 import { MISSION_EPOCH_UTC } from './mission/missionTime'
 import { routeIdentity as computeRouteIdentity } from './mission/routeIdentity'
+import { readPlanConstraints, usePlanConstraints } from './features/plan-request'
 import SystemsDrawer from './shell/SystemsDrawer'
 import {
   BottomDock,
@@ -676,6 +677,10 @@ export default function App() {
         weights,
         selectedRoverId,
         Array.from(obstacleCells.values()),
+        // Read at issue time rather than closed over: the operator may have
+        // moved a constraint since this handler was created, and the request
+        // must carry what is set now.
+        readPlanConstraints(),
       )
       // Display the radar scanning search animation briefly for authentic mission control feedback
       window.setTimeout(() => {
@@ -808,9 +813,19 @@ export default function App() {
   // the plan-request contributors exist, and an empty object is deliberately
   // identical to no constraints at all -- a feature switched on that sends no
   // field must not invalidate an analysis.
+  // Subscribed, not read: a constraint change has to move the identity, which
+  // is what marks a post-route analysis stale. The store is module-level so
+  // this is the only place in App that knows constraints exist.
+  const planConstraints = usePlanConstraints()
   const currentRouteIdentity = useMemo(
-    () => computeRouteIdentity({ roverId: selectedRoverId, start, goal, weights }),
-    [goal, selectedRoverId, start, weights],
+    () => computeRouteIdentity({
+      roverId: selectedRoverId,
+      start,
+      goal,
+      weights,
+      constraints: planConstraints,
+    }),
+    [goal, planConstraints, selectedRoverId, start, weights],
   )
 
   // Exactly the fields MissionValue declares and no more: an extra one is a

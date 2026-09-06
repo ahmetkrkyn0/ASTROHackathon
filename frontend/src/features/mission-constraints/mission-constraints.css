@@ -1,0 +1,148 @@
+/* Advanced planner constraints.
+
+   Console rules: flat, 2px radius, mono for data only. Lavender is the
+   interaction accent and is the only colour here -- a constraint being on is
+   an interaction state, not a safety verdict, so it takes no risk colour. */
+
+.lp-mc { display: flex; flex-direction: column; gap: 10px; }
+
+.lp-mc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lp-mc-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-inner);
+}
+
+.lp-mc-row:last-child { border-bottom: none; padding-bottom: 0; }
+
+.lp-mc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.lp-mc-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.lp-mc-switch {
+  flex: none;
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border: 1px solid var(--line-button);
+  border-radius: 8px;
+  background: var(--bg-inset);
+  transition: border-color 120ms linear, background 120ms linear;
+}
+
+.lp-mc-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 120ms linear, background 120ms linear;
+}
+
+.lp-mc-toggle input:checked + .lp-mc-switch {
+  border-color: var(--lavender);
+  background: rgba(186, 175, 245, 0.16);
+}
+
+.lp-mc-toggle input:checked + .lp-mc-switch::after {
+  transform: translateX(12px);
+  background: var(--lavender);
+}
+
+.lp-mc-toggle input:focus-visible + .lp-mc-switch {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
+}
+
+.lp-mc-label {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+
+.lp-mc-row.is-on .lp-mc-label { color: var(--text); }
+
+.lp-mc-hint {
+  margin: 0;
+  padding-left: 34px;
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.lp-mc-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 34px;
+}
+
+.lp-mc-control input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--lavender);
+}
+
+.lp-mc-value {
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-mc-select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text-2);
+  font-size: var(--fs-small);
+}
+
+/* The line that says the request is unchanged. Worth stating: a row of
+   switches set to off is otherwise indistinguishable, to an operator, from a
+   row of switches quietly steering the route. */
+.lp-mc-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-size: var(--fs-tiny);
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.lp-mc-foot svg { flex: none; font-size: 12px; }
+.lp-mc-foot.is-active { color: var(--lavender); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-mc-switch,
+  .lp-mc-switch::after { transition: none; }
+}
