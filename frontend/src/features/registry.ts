@@ -121,11 +121,17 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // behind a control. It renders nothing when a response carries no block, so
   // an older backend costs the rail nothing.
   { id: 'safety-margins', slot: 'rightRail', Component: SafetyMargins, modes: ['analyze'] },
-  // Slip, risk appetite and measured roughness -- three blocks that also
-  // arrive unasked, kept as one panel with three labelled sections rather
-  // than three cards, since each is a handful of numbers and the plan warns
-  // against turning new capability into rail clutter.
-  { id: 'route-model', slot: 'rightRail', Component: RouteModel, modes: ['analyze'] },
+  // Slip, risk appetite, roughness, survival and thermal dwell -- five blocks
+  // that also arrive unasked, kept as ONE panel with labelled sections rather
+  // than five cards.
+  //
+  // In the drawer, unlike the safety margins above. This panel answers "how
+  // was the cost arrived at, and under what model", which is the drawer's own
+  // definition: it proves the stack is real without being part of the
+  // moment-to-moment task of reading a route. Keeping it in the primary rail
+  // took analyze from four permanent panels to six, which is the direction
+  // the theme-preservation gate exists to stop.
+  { id: 'route-model', slot: 'rightRail', Component: RouteModel, modes: ['analyze'], group: 'systems' },
   // analyze only, from App.tsx's `missionMode === 'analyze' && planResult`
   // guard. Only the mode half becomes a registration: the bar already
   // renders nothing without waypoints, so knowing what an empty route looks
