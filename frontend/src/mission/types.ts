@@ -200,6 +200,17 @@ export interface MissionActions {
   setWeights: (weights: PlanWeights) => void
   /** Arms the next map click to place start, goal, or nothing. */
   setClickMode: (mode: ClickMode) => void
+  /**
+   * Places one endpoint outright, without arming anything.
+   *
+   * The map is the natural way to pick a point and a poor way to pick an exact
+   * one: at 5 m per cell a rover start sits inside a couple of screen pixels,
+   * and a hand cannot reliably land on the cell it means. Typing the cell is
+   * the same placement by another route, so it clears the stale route exactly
+   * as a click does -- but it leaves `clickMode` alone, because typing a value
+   * is not a request to place the next one by hand.
+   */
+  placeEndpoint: (which: 'start' | 'goal', cell: Cell) => void
   /** No-op unless both endpoints are placed and no request is in flight. */
   planRoute: () => void
   /** Clears endpoints, route and error. Keeps the selected rover. */

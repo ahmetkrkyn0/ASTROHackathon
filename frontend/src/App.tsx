@@ -420,6 +420,22 @@ export default function App() {
     [clickMode],
   )
 
+  /**
+   * Typed placement. Same consequences as a click -- the drawn route no longer
+   * describes these endpoints, so it goes -- but the picker is left as it was.
+   */
+  const handlePlaceEndpoint = useCallback(
+    (which: 'start' | 'goal', cell: [number, number]) => {
+      setPlanResult(null)
+      setPlanError(null)
+      setRoutePlaybackStep(null)
+      if (which === 'start') setStart(cell)
+      else setGoal(cell)
+      lastPlacementRef.current = which
+    },
+    [],
+  )
+
   const handleUndoPlacement = useCallback(() => {
     const last = lastPlacementRef.current
     if (!last) {
@@ -665,6 +681,7 @@ export default function App() {
       openFleetSelect: handleOpenFleetSelect,
       setWeights,
       setClickMode,
+      placeEndpoint: handlePlaceEndpoint,
       planRoute: handlePlan,
       resetMission: handleReset,
       undoPlacement: handleUndoPlacement,
@@ -676,7 +693,15 @@ export default function App() {
       setDimension,
       toggleHud,
     }),
-    [handlePlan, handleReset, handleRoverSelect, handleOpenFleetSelect, handleUndoPlacement, toggleHud],
+    [
+      handlePlan,
+      handleReset,
+      handleRoverSelect,
+      handleOpenFleetSelect,
+      handlePlaceEndpoint,
+      handleUndoPlacement,
+      toggleHud,
+    ],
   )
 
   const missionRuntimeValue: MissionRuntime = useMemo(

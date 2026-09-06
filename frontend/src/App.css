@@ -3407,10 +3407,71 @@ select {
 /* The two map pickers, full width and stacked, under the sequence they act on. */
 .lp-pick-actions {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   border-top: 1px solid var(--line);
   padding-top: 14px;
   margin-top: 4px;
+}
+
+/* Button, row, col. The button takes what is left, so the two fields keep the
+   same width whether the label says "Select Start" or "START 174, 149". */
+.lp-pick-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.lp-pick-row .lp-pick-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lp-coord-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 0 9px;
+  background: var(--void);
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  transition: border-color 140ms ease;
+}
+
+.lp-coord-field span {
+  color: var(--text-dimmest);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+
+.lp-coord-field input {
+  width: 52px;
+  padding: 8px 0;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  text-align: right;
+}
+
+.lp-coord-field input:focus {
+  outline: none;
+}
+
+.lp-coord-field:focus-within {
+  border-color: var(--lavender);
+}
+
+.lp-coord-field:hover:not(:has(input:disabled)) {
+  border-color: rgba(199, 205, 219, 0.3);
+}
+
+.lp-coord-field:has(input:disabled) {
+  opacity: 0.45;
 }
 
 .lp-pick-btn {

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import type { PlanWeights, RoverEntry } from '../../api'
 import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
 import { getRoverMeta } from '../../components/Fleet/roverMeta'
@@ -27,16 +27,80 @@ const ROVER_METRICS: Array<{
   { icon: 'mass', label: 'Mass', value: (r) => `${r.mass_kg.toFixed(0)} kg` },
 ]
 
+/**
+ * One typed coordinate.
+ *
+ * Held as a string while it is being edited: binding the box straight to the
+ * cell fights the operator, because clearing it to type a fresh number parses
+ * as NaN and "1" on the way to "149" is a placement at row 1. Nothing is
+ * committed until the field is left or Enter is pressed, and what commits is
+ * clamped to the grid -- the backend answers an out-of-range cell with a 422,
+ * which is a slow way to learn you typed 5000.
+ */
+const CoordField: React.FC<{
+  label: string
+  value: number | null
+  max: number
+  disabled: boolean
+  onCommit: (value: number) => void
+}> = ({ label, value, max, disabled, onCommit }) => {
+  const [draft, setDraft] = useState<string | null>(null)
+
+  const commit = () => {
+    if (draft === null) return
+    const n = Number.parseInt(draft, 10)
+    setDraft(null)
+    if (Number.isFinite(n)) onCommit(Math.min(max, Math.max(0, n)))
+  }
+
+  return (
+    <label className="lp-coord-field">
+      <span>{label}</span>
+      <input
+        type="number"
+        min={0}
+        max={max}
+        step={1}
+        disabled={disabled}
+        value={draft ?? (value ?? '')}
+        placeholder="--"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commit()
+            e.currentTarget.blur()
+          }
+        }}
+      />
+    </label>
+  )
+}
+
 export const MissionSetupPanel: React.FC = () => {
-  const { rover: selectedRover, weights, start, goal, planResult, clickMode, isSolving } =
+  const { rover: selectedRover, weights, start, goal, planResult, clickMode, isSolving, gridMeta } =
     useMission()
   const {
     setClickMode: onSetClickMode,
+    placeEndpoint: onPlaceEndpoint,
     planRoute: onPlanRoute,
     resetMission: onReset,
     undoPlacement: onUndoPlacement,
     openFleetSelect: onOpenFleetSelect,
   } = useMissionActions()
+
+  /* Until the grid answers, fall back to the 500x500 the site ships with --
+     the clamp is a guard against a typo, not the authority on the extent. */
+  const maxRow = (gridMeta?.rows ?? 500) - 1
+  const maxCol = (gridMeta?.cols ?? 500) - 1
+
+  const setAxis = (which: 'start' | 'goal', axis: 0 | 1, next: number) => {
+    const current = which === 'start' ? start : goal
+    const base: [number, number] = current ?? [0, 0]
+    const cell: [number, number] = axis === 0 ? [next, base[1]] : [base[0], next]
+    onPlaceEndpoint(which, cell)
+  }
   const hasRoute = Boolean(planResult)
 
   /**
@@ -94,32 +158,72 @@ export const MissionSetupPanel: React.FC = () => {
           <span className="lp-meta-label">Mission targets</span>
         </div>
 
+        {/* Click to place, or type the cell. At 5 m per pixel the difference
+            between two adjacent rover starts is a couple of screen pixels, so
+            the map cannot be the only way in. The two are the same placement:
+            typing fills the same state a click does, and the button keeps
+            showing where the point ended up. */}
         <div className="lp-pick-actions">
-          <button
-            type="button"
-            className={`lp-pick-btn ${clickMode === 'start' ? 'is-picking' : ''} ${start ? 'is-set-start' : ''}`}
-            onClick={() => onSetClickMode(clickMode === 'start' ? 'idle' : 'start')}
-          >
-            <Icon name="pin" />
-            {start
-              ? `START ${start[0]}, ${start[1]}`
-              : clickMode === 'start'
-                ? 'Pick on map…'
-                : 'Select Start'}
-          </button>
-          <button
-            type="button"
-            className={`lp-pick-btn ${clickMode === 'goal' ? 'is-picking' : ''} ${goal ? 'is-set-goal' : ''}`}
-            onClick={() => onSetClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
-            disabled={!start}
-          >
-            <Icon name="flag" />
-            {goal
-              ? `GOAL ${goal[0]}, ${goal[1]}`
-              : clickMode === 'goal'
-                ? 'Pick on map…'
-                : 'Select Goal'}
-          </button>
+          <div className="lp-pick-row">
+            <button
+              type="button"
+              className={`lp-pick-btn ${clickMode === 'start' ? 'is-picking' : ''} ${start ? 'is-set-start' : ''}`}
+              onClick={() => onSetClickMode(clickMode === 'start' ? 'idle' : 'start')}
+            >
+              <Icon name="pin" />
+              {start
+                ? `START ${start[0]}, ${start[1]}`
+                : clickMode === 'start'
+                  ? 'Pick on map…'
+                  : 'Select Start'}
+            </button>
+            <CoordField
+              label="row"
+              value={start?.[0] ?? null}
+              max={maxRow}
+              disabled={isSolving}
+              onCommit={(v) => setAxis('start', 0, v)}
+            />
+            <CoordField
+              label="col"
+              value={start?.[1] ?? null}
+              max={maxCol}
+              disabled={isSolving}
+              onCommit={(v) => setAxis('start', 1, v)}
+            />
+          </div>
+
+          <div className="lp-pick-row">
+            <button
+              type="button"
+              className={`lp-pick-btn ${clickMode === 'goal' ? 'is-picking' : ''} ${goal ? 'is-set-goal' : ''}`}
+              onClick={() => onSetClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
+              disabled={!start}
+            >
+              <Icon name="flag" />
+              {goal
+                ? `GOAL ${goal[0]}, ${goal[1]}`
+                : clickMode === 'goal'
+                  ? 'Pick on map…'
+                  : 'Select Goal'}
+            </button>
+            {/* Same gate as the button beside it: a goal without a start is a
+                route with one end. */}
+            <CoordField
+              label="row"
+              value={goal?.[0] ?? null}
+              max={maxRow}
+              disabled={isSolving || !start}
+              onCommit={(v) => setAxis('goal', 0, v)}
+            />
+            <CoordField
+              label="col"
+              value={goal?.[1] ?? null}
+              max={maxCol}
+              disabled={isSolving || !start}
+              onCommit={(v) => setAxis('goal', 1, v)}
+            />
+          </div>
         </div>
       </section>
 
