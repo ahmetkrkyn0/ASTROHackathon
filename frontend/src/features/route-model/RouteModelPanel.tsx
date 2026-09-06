@@ -20,10 +20,16 @@ import './route-model.css'
 
 /** Solid border for a measurement, dashed for a model. */
 function Validity({ level }: { level: string }) {
-  const measured = level.toUpperCase().startsWith('MEASURED')
-  return (
-    <span className={`lp-rm-chip ${measured ? 'is-measured' : 'is-model'}`}>{level}</span>
-  )
+  const upper = level.toUpperCase()
+  // Three levels, weakest last. UNCALIBRATED is not a kind of MODEL: a model
+  // with no calibration behind it is a further step from a measurement, and
+  // the thermal block ships both labels precisely so they can be told apart.
+  const tone = upper.includes('UNCALIBRATED')
+    ? 'is-uncalibrated'
+    : upper.startsWith('MEASURED')
+      ? 'is-measured'
+      : 'is-model'
+  return <span className={`lp-rm-chip ${tone}`}>{level}</span>
 }
 
 function Figure({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -182,6 +188,101 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
             // The backend's reason names the cache file and the script that
             // builds it. That belongs in the report; the rail states the fact.
             <Absent>Not applied — no roughness layer on this deployment.</Absent>
+          )}
+        </Section>
+      ) : null}
+
+      {view.survival ? (
+        <Section
+          title="Execution survival"
+          icon="shield"
+          validity={<Validity level={view.survival.validity ?? 'MODEL'} />}
+        >
+          {view.survival.applied ? (
+            <>
+              <dl className="lp-rm-figures">
+                <Figure
+                  label="Failure prob."
+                  value={view.survival.executionFailureProbability !== null
+                    ? `${(view.survival.executionFailureProbability * 100).toFixed(2)}%`
+                    : '--'}
+                />
+                <Figure label="β" value={n(view.survival.beta, 3)} />
+                <Figure
+                  label="Moves refused"
+                  value={view.survival.movesRefused !== null
+                    ? `${view.survival.movesRefused}`
+                    : '--'}
+                />
+              </dl>
+              {/* A transferred failure rate is an assumption, and the contract
+                  prefixes it as one. Hiding that is a named acceptance failure
+                  in the integration plan. */}
+              {view.survival.failureSource?.startsWith('assumption') ? (
+                <p className="lp-rm-cost">
+                  <Icon name="info" />
+                  <span>
+                    Failure rate {view.survival.failureRatePerKm ?? '--'}/km is an assumption
+                  </span>
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <Absent>
+              {view.survival.requested
+                ? `Requested but not applied${view.survival.reason ? ` — ${view.survival.reason}` : '.'}`
+                : 'Not requested — no chance constraint on this plan.'}
+            </Absent>
+          )}
+        </Section>
+      ) : null}
+
+      {view.thermal ? (
+        <Section
+          title="Thermal dwell"
+          icon="thermal"
+          validity={
+            <>
+              <Validity level={view.thermal.validity ?? 'MODEL'} />
+              {view.thermal.lagValidity ? <Validity level={view.thermal.lagValidity} /> : null}
+            </>
+          }
+        >
+          {view.thermal.applied ? (
+            <>
+              <dl className="lp-rm-figures">
+                <Figure label="Min margin" value={n(view.thermal.minDwellMarginH, 2, ' h')} />
+                <Figure
+                  label="Inner temp"
+                  value={`${n(view.thermal.innerMinC, 1)} … ${n(view.thermal.innerMaxC, 1)}°C`}
+                  hint={view.thermal.envelopeLoC !== null
+                    ? `envelope ${view.thermal.envelopeLoC}–${view.thermal.envelopeHiC}°C`
+                    : undefined}
+                />
+                <Figure
+                  label="Open-ended"
+                  // Not the same as a large finite dwell, and never rendered
+                  // as infinity: the contract is explicit that these are
+                  // states with no limit inside the evaluated horizon.
+                  value={view.thermal.openEndedStates !== null
+                    ? `${view.thermal.openEndedStates} states`
+                    : '--'}
+                />
+              </dl>
+              <p className="lp-rm-cost">
+                <Icon name="info" />
+                <span>
+                  Heater model {view.thermal.heaterModel ?? 'none'} · dwell limits are
+                  uncalibrated
+                </span>
+              </p>
+            </>
+          ) : (
+            <Absent>
+              {view.thermal.requested
+                ? 'Requested but not applied on this plan.'
+                : 'Not requested — no dwell constraint on this plan.'}
+            </Absent>
           )}
         </Section>
       ) : null}

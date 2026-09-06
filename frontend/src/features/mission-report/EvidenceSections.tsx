@@ -127,6 +127,28 @@ export function CostModelEvidence({ plan, t }: { plan: unknown; t: ReportCopy })
       references: view.roughness.references,
     })
   }
+  if (view.survival) {
+    blocks.push({
+      title: 'Execution survival',
+      validity: view.survival.validity ?? 'MODEL',
+      claim: view.survival.claim,
+      reason: view.survival.applied ? null : view.survival.reason,
+      references: view.survival.failureSource ? [view.survival.failureSource] : [],
+    })
+  }
+  if (view.thermal) {
+    blocks.push({
+      title: 'Thermal dwell',
+      // Both labels, and the weaker one last: a model with no calibration is
+      // a further step from a measurement than a model is.
+      validity: `${view.thermal.validity ?? 'MODEL'}${
+        view.thermal.lagValidity ? ` · lag ${view.thermal.lagValidity}` : ''
+      }`,
+      claim: view.thermal.claim,
+      reason: null,
+      references: [],
+    })
+  }
   if (blocks.length === 0) return null
 
   return (

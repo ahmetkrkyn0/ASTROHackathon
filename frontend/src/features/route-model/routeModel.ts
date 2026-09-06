@@ -78,10 +78,58 @@ export interface RoughnessView {
   references: string[]
 }
 
+/** B1: how likely this plan is to finish, with the recovery policy behind it. */
+export interface SurvivalView {
+  requested: boolean
+  applied: boolean
+  validity: string | null
+  /** The chance constraint, when one was applied. */
+  beta: number | null
+  /** 1 - path_survival_prob[-1]. */
+  executionFailureProbability: number | null
+  minRecoveryProb: number | null
+  /** Moves the chance constraint refused. Non-zero on a 200 is normal. */
+  movesRefused: number | null
+  /**
+   * Where the failure rate came from. The contract prefixes a transferred
+   * figure with "assumption:", and hiding that is one of the plan's named
+   * acceptance failures.
+   */
+  failureSource: string | null
+  failureRatePerKm: number | null
+  claim: string | null
+  reason: string | null
+}
+
+/** C6: inner temperature, and how long the rover may sit still. */
+export interface ThermalDwellView {
+  requested: boolean
+  applied: boolean
+  validity: string | null
+  /**
+   * Separate from `validity` and always the weaker of the two. The thermal
+   * lag is UNCALIBRATED, and the plan forbids the words "thermally
+   * validated" anywhere in this product.
+   */
+  lagValidity: string | null
+  minDwellMarginH: number | null
+  statesPastDwell: number | null
+  /** States with no finite dwell limit. Not the same as a large one. */
+  openEndedStates: number | null
+  innerMinC: number | null
+  innerMaxC: number | null
+  envelopeLoC: number | null
+  envelopeHiC: number | null
+  heaterModel: string | null
+  claim: string | null
+}
+
 export interface RouteModelView {
   slip: SlipView | null
   risk: RiskView | null
   roughness: RoughnessView | null
+  survival: SurvivalView | null
+  thermal: ThermalDwellView | null
 }
 
 function obj(source: unknown, key: string): Record<string, unknown> | null {
@@ -115,9 +163,17 @@ export function readRouteModel(result: unknown): RouteModelView {
   const riskRoot = obj(result, 'risk')
   const roughRoot = obj(result, 'roughness')
 
+  const survivalRoot = obj(result, 'survival')
+  const thermalRoot = obj(result, 'thermal_dwell')
+
   const slipRoute = obj(slipRoot, 'route')
   const riskRoute = obj(riskRoot, 'route')
   const roughRoute = obj(roughRoot, 'route')
+  const survivalRoute = obj(survivalRoot, 'route')
+  const failureModel = obj(survivalRoot, 'failure_model')
+  const thermalRoute = obj(thermalRoot, 'route')
+  const thermalInner = obj(thermalRoute, 'inner')
+  const envelope = obj(thermalRoot, 'envelope')
 
   return {
     slip: slipRoot
@@ -172,10 +228,42 @@ export function readRouteModel(result: unknown): RouteModelView {
           references: strings(roughRoot, 'references'),
         }
       : null,
+    survival: survivalRoot
+      ? {
+          requested: survivalRoot.requested === true,
+          applied: survivalRoot.applied === true,
+          validity: str(survivalRoot, 'validity'),
+          beta: num(survivalRoot, 'beta'),
+          executionFailureProbability: num(survivalRoute, 'execution_failure_probability'),
+          minRecoveryProb: num(survivalRoute, 'min_recovery_prob'),
+          movesRefused: num(survivalRoute, 'moves_refused'),
+          failureSource: str(failureModel, 'source'),
+          failureRatePerKm: num(failureModel, 'rate_per_km'),
+          claim: str(survivalRoot, 'claim'),
+          reason: str(survivalRoot, 'reason'),
+        }
+      : null,
+    thermal: thermalRoot
+      ? {
+          requested: thermalRoot.requested === true,
+          applied: thermalRoot.applied === true,
+          validity: str(thermalRoot, 'validity'),
+          lagValidity: str(thermalRoot, 'thermal_lag_validity'),
+          minDwellMarginH: num(thermalRoute, 'min_dwell_margin_h'),
+          statesPastDwell: num(thermalRoute, 'states_past_thermal_dwell'),
+          openEndedStates: num(thermalRoute, 'open_ended_states'),
+          innerMinC: num(thermalInner, 'min_c'),
+          innerMaxC: num(thermalInner, 'max_c'),
+          envelopeLoC: num(envelope, 'lo_c'),
+          envelopeHiC: num(envelope, 'hi_c'),
+          heaterModel: str(thermalRoot, 'heater_model'),
+          claim: str(thermalRoot, 'claim'),
+        }
+      : null,
   }
 }
 
 /** True when there is nothing worth drawing. */
 export function isEmpty(view: RouteModelView): boolean {
-  return !view.slip && !view.risk && !view.roughness
+  return !view.slip && !view.risk && !view.roughness && !view.survival && !view.thermal
 }

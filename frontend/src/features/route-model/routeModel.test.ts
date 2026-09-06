@@ -100,3 +100,76 @@ describe('roughness (C4)', () => {
     expect(checked.roughness!.cellsInPsr).toBe(0)
   })
 })
+
+describe('survival (B1)', () => {
+  it('keeps a transferred failure rate marked as an assumption', () => {
+    // Hiding an assumed failure rate is one of the integration plan's named
+    // acceptance failures, so the source string has to survive intact.
+    const view = readRouteModel({
+      survival: {
+        requested: true, applied: true, beta: 0.05, validity: 'MODEL',
+        failure_model: {
+          rate_per_km: 0.2,
+          source: 'assumption: Lamarre, Malhotra, Kelly (transferred)',
+        },
+        route: { execution_failure_probability: 0.0123, moves_refused: 0 },
+        claim: 'reach-avoid value iteration on a discretised field',
+      },
+    })
+    expect(view.survival!.failureSource).toContain('assumption')
+    expect(view.survival!.failureRatePerKm).toBe(0.2)
+    expect(view.survival!.executionFailureProbability).toBeCloseTo(0.0123, 4)
+  })
+
+  it('tells "not requested" apart from "requested and refused"', () => {
+    const notAsked = readRouteModel({ survival: { requested: false, applied: false } })
+    expect(notAsked.survival!.requested).toBe(false)
+    const refused = readRouteModel({
+      survival: { requested: true, applied: false, reason: 'no safe haven map' },
+    })
+    expect(refused.survival!.requested).toBe(true)
+    expect(refused.survival!.reason).toBe('no safe haven map')
+  })
+
+  it('keeps zero refused moves as zero', () => {
+    // Non-zero on a 200 is normal -- the search found another way -- so zero
+    // is a real finding and must not become null.
+    const view = readRouteModel({
+      survival: { applied: true, route: { moves_refused: 0 } },
+    })
+    expect(view.survival!.movesRefused).toBe(0)
+  })
+})
+
+describe('thermal dwell (C6)', () => {
+  it('keeps the lag validity apart from the block validity', () => {
+    // The thermal lag is UNCALIBRATED and the block is MODEL. One label for
+    // both would promote the weaker of the two, and the plan forbids this
+    // product ever reading as "thermally validated".
+    const view = readRouteModel({
+      thermal_dwell: {
+        validity: 'MODEL', thermal_lag_validity: 'UNCALIBRATED',
+        requested: false, applied: true, heater_model: 'none',
+        envelope: { lo_c: 0, hi_c: 35 },
+        route: {
+          min_dwell_margin_h: 0.36, open_ended_states: 3, states_past_thermal_dwell: 0,
+          inner: { min_c: -15.66, max_c: 17.5 },
+        },
+        claim: 'MODEL, uncalibrated',
+      },
+    })
+    expect(view.thermal!.validity).toBe('MODEL')
+    expect(view.thermal!.lagValidity).toBe('UNCALIBRATED')
+    expect(view.thermal!.claim).toContain('uncalibrated')
+  })
+
+  it('counts open-ended states rather than inventing an infinity', () => {
+    // Open-ended means no limit inside the evaluated horizon. Rendering it as
+    // a very large number of hours would be a deadline nobody computed.
+    const view = readRouteModel({
+      thermal_dwell: { applied: true, route: { open_ended_states: 3 } },
+    })
+    expect(view.thermal!.openEndedStates).toBe(3)
+    expect(view.thermal!.minDwellMarginH).toBeNull()
+  })
+})

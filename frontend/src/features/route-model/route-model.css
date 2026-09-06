@@ -155,3 +155,11 @@
 }
 
 .lp-rm-foot svg { flex: none; font-size: 12px; }
+
+/* A model with no calibration behind it is a further step from a measurement
+   than a model is, and the thermal block ships both labels so they can be told
+   apart. Dashed like MODEL, dimmer, and the only chip that says so in words. */
+.lp-rm-chip.is-uncalibrated {
+  border: 1px dashed var(--line-inner);
+  color: var(--text-dimmest);
+}

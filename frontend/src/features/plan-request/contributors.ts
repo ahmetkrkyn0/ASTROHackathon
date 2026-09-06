@@ -73,6 +73,33 @@ const riskContributor: PlanRequestContributor = {
   },
 }
 
+/**
+ * WHY THE OTHER SIX CONSTRAINTS ARE NOT HERE YET.
+ *
+ * The backend takes `require_safe_haven`, `require_earth_visibility`,
+ * `require_continuous_illumination`, `require_thermal_dwell`,
+ * `max_failure_probability` and the survival family. Every one of them is
+ * accepted by `POST /api/plan` with a 200 -- and every one of them is then
+ * SILENTLY IGNORED, because they are constraints on the 4-D planner and this
+ * cockpit plans in 2-D. Measured against the live backend: the route comes
+ * back byte-identical to the unconstrained one, and no field in the response
+ * says the constraint was dropped.
+ *
+ * A toggle that does nothing and reports nothing is worse than a refusal. The
+ * operator would read "Safe Haven required" on screen and fly a route that
+ * never checked it, which is precisely the hidden assumption the plan spends
+ * a section forbidding. So they are absent until either the cockpit issues a
+ * 4-D plan or the backend reports what it ignored, and this comment is here
+ * so the next person to reach for them finds the measurement rather than
+ * repeating it.
+ *
+ * `w_roughness` is a separate case and is NOT a constraint: it is a fifth
+ * weight, nested under `weights` rather than sent at the top level, and it
+ * belongs with the other four wherever those are edited. The backend accepts
+ * it, echoes it back, and honestly reports `applied: false` with a reason
+ * when the roughness layer is not cached -- which the route cost panel
+ * already shows.
+ */
 export const PLAN_REQUEST_CONTRIBUTORS: readonly PlanRequestContributor[] = [
   riskContributor,
 ]
