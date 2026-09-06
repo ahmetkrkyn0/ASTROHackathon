@@ -5973,6 +5973,52 @@ select {
   transition: opacity 0.52s ease, visibility 0.52s ease;
 }
 
+/* ── The starfield ──
+   Drawn rather than photographed: three layers of tiny radial gradients tile
+   at different sizes, so the field never repeats visibly and stays a crisp
+   point of light at any resolution instead of a JPEG's grey smudge. It costs
+   no request and no decode on a boot screen whose whole job is to be up
+   before anything else is.
+
+   A wash of lavender at the top left keeps it from being a flat black field
+   with specks on it -- the same colour the console uses for its one accent. */
+.splash-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1.4px 1.4px at 24% 18%, rgba(231, 234, 241, 0.9), transparent 100%),
+    radial-gradient(1.2px 1.2px at 68% 12%, rgba(231, 234, 241, 0.75), transparent 100%),
+    radial-gradient(1.6px 1.6px at 41% 63%, rgba(231, 234, 241, 0.8), transparent 100%),
+    radial-gradient(1.1px 1.1px at 83% 47%, rgba(186, 175, 245, 0.8), transparent 100%),
+    radial-gradient(1.3px 1.3px at 12% 76%, rgba(231, 234, 241, 0.7), transparent 100%),
+    radial-gradient(1px 1px at 57% 88%, rgba(231, 234, 241, 0.65), transparent 100%),
+    radial-gradient(1.5px 1.5px at 92% 79%, rgba(79, 216, 240, 0.7), transparent 100%),
+    radial-gradient(1.1px 1.1px at 34% 34%, rgba(231, 234, 241, 0.6), transparent 100%);
+  background-size: 320px 320px, 220px 220px, 470px 470px, 190px 190px,
+    380px 380px, 260px 260px, 540px 540px, 150px 150px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* The one soft light in the scene, behind the mark. */
+.splash-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 50% 42%,
+    rgba(186, 175, 245, 0.13) 0%,
+    rgba(5, 7, 13, 0) 58%
+  );
+  pointer-events: none;
+}
+
+.splash-content {
+  position: relative;
+  z-index: 1;
+}
+
 .splash-screen.is-leaving {
   opacity: 0;
   visibility: hidden;
@@ -5989,7 +6035,13 @@ select {
 .splash-identity {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 8px;
+  text-align: center;
+}
+
+.splash-mark {
+  margin-bottom: 14px;
 }
 
 .splash-identity .loading-brand {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import LunaPathMark from './components/LunaPathMark'
 
 /**
  * The boot screen.
@@ -29,7 +30,7 @@ const STAGES: Record<BootStage, { label: string; percent: number }> = {
 }
 
 /** Long enough to read the wordmark; short enough not to be in the way. */
-const MIN_VISIBLE_MS = 1400
+const MIN_VISIBLE_MS = 3000
 
 /** Matches the .splash-screen exit transition in App.css. */
 const EXIT_MS = 520
@@ -98,6 +99,7 @@ export default function SplashScreen({ stage, error, onDone }: SplashScreenProps
     >
       <div className="splash-content">
         <div className="splash-identity">
+          <LunaPathMark size={128} className="splash-mark" />
           <span className="loading-brand">LunaPath</span>
           <span className="splash-tagline">Lunar south pole mission planning</span>
         </div>
