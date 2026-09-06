@@ -121,27 +121,19 @@ export function useAssistant(mission: MissionValue): AssistantShell {
   const mode: AssistantMode =
     missionSnapshot.currentPlan === null ? 'planning' : 'analysis'
 
-  /**
-   * A finished route opens the assistant.
+  /*
+   * A finished route no longer opens the assistant.
    *
-   * The operator has just produced the thing the analysis mode exists to
-   * explain, and having to find the launcher first is friction with no
-   * purpose. It OPENS and nothing else: no question is sent, no request is
-   * made, and the model is not called. Whether to ask anything stays the
-   * operator's decision.
+   * It used to: the operator had just produced the thing analysis mode exists
+   * to explain, so the window put itself on screen. In use that lands a panel
+   * over the map at the exact moment the operator wants to look at the route
+   * they just got, and it arrives without being asked for. The launcher is one
+   * click away and it is the operator's click to make.
    *
-   * Fires on the transition only. planResult is cleared by five different
-   * actions -- a map click, a rover change, a weight change, Clear, and the
-   * start of the next plan -- so a level-triggered effect would reopen the
-   * window every time the operator adjusted anything.
+   * The one remaining path that opens this window on its own is the ask channel
+   * below, and that one IS a request: another feature only publishes an ask
+   * because the operator pressed something.
    */
-  const hadPlanRef = useRef(missionSnapshot.currentPlan !== null)
-  useEffect(() => {
-    const hasPlan = missionSnapshot.currentPlan !== null
-    const had = hadPlanRef.current
-    hadPlanRef.current = hasPlan
-    if (hasPlan && !had) open()
-  }, [missionSnapshot.currentPlan, open])
 
   /**
    * An ask from another feature opens the window.

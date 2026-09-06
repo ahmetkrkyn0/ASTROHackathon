@@ -149,11 +149,27 @@ def test_the_expensive_chip_is_still_gated_on_the_endpoints():
 
 # ── the transition ───────────────────────────────────────────────────────────
 
-def test_a_finished_route_opens_the_assistant():
-    assert "const hadPlanRef = useRef(missionSnapshot.currentPlan !== null)" in USE_ASSISTANT
-    # The transition, not the level: planResult is cleared by five different
-    # actions, and a level-triggered effect would reopen on every one of them.
-    assert "if (hasPlan && !had) open()" in USE_ASSISTANT
+def test_a_finished_route_does_not_open_the_assistant():
+    """A solved route is not a request to be talked to.
+
+    It used to open the window on the plan transition. That lands a panel over
+    the map at the moment the operator wants to look at the route they just
+    got, and it arrives unasked. The launcher is one click away.
+    """
+    assert "hadPlanRef" not in USE_ASSISTANT
+    assert "if (hasPlan && !had) open()" not in USE_ASSISTANT
+
+
+def test_an_ask_from_another_feature_still_opens_the_assistant():
+    """The other auto-open path stays, because that one IS a request.
+
+    A feature only publishes an ask because the operator pressed something --
+    the report's "Ask the assistant" button is the only caller. Removing the
+    plan-transition open must not take this with it, or that button would fill
+    a composer nobody can see.
+    """
+    assert "openedAskRef" in USE_ASSISTANT
+    assert "openedAskRef.current = ask.id" in USE_ASSISTANT
 
 
 def test_opening_the_assistant_sends_nothing():
