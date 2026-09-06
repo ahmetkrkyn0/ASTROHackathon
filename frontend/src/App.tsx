@@ -9,12 +9,7 @@ import {
 } from 'react'
 import './App.css'
 import LandingPage from './LandingPage'
-import MapCanvas, {
-  type ClickMode,
-  DOWNSAMPLE,
-  type MapCanvasHandle,
-  type MapViewMode,
-} from './MapCanvas'
+import MapCanvas, { type ClickMode, DOWNSAMPLE, type MapViewMode } from './MapCanvas'
 import { generateRockField, type RockDescriptor } from './lidarSimulation'
 import SpaceBackdrop from './SpaceBackdrop'
 import TerrainCanvas3D from './TerrainCanvas3D'
@@ -179,7 +174,6 @@ export default function App() {
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
-  const mapRef = useRef<MapCanvasHandle>(null)
   const toastIdRef = useRef(0)
   const toastTimersRef = useRef<number[]>([])
 
@@ -821,7 +815,6 @@ export default function App() {
                 <CanvasOverlaySlot />
                 {dimension === '2d' ? (
                   <MapCanvas
-                    ref={mapRef}
                     elevationGrid={elevationLayer?.data ?? null}
                     slopeGrid={slopeLayer?.data ?? null}
                     aspectGrid={aspectLayer?.data ?? null}

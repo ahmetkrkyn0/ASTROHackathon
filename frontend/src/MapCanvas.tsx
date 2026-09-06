@@ -3,8 +3,6 @@ import React, {
   useEffect,
   useCallback,
   useState,
-  forwardRef,
-  useImperativeHandle,
 } from 'react'
 import type { Waypoint } from './api'
 import { drawOverlays } from './overlay/draw2d'
@@ -60,43 +58,36 @@ interface Props {
   viewMode: MapViewMode
   resolutionM: number
   onCellClick: (row: number, col: number) => void
-  onAnimationStepChange?: (step: number | null) => void
   /**
-   * Playback cursor, owned by App's single mission clock. When provided this
-   * replaces the internal timer below: the map, the 3D scene and the
-   * transport bar have to be showing the same moment, and three independent
-   * timers is exactly how they stopped being.
+   * Playback cursor, owned by App's single mission clock -- see
+   * mission/playbackClock.ts. The map runs no timer of its own. It used to:
+   * it stepped a waypoint every 33 ms while the transport bar stepped one
+   * every 50 ms and the 3D view compressed the whole traverse into a fixed
+   * 10-45 second window, so the same route finished at three different
+   * times and none of them was the rover's speed.
    */
-  playbackStep?: number | null
+  playbackStep: number | null
   onHoverCellChange?: (cell: [number, number] | null) => void
 }
 
-export interface MapCanvasHandle {
-  startAnimation: () => void
-}
-
-const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
-  {
-    elevationGrid,
-    slopeGrid,
-    aspectGrid,
-    shadowGrid,
-    thermalGrid,
-    costGrid,
-    traversableGrid,
-    waypoints,
-    start,
-    goal,
-    clickMode,
-    viewMode,
-    resolutionM,
-    onCellClick,
-    onAnimationStepChange,
-    playbackStep,
-    onHoverCellChange,
-  },
-  ref,
-) {
+function MapCanvas({
+  elevationGrid,
+  slopeGrid,
+  aspectGrid,
+  shadowGrid,
+  thermalGrid,
+  costGrid,
+  traversableGrid,
+  waypoints,
+  start,
+  goal,
+  clickMode,
+  viewMode,
+  resolutionM,
+  onCellClick,
+  playbackStep,
+  onHoverCellChange,
+}: Props) {
   // The marks features registered, read here rather than passed down: App
   // renders OverlayProvider and so cannot consume it, and the hook falls back
   // to one shared empty list outside a provider, which keeps this canvas
@@ -105,11 +96,6 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const baseImageRef = useRef<ImageData | null>(null)
-  const animationTimerRef = useRef<number | null>(null)
-  const [animStep, setAnimStep] = useState<number | null>(null)
-  // The controlled cursor wins whenever App supplies one; the internal
-  // timer stays only for the imperative startAnimation() handle.
-  const drawStep = playbackStep !== undefined ? playbackStep : animStep
   const [hoverCell, setHoverCell] = useState<[number, number] | null>(null)
 
   // The loaded grid's own row count, not CANVAS_SIZE. Every layer is
@@ -117,13 +103,6 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
   // shape. Zero before the first fetch lands, and drawOverlays draws
   // nothing at zero -- there is no base map to be out of register with yet.
   const gridRows = elevationGrid?.length ?? 0
-
-  const stopAnimation = useCallback(() => {
-    if (animationTimerRef.current !== null) {
-      window.clearTimeout(animationTimerRef.current)
-      animationTimerRef.current = null
-    }
-  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -150,7 +129,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     })
 
     baseImageRef.current = imageData
-    redraw(ctx, imageData, waypoints, start, goal, drawStep, hoverCell, gridRows, overlays)
+    redraw(ctx, imageData, waypoints, start, goal, playbackStep, hoverCell, gridRows, overlays)
     // Overlay degerleri (waypoints/start/goal/animStep/hoverCell/overlays)
     // bilerek bagimlilikta degil: onlari bir sonraki efekt yeniden ciziyor.
     // Buraya eklemek, her hover'da -- ve her overlay degisikliginde, yani
@@ -172,53 +151,12 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       return
     }
 
-    redraw(ctx, baseImageRef.current, waypoints, start, goal, drawStep, hoverCell, gridRows, overlays)
-  }, [drawStep, goal, gridRows, hoverCell, overlays, start, waypoints])
-
-  useEffect(() => {
-    if (!waypoints || waypoints.length === 0) {
-      setAnimStep(null)
-      stopAnimation()
-    }
-  }, [stopAnimation, waypoints])
-
-  useEffect(() => {
-    onAnimationStepChange?.(animStep)
-  }, [animStep, onAnimationStepChange])
+    redraw(ctx, baseImageRef.current, waypoints, start, goal, playbackStep, hoverCell, gridRows, overlays)
+  }, [playbackStep, goal, gridRows, hoverCell, overlays, start, waypoints])
 
   useEffect(() => {
     onHoverCellChange?.(hoverCell)
   }, [hoverCell, onHoverCellChange])
-
-  const startAnimation = useCallback(() => {
-    if (!waypoints || waypoints.length === 0) {
-      return
-    }
-
-    stopAnimation()
-    let nextStep = 0
-    setAnimStep(0)
-
-    const tick = () => {
-      nextStep += 1
-      if (nextStep >= waypoints.length) {
-        setAnimStep(waypoints.length - 1)
-        animationTimerRef.current = null
-        return
-      }
-
-      setAnimStep(nextStep)
-      animationTimerRef.current = window.setTimeout(tick, 33)
-    }
-
-    animationTimerRef.current = window.setTimeout(tick, 66)
-  }, [stopAnimation, waypoints])
-
-  useImperativeHandle(ref, () => ({ startAnimation }), [startAnimation])
-
-  useEffect(() => {
-    return () => stopAnimation()
-  }, [stopAnimation])
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -318,7 +256,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       )}
     </div>
   )
-})
+}
 
 export default MapCanvas
 export { DOWNSAMPLE }
