@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import type { PlanWeights } from '../../api'
+import { Icon } from '../../components/Fleet/SpecIcons'
+import { getRoverMeta } from '../../components/Fleet/roverMeta'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
 
 /**
@@ -86,6 +88,7 @@ export const MissionSetupPanel: React.FC = () => {
             className={`lp-pick-btn ${clickMode === 'start' ? 'is-picking' : ''} ${start ? 'is-set-start' : ''}`}
             onClick={() => onSetClickMode(clickMode === 'start' ? 'idle' : 'start')}
           >
+            <Icon name="pin" />
             {start
               ? `START ${start[0]}, ${start[1]}`
               : clickMode === 'start'
@@ -98,6 +101,7 @@ export const MissionSetupPanel: React.FC = () => {
             onClick={() => onSetClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
             disabled={!start}
           >
+            <Icon name="flag" />
             {goal
               ? `GOAL ${goal[0]}, ${goal[1]}`
               : clickMode === 'goal'
@@ -116,7 +120,9 @@ export const MissionSetupPanel: React.FC = () => {
         <div className="lp-sequence-list">
           {/* Step 01: Rover */}
           <div className="lp-sequence-item is-complete">
-            <span className="lp-seq-num">01</span>
+            <span className="lp-seq-num">
+              <Icon name="rover" />
+            </span>
             <span className="lp-seq-title">Rover</span>
             <span className="lp-seq-status is-ready">
               {selectedRover?.id.toUpperCase() ?? 'SET'}
@@ -125,7 +131,9 @@ export const MissionSetupPanel: React.FC = () => {
 
           {/* Step 02: Start Point */}
           <div className={`lp-sequence-item ${start ? 'is-complete' : 'is-active'}`}>
-            <span className="lp-seq-num">02</span>
+            <span className="lp-seq-num">
+              <Icon name="pin" />
+            </span>
             <span className="lp-seq-title">Start</span>
             <span className={`lp-seq-status ${start ? 'is-ready' : ''}`}>
               {start ? `${start[0]}, ${start[1]}` : clickMode === 'start' ? 'PICKING' : 'SELECT'}
@@ -134,7 +142,9 @@ export const MissionSetupPanel: React.FC = () => {
 
           {/* Step 03: Goal Target */}
           <div className={`lp-sequence-item ${goal ? 'is-complete' : start ? 'is-active' : ''}`}>
-            <span className="lp-seq-num">03</span>
+            <span className="lp-seq-num">
+              <Icon name="flag" />
+            </span>
             <span className="lp-seq-title">Goal</span>
             <span className={`lp-seq-status ${goal ? 'is-ready' : ''}`}>
               {goal ? `${goal[0]}, ${goal[1]}` : clickMode === 'goal' ? 'PICKING' : 'WAITING'}
@@ -143,7 +153,9 @@ export const MissionSetupPanel: React.FC = () => {
 
           {/* Step 04: Path Solution Status */}
           <div className={`lp-sequence-item ${hasRoute ? 'is-complete' : ''}`}>
-            <span className="lp-seq-num">04</span>
+            <span className="lp-seq-num">
+              <Icon name="route" />
+            </span>
             <span className="lp-seq-title">Route</span>
             <span className={`lp-seq-status ${hasRoute ? 'is-ready' : ''}`}>
               {hasRoute ? 'LOCKED' : 'NOT GENERATED'}
@@ -164,6 +176,7 @@ export const MissionSetupPanel: React.FC = () => {
             disabled={isSolving || (!start && !goal)}
             title="Undo the last point placed (Ctrl+Z)"
           >
+            <Icon name="undo" />
             Undo
           </button>
           <button
@@ -173,6 +186,7 @@ export const MissionSetupPanel: React.FC = () => {
             disabled={isSolving || (!start && !goal)}
             title="Clear start and goal points"
           >
+            <Icon name="clear" />
             Clear
           </button>
         </div>
@@ -184,6 +198,7 @@ export const MissionSetupPanel: React.FC = () => {
             onClick={onPlanRoute}
             disabled={!start || !goal || isSolving}
           >
+            <Icon name={isSolving ? 'restart' : routeIsStale ? 'restart' : 'route'} />
             {isSolving
               ? 'Computing Route...'
               : routeIsStale
@@ -222,13 +237,21 @@ export const MissionSetupPanel: React.FC = () => {
         {/* Selected Rover Specs Card */}
         {selectedRover ? (
           <div className="lp-selected-rover-card">
+            {/* The photograph, not a glyph. A triangle in a box said "a vehicle
+                is assigned" and nothing about which one -- and the hangar has
+                just spent a full screen on this rover's picture, so arriving in
+                the cockpit to an abstract mark loses the thread. */}
             <div className="lp-rover-header">
-              <div className="lp-rover-avatar-box">
-                <span className="lp-rover-avatar-icon">▲</span>
-              </div>
+              <img
+                className="lp-rover-photo"
+                src={getRoverMeta(selectedRover.id).image}
+                alt=""
+                loading="lazy"
+              />
               <div className="lp-rover-title-block">
                 <h3 className="lp-rover-card-name">{selectedRover.name}</h3>
                 <span className="lp-rover-model-code">{selectedRover.id.toUpperCase()}</span>
+                <span className="lp-rover-class">{getRoverMeta(selectedRover.id).roverClass}</span>
               </div>
             </div>
 

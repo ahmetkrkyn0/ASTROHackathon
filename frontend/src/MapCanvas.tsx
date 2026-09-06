@@ -364,13 +364,19 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
             ? 'Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time.'
             : `Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time. Press Enter to place ${clickMode === 'start' ? 'Start' : 'Goal'} at the cursor.`
         }
+        className={
+          clickMode === 'start'
+            ? 'map-canvas is-picking-start'
+            : clickMode === 'goal'
+              ? 'map-canvas is-picking-goal'
+              : 'map-canvas'
+        }
         style={{
           width: '100%',
           height: '100%',
           border: '1px solid rgba(186, 175, 245, 0.2)',
           background: '#05070d',
           boxShadow: '0 24px 64px rgba(0, 0, 0, 0.45)',
-          cursor: clickMode === 'idle' ? 'default' : 'crosshair',
           imageRendering: viewMode === 'traversability' || viewMode === 'cost' ? 'pixelated' : 'auto',
         }}
       />

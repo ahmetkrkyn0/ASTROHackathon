@@ -8,6 +8,7 @@ import {
   locationFromHref,
   phaseFromHref,
 } from './shell/phaseUrl'
+import { Icon } from './components/Fleet/SpecIcons'
 import MapCanvas, {
   type ClickMode,
   DOWNSAMPLE,
@@ -785,7 +786,11 @@ export default function App() {
                   <div className="map-overlay map-overlay-top-left lp-hud-card">
                     <div className="lp-hud-header">
                       <div className="lp-hud-title-group">
-                        <span className="lp-pulse-dot" />
+                        {/* A pulsing dot is a status light, and this readout
+                            has no status to report -- it said "live" beside
+                            four numbers that are simply where the pointer is.
+                            The crosshair says what the panel is instead. */}
+                        <Icon name="location" />
                         <span className="lp-hud-title">Surface telemetry</span>
                       </div>
                       <div className="lp-hud-actions">
@@ -812,20 +817,7 @@ export default function App() {
                       <span className="map-data-value">{formatTemperature(focusTelemetry.thermalC)}</span>
                     </div>
 
-                    {(start || goal) && (
-                      <div className="lp-hud-status-strip">
-                        {start && (
-                          <span className="lp-hud-pill is-start">
-                            START [{start[0]}, {start[1]}]
-                          </span>
-                        )}
-                        {goal && (
-                          <span className="lp-hud-pill is-goal">
-                            GOAL [{goal[0]}, {goal[1]}]
-                          </span>
-                        )}
-                      </div>
-                    )}
+
                   </div>
                 )
               )}
@@ -911,6 +903,47 @@ export default function App() {
             </div>
 
             <BottomDock />
+
+            {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
+            <footer className="lp-status-bar">
+              <div className="lp-status-left">
+                <div className="lp-scale">
+                  <span className="lp-scale-rule" aria-hidden="true" />
+                  <span className="lp-scale-copy">
+                    0 - {focusTelemetry.spanKm.toFixed(1)} km · {focusTelemetry.resolutionM.toFixed(0)} m/px
+                  </span>
+                </div>
+
+                <div className="lp-risk-legend">
+                  <span className="lp-legend-label">RISK</span>
+                  {LEGEND_ITEMS.map((item) => (
+                    <span key={item.label} className="lp-legend-item">
+                      <svg
+                        className="lp-legend-line"
+                        viewBox="0 0 22 8"
+                        aria-hidden="true"
+                        focusable="false"
+                      >
+                        <line
+                          x1="1"
+                          y1="4"
+                          x2="21"
+                          y2="4"
+                          stroke={riskToHex(item.level)}
+                          strokeWidth="2.4"
+                          strokeDasharray={riskToDashArray(item.level)}
+                        />
+                      </svg>
+                      {item.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="lp-status-right">
+                <StatusBarSlot />
+              </div>
+            </footer>
           </section>
 
           {/* ── RIGHT RAIL: MISSION CONTEXT (PLAN) vs ROUTE ANALYSIS (ANALYZE) ── */}
@@ -926,47 +959,6 @@ export default function App() {
             </aside>
           )}
         </main>
-
-        {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
-        <footer className="lp-status-bar">
-          <div className="lp-status-left">
-            <div className="lp-scale">
-              <span className="lp-scale-rule" aria-hidden="true" />
-              <span className="lp-scale-copy">
-                0 - {focusTelemetry.spanKm.toFixed(1)} km · {focusTelemetry.resolutionM.toFixed(0)} m/px
-              </span>
-            </div>
-
-            <div className="lp-risk-legend">
-              <span className="lp-legend-label">RISK</span>
-              {LEGEND_ITEMS.map((item) => (
-                <span key={item.label} className="lp-legend-item">
-                  <svg
-                    className="lp-legend-line"
-                    viewBox="0 0 22 8"
-                    aria-hidden="true"
-                    focusable="false"
-                  >
-                    <line
-                      x1="1"
-                      y1="4"
-                      x2="21"
-                      y2="4"
-                      stroke={riskToHex(item.level)}
-                      strokeWidth="2.4"
-                      strokeDasharray={riskToDashArray(item.level)}
-                    />
-                  </svg>
-                  {item.label}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div className="lp-status-right">
-            <StatusBarSlot />
-          </div>
-        </footer>
 
         {/* Application-level floating utilities. Sits immediately before the
             toast stack and shares its parent: shell.css moves the toasts clear

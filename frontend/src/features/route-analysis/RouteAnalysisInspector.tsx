@@ -1,9 +1,34 @@
+import React from 'react'
 import type { Waypoint } from '../../api'
 import { batteryToHex, riskToHex } from '../../colormap'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
 import { useMissionRuntime } from '../../mission/MissionRuntimeContext'
 
 const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
+
+/** How many of the meter's five segments each verdict fills. */
+const RISK_FILL: Record<(typeof RISK_LEVELS)[number], number> = {
+  LOW: 2,
+  MEDIUM: 3,
+  HIGH: 4,
+  CRITICAL: 5,
+}
+
+/** What the verdict means, in a sentence, beside the word itself. */
+const RISK_MEANING: Record<(typeof RISK_LEVELS)[number], string> = {
+  LOW: 'Route is safe to drive as planned.',
+  MEDIUM: 'Route is feasible with manageable risk.',
+  HIGH: 'Route is drivable but carries findings to review before committing.',
+  CRITICAL: 'Route is not safe as planned.',
+}
+
+/** 88.9025\u00b0 S, 73.9967\u00b0 W -- signed degrees are not how a site is read out. */
+function formatLatLon(lat: number, lon: number): string {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '--'
+  const la = `${Math.abs(lat).toFixed(4)}\u00b0 ${lat < 0 ? 'S' : 'N'}`
+  const lo = `${Math.abs(lon).toFixed(4)}\u00b0 ${lon < 0 ? 'W' : 'E'}`
+  return `${la}, ${lo}`
+}
 
 export const RouteAnalysisInspector = () => {
   const { planResult } = useMission()
@@ -46,6 +71,8 @@ export const RouteAnalysisInspector = () => {
     if (w.risk_level) riskCounts[w.risk_level] = (riskCounts[w.risk_level] || 0) + 1
   })
   const totalWaypoints = waypoints.length || 1
+  const firstWp = waypoints[0] ?? null
+  const lastWp = waypoints.length > 0 ? waypoints[waypoints.length - 1] : null
 
   // Overall risk determination
   const criticalPct = (riskCounts.CRITICAL / totalWaypoints) * 100
@@ -77,19 +104,78 @@ export const RouteAnalysisInspector = () => {
 
   return (
     <div className="lp-panel-content">
+      {/* ── The route this panel is about ──
+          Start and goal used to be pills on the map HUD, over the terrain and
+          duplicating the left rail. Here they are the heading of the analysis
+          that describes them, with the coordinates the operator would actually
+          quote -- the waypoints already carry lat/lon, so nothing is derived. */}
+      <section className="lp-panel-section lp-route-id-section">
+        <div className="lp-section-header-row">
+          <span className="lp-meta-label">Route</span>
+        </div>
+        <p className="lp-route-id-line">
+          <strong>{planResult.rover?.name ?? 'Rover'}</strong>
+          <span>South Pole Traverse</span>
+        </p>
+
+        <div className="lp-route-endpoints">
+          {firstWp && (
+            <div className="lp-route-endpoint">
+              <span className="lp-endpoint-marker is-start" aria-hidden="true" />
+              <div className="lp-endpoint-body">
+                <span className="lp-endpoint-title">
+                  START <em>[{firstWp.row}, {firstWp.col}]</em>
+                </span>
+                <span className="lp-endpoint-coord">{formatLatLon(firstWp.lat, firstWp.lon)}</span>
+              </div>
+            </div>
+          )}
+          {lastWp && (
+            <div className="lp-route-endpoint">
+              <span className="lp-endpoint-marker is-goal" aria-hidden="true" />
+              <div className="lp-endpoint-body">
+                <span className="lp-endpoint-title">
+                  GOAL <em>[{lastWp.row}, {lastWp.col}]</em>
+                </span>
+                <span className="lp-endpoint-coord">{formatLatLon(lastWp.lat, lastWp.lon)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* ── TIER 1: DECISION SUMMARY ────────────────────────── */}
       <section className="lp-panel-section lp-tier-1-section">
+        {/* The verdict was a bordered chip in the header row, the same size as
+            the section label beside it -- the single most important output of
+            the whole planner, set in 12px. It is the section now: the word at
+            display size, a five-segment meter that says where it sits on the
+            scale, and the sentence that says what it means. */}
+        <div className="lp-verdict-block" style={{ '--verdict-color': riskToHex(overallRisk) } as React.CSSProperties}>
+          <div className="lp-verdict-head">
+            <div className="lp-verdict-naming">
+              <span className="lp-meta-label">Overall risk</span>
+              <strong className="lp-verdict-value">{overallRisk}</strong>
+            </div>
+            <div className="lp-verdict-meter" role="img" aria-label={`Risk ${overallRisk}, ${RISK_FILL[overallRisk]} of 5`}>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <span
+                  key={i}
+                  className={`lp-verdict-seg ${i < RISK_FILL[overallRisk] ? 'is-on' : ''}`}
+                  style={
+                    i < RISK_FILL[overallRisk]
+                      ? { background: riskToHex(i < 2 ? 'LOW' : overallRisk) }
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          </div>
+          <p className="lp-verdict-meaning">{RISK_MEANING[overallRisk]}</p>
+        </div>
+
         <div className="lp-section-header-row">
           <span className="lp-meta-label">Mission decision summary</span>
-          <span
-            className="lp-overall-risk-badge"
-            style={{
-              borderColor: riskToHex(overallRisk),
-              color: riskToHex(overallRisk),
-            }}
-          >
-            OVERALL RISK: {overallRisk}
-          </span>
         </div>
 
         <div className="lp-decision-kpi-grid">
@@ -282,7 +368,12 @@ export const RouteAnalysisInspector = () => {
                   className="lp-milestone-dot"
                   style={{ backgroundColor: riskToHex(wp.risk_level) }}
                 />
-                {idx < milestones.length - 1 && <div className="lp-milestone-stem" />}
+                {idx < milestones.length - 1 && (
+                  <div
+                    className="lp-milestone-stem"
+                    style={{ background: riskToHex(wp.risk_level) }}
+                  />
+                )}
               </div>
               <div className="lp-milestone-body">
                 <div className="lp-milestone-title-row">
@@ -291,11 +382,23 @@ export const RouteAnalysisInspector = () => {
                     [{wp.col}, {wp.row}] · {wp.distance_m.toFixed(0)} m
                   </span>
                 </div>
+                {/* Slope, temperature, and the verdict that follows from them.
+                    Battery came out: it is the one number here already given
+                    its own KPI above, and at four readings on a 400px row the
+                    line wrapped and none of them could be read at a glance. */}
                 <div className="lp-milestone-sub">
-                  <span>Bat: {wp.battery_pct.toFixed(0)}%</span>
                   <span>Slope: {wp.slope_deg.toFixed(1)}°</span>
+                  <span className="lp-milestone-sep" aria-hidden="true">|</span>
                   <span>Temp: {wp.surface_temp_c.toFixed(0)}°C</span>
-                  <span style={{ color: riskToHex(wp.risk_level) }}>{wp.risk_level}</span>
+                  <span
+                    className="lp-milestone-risk"
+                    style={{
+                      color: riskToHex(wp.risk_level),
+                      borderColor: riskToHex(wp.risk_level),
+                    }}
+                  >
+                    {wp.risk_level}
+                  </span>
                 </div>
               </div>
             </div>

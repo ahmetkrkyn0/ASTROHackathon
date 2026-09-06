@@ -959,7 +959,12 @@ select {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 340px;
+  /* The right rail was 340px and its contents did not fit: the payload row's
+     "Arrives with 88.2%" was clipped at the edge, the risk bar had no room to
+     read as a distribution, and every milestone wrapped. It carries six
+     sections of analysis against the left rail's controls, so it is the wider
+     of the two now. */
+  grid-template-columns: 300px minmax(0, 1fr) 400px;
   overflow: hidden;
 }
 
@@ -1633,7 +1638,7 @@ select {
 }
 
 .map-data-label {
-  color: var(--text-dimmest);
+  color: var(--text-dim-2);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-caps);
 }
@@ -1641,7 +1646,8 @@ select {
 .map-data-value {
   color: var(--text);
   font-family: var(--font-data);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-body);
+  font-weight: 600;
   letter-spacing: var(--track-normal);
 }
 
@@ -2931,21 +2937,37 @@ select {
 .lp-rover-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 12px;
 }
 
-.lp-rover-avatar-box {
-  width: 32px;
-  height: 32px;
-  background: rgba(186, 175, 245, 0.14);
-  border: 1px solid rgba(186, 175, 245, 0.3);
+/* Replaces the 32px triangle-in-a-box. Wide rather than square: these are
+   landscape photographs of a rover on terrain, and cropping one to a 32px
+   square threw away the vehicle to keep some regolith. */
+.lp-rover-photo {
+  flex: none;
+  /* 64, not 84. The rail is 300px and the card's inner width is about 205 of
+     them; at 84 the name had 109px left and "LPR-1 (Default)" broke across
+     three lines. */
+  width: 64px;
+  height: 46px;
+  object-fit: cover;
   border-radius: var(--radius);
+  background: var(--void);
+}
+
+.lp-rover-title-block {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent-lavender);
-  font-size: var(--fs-strong);
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lp-rover-class {
+  color: var(--text-dim-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .lp-rover-card-name {
@@ -2967,7 +2989,6 @@ select {
 }
 
 .lp-rover-metric,
-.lp-context-cell,
 .lp-telemetry-mono-cell {
   display: flex;
   align-items: baseline;
@@ -3292,12 +3313,25 @@ select {
   font-size: var(--fs-small);
 }
 
+/* Was 01-04. The numerals only said "these are in order", which the vertical
+   stack already says; the glyph says WHICH step, so the row can be scanned
+   without reading its label. */
 .lp-seq-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
+  width: 18px;
   color: var(--text-dimmest);
-  font-family: var(--font-data);
-  font-size: var(--fs-small);
-  font-weight: 400;
+  font-size: 16px;
+}
+
+.lp-sequence-item.is-complete .lp-seq-num {
+  color: var(--mint);
+}
+
+.lp-sequence-item.is-active .lp-seq-num {
+  color: var(--accent-lavender);
 }
 
 .lp-seq-title {
@@ -3316,17 +3350,53 @@ select {
 }
 
 .lp-pick-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   width: 100%;
-  padding: 9px 10px;
-  background: none;
+  padding: 11px 12px;
+  background: rgba(16, 22, 36, 0.7);
   border: 1px solid var(--line-button);
   border-radius: var(--radius);
   color: var(--text-2);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: var(--fs-small);
+  font-size: var(--fs-body);
+  font-weight: 600;
   letter-spacing: var(--track-label);
-  transition: border-color 140ms ease, color 140ms ease;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+/* The glyph carries the colour the map is about to use: the start marker is
+   mint and the goal marker is coral, so the button that places each one says
+   which before you have placed anything. */
+.lp-pick-btn .lp-icon {
+  font-size: 17px;
+  color: var(--text-dim-2);
+  transition: color 140ms ease;
+}
+
+.lp-pick-btn:hover:not(:disabled) {
+  background: rgba(16, 22, 36, 0.95);
+  border-color: rgba(199, 205, 219, 0.3);
+  color: var(--text);
+}
+
+.lp-pick-btn:first-child .lp-icon {
+  color: var(--mint);
+}
+
+.lp-pick-btn:last-child .lp-icon {
+  color: var(--risk-high);
+}
+
+.lp-pick-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lp-pick-btn:disabled .lp-icon {
+  color: var(--text-dimmest);
 }
 
 .lp-pick-btn:hover:not(:disabled) {
@@ -3555,16 +3625,6 @@ select {
   color: var(--accent-mint);
 }
 
-/* Mission Context (Right Rail Plan Mode) */
-.lp-live-badge {
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  padding: 2px 6px;
-  border-radius: var(--radius);
-  background: rgba(95, 227, 176, 0.15);
-  color: var(--accent-mint);
-  font-weight: 700;
-}
 
 .lp-panel-desc-text {
   font-size: var(--fs-small);
@@ -3573,99 +3633,12 @@ select {
   margin: 0;
 }
 
-.lp-context-grid {
-  display: grid;
-  gap: 7px;
-}
-
-.lp-active-layer-card {
-  background: var(--bg-card);
-  border: 1px solid var(--line-card);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-}
-
-.lp-layer-card-tag {
-  font-family: var(--font-label);
-  font-size: var(--fs-micro);
-  color: var(--accent-lavender);
-  letter-spacing: var(--track-caps);
-  margin-bottom: 2px;
-}
-
-.lp-layer-card-title {
-  font-size: var(--fs-body);
-  font-weight: 600;
-  color: var(--text);
-}
 
 .lp-telemetry-mono-grid {
   display: grid;
   gap: 7px;
 }
 
-/* No Route Empty State */
-.lp-no-route-card {
-  background: rgba(12, 17, 28, 0.65);
-  border: 1px dashed rgba(160, 175, 210, 0.25);
-  border-radius: var(--radius);
-  padding: 18px 14px;
-  text-align: center;
-}
-
-.lp-no-route-icon {
-  font-size: var(--fs-display);
-  color: var(--accent-lavender);
-  opacity: 0.7;
-  margin-bottom: 8px;
-}
-
-.lp-no-route-title {
-  margin: 0 0 6px;
-  font-size: var(--fs-strong);
-  font-weight: 700;
-  color: var(--text-2);
-  letter-spacing: var(--track-label);
-  /* Without this the heading broke as "NO ROUTE ANALYSIS / YET", leaving one
-     word orphaned on its own line. `balance` lets the browser even out the
-     lines instead of filling the first one greedily; where it is unsupported
-     the heading simply wraps as before. */
-  text-wrap: balance;
-}
-
-.lp-no-route-text {
-  font-size: var(--fs-small);
-  line-height: 1.45;
-  color: var(--text-dim-2);
-  margin: 0 0 14px;
-}
-
-.lp-no-route-checklist {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  text-align: left;
-}
-
-.lp-check-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-small);
-  color: var(--text-dim-2);
-  background: rgba(5, 7, 13, 0.4);
-  padding: 6px 8px;
-  border-radius: var(--radius);
-}
-
-.lp-check-row.is-done {
-  color: var(--text-2);
-}
-
-.lp-check-row.is-done .lp-check-icon {
-  color: var(--accent-mint);
-  font-weight: 700;
-}
 
 /* Analysis Mode Left Rail (Snapshot) */
 .lp-status-pill.is-locked {
@@ -3820,9 +3793,12 @@ select {
   letter-spacing: var(--track-label);
 }
 
+/* Two, not three. At three across a 400px rail each cell had ~110px, which
+   broke "Route speed" onto two lines and "0.19 m/s" onto a third -- six
+   headline numbers none of which could be read at a glance. */
 .lp-decision-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -3845,7 +3821,7 @@ select {
 
 .lp-kpi-val {
   font-family: var(--font-data);
-  font-size: var(--fs-strong);
+  font-size: var(--fs-value);
   color: var(--text);
   font-weight: 700;
 }
@@ -3952,10 +3928,25 @@ select {
 
 .lp-payload-result-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
   padding-top: 8px;
   border-top: 1px solid var(--border-line);
+}
+
+/* Each result stacks its label over its value. Both are `white-space: nowrap`,
+   and side by side in a third of the rail the third cell ran off the edge --
+   "Arrives with 88.2%" was clipped to "Arrives with 88." for as long as this
+   panel has existed. */
+.lp-payload-result-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lp-payload-result-row .lp-mono-val {
+  text-align: left;
 }
 
 /* Tier 3 Milestones */
@@ -4025,17 +4016,26 @@ select {
 
 .lp-milestone-sub {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 7px;
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   color: var(--text-muted);
+}
+
+/* The readings do not wrap. With the risk badge pushed right by margin-left,
+   the two shrinkable spans took the squeeze and broke "Slope:" from "5.3" --
+   a label on one line and its own value on the next. */
+.lp-milestone-sub > span {
+  white-space: nowrap;
 }
 
 /* ── Playback transport, inline in the status strip ── */
 .lp-playback-dock {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -4073,16 +4073,22 @@ select {
   flex: none;
 }
 
+/* The scrubber is how a 190-waypoint traverse is actually read, and at a fixed
+   190px each step was one pixel wide -- you could not stop on a waypoint, only
+   near one. It takes the room the strip has spare now instead. */
 .lp-playback-slider-block {
   display: flex;
   align-items: center;
-  width: 190px;
-  flex: none;
+  flex: 1 1 260px;
+  /* 216, not 240: at 240 the readouts were squeezed to 262px and "SLOPE 10.9°"
+     ran 13px past the strip's edge, where overflow:hidden ate the degree sign.
+     This is the widest the scrubber goes without clipping its neighbour. */
+  min-width: 216px;
 }
 
 .lp-playback-range {
   width: 100%;
-  height: 16px;
+  height: 20px;
   appearance: none;
   background: transparent;
   outline: none;
@@ -4123,6 +4129,8 @@ select {
   align-items: baseline;
   gap: 14px;
   flex: none;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .lp-playback-stat {
@@ -4383,51 +4391,6 @@ select {
   margin-top: 1px;
 }
 
-.lp-seq-action-btn {
-  flex: none;
-  background: none;
-  border: 1px solid var(--line-button);
-  color: var(--text-muted);
-  font-family: var(--font-data);
-  font-size: var(--fs-small);
-  font-weight: 600;
-  padding: 6px 10px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.lp-seq-action-btn:hover {
-  background: rgba(199, 205, 219, 0.08);
-  color: var(--text);
-}
-
-.lp-seq-action-btn.is-picking-start {
-  background: rgba(95, 227, 176, 0.15);
-  border-color: var(--mint);
-  color: var(--mint);
-  animation: lpPulseBorderStart 1.5s infinite;
-}
-
-.lp-seq-action-btn.is-set-start {
-  background: rgba(95, 227, 176, 0.1);
-  border-color: rgba(95, 227, 176, 0.4);
-  color: var(--mint);
-}
-
-.lp-seq-action-btn.is-picking-goal {
-  background: rgba(237, 133, 110, 0.15);
-  border-color: var(--coral);
-  color: var(--coral);
-  animation: lpPulseBorderGoal 1.5s infinite;
-}
-
-.lp-seq-action-btn.is-set-goal {
-  background: rgba(237, 133, 110, 0.1);
-  border-color: rgba(237, 133, 110, 0.4);
-  color: var(--coral);
-}
 
 .lp-panel-action-row {
   display: grid;
@@ -4463,6 +4426,10 @@ select {
 }
 
 .lp-panel-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   background: none;
   border: 1px solid var(--line-button);
   color: var(--text-muted);
@@ -4528,6 +4495,7 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
 }
 
 .lp-panel-plan-btn:hover:not(:disabled) {
@@ -4545,9 +4513,10 @@ select {
 
 /* ── Minimizable Telemetry HUD Overlay on Canvas ── */
 .lp-hud-card {
-  min-width: 220px;
-  max-width: 250px;
-  padding: 12px;
+  min-width: 232px;
+  max-width: 262px;
+  padding: 12px 14px;
+  border-left: 2px solid var(--cyan);
 }
 
 .lp-hud-header {
@@ -4565,12 +4534,22 @@ select {
   gap: 6px;
 }
 
+/* Was --text-muted at micro: the panel's own name was the dimmest thing in it,
+   fainter than the numbers it introduces and fainter than the terrain behind
+   the card. It is the only label on the map, so it gets the cyan the rest of
+   the console uses for a live readout. */
 .lp-hud-title {
   font-family: var(--font-data);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-small);
   font-weight: 700;
   letter-spacing: var(--track-label);
-  color: var(--text-muted);
+  color: var(--cyan);
+  text-transform: uppercase;
+}
+
+.lp-hud-title-group .lp-icon {
+  font-size: 15px;
+  color: var(--cyan);
 }
 
 .lp-hud-actions {
@@ -4635,34 +4614,6 @@ select {
   color: var(--text-muted);
 }
 
-.lp-hud-status-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(199, 205, 219, 0.08);
-}
-
-.lp-hud-pill {
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: var(--radius);
-}
-
-.lp-hud-pill.is-start {
-  background: rgba(95, 227, 176, 0.15);
-  border: 1px solid rgba(95, 227, 176, 0.3);
-  color: var(--mint);
-}
-
-.lp-hud-pill.is-goal {
-  background: rgba(237, 133, 110, 0.15);
-  border: 1px solid rgba(237, 133, 110, 0.3);
-  color: var(--coral);
-}
 
 .lp-hud-dock-btn {
   background: rgba(199, 205, 219, 0.04);
@@ -5540,6 +5491,8 @@ select {
   align-items: center;
   gap: 20px;
   min-width: 0;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 /* Right padding keeps the last readout clear of the assistant launcher, which
@@ -5548,6 +5501,7 @@ select {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex: 1 1 auto;
   min-width: 0;
   padding-right: 62px;
 }
@@ -5671,4 +5625,192 @@ select {
     grid-column: 1;
     grid-row: 3;
   }
+}
+
+/* ── Placing a point ──
+   A plain `crosshair` said "you are placing something" and never which of the
+   two, so the only way to tell Start from Goal mid-placement was to look away
+   from the terrain and back at the rail. These carry the marker's own colour:
+   mint is what the Start marker is drawn in, coral is the Goal. The hotspot is
+   the centre of the ring (13 13), which is the cell that gets the point, and
+   the dark under-stroke keeps the cursor readable over bright regolith.
+
+   `crosshair` stays as the fallback: a browser that refuses the data URI gets
+   the old behaviour rather than an arrow. */
+.map-canvas.is-picking-start {
+  cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2226%22%20height%3D%2226%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2305070d%22%20stroke-width%3D%223.4%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%235fe3b0%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E") 13 13, crosshair;
+}
+
+.map-canvas.is-picking-goal {
+  cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2226%22%20height%3D%2226%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2305070d%22%20stroke-width%3D%223.4%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%23ed856e%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E") 13 13, crosshair;
+}
+
+
+/* ── Route identity ──
+   The heading of the analysis: which rover, which traverse, and the two points
+   it runs between. Start and goal were pills floating on the map HUD, over the
+   terrain and repeating the left rail; here they sit at the top of the panel
+   that explains them, with the lat/lon a site is actually quoted by. */
+.lp-route-id-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: var(--fs-small);
+  color: var(--text-dim-2);
+}
+
+.lp-route-id-line strong {
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.lp-route-endpoints {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+}
+
+.lp-route-endpoint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  position: relative;
+}
+
+/* A filled disc for where the rover starts, a ring for where it is headed --
+   the same two marks the canvas draws on the terrain. */
+.lp-endpoint-marker {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-top: 2px;
+  border-radius: 50%;
+}
+
+.lp-endpoint-marker.is-start {
+  background: var(--mint);
+}
+
+.lp-endpoint-marker.is-goal {
+  background: transparent;
+  border: 3px solid var(--coral);
+}
+
+/* The dashed leg between them, drawn from the start row only. */
+.lp-route-endpoint:first-child::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 19px;
+  width: 1px;
+  height: calc(100% - 4px);
+  border-left: 1px dashed rgba(199, 205, 219, 0.28);
+}
+
+.lp-endpoint-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lp-endpoint-title {
+  color: var(--mint);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  letter-spacing: var(--track-normal);
+}
+
+.lp-route-endpoint:last-child .lp-endpoint-title {
+  color: var(--coral);
+}
+
+.lp-endpoint-title em {
+  color: var(--text-dim-2);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.lp-endpoint-coord {
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+}
+
+/* ── The verdict ──
+   Was a 12px bordered chip sharing a header row with the section label. It is
+   the planner's single most important output, so it is the size of one. */
+.lp-verdict-block {
+  padding: 14px;
+  margin-bottom: 16px;
+  background: rgba(16, 22, 36, 0.7);
+  border: 1px solid var(--border-line);
+  border-left: 3px solid var(--verdict-color);
+  border-radius: var(--radius);
+}
+
+.lp-verdict-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.lp-verdict-naming {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.lp-verdict-value {
+  color: var(--verdict-color);
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+/* Five steps, so the word has a position and not just a colour: LOW fills two
+   and CRITICAL fills all five, which is what turns "MEDIUM" from a label into
+   a reading. */
+.lp-verdict-meter {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.lp-verdict-seg {
+  width: 22px;
+  height: 13px;
+  border-radius: 2px;
+  background: rgba(199, 205, 219, 0.1);
+}
+
+.lp-verdict-meaning {
+  margin: 10px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+
+/* ── Milestones ── */
+.lp-milestone-sep {
+  color: var(--text-dimmest);
+}
+
+.lp-milestone-risk {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 700;
 }

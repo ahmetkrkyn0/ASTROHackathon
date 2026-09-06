@@ -48,3 +48,57 @@
 
 .lp-compare-note { margin: 8px 0 0; font-size: var(--fs-small); color: var(--text-muted); }
 .lp-compare-warn { color: var(--risk-med); }
+
+
+/* ── Comparison cards ──
+   Four profiles read as a column of cards rather than a stack of paragraphs:
+   the same four numbers in the same four places, so the eye can run down one
+   column instead of re-reading each block. */
+.lp-compare-row {
+  border-left: 3px solid var(--profile-color, var(--accent-lavender));
+}
+
+.lp-compare-badge {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid var(--cyan);
+  border-radius: var(--radius);
+  color: var(--cyan);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-normal);
+  white-space: nowrap;
+}
+
+.lp-compare-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: var(--fs-small);
+}
+
+.lp-compare-status .lp-icon {
+  flex: none;
+  font-size: 15px;
+}
+
+.lp-compare-status.is-good {
+  color: var(--mint);
+}
+
+.lp-compare-status.is-bad {
+  color: var(--coral);
+}
+
+.lp-compare-strength {
+  color: var(--text-dim-2);
+}
+
+.lp-compare-run {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
