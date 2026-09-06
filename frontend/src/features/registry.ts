@@ -16,6 +16,7 @@ import { PoseLoop } from './pose-loop'
 import { Replan } from './replan'
 import { RosShowcase } from './ros-showcase'
 import { RouteAnalysis } from './route-analysis'
+import { SafetyMargins } from './safety-margins'
 import { TimeAxis } from './time-axis'
 import { SolvingIndicator } from './solving-indicator'
 
@@ -109,6 +110,12 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // throughout analyze, so removing this panel takes no route back with it.
   { id: 'mission-snapshot', slot: 'leftRail', Component: MissionSnapshot, modes: [] },
   { id: 'route-analysis', slot: 'rightRail', Component: RouteAnalysis, modes: ['analyze'] },
+  // Analyze only, and NOT in the systems drawer: the twelve requirements are
+  // checked on every route whether anyone asks or not, and the plan is
+  // explicit that a result which exists must be visible rather than parked
+  // behind a control. It renders nothing when a response carries no block, so
+  // an older backend costs the rail nothing.
+  { id: 'safety-margins', slot: 'rightRail', Component: SafetyMargins, modes: ['analyze'] },
   // analyze only, from App.tsx's `missionMode === 'analyze' && planResult`
   // guard. Only the mode half becomes a registration: the bar already
   // renders nothing without waypoints, so knowing what an empty route looks

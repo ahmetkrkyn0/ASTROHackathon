@@ -1,0 +1,154 @@
+/* Formal safety margins (D3). Uses the console's own surfaces, ramp and risk
+   colours -- and risk colour only where it carries safety semantics, which
+   here is its actual meaning rather than decoration. */
+
+.lp-margins {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lp-margins-verdict {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border-left: 2px solid var(--line-card);
+  background: var(--bg-inset);
+}
+
+.lp-margins-verdict-text {
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+}
+
+.lp-margins-verdict.is-satisfied { border-left-color: var(--mint); }
+.lp-margins-verdict.is-satisfied .lp-margins-verdict-text { color: var(--mint-text); }
+.lp-margins-verdict.is-violated { border-left-color: var(--coral); }
+.lp-margins-verdict.is-violated .lp-margins-verdict-text { color: var(--coral-text); }
+
+.lp-margins-count {
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-dim);
+}
+
+.lp-margins-tightest {
+  margin: 0;
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+
+.lp-margins-tightest b {
+  font-family: var(--font-data);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.lp-margins-tightest-value {
+  font-family: var(--font-data);
+  margin-left: 6px;
+  color: var(--text);
+}
+
+.lp-margins-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-margin-row {
+  display: grid;
+  grid-template-columns: 16px 54px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--line-inner);
+  font-size: var(--fs-small);
+}
+
+.lp-margin-row:last-child { border-bottom: none; }
+
+.lp-margin-icon {
+  display: flex;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.lp-margin-id {
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-dim);
+}
+
+.lp-margin-name {
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-margin-value {
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The reason spans the full row under it: it is a sentence, not a column. */
+.lp-margin-reason {
+  grid-column: 2 / -1;
+  font-size: var(--fs-tiny);
+  color: var(--text-dimmest);
+  line-height: 1.4;
+}
+
+.lp-margin-row.is-satisfied .lp-margin-icon { color: var(--mint); }
+.lp-margin-row.is-violated .lp-margin-icon { color: var(--coral); }
+.lp-margin-row.is-violated .lp-margin-value { color: var(--coral-text); }
+.lp-margin-row.is-boundary .lp-margin-icon { color: var(--cyan); }
+.lp-margin-row.is-boundary .lp-margin-value { color: var(--cyan-text); }
+
+/* Untested and undecided are deliberately quiet rather than green: they are
+   not passes, and they are not failures either. */
+.lp-margin-row.is-not-applicable .lp-margin-name,
+.lp-margin-row.is-pending .lp-margin-name { color: var(--text-dim); }
+
+.lp-margins-note {
+  margin: 0;
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.lp-margins-claim {
+  display: flex;
+  gap: 7px;
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.lp-margins-claim svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-dim);
+}
+
+.lp-margins-provenance {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: var(--fs-tiny);
+  color: var(--text-dimmest);
+}
