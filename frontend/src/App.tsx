@@ -17,6 +17,7 @@ import MapCanvas, {
 } from './MapCanvas'
 import { riskToDashArray, riskToHex } from './colormap'
 import SpaceBackdrop from './SpaceBackdrop'
+import SplashScreen, { type BootStage } from './SplashScreen'
 import TerrainCanvas3D from './TerrainCanvas3D'
 import {
   checkHealth,
@@ -131,6 +132,10 @@ export default function App() {
     typeof window === 'undefined' ? 'landing' : phaseFromHref(window.location.href),
   )
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>('loading')
+  /* Which step of the bootstrap is running, for the splash to name. Separate
+     from bootstrapState, which only says whether it is over. */
+  const [bootStage, setBootStage] = useState<BootStage>('health')
+  const [splashOpen, setSplashOpen] = useState(true)
   const [planningEngaged, setPlanningEngaged] = useState(false)
 
   // Workstation mode: the two working modes of the design, PLAN and ANALYZE.
@@ -231,18 +236,22 @@ export default function App() {
   useEffect(() => {
     async function init() {
       setBootstrapState('loading')
+      setBootStage('health')
       try {
         const health = await checkHealth()
         if (!health.dem_loaded) {
+          setBootStage('dem')
           await loadPreprocessed()
         }
 
+        setBootStage('rovers')
         const roverCatalog = await fetchRovers()
         const initialRoverId = roverCatalog.default_rover_id
         const initialRover =
           roverCatalog.rovers.find((entry) => entry.id === initialRoverId) ?? roverCatalog.rovers[0]
         const initialWeights = initialRover?.default_weights ?? DEFAULT_WEIGHTS
 
+        setBootStage('layers')
         const [elevation, slope, aspect, shadow, thermal, cost, traversable] = await Promise.all([
           fetchLayer('elevation', DOWNSAMPLE, { roverId: initialRoverId }),
           fetchLayer('slope', DOWNSAMPLE, { roverId: initialRoverId }),
@@ -263,6 +272,7 @@ export default function App() {
         setThermalLayer(thermal)
         setCostLayer(cost)
         setTraversableLayer(traversable)
+        setBootStage('ready')
         setBootstrapState('ready')
       } catch (error) {
         setLayerError((error as Error).message)
@@ -675,6 +685,8 @@ export default function App() {
   // an action without subscribing to the mission snapshot. Every entry is
   // already memoised above; this object exists so the identity of the whole
   // does not churn either.
+  const handleSplashDone = useCallback(() => setSplashOpen(false), [])
+
   const missionActions: MissionActions = useMemo(
     () => ({
       selectRover: handleRoverSelect,
@@ -722,6 +734,16 @@ export default function App() {
         stage={phase === 'app' ? 'deck' : 'ambient'}
         frozen={planningEngaged}
       />
+
+      {/* Over everything, including the landing screen, until the planner has
+          something to plan on. */}
+      {splashOpen && (
+        <SplashScreen
+          stage={bootStage}
+          error={bootstrapState === 'error' ? (layerError ?? 'Bootstrap failed.') : null}
+          onDone={handleSplashDone}
+        />
+      )}
 
       {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
 

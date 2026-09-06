@@ -5954,3 +5954,100 @@ select {
 .lp-status-bar.is-analyze .lp-risk-legend {
   display: none;
 }
+
+
+/* ── Boot screen ──
+   Above the landing screen (131) and the hangar, because until the layers are
+   in there is nothing behind it worth reaching. Opaque rather than a wash: the
+   backdrop clip is running underneath from the first frame, and a translucent
+   boot screen would show a moon drifting behind a progress bar, which reads as
+   the app having already started. */
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: var(--void);
+  transition: opacity 0.52s ease, visibility 0.52s ease;
+}
+
+.splash-screen.is-leaving {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.splash-content {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  width: min(420px, 100%);
+}
+
+.splash-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.splash-identity .loading-brand {
+  font-size: var(--fs-hero);
+}
+
+.splash-tagline {
+  color: var(--text-dim-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
+}
+
+.splash-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+/* A failed boot stops being a progress bar and becomes a state. */
+.loading-bar-fill.is-failed {
+  background: var(--coral);
+}
+
+.splash-error {
+  margin: 0;
+  color: var(--coral);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  line-height: 1.55;
+}
+
+/* The wordmark settles first, the bar under it -- the same one-orchestrated-
+   entrance rule the landing screen follows, and skipped entirely for a viewer
+   who asked for less motion. */
+@keyframes splash-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.splash-identity,
+.splash-progress {
+  animation: splash-rise 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.splash-progress {
+  animation-delay: 0.16s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-identity,
+  .splash-progress {
+    animation: none;
+  }
+}
