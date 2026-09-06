@@ -934,6 +934,90 @@ function wheelAxisVector(axis: 'x' | 'y' | 'z'): THREE.Vector3 {
   return WHEEL_AXIS_VECTORS[axis]
 }
 
+interface RoverWheel {
+  /** The wheel node itself; accumulates rolling rotation from identity. */
+  spin: THREE.Object3D
+  /** Pivot parent holding the wheel's rest transform and its steer angle. */
+  steer: THREE.Group
+  /** Rolling axis in the wheel's own frame, signed so +angle rolls forward. */
+  axis: THREE.Vector3
+  /** Rolling radius in METRES, not in the GLB's native units. */
+  radiusM: number
+  /** Position along the rover's forward axis, metres; sets front vs rear. */
+  forwardOffsetM: number
+  isFront?: boolean
+}
+
+/**
+ * How sharply the rover is allowed to change heading, in radians per metre
+ * driven. Turning is bound to DISTANCE rather than to elapsed time on
+ * purpose: a vehicle's turn radius is a property of the vehicle, so the
+ * same corner has to look the same whether the simulation is running at
+ * real time or fast-forwarded. 1.2 rad/m is roughly a 0.85 m turn radius --
+ * tight, as a four-wheel skid-steer rover is, but not a pivot in place.
+ */
+const MAX_YAW_RATE_RAD_PER_M = 1.2
+/** Steering lock. Beyond this a real linkage binds; visually it just reads
+ *  as a wheel snapped sideways. */
+const MAX_STEER_RAD = THREE.MathUtils.degToRad(34)
+
+/** Orbit-mode locator exaggeration, and the camera distance below which the
+ *  rover is drawn at its true size instead. */
+const ROVER_ORBIT_SCALE = 10
+const ROVER_TRUE_SCALE_DISTANCE_M = 45
+
+// Scratch objects for the per-update rover pose; allocating a quaternion
+// per playback tick is pure garbage at 60 Hz.
+const ROVER_UP = new THREE.Vector3(0, 1, 0)
+const roverTiltQuaternion = new THREE.Quaternion()
+const roverYawQuaternion = new THREE.Quaternion()
+
+/**
+ * A minimal image-based lighting probe for an airless surface: black sky
+ * above the horizon, regolith bounce below it, nothing else.
+ *
+ * A glTF metallic-roughness material reflects its environment and almost
+ * nothing else -- with no environment bound, `metalness: 1` renders BLACK
+ * except for one specular highlight. That is why the rover's metal read as
+ * a dark silhouette no matter how bright the sun light was, and why its
+ * texture looked like it was not loading. This gives those surfaces
+ * something physically defensible to reflect.
+ *
+ * Deliberately NOT assigned to scene.environment: every MeshStandardMaterial
+ * in the scene would then pick it up, and lifting the terrain's shadowed
+ * side off zero is exactly what this view's lighting is built to avoid --
+ * a lunar shadow gets no fill. It is bound per-material, on the rover only.
+ */
+function createLunarEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
+  const width = 64
+  const height = 32
+  const data = new Float32Array(width * height * 4)
+  for (let y = 0; y < height; y++) {
+    // +1 straight up, -1 straight down.
+    const elevation = Math.cos(((y + 0.5) / height) * Math.PI)
+    // Sunlit regolith at ~0.11 reflectance fills the lower hemisphere; the
+    // upper hemisphere is vacuum, left barely above zero so a mirror-metal
+    // face is not a literal void.
+    const bounce = THREE.MathUtils.smoothstep(-elevation, -0.08, 0.5)
+    const value = 0.012 + bounce * 0.17
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4
+      data[index] = value
+      data[index + 1] = value * 0.975
+      data[index + 2] = value * 0.94
+      data[index + 3] = 1
+    }
+  }
+  const equirect = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType)
+  equirect.mapping = THREE.EquirectangularReflectionMapping
+  equirect.needsUpdate = true
+  const pmrem = new THREE.PMREMGenerator(renderer)
+  const target = pmrem.fromEquirectangular(equirect)
+  equirect.dispose()
+  pmrem.dispose()
+  return target.texture
+}
+
 function createRoverModel(): {
   group: THREE.Group
   lidarHead: THREE.Group
@@ -1090,7 +1174,18 @@ export default function TerrainCanvas3D({
   // the earlier single fused-mesh export). Each wheel's own spin axis and
   // radius are measured from its geometry rather than assumed, since
   // nothing about an AI-generated asset guarantees a particular convention.
-  const wheelsRef = useRef<Array<{ object: THREE.Object3D; axis: 'x' | 'y' | 'z'; radius: number }>>([])
+  const wheelsRef = useRef<RoverWheel[]>([])
+  /** Front-to-rear axle separation in metres, measured off whichever model
+   *  actually loaded; feeds the Ackermann steering angle. */
+  const wheelbaseRef = useRef(0.8)
+  /** Smoothed heading and steer angle, so the rover arcs into a turn the way
+   *  a vehicle does instead of teleporting its yaw at every A* node. */
+  const roverHeadingRef = useRef<number | null>(null)
+  const roverSteerRef = useRef(0)
+  /** The render loop needs the current camera mode, and it is set up once in
+   *  an effect that must not re-run every time the mode changes. */
+  const cameraModeRef = useRef(cameraMode)
+  cameraModeRef.current = cameraMode
   const lastRoverGroundPosRef = useRef<{ x: number; z: number } | null>(null)
   // A new route jumps the rover from wherever it was idling straight to the
   // route's start node -- a real position change, but not one any wheel
@@ -1285,6 +1380,7 @@ export default function TerrainCanvas3D({
 
     const regolithTexture = createRegolithTexture()
 
+    const roverEnvironment = createLunarEnvironment(renderer)
     const rover = createRoverModel()
     scene.add(rover.group)
     // The physical sensor mast/dome is not shown -- it stays in the scene
@@ -1302,102 +1398,213 @@ export default function TerrainCanvas3D({
     // and the physically-scaled terrain, not a claim that every proportion
     // is a laser-measured replica of the real rover.
     const ROVER_MODEL_LENGTH_M = 1.5
-    new GLTFLoader().load(
-      '/models/viper-rover.glb',
-      (gltf) => {
-        if (disposed) return
-        const model = gltf.scene
-        const box = new THREE.Box3().setFromObject(model)
-        const size = box.getSize(new THREE.Vector3())
-        const center = box.getCenter(new THREE.Vector3())
-        // Recentre horizontally and drop the model so its own lowest point
-        // sits at local y=0 -- the ground-contact point every other rover
-        // placement in this file already assumes.
-        model.position.x -= center.x
-        model.position.z -= center.z
-        model.position.y -= box.min.y
-        const longestHorizontal = Math.max(size.x, size.z)
-        const scale = longestHorizontal > 1e-6 ? ROVER_MODEL_LENGTH_M / longestHorizontal : 1
-        model.scale.setScalar(scale)
-        // This file's heading math (see the FPS-camera and rover-position
-        // effects) always drives rover.group.rotation.y assuming the model's
-        // own forward axis is local +Z -- an assumption the GLB has no
-        // reason to satisfy, since it is an arbitrary AI-generated asset.
-        // Measuring which horizontal axis it is actually longest along and
-        // rotating the MODEL (not the group, which the per-frame heading
-        // logic owns) to put that axis on +Z corrects it once, at load time,
-        // independent of that per-frame math ever needing to change.
-        if (size.x > size.z) {
-          model.rotation.y = Math.PI / 2
+
+    const findFirstMesh = (object: THREE.Object3D): THREE.Mesh | null => {
+      if (object instanceof THREE.Mesh) return object
+      for (const child of object.children) {
+        const found = findFirstMesh(child)
+        if (found) return found
+      }
+      return null
+    }
+
+    const configureRoverModel = (model: THREE.Group) => {
+      const box = new THREE.Box3().setFromObject(model)
+      const size = box.getSize(new THREE.Vector3())
+      const center = box.getCenter(new THREE.Vector3())
+      // Recentre horizontally and drop the model so its own lowest point
+      // sits at local y=0 -- the ground-contact point every other rover
+      // placement in this file already assumes.
+      model.position.x -= center.x
+      model.position.z -= center.z
+      model.position.y -= box.min.y
+      const longestHorizontal = Math.max(size.x, size.z)
+      const scale = longestHorizontal > 1e-6 ? ROVER_MODEL_LENGTH_M / longestHorizontal : 1
+      model.scale.setScalar(scale)
+      // This file's heading math (see the rover-position effect) drives the
+      // rover group's orientation assuming the model's own forward axis is
+      // local +Z -- an assumption the GLB has no reason to satisfy, since it
+      // is an arbitrary generated asset. Measuring which horizontal axis it
+      // is actually longest along and rotating the MODEL (not the group,
+      // which the per-frame heading logic owns) to put that axis on +Z
+      // corrects it once, at load time.
+      if (size.x > size.z) {
+        model.rotation.y = Math.PI / 2
+      }
+      const scaledHeight = size.y * scale
+      model.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return
+        const materials = Array.isArray(child.material) ? child.material : [child.material]
+        for (const material of materials) {
+          if (!(material instanceof THREE.MeshStandardMaterial)) continue
+          material.envMap = roverEnvironment
+          material.needsUpdate = true
         }
-        const scaledHeight = size.y * scale
+      })
+      rover.group.add(model)
+      rover.group.updateMatrixWorld(true)
 
-        // Wheel rotation: find every "wheel*" node, then measure -- not
-        // assume -- which local axis each one spins around. A wheel mesh is
-        // a thin disc, so whichever of its own local x/y/z extents is
-        // smallest is the axle direction; the two larger extents (their
-        // average / 2) give the rolling radius used to convert distance
-        // driven into an angle turned.
-        const findFirstMesh = (object: THREE.Object3D): THREE.Mesh | null => {
-          if (object instanceof THREE.Mesh) return object
-          for (const child of object.children) {
-            const found = findFirstMesh(child)
-            if (found) return found
-          }
-          return null
+      // ── Wheels ──────────────────────────────────────────────────────────
+      // Three things have to be true before a wheel can be made to turn the
+      // way a vehicle's does, and none of them were:
+      //
+      //  1. The node has to pivot on its own axle. The source asset gives
+      //     every wheel node an identity transform while its geometry sits
+      //     out at a corner, so rotating the node swung the wheel in a wide
+      //     arc around the middle of the rover instead of spinning it. The
+      //     split asset fixes this at build time (frontend/scripts/
+      //     split_rover_glb.mjs); recentring here as well means the legacy
+      //     fallback asset behaves too, and neither depends on the other.
+      //  2. The rolling radius has to be in METRES. It was read straight off
+      //     the geometry's own bounding box, in the GLB's arbitrary native
+      //     units, and then divided into a distance in metres -- so the
+      //     wheels turned at 1/scale of the right rate (about 19% slow).
+      //  3. Spin and steer cannot share one transform. Roll accumulates and
+      //     steer is absolute; composing both on the same node makes each
+      //     one corrupt the other. Every wheel gets a steering pivot parent.
+      const wheels: RoverWheel[] = []
+      const wheelCentre = new THREE.Vector3()
+      const groupRight = new THREE.Vector3()
+      model.traverse((child) => {
+        // The legacy GLB misspells one of the four as "wheek_3" -- matching
+        // just the "whee" stem catches that typo along with every correctly
+        // spelled wheel node.
+        if (!/whee[lk]/i.test(child.name)) return
+        const mesh = findFirstMesh(child)
+        if (!mesh) return
+        mesh.geometry.computeBoundingBox()
+        const bb = mesh.geometry.boundingBox
+        if (!bb) return
+
+        // (1) Move the geometry onto its own centre and push the offset up
+        // into the node, so the node pivots on the axle.
+        bb.getCenter(wheelCentre)
+        if (wheelCentre.lengthSq() > 1e-10) {
+          mesh.geometry.translate(-wheelCentre.x, -wheelCentre.y, -wheelCentre.z)
+          mesh.position.add(wheelCentre)
+          mesh.geometry.computeBoundingBox()
         }
-        const wheels: Array<{ object: THREE.Object3D; axis: 'x' | 'y' | 'z'; radius: number }> = []
-        model.traverse((child) => {
-          // The source GLB misspells one of the four as "wheek_3" --
-          // matching just the "whee" stem catches that typo along with
-          // every correctly-spelled "wheel_N".
-          if (!/whee[lk]/i.test(child.name)) return
-          const geometry = findFirstMesh(child)?.geometry
-          if (!geometry) return
-          geometry.computeBoundingBox()
-          const bb = geometry.boundingBox
-          if (!bb) return
-          const extents = { x: bb.max.x - bb.min.x, y: bb.max.y - bb.min.y, z: bb.max.z - bb.min.z }
-          const axis = (Object.keys(extents) as Array<'x' | 'y' | 'z'>).reduce((a, b) =>
-            extents[a] < extents[b] ? a : b,
-          )
-          const diameters = (Object.keys(extents) as Array<'x' | 'y' | 'z'>)
-            .filter((k) => k !== axis)
-            .map((k) => extents[k])
-          const radius = (diameters[0] + diameters[1]) / 4
-          wheels.push({ object: child, axis, radius: radius > 1e-3 ? radius : 0.3 })
-        })
-        wheelsRef.current = wheels
 
-        // The procedural chassis/wheels are hidden, not removed: the mast
-        // and LiDAR head stay the exact objects the sweep animation and the
-        // orbit-mode scale toggle already reference, just resized and
-        // repositioned onto the new body's roofline instead of the
-        // placeholder box's. Sized for the OLD 1.85 m boxy chassis (0.82 m
-        // mast on a 0.6 m body), the mast alone was nearly as tall as this
-        // flatter model's entire body -- reading as a stuck-on antenna
-        // rather than part of the vehicle. Scaling the sensor rig itself
-        // down keeps it proportionate to whatever body it ends up sitting
-        // on, model-generated or procedural.
-        rover.chassis.visible = false
-        rover.wheels.forEach((wheel) => {
-          wheel.visible = false
-        })
-        const sensorScale = 0.55
-        rover.mast.scale.setScalar(sensorScale)
-        rover.lidarHead.scale.setScalar(sensorScale)
-        const mastHeight = 0.82 * sensorScale
-        rover.mast.position.y = scaledHeight + mastHeight / 2
-        rover.lidarHead.position.y = scaledHeight + mastHeight + 0.03 * sensorScale
+        // A wheel is a thin disc, so whichever of its own local extents is
+        // smallest is the axle direction; the two larger ones give the
+        // rolling diameter.
+        const extents = {
+          x: bb.max.x - bb.min.x,
+          y: bb.max.y - bb.min.y,
+          z: bb.max.z - bb.min.z,
+        }
+        const axisName = (Object.keys(extents) as Array<'x' | 'y' | 'z'>).reduce((a, b) =>
+          extents[a] < extents[b] ? a : b,
+        )
+        const diameters = (Object.keys(extents) as Array<'x' | 'y' | 'z'>)
+          .filter((key) => key !== axisName)
+          .map((key) => extents[key])
+        // (2) Native units -> metres. The model scale is uniform, so one
+        // factor converts the whole thing.
+        const radiusM = ((diameters[0] + diameters[1]) / 4) * scale
 
-        rover.group.add(model)
-      },
-      undefined,
-      (error) => {
-        // Placeholder box+wheels stays visible; the scene still works.
-        console.warn('Rover GLB failed to load, keeping the procedural placeholder', error)
-      },
-    )
+        // (3) A steering pivot between the wheel and its parent, taking over
+        // the wheel's rest transform so the wheel node itself is free to
+        // accumulate roll from identity.
+        const steer = new THREE.Group()
+        steer.name = `${child.name}_steer`
+        steer.position.copy(child.position)
+        steer.quaternion.copy(child.quaternion)
+        steer.scale.copy(child.scale)
+        const parent = child.parent ?? model
+        parent.add(steer)
+        child.position.set(0, 0, 0)
+        child.quaternion.identity()
+        child.scale.set(1, 1, 1)
+        steer.add(child)
+        steer.updateMatrixWorld(true)
+
+        // Which way is "roll forward"? A wheel whose axle points along the
+        // rover's right rolls forward under a POSITIVE rotation about that
+        // axle (right-hand rule with +Y up, +Z forward). Measuring the
+        // axle's actual world direction against the rover's right, rather
+        // than assuming it, means an asset exported with either handedness
+        // rolls the correct way instead of visibly spinning backwards.
+        const axis = wheelAxisVector(axisName).clone()
+        const worldAxis = axis.clone().transformDirection(child.matrixWorld)
+        groupRight.set(1, 0, 0).transformDirection(rover.group.matrixWorld).normalize()
+        if (worldAxis.dot(groupRight) < 0) axis.negate()
+
+        const localPosition = steer.getWorldPosition(new THREE.Vector3())
+        rover.group.worldToLocal(localPosition)
+        wheels.push({
+          spin: child,
+          steer,
+          axis,
+          radiusM: radiusM > 1e-3 ? radiusM : 0.13,
+          forwardOffsetM: localPosition.z,
+        })
+      })
+      // Front wheels are the ones ahead of the wheel group's own centre, so
+      // "front" comes from the geometry rather than from node names the
+      // legacy asset does not provide.
+      const forwardMid =
+        wheels.reduce((sum, wheel) => sum + wheel.forwardOffsetM, 0) / Math.max(wheels.length, 1)
+      for (const wheel of wheels) wheel.isFront = wheel.forwardOffsetM >= forwardMid
+      // Wheelbase drives the Ackermann steering angle below; measured, not
+      // assumed, so it is right for whichever asset actually loaded.
+      const frontOffsets = wheels.filter((w) => w.isFront).map((w) => w.forwardOffsetM)
+      const rearOffsets = wheels.filter((w) => !w.isFront).map((w) => w.forwardOffsetM)
+      wheelbaseRef.current =
+        frontOffsets.length > 0 && rearOffsets.length > 0
+          ? Math.abs(
+              frontOffsets.reduce((a, b) => a + b, 0) / frontOffsets.length -
+                rearOffsets.reduce((a, b) => a + b, 0) / rearOffsets.length,
+            )
+          : ROVER_MODEL_LENGTH_M * 0.55
+      wheelsRef.current = wheels
+
+      // The procedural chassis/wheels are hidden, not removed: the mast and
+      // LiDAR head stay the exact objects the sweep animation and the
+      // orbit-mode scale toggle already reference, just resized and
+      // repositioned onto the new body's roofline instead of the
+      // placeholder box's.
+      rover.chassis.visible = false
+      rover.wheels.forEach((wheel) => {
+        wheel.visible = false
+      })
+      const mastMaterial = rover.mast.material
+      if (mastMaterial instanceof THREE.MeshStandardMaterial) {
+        mastMaterial.envMap = roverEnvironment
+        mastMaterial.needsUpdate = true
+      }
+      const sensorScale = 0.55
+      rover.mast.scale.setScalar(sensorScale)
+      rover.lidarHead.scale.setScalar(sensorScale)
+      const mastHeight = 0.82 * sensorScale
+      rover.mast.position.y = scaledHeight + mastHeight / 2
+      rover.lidarHead.position.y = scaledHeight + mastHeight + 0.03 * sensorScale
+    }
+
+    // The textured, wheel-split asset first; the original untextured split
+    // asset is kept as a fallback so a failed or missing build artefact
+    // degrades to a rover that still drives rather than to no rover at all.
+    const loadRover = (urls: string[]) => {
+      const [url, ...rest] = urls
+      if (!url) {
+        console.warn('No rover GLB loaded, keeping the procedural placeholder')
+        return
+      }
+      new GLTFLoader().load(
+        url,
+        (gltf) => {
+          if (disposed) return
+          configureRoverModel(gltf.scene)
+        },
+        undefined,
+        () => {
+          if (disposed) return
+          console.warn(`Rover GLB ${url} failed to load, trying the next candidate`)
+          loadRover(rest)
+        },
+      )
+    }
+    loadRover(['/models/viper-rover-textured.glb', '/models/viper-rover.glb'])
 
     // Real rock shapes, loaded once. Failure (or simply not being loaded
     // yet the first time the rock field below builds) leaves
@@ -1569,7 +1776,12 @@ export default function TerrainCanvas3D({
         span * 0.75,
       )
       controls.target.set(0, targetY, 0)
-      controls.minDistance = 150
+      controls.minDistance = 12
+    // Zoom toward whatever is under the pointer, not toward the middle of
+    // the map. Dollying at a fixed scene-centre target meant that trying to
+    // get a closer look at the rover -- which is almost never at the centre
+    // -- flew the camera past it and under the terrain instead.
+    controls.zoomToCursor = true
       controls.maxDistance = span * 4.0
       controls.update()
 
@@ -1621,6 +1833,7 @@ export default function TerrainCanvas3D({
             mesh.geometry.dispose()
             mesh.dispose()
           })
+          roverEnvironment.dispose()
           rockMaterial.dispose()
           rockTexture.dispose()
           rockMarkerMaterial.dispose()
@@ -1783,6 +1996,18 @@ export default function TerrainCanvas3D({
       const state = sceneRef.current
       if (state?.earthMesh) {
         state.earthMesh.rotation.y += 0.0004
+      }
+      // Orbit mode draws the rover oversized so a 1.5 m vehicle is findable
+      // across a 2.5 km overview. Held at a fixed 10x that also meant the
+      // rover was a 15 m monster the moment anyone zoomed in to look at it
+      // -- and the wheels and body are only worth animating if they can be
+      // looked at. The exaggeration now fades out as the camera closes in,
+      // so it is a locator at range and a real 1.5 m rover up close.
+      if (state && cameraModeRef.current === 'orbit') {
+        const cameraDistance = camera.position.distanceTo(state.roverGroup.position)
+        state.roverGroup.scale.setScalar(
+          THREE.MathUtils.clamp(cameraDistance / ROVER_TRUE_SCALE_DISTANCE_M, 1, ROVER_ORBIT_SCALE),
+        )
       }
       if (state?.lidarScan && state.lidarSweep.visible) {
         const revolutionMs = 1000 / LIDAR_CONFIG.scanRateHz
@@ -2137,6 +2362,11 @@ export default function TerrainCanvas3D({
     if (lastRoverRouteRef.current !== (waypoints ?? null)) {
       lastRoverRouteRef.current = waypoints ?? null
       lastRoverGroundPosRef.current = null
+      // A new route starts from a standstill: carrying the old heading over
+      // would make the rover spend its first metres swinging round from
+      // wherever the previous drive left it pointing.
+      roverHeadingRef.current = null
+      roverSteerRef.current = 0
     }
     const { rows, cols, resolution_m: resolutionM } = state.manifest.grid
     const source = activeWaypoint ?? waypoints?.[0] ?? null
@@ -2175,33 +2405,98 @@ export default function TerrainCanvas3D({
       const t = THREE.MathUtils.clamp(roverFraction, 0, 1)
       roverX = THREE.MathUtils.lerp(baseX, nextX, t)
       roverZ = THREE.MathUtils.lerp(baseZ, nextZ, t)
-      state.roverGroup.rotation.y = Math.atan2(nextX - baseX, nextZ - baseZ)
     }
     const roverGroundY = sampleTerrainHeight(terrain, roverX, roverZ) ?? 0
+
+    // Ground actually covered since the last update. Everything below --
+    // heading rate, steering angle, wheel roll -- is derived from this
+    // rather than from elapsed time, so the vehicle behaves identically
+    // whether the playback clock is running at real time or fast-forwarded:
+    // a rover that drives one metre turns its wheels the same amount and
+    // arcs into a corner by the same angle either way.
+    const lastPos = lastRoverGroundPosRef.current
+    const deltaX = lastPos ? roverX - lastPos.x : 0
+    const deltaZ = lastPos ? roverZ - lastPos.z : 0
+    const distance = Math.hypot(deltaX, deltaZ)
+    lastRoverGroundPosRef.current = { x: roverX, z: roverZ }
+
+    // Heading. The A* path turns in 45-degree steps at 5 m nodes, so taking
+    // the next node's bearing directly made the rover's yaw jump the moment
+    // it arrived -- a vehicle pivoting on the spot between every cell. The
+    // heading now chases that bearing at a bounded rate per metre driven,
+    // which is what a turn radius is, so the rover leans into a corner over
+    // roughly its own length instead of snapping through it.
+    let heading = roverHeadingRef.current
+    let yawStep = 0
+    if (distance > 1e-4) {
+      const targetHeading = Math.atan2(deltaX, deltaZ)
+      if (heading === null) {
+        heading = targetHeading
+      } else {
+        // Shortest way round: without this a heading crossing +/-pi takes
+        // the long way and the rover spins a full turn on the spot.
+        let error = targetHeading - heading
+        error = Math.atan2(Math.sin(error), Math.cos(error))
+        const limit = distance * MAX_YAW_RATE_RAD_PER_M
+        yawStep = THREE.MathUtils.clamp(error, -limit, limit)
+        heading += yawStep
+      }
+      roverHeadingRef.current = heading
+    } else if (heading === null && nextWaypoint) {
+      // Standing still at the start of a route: face the way it is about to
+      // go rather than an arbitrary default.
+      heading = Math.atan2(
+        nextWaypoint.col * stepX - width / 2 - baseX,
+        nextWaypoint.row * stepZ - depth / 2 - baseZ,
+      )
+      roverHeadingRef.current = heading
+    }
+
+    // Steering angle from the curvature actually being driven, via the
+    // bicycle model: tan(delta) = wheelbase * dyaw/ds. It is eased rather
+    // than applied outright because a linkage takes time to swing, and an
+    // instantly-snapping front wheel reads as broken even when the body
+    // path is right.
+    const curvature = distance > 1e-4 ? yawStep / distance : 0
+    const targetSteer = THREE.MathUtils.clamp(
+      Math.atan(wheelbaseRef.current * curvature),
+      -MAX_STEER_RAD,
+      MAX_STEER_RAD,
+    )
+    roverSteerRef.current += (targetSteer - roverSteerRef.current) * 0.25
+
     state.roverGroup.position.set(roverX, roverGroundY, roverZ)
-    state.roverGroup.scale.setScalar(cameraMode === 'orbit' ? 10 : 1)
+    // Sitting ON the slope, not floating level above it: the body's up axis
+    // follows the terrain normal and the heading is applied within that
+    // frame. A rover driving a 15-degree crater wall while staying perfectly
+    // level is the single clearest tell that a vehicle is pasted onto a
+    // terrain rather than driving on it.
+    const surfaceNormal = sampleTerrainNormal(terrain, roverX, roverZ)
+    roverTiltQuaternion.setFromUnitVectors(ROVER_UP, surfaceNormal)
+    roverYawQuaternion.setFromAxisAngle(ROVER_UP, heading ?? 0)
+    state.roverGroup.quaternion.copy(roverTiltQuaternion).multiply(roverYawQuaternion)
+    // Orbit mode's exaggeration is the render loop's job (it depends on
+    // camera distance, which changes without any of this effect's inputs
+    // changing); this only has to make sure surface mode is life-size.
+    if (cameraMode !== 'orbit') state.roverGroup.scale.setScalar(1)
     state.roverGroup.updateMatrixWorld(true)
     state.lidarOrigin.set(roverX, roverGroundY + 1.6, roverZ)
 
-    // Wheel spin: driven by actual ground distance covered since the last
-    // tick (not by roverFraction or elapsed time directly), so it stays
-    // correct regardless of how unevenly waypoints are spaced or how the
-    // playback clock is paced -- exactly the distance a real wheel of this
-    // radius would have to turn through to cover that ground.
-    const lastPos = lastRoverGroundPosRef.current
-    const distance = lastPos ? Math.hypot(roverX - lastPos.x, roverZ - lastPos.z) : 0
-    lastRoverGroundPosRef.current = { x: roverX, z: roverZ }
-    if (distance > 0) {
-      for (const wheel of wheelsRef.current) {
-        // rotateOnAxis composes the turn as a quaternion multiply in the
-        // wheel's OWN current local frame -- incrementing rotation[axis]
-        // directly instead (a raw Euler component) only spins cleanly if
-        // the other two Euler angles are exactly zero. This wheel's rest
-        // pose is whatever the GLB shipped, not guaranteed level, so that
-        // showed up as the whole wheel visibly tipping/lifting each frame
-        // instead of rolling.
-        wheel.object.rotateOnAxis(wheelAxisVector(wheel.axis), distance / wheel.radius)
-      }
+    // Wheels. Roll is the angle a wheel of this radius has to turn through
+    // to cover the ground actually covered -- signed along the rover's own
+    // forward axis, so reversing rolls the wheels backwards rather than
+    // forwards. Steering is absolute and lives on a separate pivot node, so
+    // the two never corrupt each other.
+    const forwardDot = heading === null ? 1 : deltaX * Math.sin(heading) + deltaZ * Math.cos(heading)
+    const signedDistance = distance > 1e-4 ? Math.sign(forwardDot || 1) * distance : 0
+    for (const wheel of wheelsRef.current) {
+      wheel.steer.rotation.y = wheel.isFront ? roverSteerRef.current : 0
+      if (signedDistance === 0) continue
+      // rotateOnAxis composes the turn as a quaternion multiply in the
+      // wheel's OWN current local frame -- incrementing a raw Euler
+      // component instead only spins cleanly when the other two angles are
+      // exactly zero, which is not something an arbitrary asset guarantees.
+      wheel.spin.rotateOnAxis(wheel.axis, signedDistance / wheel.radiusM)
     }
   }, [activeWaypoint, roverFraction, cameraMode, exaggeration, status, waypoints])
 
@@ -2455,7 +2750,6 @@ export default function TerrainCanvas3D({
       // group itself would fling every rock outward from the scene origin
       // instead of growing each one around its own centre.
       const orbitRockScale = cameraMode === 'orbit' ? 3 : 1
-      state.roverGroup.scale.setScalar(cameraMode === 'orbit' ? 10 : 1)
       // Marker visibility is the lidarEnabled/cameraMode effect's job now
       // (below) -- it reacts immediately, where this effect is debounced.
       for (const child of state.rockGroup.children) {
