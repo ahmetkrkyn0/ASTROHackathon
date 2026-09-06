@@ -153,6 +153,24 @@ export interface MissionValue {
    * stage at all.
    */
   missionMode: MissionMode
+  /**
+   * The mission clock, as an ISO UTC instant. ONE origin for every
+   * time-dependent product -- illumination, Earth visibility, the corridor,
+   * thermal dwell, survival -- so they cannot end up drawn for different
+   * moments. See mission/missionTime.ts for why it is fixed rather than now.
+   */
+  missionTime: string
+  /**
+   * A stable name for the route the current inputs produce, or null when
+   * there is no route to name.
+   *
+   * Post-route analyses bind their results to this, so a Monte Carlo run
+   * cannot be shown beside a route it was not computed for. Deliberately
+   * narrow: it moves when the rover, the endpoints, the weights or an active
+   * constraint move, and NOT when the visible layer, the camera or the
+   * playback position do. See mission/routeIdentity.ts.
+   */
+  routeIdentity: string | null
 }
 
 /**
@@ -244,6 +262,8 @@ export interface MissionActions {
    */
   undoPlacement: () => void
   setMissionMode: (mode: MissionMode) => void
+  /** Moves the mission clock. Every time-dependent layer follows it. */
+  setMissionTime: (utc: string) => void
   /**
    * The playback cursor; null shows the route at rest.
    *

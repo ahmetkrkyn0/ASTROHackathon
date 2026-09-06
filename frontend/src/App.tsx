@@ -55,6 +55,8 @@ import { MissionRuntimeProvider } from './mission/MissionRuntimeProvider'
 import type { MissionActions, MissionRuntime, MissionValue } from './mission/types'
 import { OverlayProvider } from './overlay/OverlayProvider'
 import { FEATURES, selectFeatures } from './features/registry'
+import { MISSION_EPOCH_UTC } from './mission/missionTime'
+import { routeIdentity as computeRouteIdentity } from './mission/routeIdentity'
 import SystemsDrawer from './shell/SystemsDrawer'
 import {
   BottomDock,
@@ -797,6 +799,20 @@ export default function App() {
 
   const appIsVisible = phase === 'app'
 
+  // The mission clock. Seeded from the canonical epoch rather than from the
+  // wall clock so a run is reproducible; see mission/missionTime.ts.
+  const [missionTime, setMissionTime] = useState<string>(MISSION_EPOCH_UTC)
+
+  // Derived, never stored: an identity kept in state is one that can be left
+  // behind by an input it is supposed to describe. Constraints are empty until
+  // the plan-request contributors exist, and an empty object is deliberately
+  // identical to no constraints at all -- a feature switched on that sends no
+  // field must not invalidate an analysis.
+  const currentRouteIdentity = useMemo(
+    () => computeRouteIdentity({ roverId: selectedRoverId, start, goal, weights }),
+    [goal, selectedRoverId, start, weights],
+  )
+
   // Exactly the fields MissionValue declares and no more: an extra one is a
   // compile error, which is what keeps this object honest as the contract
   // grows. Eleven fields already existed under these names; this task adds
@@ -828,8 +844,11 @@ export default function App() {
       activeViewMode: viewMode,
       dimension,
       missionMode,
+      missionTime,
+      routeIdentity: currentRouteIdentity,
     }),
     [
+      currentRouteIdentity,
       dimension,
       clickMode,
       elevationLayer,
@@ -838,6 +857,7 @@ export default function App() {
       isSolving,
       layerError,
       missionMode,
+      missionTime,
       planResult,
       selectedRover,
       selectedRoverId,
@@ -865,6 +885,7 @@ export default function App() {
       resetMission: handleReset,
       undoPlacement: handleUndoPlacement,
       setMissionMode,
+      setMissionTime,
       setPlaybackStep: seekPlaybackStep,
       setPlaying: setIsPlaying,
       setTimeScale,
