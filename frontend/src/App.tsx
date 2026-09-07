@@ -8,6 +8,11 @@ import {
   useState,
 } from 'react'
 import './App.css'
+// After App.css on purpose: these rules resolve collisions between
+// independently-owned pieces and have to win. Never imported at all
+// until now, so the toast/assistant offset it documents had never
+// actually applied.
+import './shell/shell.css'
 import LandingPage from './LandingPage'
 import FleetSelectionView from './components/Fleet/FleetSelectionView'
 import {
@@ -19,7 +24,6 @@ import {
 import { Icon } from './components/Fleet/SpecIcons'
 import MapCanvas, { type ClickMode, DOWNSAMPLE, type MapViewMode } from './MapCanvas'
 import { generateRockField, type RockDescriptor } from './lidarSimulation'
-import { riskToDashArray, riskToHex } from './colormap'
 import SpaceBackdrop from './SpaceBackdrop'
 import SplashScreen, { type BootStage } from './SplashScreen'
 import TerrainCanvas3D from './TerrainCanvas3D'
@@ -53,10 +57,11 @@ import { AssistantAskProvider } from './intent/AssistantAskProvider'
 import { MissionProvider } from './mission/MissionProvider'
 import { MissionRuntimeProvider } from './mission/MissionRuntimeProvider'
 import type { MissionActions, MissionRuntime, MissionValue } from './mission/types'
-import { SESSION_MISSION_TIME, type MissionTime } from './mission/missionTime'
-import { routeIdentityOf } from './mission/routeIdentity'
 import { OverlayProvider } from './overlay/OverlayProvider'
 import { FEATURES, selectFeatures } from './features/registry'
+import { SESSION_MISSION_TIME, type MissionTime } from './mission/missionTime'
+import { routeIdentity as computeRouteIdentity } from './mission/routeIdentity'
+import { readPlanConstraints, usePlanConstraints } from './features/plan-request'
 import SystemsDrawer from './shell/SystemsDrawer'
 import {
   BottomDock,
@@ -118,25 +123,6 @@ interface ToastItem {
   actionLabel?: string
   actionId?: 'show-traversability'
 }
-
-/**
- * The risk legend, derived rather than transcribed.
- *
- * These four hexes used to be written out here, and they had drifted: the
- * legend taught green for "Safe" while the map drew a safe segment in cyan --
- * a colour distance of 62, so the legend was describing something the map
- * never rendered. Reading riskToHex makes that class of drift impossible.
- *
- * The swatch shows the dash pattern too, because the map now carries risk in
- * the line's pattern as well as its colour, and a legend that showed only
- * colour would document half the encoding.
- */
-const LEGEND_ITEMS = [
-  { label: 'Safe', level: 'LOW' },
-  { label: 'Caution', level: 'MEDIUM' },
-  { label: 'High', level: 'HIGH' },
-  { label: 'Critical', level: 'CRITICAL' },
-] as const
 
 export default function App() {
   // Phase and lifecycle. The address names the stage, so a reload comes back to
@@ -676,6 +662,10 @@ export default function App() {
         weights,
         selectedRoverId,
         Array.from(obstacleCells.values()),
+        // Read at issue time rather than closed over: the operator may have
+        // moved a constraint since this handler was created, and the request
+        // must carry what is set now.
+        readPlanConstraints(),
       )
       // Display the radar scanning search animation briefly for authentic mission control feedback
       window.setTimeout(() => {
@@ -799,24 +789,43 @@ export default function App() {
 
   const appIsVisible = phase === 'app'
 
+  // The one clock every time-dependent layer reads (spec 5.8): safe haven,
+  // Earth visibility, illumination, uncertainty, corridor, thermal dwell.
+  //
+  // An epoch plus an offset, not a bare instant. The endpoints take both --
+  // `start_utc` fixes the ephemeris, the offset says how far into the window
+  // the operator has scrubbed -- and deriving the epoch back out of a scrubbed
+  // instant would lose which window we are in.
+  //
+  // Seeded from MISSION_EPOCH_UTC rather than the wall clock so a run is
+  // reproducible; see mission/missionTime.ts for why that matters against
+  // caches built for specific epochs.
+  const [missionTime, setMissionTime] = useState<MissionTime>(SESSION_MISSION_TIME)
+
+  // Derived, never stored: an identity kept in state is one that can be left
+  // behind by an input it is supposed to describe. Constraints are empty until
+  // the plan-request contributors exist, and an empty object is deliberately
+  // identical to no constraints at all -- a feature switched on that sends no
+  // field must not invalidate an analysis.
+  // Subscribed, not read: a constraint change has to move the identity, which
+  // is what marks a post-route analysis stale. The store is module-level so
+  // this is the only place in App that knows constraints exist.
+  const planConstraints = usePlanConstraints()
+  const currentRouteIdentity = useMemo(
+    () => computeRouteIdentity({
+      roverId: selectedRoverId,
+      start,
+      goal,
+      weights,
+      constraints: planConstraints,
+    }),
+    [goal, planConstraints, selectedRoverId, start, weights],
+  )
+
   // Exactly the fields MissionValue declares and no more: an extra one is a
   // compile error, which is what keeps this object honest as the contract
   // grows. Eleven fields already existed under these names; this task adds
   // the four values the mission setup feature needs from its context.
-  // The one clock every time-dependent layer reads (spec 5.8): safe haven,
-  // Earth visibility, illumination, uncertainty, corridor, thermal dwell.
-  //
-  // Seeded with the session's own start instant rather than left empty. An
-  // empty clock is not the more honest option here, which is what it looked
-  // like at first: the backend's `unavailable` for a missing epoch is a
-  // statement about what we asked, not about what this deployment has, and
-  // leaving it unset only meant the panels sat dark in the one stage where
-  // a mission is configured -- time-axis, which used to own the epoch, does
-  // not mount in `plan` mode. Choosing an epoch is a planning decision, and
-  // each panel prints the one it used. Drawing a haven map with no epoch
-  // behind it would be the fabrication; naming the epoch is not.
-  const [missionTime, setMissionTime] = useState<MissionTime>(SESSION_MISSION_TIME)
-
   const missionValue: MissionValue = useMemo(
     () => ({
       gridMeta: elevationLayer
@@ -845,19 +854,10 @@ export default function App() {
       dimension,
       missionMode,
       missionTime,
-      // Derived, not stored: an identity kept in state is an identity that
-      // can lag the inputs it describes, and a stale-marker that lags is
-      // worse than none. Advanced constraints are absent here because none
-      // of them is wired into a plan request yet; a contributor that turns
-      // one on passes it here at the same time.
-      routeIdentity: routeIdentityOf({
-        roverId: selectedRoverId,
-        start,
-        goal,
-        weights,
-      }),
+      routeIdentity: currentRouteIdentity,
     }),
     [
+      currentRouteIdentity,
       dimension,
       clickMode,
       elevationLayer,
@@ -894,6 +894,7 @@ export default function App() {
       resetMission: handleReset,
       undoPlacement: handleUndoPlacement,
       setMissionMode,
+      setMissionTime,
       setPlaybackStep: seekPlaybackStep,
       setPlaying: setIsPlaying,
       setTimeScale,
@@ -903,7 +904,6 @@ export default function App() {
       setViewMode,
       setDimension,
       toggleHud,
-      setMissionTime,
     }),
     [
       handlePlan,
@@ -1199,40 +1199,6 @@ export default function App() {
 
             {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
             <footer className={`lp-status-bar ${missionMode === 'analyze' ? 'is-analyze' : ''}`}>
-              <div className="lp-status-left">
-                <div className="lp-scale">
-                  <span className="lp-scale-rule" aria-hidden="true" />
-                  <span className="lp-scale-copy">
-                    0 - {focusTelemetry.spanKm.toFixed(1)} km · {focusTelemetry.resolutionM.toFixed(0)} m/px
-                  </span>
-                </div>
-
-                <div className="lp-risk-legend">
-                  <span className="lp-legend-label">RISK</span>
-                  {LEGEND_ITEMS.map((item) => (
-                    <span key={item.label} className="lp-legend-item">
-                      <svg
-                        className="lp-legend-line"
-                        viewBox="0 0 22 8"
-                        aria-hidden="true"
-                        focusable="false"
-                      >
-                        <line
-                          x1="1"
-                          y1="4"
-                          x2="21"
-                          y2="4"
-                          stroke={riskToHex(item.level)}
-                          strokeWidth="2.4"
-                          strokeDasharray={riskToDashArray(item.level)}
-                        />
-                      </svg>
-                      {item.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
               <div className="lp-status-right">
                 <StatusBarSlot />
               </div>

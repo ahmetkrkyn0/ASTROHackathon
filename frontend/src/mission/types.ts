@@ -2,7 +2,6 @@ import type { Dispatch, SetStateAction } from 'react'
 import type { ClickMode, MapViewMode } from '../MapCanvas'
 import type { PlanResponse, PlanWeights, RoverEntry } from '../api'
 import type { MissionTime } from './missionTime'
-import type { RouteIdentity } from './routeIdentity'
 
 /**
  * A fine-grid cell index, as the cockpit has always carried one.
@@ -156,25 +155,33 @@ export interface MissionValue {
    */
   missionMode: MissionMode
   /**
-   * The one clock the time-dependent layers read -- spec 5.8.
+   * The one clock every time-dependent layer reads -- spec 5.8.
    *
    * Six backend series vary over this axis (illumination, Earth visibility,
    * uncertainty, corridor, thermal dwell, survival). Published here so they
    * share it: a feature holding its own epoch is a second clock, and two
    * layers drawn from two different moments look exactly like two layers
    * drawn from one.
+   *
+   * An epoch plus an offset rather than a bare instant, because that is what
+   * the endpoints take: `start_utc` fixes the ephemeris and the slice count
+   * spans the window, and the operator scrubs within it. A caller that wants
+   * the selected instant asks `missionTimeUtc(missionTime)`.
    */
   missionTime: MissionTime
   /**
-   * Which route the post-analysis results on screen were computed against --
-   * spec 5.4.
+   * A stable name for the route the current inputs produce, or null when
+   * there is no route to name -- spec 5.4.
    *
-   * Null before a route exists. A panel holding an analysis compares the
-   * identity it recorded against this one and marks itself stale when they
-   * differ; it does not re-derive that comparison from rover, endpoints and
-   * weights, because two panels doing so would eventually disagree.
+   * Post-route analyses bind their results to this, so a Monte Carlo run
+   * cannot be shown beside a route it was not computed for. Deliberately
+   * narrow: it moves when the rover, the endpoints, the weights or an active
+   * constraint move, and NOT when the visible layer, the camera or the
+   * playback position do. A panel does not re-derive that comparison itself,
+   * because two panels doing so would eventually disagree. See
+   * mission/routeIdentity.ts.
    */
-  routeIdentity: RouteIdentity
+  routeIdentity: string | null
 }
 
 /**

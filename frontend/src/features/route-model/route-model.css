@@ -1,0 +1,167 @@
+/* Route cost model: slip, risk appetite, roughness.
+
+   Console rules: flat surfaces, 2px radius, mono for measured data only. No
+   risk colour anywhere in here -- this panel reports how a number was arrived
+   at, and confidence is not a safety verdict. */
+
+.lp-rm { display: flex; flex-direction: column; gap: 12px; }
+
+.lp-rm-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--line-inner);
+}
+
+.lp-rm-section:last-of-type { border-bottom: none; padding-bottom: 0; }
+
+.lp-rm-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-rm-head-icon { font-size: 14px; color: var(--text-dim); }
+
+/* Sub-heading inside a rail panel, in the console's own label voice:
+   the same size, weight and tracking .lp-meta-label uses. */
+.lp-rm-head h4 {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  letter-spacing: var(--track-label);
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.lp-rm-validity {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* The chip's border carries the claim: solid where the number was measured,
+   dashed where it was modelled. "Not measured" looks like a dashed edge, so
+   the distinction survives a glance without spending any colour on it. */
+.lp-rm-chip {
+  padding: 1px 5px;
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.lp-rm-chip.is-measured {
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
+}
+
+.lp-rm-chip.is-model {
+  border: 1px dashed var(--line-button);
+  color: var(--text-dim);
+}
+
+/* ── The line that says what it cost ─────────────────────────────────────── */
+
+.lp-rm-cost {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+}
+
+.lp-rm-cost svg { font-size: 12px; color: var(--text-dim); }
+
+.lp-rm-cost b {
+  font-family: var(--font-data);
+  font-weight: 500;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The arrow points from the mean-slip figure to the tail-priced one; `back`
+   is the only chevron in the set, so it is turned to face forward. */
+.lp-rm-arrow { transform: rotate(180deg); }
+
+/* Alpha changes the ranking cost and nothing else. The tag sits on the same
+   line as the two figures so the caveat cannot be read separately from them. */
+.lp-rm-scope-tag {
+  padding: 1px 5px;
+  border: 1px dashed var(--line-button);
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+}
+
+/* ── A block the backend considered and did not apply ────────────────────── */
+
+.lp-rm-absent {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px dashed var(--line-inner);
+  border-radius: var(--radius);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.lp-rm-absent svg { flex: none; margin-top: 1px; font-size: 12px; color: var(--text-dimmest); }
+
+.lp-rm-foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
+}
+
+.lp-rm-foot svg { flex: none; font-size: 12px; }
+
+/* A model with no calibration behind it is a further step from a measurement
+   than a model is, and the thermal block ships both labels so they can be told
+   apart. Dashed like MODEL, dimmer, and the only chip that says so in words. */
+.lp-rm-chip.is-uncalibrated {
+  border: 1px dashed var(--line-inner);
+  color: var(--text-dimmest);
+}
+
+/* What the panel answers. Two of its three sections are usually empty states,
+   and an empty state with no frame around it reads as a broken feature rather
+   than as one nobody asked for. */
+.lp-rm-lede {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+/* A ratio with no referent is a number nobody can act on. */
+.lp-rm-explain {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-dimmest);
+}
+
+.lp-rm-absent b { font-weight: 500; color: var(--text-2); }
+
+.lp-rm-absent code {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}

@@ -46,7 +46,23 @@ export const MISSION_TIME_NONE: MissionTime = Object.freeze({
 })
 
 /**
- * Six days from the moment the app loaded, in six-hour slices.
+ * The mission clock's origin: one epoch, for everything time-dependent.
+ *
+ * FIXED RATHER THAN WALL CLOCK, deliberately. A demo that opens on the real
+ * current time shows a different sky, different shadows and different
+ * illumination on every run, which makes a result impossible to reproduce and
+ * a screenshot impossible to check. It is also the more fragile choice against
+ * this backend: several products are read from caches built for specific
+ * epochs, and an arbitrary "now" is exactly how an endpoint comes back
+ * unavailable in front of an audience.
+ *
+ * This is the origin, not a limit. `setMissionTime` moves the clock, and every
+ * time-dependent layer is expected to follow it.
+ */
+export const MISSION_EPOCH_UTC = '2026-09-07T00:00:00Z'
+
+/**
+ * Six days from the mission epoch, in six-hour slices.
  *
  * The span is not arbitrary. A lunar day is about 29.5 Earth days, so at this
  * polar site a 24-hour window does not change at all -- the backend reports
@@ -54,12 +70,15 @@ export const MISSION_TIME_NONE: MissionTime = Object.freeze({
  * the shortest window over which the illumination this cockpit exists to show
  * actually moves, and it is the window `useTimeAxis` already requests.
  *
- * Taken once at module load so every consumer anchors to the same instant. A
- * second `new Date()` somewhere else would be a second clock, and two layers
- * drawn from two moments look exactly like two layers drawn from one.
+ * Anchored to MISSION_EPOCH_UTC rather than to `new Date()`. The wall clock
+ * was the first choice here and it was the wrong one: it makes two runs of the
+ * same mission incomparable, and it walks off the epochs the preprocessing
+ * caches were built for. A second clock anywhere -- a stray `new Date()`, a
+ * hardcoded epoch in a query string -- is two layers drawn from two moments,
+ * which looks exactly like two layers drawn from one.
  */
 export const SESSION_MISSION_TIME: MissionTime = Object.freeze({
-  startUtc: new Date().toISOString(),
+  startUtc: MISSION_EPOCH_UTC,
   offsetHours: 0,
   spanHours: 144,
   sliceHours: 6,

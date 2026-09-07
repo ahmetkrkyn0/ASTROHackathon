@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { PlanResponse } from '../../api'
 import type { RouteStatistics } from '../../net/types'
 import { riskToHex } from '../../colormap'
+import { CostModelEvidence, SafetyEvidence } from './EvidenceSections'
 import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
 import {
   COPY,
@@ -735,6 +736,19 @@ export const MissionReportModal: React.FC<Props> = ({
                   </div>
                 </Section>
               </div>
+
+              {/* Full width, outside the two-column row: a twelve-row table of
+                  FRETISH sentences and eighty-word claim paragraphs are not
+                  half-column content. Putting them in that row also stretched
+                  the planner evidence card to match the tallest thing beside
+                  it, which is where the empty space under it came from. */}
+              <Section label={t.sections.safety} icon="shield">
+                <SafetyEvidence plan={plan} t={t} />
+              </Section>
+
+              <Section label={t.sections.costModel} icon="evidence">
+                <CostModelEvidence plan={plan} t={t} />
+              </Section>
             </>
           )}
         </div>

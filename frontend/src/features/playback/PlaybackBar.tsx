@@ -121,9 +121,16 @@ export const PlaybackBar: React.FC = () => {
         </div>
       </div>
 
+      {/* The rover's own readings at the cursor, which is why they live beside
+          the transport rather than in the analysis rail: they change as the
+          route plays, and the rail reports the route.
+
+          COVERED, not DISTANCE. The rail carries "Route distance" -- the whole
+          traverse -- and two figures both labelled Distance, one reading
+          0.00 km at step zero and the other 2.64, is worse than either alone. */}
       <div className="lp-playback-readouts">
         <div className="lp-playback-stat">
-          <span className="lp-stat-name">DISTANCE</span>
+          <span className="lp-stat-name">COVERED</span>
           <strong className="lp-stat-val">
             {activeWp ? `${(activeWp.distance_m / 1000).toFixed(2)} km` : '--'}
           </strong>

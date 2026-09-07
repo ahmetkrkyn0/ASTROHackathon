@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   PLAN_REQUEST_CONTRIBUTORS,
   applyPlanRequestContributors,
+  mergeContributedFields,
   type PlanRequestContext,
 } from '../features/plan-request/contributors'
 
@@ -129,11 +130,40 @@ describe('plan request non-regression', () => {
 
   it('every contributor returns null while disabled', () => {
     // The rule stated once over the whole list, so a contributor appended
-    // later cannot opt out of it.
+    // later cannot opt out of it. Both arities are checked: the 4-D builder
+    // hands a state and a context, the store hands a state alone.
     for (const contributor of PLAN_REQUEST_CONTRIBUTORS) {
-      expect(contributor.enabled(NOTHING_ON)).toBe(false)
-      expect(contributor.fields(NOTHING_ON)).toBeNull()
+      const off = { enabled: false }
+      expect(contributor.enabled(off, NOTHING_ON)).toBe(false)
+      expect(contributor.fields(off, NOTHING_ON)).toBeNull()
+      expect(contributor.fields(off)).toBeNull()
     }
+  })
+
+  it('sends no 4-D constraint through the store, which builds the 2-D body', () => {
+    // The guard the merge turns on: POST /api/plan accepts every one of these
+    // flags with a 200 and then ignores it. A contributor with no context is a
+    // contributor on the 2-D path, and must contribute nothing there.
+    for (const contributor of PLAN_REQUEST_CONTRIBUTORS) {
+      if (contributor.id === 'risk') continue
+      expect(contributor.fields({ enabled: true, value: 0.9 })).toBeNull()
+    }
+  })
+
+  it('merges a weight into the four rather than replacing them', () => {
+    // The hazard a flat Object.assign would create: `weights` arrives as a
+    // one-key object and would take the place of all four.
+    const merged = mergeContributedFields(
+      { weights: { w_slope: 0.409, w_energy: 0.259, w_shadow: 0.142, w_thermal: 0.19 } },
+      { weights: { w_roughness: 0.4 } },
+    )
+    expect(merged.weights).toEqual({
+      w_slope: 0.409,
+      w_energy: 0.259,
+      w_shadow: 0.142,
+      w_thermal: 0.19,
+      w_roughness: 0.4,
+    })
   })
 })
 

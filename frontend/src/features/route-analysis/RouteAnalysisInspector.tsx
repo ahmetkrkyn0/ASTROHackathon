@@ -1,6 +1,6 @@
 import React from 'react'
-import type { Waypoint } from '../../api'
 import { batteryToHex, riskToHex } from '../../colormap'
+import type { Waypoint } from '../../api'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
 import { useMissionRuntime } from '../../mission/MissionRuntimeContext'
 
@@ -32,22 +32,25 @@ function formatLatLon(lat: number, lon: number): string {
 
 export const RouteAnalysisInspector = () => {
   const { planResult } = useMission()
-  const { routePlaybackStep: playbackStep, payloadW, heaterW } = useMissionRuntime()
+  // No playback cursor here on purpose: this panel reports the route, and
+  // the cursor's own readings belong to the transport bar under the map.
+  const { payloadW, heaterW } = useMissionRuntime()
   const { setPayloadW, setHeaterW } = useMissionActions()
 
   if (!planResult) return null
 
   const { summary, astar_metrics: metrics, waypoints } = planResult
 
-  // Playback waypoint
-  const currentWp: Waypoint | null =
-    playbackStep !== null && playbackStep >= 0 && playbackStep < waypoints.length
-      ? waypoints[playbackStep]
-      : null
-
-  // Battery metrics
+  /**
+   * Battery at the END of the route, which is what this panel's label says.
+   *
+   * It used to fall back to the playback cursor's waypoint, so during playback
+   * a figure labelled "End battery" showed the battery right now -- the same
+   * number the transport bar under the map was already showing, under a label
+   * that meant something else. This panel reports the route; the cursor's
+   * values are the transport bar's job and are two inches away.
+   */
   const finalBattery = summary?.final_battery_pct ?? 100
-  const activeBattery = currentWp ? currentWp.battery_pct : finalBattery
 
   // LiDAR calculations
   const totalHours = summary?.total_elapsed_hours ?? 0
@@ -180,7 +183,10 @@ export const RouteAnalysisInspector = () => {
 
         <div className="lp-decision-kpi-grid">
           <div className="lp-decision-kpi">
-            <span className="lp-kpi-label">Distance</span>
+            {/* "Route", because the transport bar reports distance COVERED at
+                the cursor and two figures both called Distance, one reading
+                0.00 km and the other 2.64, is worse than either alone. */}
+            <span className="lp-kpi-label">Route distance</span>
             <strong className="lp-kpi-val">
               {summary?.total_distance_km ? `${summary.total_distance_km.toFixed(2)} km` : '--'}
             </strong>
@@ -190,11 +196,10 @@ export const RouteAnalysisInspector = () => {
             <span className="lp-kpi-label">End battery</span>
             <strong
               className="lp-kpi-val"
-              style={{ color: batteryToHex(activeBattery) }}
+              style={{ color: batteryToHex(finalBattery) }}
             >
-              {activeBattery.toFixed(1)}%
+              {finalBattery.toFixed(1)}%
             </strong>
-            {currentWp && <span className="lp-kpi-sub">Step {playbackStep}</span>}
           </div>
 
           <div className="lp-decision-kpi">

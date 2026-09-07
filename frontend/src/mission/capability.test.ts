@@ -90,3 +90,27 @@ describe('capability', () => {
     ).toBeNull()
   })
 })
+
+describe('capabilityFromError classifies structurally', () => {
+  it('recognises an error from either ApiError class', () => {
+    // api/client.ts defines its own ApiError with no relation to net/client's.
+    // Under `instanceof` this one fell through to `error`, painting a missing
+    // cache as a fault -- the inverse of the rule this module exists for.
+    class OtherApiError extends Error {
+      status = 404
+    }
+    const foreign = new OtherApiError(roughnessUnavailable.detail)
+    const capability = capabilityFromError(foreign, { isDataUnavailable: true })
+    expect(capability?.status).toBe('unavailable')
+  })
+
+  it('still calls an unsupported endpoint unsupported, not unavailable', () => {
+    class OtherApiError extends Error {
+      status = 501
+    }
+    const capability = capabilityFromError(new OtherApiError('not implemented'), {
+      isDataUnavailable: false,
+    })
+    expect(capability?.status).toBe('unsupported')
+  })
+})

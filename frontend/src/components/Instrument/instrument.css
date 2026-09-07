@@ -1,0 +1,195 @@
+/* The console's instrument vocabulary.
+
+   Console rules throughout: flat surfaces, 2px radius, mono for measured data
+   only, and colour spent only where it carries meaning. What this adds over
+   the tokens alone is HIERARCHY -- one figure per block at display size, and
+   everything else deliberately smaller than it. */
+
+/* ── Readout: the figure a block exists to show ──────────────────────────── */
+
+.lp-io-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 9px 11px;
+  border-left: 2px solid var(--line-button);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.lp-io-label {
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.lp-io-value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--font-data);
+  font-size: var(--fs-value);
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-io-unit {
+  font-style: normal;
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  color: var(--text-dim-2);
+}
+
+.lp-io-sub {
+  margin-top: 2px;
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.lp-io-readout.is-ok { border-left-color: var(--mint); }
+.lp-io-readout.is-ok .lp-io-value { color: var(--mint-text); }
+.lp-io-readout.is-warn { border-left-color: var(--cyan); }
+.lp-io-readout.is-warn .lp-io-value { color: var(--cyan-text); }
+.lp-io-readout.is-bad { border-left-color: var(--coral); }
+.lp-io-readout.is-bad .lp-io-value { color: var(--coral-text); }
+.lp-io-readout.is-muted { border-left-color: var(--line-inner); }
+.lp-io-readout.is-muted .lp-io-value { color: var(--text-dim); }
+
+/* ── Meter: a bar with an axis ───────────────────────────────────────────── */
+
+.lp-io-meter { display: flex; flex-direction: column; gap: 3px; }
+
+.lp-io-track {
+  position: relative;
+  height: 8px;
+  border: 1px solid var(--line-inner);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+/* The ticks are what make this a measurement rather than a decoration. */
+.lp-io-ticks i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-card);
+}
+
+.lp-io-origin {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: 50%;
+  width: 1px;
+  background: var(--line-button);
+  z-index: 1;
+}
+
+.lp-io-fill {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  background: var(--cyan);
+}
+
+.lp-io-track.is-ok .lp-io-fill { background: var(--mint); }
+.lp-io-track.is-bad .lp-io-fill { background: var(--coral); }
+.lp-io-track.is-warn .lp-io-fill { background: var(--cyan); }
+.lp-io-track.is-muted .lp-io-fill { background: var(--text-dim); }
+.lp-io-fill.is-negative { background: var(--coral); }
+
+/* Held at the edge with a hatched cap rather than allowed to run: a bar that
+   keeps growing has stopped being comparable to the ones beside it. */
+.lp-io-fill.is-clamped::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 4px;
+  background: repeating-linear-gradient(
+    90deg, transparent 0 1px, var(--bg-inset) 1px 2px
+  );
+}
+
+.lp-io-fill.is-negative.is-clamped::after { right: auto; left: 0; }
+
+.lp-io-marker {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text-2);
+  z-index: 2;
+}
+
+.lp-io-scale {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Field: everything that is not the headline ──────────────────────────── */
+
+.lp-io-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 9px 10px;
+  margin: 0;
+}
+
+.lp-io-field { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+
+.lp-io-field dt {
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lp-io-field dd {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-io-field.is-ok dd { color: var(--mint-text); }
+.lp-io-field.is-bad dd { color: var(--coral-text); }
+.lp-io-field.is-warn dd { color: var(--cyan-text); }
+.lp-io-field.is-muted dd { color: var(--text-dim); }
+
+.lp-io-hint { font-size: var(--fs-micro); color: var(--text-dimmest); }
+
+/* ── Divide: a labelled rule, the way a schematic separates two things ───── */
+
+.lp-io-divide {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.lp-io-divide::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line-inner);
+}

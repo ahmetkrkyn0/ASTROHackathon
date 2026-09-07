@@ -1,0 +1,48 @@
+/* DEM uncertainty (B3).
+
+   Console rules: flat, 2px radius, mono for data only. Cyan is the analysis
+   accent here and carries no safety meaning -- a wide band is not a hazard,
+   it is a measurement of how little the elevation model pins down. */
+
+.lp-unc { display: flex; flex-direction: column; gap: 10px; }
+
+.lp-unc-result { display: flex; flex-direction: column; gap: 9px; }
+
+.lp-unc-scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+}
+
+.lp-unc-key { display: flex; align-items: center; gap: 4px; }
+
+.lp-unc-swatch { display: inline-block; }
+.lp-unc-swatch.is-band { width: 12px; height: 4px; border-radius: 2px; background: rgba(79, 216, 240, 0.35); }
+.lp-unc-swatch.is-median { width: 2px; height: 9px; background: var(--cyan); }
+.lp-unc-swatch.is-nominal { width: 2px; height: 9px; background: var(--text-2); }
+
+.lp-unc-feasible {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+}
+
+.lp-unc-feasible svg { flex: none; font-size: 12px; }
+.lp-unc-feasible b { font-family: var(--font-data); font-weight: 500; color: var(--text-2); }
+
+.lp-unc-metric { display: flex; flex-direction: column; gap: 4px; }
+
+/* The median, under the band it sits in rather than crowded into the axis. */
+.lp-unc-median {
+  align-self: flex-end;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}

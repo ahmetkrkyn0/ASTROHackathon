@@ -25,8 +25,6 @@
  * `reason`, and neither of them can carry a `value`.
  */
 
-import { ApiError } from '../net/client'
-
 /** The seven states of section 5.1, as a discriminant. */
 export type CapabilityStatus =
   | 'idle'
@@ -212,14 +210,27 @@ export function capabilityFromError(
   if (options.signal?.aborted) return null
   if (error instanceof DOMException && error.name === 'AbortError') return null
 
-  if (error instanceof ApiError) {
-    if (options.isDataUnavailable) return capabilityUnavailable(error.message)
-    if (error.status === 501 || error.status === 405) {
-      return capabilityUnsupported(error.message)
+  // Read structurally, never `instanceof`. This codebase defines ApiError twice
+  // -- net/client.ts and api/client.ts, unrelated -- so an instanceof check
+  // recognises one and not the other, and the branch it falls past paints a
+  // missing cache as `error`. That is the single rule this module exists to
+  // enforce, inverted. See net/errors.ts for the same fix on the same cause.
+  const status =
+    typeof error === 'object' && error !== null && typeof (error as { status?: unknown }).status === 'number'
+      ? (error as { status: number }).status
+      : null
+  const cause = error instanceof Error ? error : new Error(String(error))
+
+  if (status !== null) {
+    if (options.isDataUnavailable) return capabilityUnavailable(cause.message)
+    // 501 and 405: the deployment does not have this endpoint at all, which is
+    // a different remedy from a cache it never built.
+    if (status === 501 || status === 405) {
+      return capabilityUnsupported(cause.message)
     }
-    return capabilityError(error)
+    return capabilityError(cause)
   }
-  return capabilityError(error instanceof Error ? error : new Error(String(error)))
+  return capabilityError(cause)
 }
 
 /**
