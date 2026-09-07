@@ -94,18 +94,22 @@ export function SafetyMarginsPanel({ view }: { view: SafetyMarginsView }) {
 
       <Divide label="Robustness" />
 
-      {/* Drawn once, not twelve times: every row shares this axis. */}
-      <div className="lp-margins-axis" aria-hidden="true">
-        <span>violation</span>
-        <span className="lp-margins-axis-zero">0</span>
-        <span>margin</span>
-      </div>
+      {/* The axis belongs inside the card with the rows it labels. Outside it,
+          the card's own edge separated the scale from the chart it describes. */}
+      <div className="lp-margins-card">
+        {/* Drawn once, not twelve times: every row shares this axis. */}
+        <div className="lp-margins-axis" aria-hidden="true">
+          <span>violation</span>
+          <span className="lp-margins-axis-zero">0</span>
+          <span>margin</span>
+        </div>
 
-      <ul className="lp-margins-list">
-        {view.requirements.map((requirement) => (
-          <Requirement key={requirement.id} requirement={requirement} />
-        ))}
-      </ul>
+        <ul className="lp-margins-list">
+          {view.requirements.map((requirement) => (
+            <Requirement key={requirement.id} requirement={requirement} />
+          ))}
+        </ul>
+      </div>
 
       <p className="lp-margins-foot">
         {untested > 0 ? (

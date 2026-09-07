@@ -6,6 +6,23 @@
 
 .lp-margins-tight-id { font-weight: 500; color: var(--text-2); }
 
+/* The twelve rows and the axis they share, on one raised surface. The chart is
+   what this panel is for; a card separates it from the verdict above and the
+   caveats below without spending a rule on either edge.
+
+   8px, not the console's 2px: a rail of stacked hairline blocks read as one
+   undifferentiated list, and this radius is what makes each block a thing you
+   can point at. It is the one place the Safety rail departs from --radius. */
+.lp-margins-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px 13px 6px;
+  border: 1px solid var(--line-inner);
+  border-radius: 8px;
+  background: var(--bg-raised);
+}
+
 /* The axis, drawn once above the twelve rows that share it. */
 .lp-margins-axis {
   display: grid;
@@ -33,11 +50,17 @@
   grid-template-columns: 15px 48px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 7px;
-  row-gap: 3px;
-  padding: 6px 0 7px;
+  row-gap: 5px;
+  padding: 9px 0 10px;
   border-bottom: 1px solid var(--line-inner);
   font-size: var(--fs-small);
 }
+
+/* Taller and softer-ended than the console default. Twelve of these stacked
+   are the whole chart, and at 8px square the fill on a near-zero margin read
+   as a hairline rather than a bar you could compare to the one above it. */
+.lp-margins-card .lp-io-track { height: 10px; border-radius: 5px; }
+.lp-margins-card .lp-io-fill { border-radius: 4px; }
 
 .lp-margin-row:last-child { border-bottom: none; }
 
@@ -72,6 +95,10 @@
 .lp-margin-meter { grid-column: 2 / -1; }
 
 .lp-margin-row.is-satisfied .lp-margin-icon { color: var(--mint); }
+/* The figure carries the verdict its bar does. Colouring only the failures
+   left the passes reading as unmeasured -- the one thing this panel must not
+   blur, since untested rows are styled quiet just below. */
+.lp-margin-row.is-satisfied .lp-margin-value { color: var(--mint-text); }
 .lp-margin-row.is-violated .lp-margin-icon { color: var(--coral); }
 .lp-margin-row.is-violated .lp-margin-value { color: var(--coral-text); }
 .lp-margin-row.is-violated .lp-margin-name { color: var(--text-2); }

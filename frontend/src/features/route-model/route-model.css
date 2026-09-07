@@ -6,15 +6,19 @@
 
 .lp-rm { display: flex; flex-direction: column; gap: 12px; }
 
+/* Each cost model on its own surface. Under a shared bottom rule the blocks
+   read as one long list, so "slip was not applied" ran straight into the
+   figures beneath it; a card makes that a statement about slip alone. Radius
+   matches the margins card in the same rail. */
 .lp-rm-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-bottom: 11px;
-  border-bottom: 1px solid var(--line-inner);
+  gap: 9px;
+  padding: 11px 13px 12px;
+  border: 1px solid var(--line-inner);
+  border-radius: 8px;
+  background: var(--bg-raised);
 }
-
-.lp-rm-section:last-of-type { border-bottom: none; padding-bottom: 0; }
 
 .lp-rm-head {
   display: flex;
@@ -46,12 +50,23 @@
    dashed where it was modelled. "Not measured" looks like a dashed edge, so
    the distinction survives a glance without spending any colour on it. */
 .lp-rm-chip {
-  padding: 1px 5px;
-  border-radius: var(--radius);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-inset);
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   letter-spacing: 0.04em;
   white-space: nowrap;
+}
+
+/* The three figures under each heading, each in its own well. Side by side on
+   a flat ground they ran together into one string of numbers; the wells are
+   what make "0.43" and "0.90" read as two measurements rather than a range. */
+.lp-rm-section .lp-io-field {
+  padding: 7px 9px;
+  border: 1px solid var(--line-inner);
+  border-radius: 6px;
+  background: var(--bg-inset);
 }
 
 .lp-rm-chip.is-measured {
