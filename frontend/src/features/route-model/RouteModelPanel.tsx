@@ -72,6 +72,12 @@ const n = (value: number | null, digits = 2, unit = ''): string =>
 export function RouteModelPanel({ view }: { view: RouteModelView }) {
   return (
     <div className="lp-rm">
+      {/* What the panel answers. Without it the three sections read as
+          disconnected figures, and two of them are usually empty states --
+          which then read as "broken" rather than "not asked for". */}
+      <p className="lp-rm-lede">
+        What the planner charged this route, and how sure each figure is.
+      </p>
       {view.slip ? (
         <Section
           title="Mobility · slip"
@@ -100,9 +106,19 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
                 <b>{n(view.slip.extraDrawnWh, 0)} Wh</b>
                 <span>added by slip</span>
               </p>
+              {/* The figures are ratios, and a ratio with no referent is a
+                  number nobody can act on. */}
+              <p className="lp-rm-explain">
+                Slip is the share of wheel rotation that does not become
+                forward motion. At {n(view.slip.meanSlip)} mean, the wheels
+                turn {n(view.slip.distanceFactor, 2)}× the ground distance.
+              </p>
             </>
           ) : (
-            <Absent>Not applied — this profile declares no slip curve.</Absent>
+            <Absent>
+              <b>Not applied.</b> This rover profile declares no slip curve, so
+              travel time and energy are the planner's nominal figures.
+            </Absent>
           )}
         </Section>
       ) : null}
@@ -134,7 +150,12 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
               </p>
             </>
           ) : (
-            <Absent>Nominal — no tail pricing requested.</Absent>
+            <Absent>
+              <b>Nominal.</b> The cost grid is the ordinary one, bit for bit.
+              Switch on <b>Risk appetite</b> under Advanced Constraints
+              (Systems, in plan mode) to rank routes on the adverse tail
+              instead.
+            </Absent>
           )}
         </Section>
       ) : null}
@@ -178,7 +199,12 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
           ) : (
             // The backend's reason names the cache file and the script that
             // builds it. That belongs in the report; the rail states the fact.
-            <Absent>Not applied — no roughness layer on this deployment.</Absent>
+            <Absent>
+              <b>Not applied.</b> This deployment has no measured roughness
+              layer, so the criterion steers nothing and its weight is inert.
+              <code>scripts/setup_caches.py</code> builds it; the full reason
+              is in the mission report.
+            </Absent>
           )}
         </Section>
       ) : null}

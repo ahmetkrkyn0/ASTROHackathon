@@ -139,3 +139,29 @@
   border: 1px dashed var(--line-inner);
   color: var(--text-dimmest);
 }
+
+/* What the panel answers. Two of its three sections are usually empty states,
+   and an empty state with no frame around it reads as a broken feature rather
+   than as one nobody asked for. */
+.lp-rm-lede {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+/* A ratio with no referent is a number nobody can act on. */
+.lp-rm-explain {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-dimmest);
+}
+
+.lp-rm-absent b { font-weight: 500; color: var(--text-2); }
+
+.lp-rm-absent code {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}

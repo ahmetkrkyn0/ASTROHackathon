@@ -232,14 +232,23 @@ function createStarPoints(sprite: THREE.Texture, pixelRatio: number): THREE.Poin
     `,
     transparent: true,
     blending: THREE.AdditiveBlending,
+    // Writes no depth -- a star is a point, not an occluder -- but TESTS it,
+    // so the terrain hides the stars behind it.
+    //
+    // This was `depthTest: false`, which made the Moon transparent. A material
+    // marked `transparent` goes in three.js's transparent queue, drawn AFTER
+    // all opaque geometry, and renderOrder only sorts within that queue -- it
+    // does not move the sky in front of the terrain. So the stars were painted
+    // over the surface every frame and the ground showed the sky beneath it.
     depthWrite: false,
-    depthTest: false,
+    depthTest: true,
   })
 
   const points = new THREE.Points(new THREE.BufferGeometry(), material)
-  // Drawn before everything, and never occluding it: the sky is a backdrop,
-  // and at 70 km its bounding sphere would otherwise get it frustum-culled
-  // the moment the camera looks along the terrain.
+  // Never culled: at 70 km the bounding sphere would drop the whole sky the
+  // moment the camera looks along the terrain. renderOrder keeps it first
+  // among the transparent objects, so the Earth and the sun flare draw over
+  // it rather than under it.
   points.frustumCulled = false
   points.renderOrder = -1
   return points
