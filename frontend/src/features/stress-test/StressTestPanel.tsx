@@ -1,6 +1,5 @@
 import { Icon } from '../../components/Fleet/SpecIcons'
-import { describeFailure } from '../../net/errors'
-import type { AnalysisJob } from '../analysis-job'
+import { JobState, type AnalysisJob } from '../analysis-job'
 import type { Histogram, Rate, StressTestResponse } from '../../net/stressTest'
 import './stress-test.css'
 
@@ -149,48 +148,17 @@ export function StressTestPanel({
   runs: number
 }) {
   return (
-    <div className="lp-st">
-      {job.state === 'idle' || job.state === 'failure' ? (
-        <button type="button" className="lp-st-run" onClick={start} disabled={!canRun}>
-          <Icon name="spark" />
-          Run {runs.toLocaleString('en-GB')} perturbed executions
-        </button>
-      ) : null}
-
-      {job.state === 'running' ? (
-        <div className="lp-st-running">
-          <span className="lp-st-spinner" aria-hidden="true" />
-          <span>Executing…</span>
-          <button type="button" className="lp-st-cancel" onClick={cancel}>Cancel</button>
-        </div>
-      ) : null}
-
-      {job.state === 'success' ? <Result value={job.value} /> : null}
-
-      {job.state === 'stale' ? (
-        <>
-          <p className="lp-st-stale">
-            <Icon name="clock" />
-            This test is for the previous route.
-          </p>
-          <div className="is-stale"><Result value={job.value} /></div>
-          <button type="button" className="lp-st-run" onClick={start} disabled={!canRun}>
-            <Icon name="restart" />
-            Re-run for this route
-          </button>
-        </>
-      ) : null}
-
-      {job.state === 'failure' ? (
-        <p
-          className={`lp-st-failure ${
-            job.failure.kind === 'data-unavailable' ? 'is-absent' : 'is-error'
-          }`}
-        >
-          <Icon name={job.failure.kind === 'data-unavailable' ? 'info' : 'warning'} />
-          <span>{describeFailure(job.failure)}</span>
-        </p>
-      ) : null}
-    </div>
+    <JobState
+      job={job}
+      start={start}
+      cancel={cancel}
+      canRun={canRun}
+      runIcon="spark"
+      runLabel={`Run ${runs.toLocaleString('en-GB')} executions`}
+      busyLabel="Executing…"
+      staleLabel="This test is for the previous route."
+    >
+      {(value) => <Result value={value} />}
+    </JobState>
   )
 }

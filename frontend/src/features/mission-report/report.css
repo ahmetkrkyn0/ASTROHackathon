@@ -1024,60 +1024,29 @@
 }
 
 /* ── Evidence: formal safety + cost model ───────────────────────────────────
-   The prose the rail panels deliberately do not carry. Same three rules as the
-   rest of the report -- flat surfaces, 2px radius, mono for measured data --
-   and set at a readable measure rather than a rail's width, which is the whole
-   reason it lives here. */
+   The prose the rail panels deliberately do not carry. Built ON the report's
+   own card and table rather than beside them -- only the FRETISH column is
+   different, because it is a sentence and the rest of that table is figures. */
 
 .lp-ev { display: flex; flex-direction: column; gap: 14px; }
 
-.lp-ev-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--fs-small);
-}
-
-.lp-ev-table th {
-  text-align: left;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--line-card);
-  font-family: var(--font-data);
-  font-size: var(--fs-tiny);
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-}
-
-.lp-ev-table td {
-  padding: 8px;
-  border-bottom: 1px solid var(--line-inner);
-  vertical-align: top;
-  color: var(--text-3);
-}
-
-.lp-ev-table tbody tr:last-child td { border-bottom: none; }
-
-/* Numbers are measured data, so they are the only mono in the table. */
-.lp-ev-num {
-  font-family: var(--font-data);
-  text-align: right;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
+/* Inherits .lp-report-table. Two overrides only. */
+.lp-ev-table td { white-space: normal; vertical-align: top; }
+.lp-ev-table .lp-ev-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
 
 .lp-ev-id {
   display: block;
-  font-family: var(--font-data);
-  font-size: var(--fs-tiny);
-  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
 }
 
-/* The requirement as written. Set at a comfortable measure -- this is the
-   sentence that says what was actually checked. */
+/* The requirement as written, at a readable measure. This sentence is what
+   was actually checked, and the rail has no room for it. */
 .lp-ev-fretish {
   display: block;
   max-width: 62ch;
   margin-top: 2px;
+  font-family: var(--font-body);
   line-height: 1.5;
   color: var(--text-2);
 }
@@ -1085,7 +1054,8 @@
 .lp-ev-reason {
   display: block;
   margin-top: 3px;
-  font-size: var(--fs-tiny);
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
   line-height: 1.45;
   color: var(--text-dimmest);
 }
@@ -1097,8 +1067,8 @@
 .lp-ev-block {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-bottom: 12px;
+  gap: 7px;
+  padding-bottom: 13px;
   border-bottom: 1px solid var(--line-inner);
 }
 
@@ -1113,16 +1083,17 @@
 
 .lp-ev-block-head h5 {
   margin: 0;
-  font-size: var(--fs-small);
-  font-weight: 500;
-  color: var(--text-2);
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text);
 }
 
 .lp-ev-validity {
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
-  letter-spacing: 0.05em;
-  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  color: var(--text-dim-2);
   white-space: nowrap;
 }
 
@@ -1136,8 +1107,9 @@
 }
 
 .lp-ev-scope {
-  padding: 7px 10px;
+  padding: 8px 10px;
   border-left: 2px solid var(--line-card);
+  border-radius: var(--radius);
   background: var(--bg-inset);
 }
 
@@ -1145,15 +1117,15 @@
   display: block;
   margin-bottom: 3px;
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
-  letter-spacing: 0.05em;
-  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  color: var(--text-dim-2);
 }
 
 .lp-ev-meta {
   margin: 0;
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dimmest);
 }
 
@@ -1165,13 +1137,13 @@
   flex-direction: column;
   gap: 3px;
   max-width: 78ch;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   line-height: 1.5;
   color: var(--text-dimmest);
 }
 
 .lp-ev-refs-label {
   font-family: var(--font-data);
-  letter-spacing: 0.05em;
-  color: var(--text-dim);
+  letter-spacing: var(--track-label);
+  color: var(--text-dim-2);
 }

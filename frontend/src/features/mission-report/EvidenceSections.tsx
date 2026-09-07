@@ -28,7 +28,10 @@ export function SafetyEvidence({ plan, t }: { plan: unknown; t: ReportCopy }) {
 
   return (
     <div className="lp-ev">
-      <table className="lp-ev-table">
+      {/* The report's own table, with one column allowed to wrap: the FRETISH
+          sentence is prose and the rest of this table is not. */}
+      <div className="lp-report-table-wrap">
+      <table className="lp-report-table lp-ev-table">
         <thead>
           <tr>
             <th>{t.evidence.requirement}</th>
@@ -67,6 +70,7 @@ export function SafetyEvidence({ plan, t }: { plan: unknown; t: ReportCopy }) {
           ))}
         </tbody>
       </table>
+      </div>
 
       {view.claim ? (
         <p className="lp-ev-claim">

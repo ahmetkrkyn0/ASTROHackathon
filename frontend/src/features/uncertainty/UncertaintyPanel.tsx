@@ -1,6 +1,5 @@
 import { Icon } from '../../components/Fleet/SpecIcons'
-import { describeFailure } from '../../net/errors'
-import type { AnalysisJob } from '../analysis-job'
+import { JobState, type AnalysisJob } from '../analysis-job'
 import type { UncertaintyResponse, UncertaintyBand } from '../../net/uncertainty'
 import type { UncertaintySummary } from './useUncertainty'
 import './uncertainty.css'
@@ -122,7 +121,8 @@ export function UncertaintyPanel({
 }) {
   return (
     <div className="lp-unc">
-      {/* The cheap half, when the ensemble exists. */}
+      {/* The cheap half, when the ensemble exists: it rides along with the
+          plan and costs milliseconds. */}
       {summary ? (
         <dl className="lp-unc-summary">
           <div>
@@ -141,58 +141,18 @@ export function UncertaintyPanel({
         </dl>
       ) : null}
 
-      {job.state === 'idle' || job.state === 'failure' ? (
-        <button
-          type="button"
-          className="lp-unc-run"
-          onClick={start}
-          disabled={!canRun}
-        >
-          <Icon name="levels" />
-          Price the route on the clone ensemble
-        </button>
-      ) : null}
-
-      {/* Indeterminate, and nothing here pretends otherwise: the backend
-          reports no progress for this job, so a percentage would be an
-          animation impersonating telemetry. */}
-      {job.state === 'running' ? (
-        <div className="lp-unc-running">
-          <span className="lp-unc-spinner" aria-hidden="true" />
-          <span>Pricing on 100 clones…</span>
-          <button type="button" className="lp-unc-cancel" onClick={cancel}>Cancel</button>
-        </div>
-      ) : null}
-
-      {job.state === 'success' ? <Result value={job.value} /> : null}
-
-      {/* Stale rather than gone: the operator changed something, and a result
-          that described the previous route is greyed out instead of vanishing,
-          which would read as data loss. */}
-      {job.state === 'stale' ? (
-        <>
-          <p className="lp-unc-stale">
-            <Icon name="clock" />
-            This band is for the previous route.
-          </p>
-          <div className="is-stale"><Result value={job.value} /></div>
-          <button type="button" className="lp-unc-run" onClick={start} disabled={!canRun}>
-            <Icon name="restart" />
-            Re-price for this route
-          </button>
-        </>
-      ) : null}
-
-      {job.state === 'failure' ? (
-        <p
-          className={`lp-unc-failure ${
-            job.failure.kind === 'data-unavailable' ? 'is-absent' : 'is-error'
-          }`}
-        >
-          <Icon name={job.failure.kind === 'data-unavailable' ? 'info' : 'warning'} />
-          <span>{describeFailure(job.failure)}</span>
-        </p>
-      ) : null}
+      <JobState
+        job={job}
+        start={start}
+        cancel={cancel}
+        canRun={canRun}
+        runIcon="levels"
+        runLabel="Price on the clone ensemble"
+        busyLabel="Pricing on 100 clones…"
+        staleLabel="This band is for the previous route."
+      >
+        {(value) => <Result value={value} />}
+      </JobState>
     </div>
   )
 }

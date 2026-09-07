@@ -24,11 +24,16 @@
 
 .lp-rm-head-icon { font-size: 14px; color: var(--text-dim); }
 
+/* Sub-heading inside a rail panel, in the console's own label voice:
+   the same size, weight and tracking .lp-meta-label uses. */
 .lp-rm-head h4 {
   margin: 0;
-  font-size: var(--fs-small);
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
   font-weight: 500;
-  color: var(--text-2);
+  letter-spacing: var(--track-label);
+  color: var(--text-muted);
+  text-transform: uppercase;
 }
 
 .lp-rm-validity {
@@ -44,7 +49,7 @@
   padding: 1px 5px;
   border-radius: var(--radius);
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
@@ -71,8 +76,8 @@
 .lp-rm-figure { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 
 .lp-rm-figure dt {
-  font-size: var(--fs-tiny);
-  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -86,7 +91,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.lp-rm-hint { font-size: var(--fs-tiny); color: var(--text-dimmest); }
+.lp-rm-hint { font-size: var(--fs-micro); color: var(--text-dimmest); }
 
 /* ── The line that says what it cost ─────────────────────────────────────── */
 
@@ -99,7 +104,7 @@
   padding: 6px 8px;
   border-radius: var(--radius);
   background: var(--bg-inset);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dim);
 }
 
@@ -124,7 +129,7 @@
   border: 1px dashed var(--line-button);
   border-radius: var(--radius);
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dim);
 }
 
@@ -138,7 +143,7 @@
   padding: 7px 9px;
   border: 1px dashed var(--line-inner);
   border-radius: var(--radius);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   line-height: 1.5;
   color: var(--text-dim);
 }
@@ -150,7 +155,7 @@
   align-items: center;
   gap: 5px;
   margin: 0;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dimmest);
 }
 

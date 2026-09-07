@@ -1,5 +1,5 @@
 import { Icon } from '../../components/Fleet/SpecIcons'
-import { describeFailure } from '../../net/errors'
+import { JobState } from '../analysis-job'
 import type { RiskSweepResponse, SweepDelta } from '../../net/riskSweep'
 import { useRiskSweep } from './useRiskSweep'
 import './risk-sweep.css'
@@ -78,42 +78,18 @@ export function RiskSweep() {
   return (
     <section className="rail-section">
       <p className="panel-kicker">Risk Appetite Sweep</p>
-
-      <div className="lp-rs">
-        {job.state === 'idle' || job.state === 'failure' ? (
-          <button type="button" className="lp-rs-run" onClick={start} disabled={!canRun}>
-            <Icon name="balance" />
-            Plan at α {alphas.join(', ')}
-          </button>
-        ) : null}
-
-        {job.state === 'running' ? (
-          <div className="lp-rs-running">
-            <span className="lp-rs-spinner" aria-hidden="true" />
-            <span>Planning {alphas.length} more routes…</span>
-            <button type="button" className="lp-rs-cancel" onClick={cancel}>Cancel</button>
-          </div>
-        ) : null}
-
-        {job.state === 'success' ? <Result value={job.value} /> : null}
-
-        {job.state === 'stale' ? (
-          <>
-            <p className="lp-rs-stale">
-              <Icon name="clock" />
-              This sweep is for the previous mission.
-            </p>
-            <div className="is-stale"><Result value={job.value} /></div>
-          </>
-        ) : null}
-
-        {job.state === 'failure' ? (
-          <p className={`lp-rs-failure ${job.failure.kind === 'data-unavailable' ? 'is-absent' : 'is-error'}`}>
-            <Icon name={job.failure.kind === 'data-unavailable' ? 'info' : 'warning'} />
-            <span>{describeFailure(job.failure)}</span>
-          </p>
-        ) : null}
-      </div>
+      <JobState
+        job={job}
+        start={start}
+        cancel={cancel}
+        canRun={canRun}
+        runIcon="balance"
+        runLabel={`Plan at \u03b1 ${alphas.join(', ')}`}
+        busyLabel={`Planning ${alphas.length} more routes\u2026`}
+        staleLabel="This sweep is for the previous mission."
+      >
+        {(value) => <Result value={value} />}
+      </JobState>
     </section>
   )
 }

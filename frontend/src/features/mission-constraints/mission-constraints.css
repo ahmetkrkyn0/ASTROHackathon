@@ -78,6 +78,7 @@
 }
 
 .lp-mc-label {
+  font-family: var(--font-body);
   font-size: var(--fs-small);
   color: var(--text-3);
 }
@@ -87,7 +88,7 @@
 .lp-mc-hint {
   margin: 0;
   padding-left: 34px;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   line-height: 1.5;
   color: var(--text-dim);
 }
@@ -134,7 +135,7 @@
   padding: 6px 8px;
   border-radius: var(--radius);
   background: var(--bg-inset);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   line-height: 1.45;
   color: var(--text-dim);
 }

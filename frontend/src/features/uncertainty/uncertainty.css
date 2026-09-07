@@ -13,7 +13,7 @@
   margin: 0;
 }
 
-.lp-unc-summary dt { font-size: var(--fs-tiny); color: var(--text-dim); }
+.lp-unc-summary dt { font-size: var(--fs-micro); color: var(--text-dim-2); }
 
 .lp-unc-summary dd {
   margin: 0;
@@ -23,65 +23,8 @@
   font-variant-numeric: tabular-nums;
 }
 
-.lp-unc-sub { margin-left: 6px; font-size: var(--fs-tiny); color: var(--text-dimmest); }
+.lp-unc-sub { margin-left: 6px; font-size: var(--fs-micro); color: var(--text-dimmest); }
 
-/* ── Run / cancel ────────────────────────────────────────────────────────── */
-
-.lp-unc-run {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid var(--line-button);
-  border-radius: var(--radius);
-  background: var(--bg-inset);
-  color: var(--text-2);
-  font-size: var(--fs-small);
-  cursor: pointer;
-}
-
-.lp-unc-run:hover:not(:disabled) { border-color: var(--lavender); color: var(--text); }
-.lp-unc-run:disabled { opacity: 0.45; cursor: default; }
-
-.lp-unc-running {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  border-radius: var(--radius);
-  background: var(--bg-inset);
-  font-size: var(--fs-tiny);
-  color: var(--text-dim);
-}
-
-/* Indeterminate on purpose: the backend reports no progress for this job, so
-   a filling bar would be an animation impersonating telemetry. */
-.lp-unc-spinner {
-  flex: none;
-  width: 11px;
-  height: 11px;
-  border: 1.5px solid var(--line-button);
-  border-top-color: var(--cyan);
-  border-radius: 50%;
-  animation: lp-unc-spin 900ms linear infinite;
-}
-
-@keyframes lp-unc-spin { to { transform: rotate(360deg); } }
-
-.lp-unc-cancel {
-  margin-left: auto;
-  border: none;
-  background: none;
-  padding: 0;
-  color: var(--text-dim);
-  font-size: var(--fs-tiny);
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.lp-unc-cancel:hover { color: var(--text-2); }
 
 /* ── The bands ───────────────────────────────────────────────────────────── */
 
@@ -92,7 +35,7 @@
   flex-wrap: wrap;
   gap: 10px;
   margin: 0;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dim);
 }
 
@@ -105,7 +48,13 @@
 
 .lp-unc-metric { display: flex; flex-direction: column; gap: 3px; }
 
-.lp-unc-label { font-size: var(--fs-tiny); color: var(--text-dim); }
+.lp-unc-label {
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
 
 .lp-unc-row { display: flex; flex-direction: column; gap: 3px; }
 
@@ -144,7 +93,7 @@
   display: flex;
   justify-content: space-between;
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dimmest);
   font-variant-numeric: tabular-nums;
 }
@@ -156,49 +105,11 @@
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dim);
 }
 
 .lp-unc-feasible svg { flex: none; font-size: 12px; }
 .lp-unc-feasible b { font-family: var(--font-data); font-weight: 500; color: var(--text-2); }
 
-/* ── Stale and absent ────────────────────────────────────────────────────── */
 
-.lp-unc-stale,
-.lp-unc-failure {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 0;
-  font-size: var(--fs-tiny);
-  line-height: 1.5;
-}
-
-.lp-unc-stale { color: var(--text-dim); }
-.lp-unc-stale svg,
-.lp-unc-failure svg { flex: none; margin-top: 1px; font-size: 12px; }
-
-.is-stale { opacity: 0.5; }
-
-/* Unavailable is not an error, and is not drawn like one: a missing clone
-   ensemble is a fact about the deployment, and the backend's sentence names
-   the script that builds it. */
-.lp-unc-failure.is-absent {
-  padding: 7px 9px;
-  border: 1px dashed var(--line-inner);
-  border-radius: var(--radius);
-  color: var(--text-dim);
-}
-
-.lp-unc-failure.is-error {
-  padding: 7px 9px;
-  border-left: 2px solid var(--coral);
-  border-radius: var(--radius);
-  background: rgba(237, 133, 110, 0.08);
-  color: var(--coral-text);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lp-unc-spinner { animation: none; }
-}

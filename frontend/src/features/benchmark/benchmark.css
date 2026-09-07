@@ -6,7 +6,7 @@
 
 .lp-bm-lede {
   margin: 0;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   line-height: 1.5;
   color: var(--text-dim);
 }
@@ -26,8 +26,8 @@
 
 .lp-bm-label {
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
-  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
 }
 
 .lp-bm-rate { display: flex; align-items: baseline; gap: 6px; }
@@ -42,7 +42,7 @@
 
 .lp-bm-vs {
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dimmest);
 }
 
@@ -75,7 +75,7 @@
 
 .lp-bm-why {
   margin: 0;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   line-height: 1.45;
   color: var(--text-dimmest);
 }
@@ -86,7 +86,7 @@
   align-items: flex-start;
   gap: 6px;
   margin: 0;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   line-height: 1.5;
 }
 
@@ -105,7 +105,7 @@
 
 .lp-bm-claim {
   margin: 0;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   line-height: 1.55;
   color: var(--text-dimmest);
 }

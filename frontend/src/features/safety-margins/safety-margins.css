@@ -22,15 +22,16 @@
 
 .lp-margins-verdict-text {
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
-  letter-spacing: 0.07em;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-caps);
   color: var(--text-2);
 }
 
 .lp-margins-count {
   margin-left: auto;
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -61,7 +62,7 @@
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dim);
 }
 
@@ -101,7 +102,7 @@
 
 .lp-margin-id {
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-dim);
 }
 
@@ -114,7 +115,7 @@
 
 .lp-margin-value {
   font-family: var(--font-data);
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   color: var(--text-2);
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -187,7 +188,7 @@
   flex-direction: column;
   gap: 4px;
   margin: 0;
-  font-size: var(--fs-tiny);
+  font-size: var(--fs-micro);
   line-height: 1.45;
 }
 
