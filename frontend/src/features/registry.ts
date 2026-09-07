@@ -9,6 +9,7 @@ import { CorridorFeature } from './corridor'
 import { CostExplain } from './cost-explain'
 import { LayerPicker } from './layer-picker'
 import { LayerProvenance } from './layer-provenance'
+import { MapLegend } from './map-legend'
 import { MissionReport } from './mission-report'
 import { MissionSetup } from './mission-setup'
 import { MissionValidation } from './mission-validation'
@@ -152,6 +153,10 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // solving indicator covers the map while a route is being solved, so it
   // comes after the picker it may draw over.
   { id: 'layer-picker', slot: 'canvasOverlay', Component: LayerPicker },
+  // Scale and risk key, over the terrain rather than under it: both describe
+  // what the map is showing, so they belong on the thing they describe rather
+  // than in a band the eye has to leave it to read.
+  { id: 'map-legend', slot: 'canvasOverlay', Component: MapLegend },
   { id: 'solving-indicator', slot: 'canvasOverlay', Component: SolvingIndicator },
   // The first two features to come back from the parking lot, and the only
   // two that needed no retyping: neither draws an overlay and neither reads a

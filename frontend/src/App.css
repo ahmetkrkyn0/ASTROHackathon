@@ -5602,7 +5602,10 @@ select {
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* The scale and the risk key moved onto the map, where the things they
+     describe are. What is left is the transport, so the strip aligns to the
+     end rather than splitting a single child across the width. */
+  justify-content: flex-end;
   gap: 18px;
   padding: 0 16px;
   background: var(--bg-surface);
@@ -5610,119 +5613,7 @@ select {
   overflow: hidden;
 }
 
-.lp-status-left {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  min-width: 0;
-  min-width: 0;
-  flex: 0 1 auto;
-}
-
-/* Right padding keeps the last readout clear of the assistant launcher, which
-   is pinned to the same corner. */
-.lp-status-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding-right: 62px;
-}
-
-.lp-scale {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
-}
-
-/* A ruler, drawn the way a chart draws one: a rule with a tick at each end. */
-.lp-scale-rule {
-  position: relative;
-  width: 52px;
-  height: 1px;
-  background: var(--text-dim-2);
-}
-
-.lp-scale-rule::before,
-.lp-scale-rule::after {
-  content: '';
-  position: absolute;
-  top: -3px;
-  width: 1px;
-  height: 7px;
-  background: var(--text-dim-2);
-}
-
-.lp-scale-rule::before {
-  left: 0;
-}
-
-.lp-scale-rule::after {
-  right: 0;
-}
-
-.lp-scale-copy {
-  color: var(--text-muted-2);
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  white-space: nowrap;
-}
-
-.lp-risk-legend {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.lp-risk-legend::-webkit-scrollbar {
-  display: none;
-}
-
-.lp-legend-label {
-  color: var(--text-dimmest);
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-caps);
-  flex: none;
-}
-
-/* The legend swatch is a line, because what it documents is a line: the map
-   encodes risk in both the colour and the dash pattern, and a solid block
-   could only ever show half of that. */
-.lp-legend-line {
-  width: 22px;
-  height: 8px;
-  flex: none;
-  overflow: visible;
-}
-
-.lp-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: var(--fs-micro);
-  white-space: nowrap;
-  flex: none;
-}
-
-.lp-legend-swatch {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius);
-  flex: none;
-}
-
 @media (max-width: 900px) {
-  .lp-risk-legend {
-    display: none;
-  }
-
   /* Below this there is no room for two columns: the photograph would be a
      sliver and the specifications a column of wrapped single words. This block
      has to sit after the .lp-fleet-card rules it overrides -- a media query

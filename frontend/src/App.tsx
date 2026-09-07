@@ -19,7 +19,6 @@ import {
 import { Icon } from './components/Fleet/SpecIcons'
 import MapCanvas, { type ClickMode, DOWNSAMPLE, type MapViewMode } from './MapCanvas'
 import { generateRockField, type RockDescriptor } from './lidarSimulation'
-import { riskToDashArray, riskToHex } from './colormap'
 import SpaceBackdrop from './SpaceBackdrop'
 import SplashScreen, { type BootStage } from './SplashScreen'
 import TerrainCanvas3D from './TerrainCanvas3D'
@@ -119,25 +118,6 @@ interface ToastItem {
   actionLabel?: string
   actionId?: 'show-traversability'
 }
-
-/**
- * The risk legend, derived rather than transcribed.
- *
- * These four hexes used to be written out here, and they had drifted: the
- * legend taught green for "Safe" while the map drew a safe segment in cyan --
- * a colour distance of 62, so the legend was describing something the map
- * never rendered. Reading riskToHex makes that class of drift impossible.
- *
- * The swatch shows the dash pattern too, because the map now carries risk in
- * the line's pattern as well as its colour, and a legend that showed only
- * colour would document half the encoding.
- */
-const LEGEND_ITEMS = [
-  { label: 'Safe', level: 'LOW' },
-  { label: 'Caution', level: 'MEDIUM' },
-  { label: 'High', level: 'HIGH' },
-  { label: 'Critical', level: 'CRITICAL' },
-] as const
 
 export default function App() {
   // Phase and lifecycle. The address names the stage, so a reload comes back to
@@ -1205,40 +1185,6 @@ export default function App() {
 
             {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
             <footer className={`lp-status-bar ${missionMode === 'analyze' ? 'is-analyze' : ''}`}>
-              <div className="lp-status-left">
-                <div className="lp-scale">
-                  <span className="lp-scale-rule" aria-hidden="true" />
-                  <span className="lp-scale-copy">
-                    0 - {focusTelemetry.spanKm.toFixed(1)} km · {focusTelemetry.resolutionM.toFixed(0)} m/px
-                  </span>
-                </div>
-
-                <div className="lp-risk-legend">
-                  <span className="lp-legend-label">RISK</span>
-                  {LEGEND_ITEMS.map((item) => (
-                    <span key={item.label} className="lp-legend-item">
-                      <svg
-                        className="lp-legend-line"
-                        viewBox="0 0 22 8"
-                        aria-hidden="true"
-                        focusable="false"
-                      >
-                        <line
-                          x1="1"
-                          y1="4"
-                          x2="21"
-                          y2="4"
-                          stroke={riskToHex(item.level)}
-                          strokeWidth="2.4"
-                          strokeDasharray={riskToDashArray(item.level)}
-                        />
-                      </svg>
-                      {item.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
               <div className="lp-status-right">
                 <StatusBarSlot />
               </div>
