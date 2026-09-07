@@ -1,0 +1,1192 @@
+/* ── MISSION REPORT ─────────────────────────────────────────────────────────
+   Full-screen, opaque, and NOT frosted: the canvas darkens what is behind a
+   modal, it never blurs it. Same three rules as the rest of the cockpit --
+   flat surfaces, 2px radius, mono for measured data only. */
+
+/* In the top bar, not floating over the map.
+
+   It used to sit at right:74 / bottom:56, beside the assistant launcher, and
+   the two read as a stack of buttons in the corner of the terrain -- with the
+   report vanishing under the chat window whenever that was open, which is why
+   it had been pushed sideways in the first place. The bar is where the
+   cockpit's other application-level control already lives (Systems), so this
+   belongs beside it rather than in a second, invented place.
+
+   In the bar's flow, not positioned into it: the button is portalled into an
+   anchor the bar renders, so it is laid out by .lp-topbar-right like every
+   other control there. A fixed offset would have had to be re-measured every
+   time the readouts beside it changed length. */
+.lp-report-launcher {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: rgba(186, 175, 245, 0.1);
+  border: 1px solid var(--line-accent-hover);
+  border-radius: var(--radius);
+  color: var(--lavender-bright);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: var(--track-normal);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.lp-report-launcher:hover {
+  background: rgba(186, 175, 245, 0.2);
+  border-color: var(--lavender);
+}
+
+.lp-report-launcher:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
+}
+
+.lp-report-launcher-icon {
+  font-size: 17px;
+}
+
+/* A report is ready and nobody has looked at it.
+
+   This used to be an auto-opening modal, which covered the map at the exact
+   moment the operator had finished watching a rover drive across it. The
+   button asks instead.
+
+   A box-shadow ring and nothing else. App.css:2519 gives the slot
+   `display: contents`, so this button IS the flex item in .lp-topbar-right --
+   animating transform, border-width or padding would shove Systems, Mission
+   and Data link sideways sixty times a second. A shadow costs no layout. */
+@keyframes lp-report-waiting {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(186, 175, 245, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(186, 175, 245, 0.06);
+  }
+}
+
+.lp-report-launcher.is-waiting {
+  border-color: var(--lavender);
+  color: var(--text);
+  animation: lp-report-waiting 1.6s ease-in-out infinite;
+}
+
+/* Guarded per feature, as every other animation in this codebase is. The
+   button still says it is waiting -- it keeps the lit border -- it just stops
+   moving. */
+@media (prefers-reduced-motion: reduce) {
+  .lp-report-launcher.is-waiting {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(186, 175, 245, 0.18);
+  }
+}
+
+.lp-report-scrim {
+  position: fixed;
+  inset: 0;
+  /* Darkens, does not frost. */
+  background: rgba(3, 5, 9, 0.82);
+  z-index: 300;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 24px;
+}
+
+.lp-report-modal {
+  width: min(1180px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.lp-report-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line-card);
+  background: var(--bg-card);
+}
+
+.lp-report-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-report-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-value);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.005em;
+}
+
+/* A sentence, not three facts joined by punctuation. The numbers stay in the
+   data face because they are measurements; the words around them do not. */
+.lp-report-subtitle {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+}
+
+.lp-report-figure {
+  font-family: var(--font-data);
+  color: var(--text-2);
+}
+
+.lp-report-header-right {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+/* What the mission recorded: rover, region, and when this was produced.
+   Mono, because every value in it is a measurement or a timestamp. */
+.lp-report-meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 12px;
+  align-content: start;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+
+.lp-report-meta > div {
+  display: contents;
+}
+
+.lp-report-meta dt {
+  margin: 0;
+  color: var(--text-dim-2);
+}
+
+.lp-report-meta dd {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.lp-report-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Two buttons, each naming its own language. A single toggle labelled with
+   the OTHER language is the classic ambiguity -- nobody agrees whether it
+   shows the current state or the action it performs. */
+.lp-report-langs {
+  display: flex;
+  margin-right: 6px;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* Both buttons keep one width whichever is active. The glyph only appears on
+   the selected one, so without a floor the group changed width on every
+   switch and the toolbar beside it shuffled. */
+.lp-report-lang {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 58px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: var(--track-normal);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.lp-report-lang + .lp-report-lang {
+  border-left: 1px solid var(--line-card);
+}
+
+.lp-report-lang:hover {
+  color: var(--text);
+}
+
+.lp-report-lang.is-active {
+  background: rgba(186, 175, 245, 0.14);
+  color: var(--lavender-bright);
+}
+
+.lp-report-lang .lp-icon {
+  font-size: 15px;
+}
+
+/* ── The verdict ─────────────────────────────────────────────────────────
+   The one element in this report allowed to shout, and the only reason a
+   reader opens it in a hurry. It sits between the header and the body at full
+   width rather than as a chip beside the title, because a three-letter token
+   in a corner is a label and the decision is the document.
+
+   The border colour arrives inline from VERDICT_COLOR; everything else is
+   here. No glow -- App.css:184 is explicit that this system has two shadows
+   and neither is coloured. */
+.lp-report-verdict-panel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line-card);
+  /* Overridden inline per verdict; declared so the shape never depends on it. */
+  border-left: 3px solid var(--line-card);
+  background: var(--bg-card);
+}
+
+.lp-report-verdict-icon {
+  flex: 0 0 auto;
+  font-size: 30px;
+}
+
+.lp-report-verdict-panel.is-go .lp-report-verdict-icon {
+  color: var(--risk-low);
+}
+
+.lp-report-verdict-panel.is-go-with-risk .lp-report-verdict-icon {
+  color: var(--risk-med);
+}
+
+.lp-report-verdict-panel.is-no-go .lp-report-verdict-icon {
+  color: var(--risk-crit);
+}
+
+.lp-report-verdict-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* The token itself: a contract value shared with the backend, never
+   translated, and set in mono because that is what it is. */
+.lp-report-verdict {
+  font-family: var(--font-data);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  letter-spacing: var(--track-caps);
+  line-height: 1.15;
+}
+
+/* What it means. The UI review asked for exactly this line: GO and NO-GO are
+   recognisable only to someone who already knows the product. */
+.lp-report-verdict-meaning {
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+/* Export sits beside the close button, not buried in the body: it is
+   something you do to the whole report, at the moment you have finished
+   reading it. Both are named for what they produce -- "Save as PDF" and
+   "Download data" -- rather than for the mechanism. */
+.lp-report-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.lp-report-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+.lp-report-action:hover {
+  border-color: var(--line-accent-hover);
+  color: var(--text);
+}
+
+.lp-report-action .lp-icon,
+.lp-report-close .lp-icon {
+  font-size: 16px;
+}
+
+.lp-report-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+.lp-report-close:hover {
+  border-color: var(--line-accent-hover);
+  color: var(--text);
+}
+
+/* ── Body ───────────────────────────────────────────────────────────────── */
+
+.lp-report-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lp-report-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .lp-report-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lp-report-card {
+  background: var(--bg-card);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+  min-width: 0;
+}
+
+.lp-report-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-inner);
+}
+
+/* The glyph and the label travel together, so the note and the action still
+   sit at the far edge of the header. */
+.lp-report-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* Named for the QUANTITY rather than the card: the battery profile carries
+   the same mark the battery KPI does, so a reader learns one glyph per
+   reading instead of one per box. Neutral by default -- the readings that
+   carry a colour carry it in their own chart, and a rainbow of card headers
+   would compete with that. */
+.lp-report-card-icon {
+  flex: 0 0 auto;
+  font-size: 17px;
+  color: var(--text-3);
+}
+
+.lp-report-card-note {
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+  text-align: right;
+}
+
+/* Pushed to the right edge whether or not the section also carries a note,
+   because a control that moves when the copy changes reads as a different
+   control. */
+.lp-report-card-action {
+  margin-left: auto;
+}
+
+.lp-report-ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lp-report-ask .lp-icon {
+  font-size: 15px;
+}
+
+/* The assistant answers only in Turkish -- its grounding layer matches Turkish
+   morphology to block fabricated numbers -- so an English report says which
+   language is coming back BEFORE the operator presses. The same badge the chat
+   panel carries, for the same reason. */
+.lp-report-ask-lang {
+  padding: 0 4px;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  color: var(--text-muted);
+}
+
+.lp-report-ask:hover {
+  border-color: var(--line-accent-hover);
+  color: var(--text);
+}
+
+.lp-report-empty {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-dim);
+}
+
+/* ── Verdict reasons + KPIs ─────────────────────────────────────────────── */
+
+.lp-report-reasons {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lp-report-reasons li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.lp-reason-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  transform: translateY(-1px);
+}
+
+.lp-report-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1px;
+  background: var(--line-inner);
+  border: 1px solid var(--line-inner);
+}
+
+.lp-report-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-inset);
+}
+
+/* .lp-kpi-label is shared with the rail panels (App.css:2590), so the row is
+   made here rather than by editing that rule and moving the whole cockpit. */
+.lp-report-kpi .lp-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lp-report-kpi-icon {
+  flex: 0 0 auto;
+  font-size: 14px;
+  color: var(--text-dim-2);
+}
+
+/* ── Charts ─────────────────────────────────────────────────────────────── */
+
+.lp-chart-wrap {
+  /* The measured box. min-width:0 keeps a grid column from being widened by
+     the SVG instead of the SVG being narrowed by the column. */
+  width: 100%;
+  min-width: 0;
+}
+
+.lp-chart {
+  display: block;
+}
+
+.lp-hbars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lp-hbar-row {
+  display: grid;
+  grid-template-columns: 58px 1fr 46px 30px;
+  align-items: center;
+  gap: 10px;
+}
+
+.lp-hbar-label,
+.lp-hbar-val,
+.lp-hbar-count {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-muted-2);
+}
+
+.lp-hbar-val {
+  text-align: right;
+  color: var(--text-2);
+}
+
+.lp-hbar-count {
+  text-align: right;
+  color: var(--text-dimmest);
+}
+
+.lp-hbar-track {
+  height: 7px;
+  background: var(--bg-inset);
+  border: 1px solid var(--line-inner);
+}
+
+.lp-hbar-fill {
+  height: 100%;
+  transition: width 160ms ease-out;
+}
+
+.lp-stacked-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Note 30 of the UI review: the risk split is the reading the verdict rests
+   on, and at 12px with small legend text it was the quietest thing in the
+   report. Thicker bar, and the shares set at the size the KPI values use --
+   it stays in its column, it just stops whispering. */
+.lp-stacked-bar {
+  display: flex;
+  height: 20px;
+  background: var(--bg-inset);
+  border: 1px solid var(--line-inner);
+  overflow: hidden;
+}
+
+.lp-stacked-seg {
+  height: 100%;
+}
+
+.lp-stacked-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+.lp-stacked-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+}
+
+.lp-stacked-legend strong {
+  font-family: var(--font-data);
+  font-size: var(--fs-value);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.lp-legend-swatch {
+  width: 7px;
+  height: 7px;
+  flex: none;
+}
+
+.lp-donut-block {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  flex-wrap: wrap;
+}
+
+.lp-donut {
+  width: 128px;
+  height: 128px;
+  flex: none;
+}
+
+.lp-donut-legend {
+  flex: 1;
+  min-width: 240px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1px;
+  background: var(--line-inner);
+  border: 1px solid var(--line-inner);
+}
+
+.lp-donut-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-inset);
+}
+
+.lp-donut-tile .lp-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-donut-tile-val {
+  font-family: var(--font-data);
+  font-size: var(--fs-strong);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.lp-donut-tile-share {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+/* ── Gauge ──────────────────────────────────────────────────────────────── */
+
+.lp-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.lp-gauge-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lp-gauge-val {
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lp-gauge-track {
+  height: 7px;
+  background: var(--bg-inset);
+  border: 1px solid var(--line-inner);
+}
+
+.lp-gauge-fill {
+  height: 100%;
+}
+
+.lp-gauge-note {
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+/* ── Details ────────────────────────────────────────────────────────────── */
+
+.lp-report-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+/* One glyph for both states. Two characters baked into two sentences meant
+   the arrow could disagree with the state it was describing. */
+.lp-report-toggle-icon {
+  font-size: 17px;
+  transition: transform 140ms ease;
+}
+
+.lp-report-toggle[aria-expanded='true'] .lp-report-toggle-icon {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-report-toggle-icon {
+    transition: none;
+  }
+}
+
+.lp-report-toggle:hover {
+  color: var(--text);
+  border-color: var(--line-accent-hover);
+}
+
+.lp-report-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0;
+}
+
+.lp-report-dl > div {
+  display: contents;
+}
+
+.lp-report-dl dt,
+.lp-report-dl dd {
+  margin: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-inner);
+  font-size: var(--fs-small);
+}
+
+.lp-report-dl dt {
+  color: var(--text-muted);
+}
+
+.lp-report-dl dd {
+  font-family: var(--font-data);
+  color: var(--text-2);
+  text-align: right;
+}
+
+.lp-report-table-wrap {
+  overflow-x: auto;
+}
+
+.lp-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+}
+
+.lp-report-table th {
+  text-align: left;
+  padding: 6px 8px;
+  color: var(--text-dim-2);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  letter-spacing: var(--track-label);
+  border-bottom: 1px solid var(--line-card);
+  white-space: nowrap;
+}
+
+.lp-report-table td {
+  padding: 6px 8px;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--line-inner);
+  white-space: nowrap;
+}
+
+/* ── Print ──────────────────────────────────────────────────────────────────
+   Exporting the report means printing it, and the browser's PDF writer is the
+   most capable one on the machine. No dependency, and the charts stay vector
+   because they are SVG -- a rasterised export would blur every axis label.
+
+   The screen design cannot go to paper unchanged. It is built for a dark
+   cockpit: near-black surfaces, hairlines that only read against them, and
+   text tuned for emitted light. On paper that is a page of ink with white
+   letters knocked out of it, which wastes toner and reads badly. So print
+   inverts the ground and lets the risk colours carry through, since they are
+   the only colour that means something.
+
+   `color-adjust: exact` on the risk marks only: their hue IS the reading, and
+   a browser that drops backgrounds to save ink would drop the finding with
+   them. */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  /* The cockpit behind the modal has no business on the page. */
+  body > *:not(.lp-report-scrim) {
+    display: none !important;
+  }
+
+  .lp-report-scrim {
+    position: static;
+    display: block;
+    padding: 0;
+    background: none;
+  }
+
+  .lp-report-modal {
+    width: 100%;
+    max-width: none;
+    height: auto;
+    border: none;
+    box-shadow: none;
+    background: #fff;
+    color: #111;
+
+    /* Retone the document by its tokens, not element by element.
+       Listing selectors only reaches what someone remembered to list, and it
+       reached none of the SVG: chart labels are drawn with fill="var(--text)"
+       and so were still painting near-white onto white paper. Redefining the
+       scale here catches every reference at once, in the charts and in the
+       markup alike.
+
+       Deliberately absent: --risk-*, --cyan and the rest of the semantic
+       palette. Those carry a reading rather than a rank, which is why the
+       rules below spend ink keeping them exact. */
+    --text: #111;
+    --text-2: #111;
+    --text-3: #333;
+    --text-muted: #555;
+    --text-muted-2: #555;
+    --text-dim: #555;
+    --text-dim-2: #555;
+    --text-dimmest: #666;
+    /* Grid and hairlines. #161b27 is a whisper on the console and a hard
+       black rule on paper. */
+    --line: #ddd;
+    --border-line: #ddd;
+  }
+
+  /* The unfilled part of a bar is the remainder, and on screen it is a dark
+     inset. Printed as-is it became a solid black block wider than the reading
+     it was meant to frame. */
+  .lp-hbar-track,
+  .lp-stacked-bar,
+  .lp-gauge-track {
+    background: #eee;
+  }
+
+  .lp-report-body {
+    overflow: visible;
+    padding: 0;
+    gap: 10px;
+  }
+
+  .lp-report-header {
+    background: none;
+    border-bottom: 1.5pt solid #111;
+    padding: 0 0 8pt;
+  }
+
+  .lp-report-title,
+  .lp-report-subtitle,
+  .lp-report-figure,
+  .lp-report-kpi .lp-kpi-val,
+  .lp-report-table td,
+  .lp-report-dl dd,
+  .lp-report-meta dd,
+  .lp-report-verdict-meaning {
+    color: #111;
+  }
+
+  .lp-meta-label,
+  .lp-report-card-note,
+  .lp-report-table th,
+  .lp-report-dl dt,
+  .lp-kpi-label,
+  .lp-gauge-note,
+  .lp-donut-tile-share,
+  .lp-report-meta dt {
+    color: #555;
+  }
+
+  /* The glyphs are ink, and on paper they are the only thing telling a
+     scanned column of cards apart at a glance. */
+  .lp-report-card-icon,
+  .lp-report-kpi-icon {
+    color: #555;
+  }
+
+  .lp-report-card,
+  .lp-report-kpi,
+  .lp-donut-tile {
+    background: none;
+    border-color: #bbb;
+  }
+
+  .lp-report-kpis,
+  .lp-donut-legend {
+    background: none;
+    border-color: #bbb;
+  }
+
+  .lp-report-card-head,
+  .lp-report-dl dt,
+  .lp-report-dl dd,
+  .lp-report-table td {
+    border-color: #ddd;
+  }
+
+  /* The verdict is the one thing a reader must not miss on paper either.
+     Its panel keeps its rule and its glyph keeps its colour; the token was
+     already the heaviest text in the document and stays that way. */
+  .lp-report-verdict {
+    font-weight: 700;
+  }
+
+  .lp-report-verdict-panel {
+    border-left-width: 3pt;
+    border-bottom: 1pt solid #ddd;
+    background: none;
+    padding: 8pt 0;
+  }
+
+  /* Colour that carries a reading survives the browser's ink-saving. */
+  .lp-stacked-seg,
+  .lp-stacked-bar,
+  .lp-hbar-fill,
+  .lp-hbar-track,
+  .lp-gauge-fill,
+  .lp-gauge-track,
+  .lp-legend-swatch,
+  .lp-reason-dot,
+  .lp-report-verdict,
+  .lp-report-verdict-panel,
+  .lp-report-verdict-icon,
+  .lp-chart,
+  .lp-donut {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Charts were sized against a measured pixel width; on paper they get the
+     column instead. */
+  .lp-chart {
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Nothing that only works by being clicked. */
+  .lp-report-close,
+  .lp-report-toggle,
+  .lp-report-actions,
+  .lp-report-langs,
+  .lp-report-ask,
+  .lp-report-launcher {
+    display: none !important;
+  }
+
+  /* A card split across a page break loses the pairing of chart and caption. */
+  .lp-report-verdict-panel {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .lp-report-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .lp-report-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ── Evidence: formal safety + cost model ───────────────────────────────────
+   Built ON the report's own card and table rather than beside them. A report
+   is not an excuse for a wall of text: every claim is a framed, labelled block
+   so a reader scanning for "what is this number allowed to mean" finds it by
+   shape rather than by reading four paragraphs to see which one it is in. */
+
+.lp-ev { display: flex; flex-direction: column; gap: 16px; }
+
+.lp-ev-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.lp-ev-meta {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
+}
+
+/* Inherits .lp-report-table. Three overrides: the sentence column wraps, the
+   figures stay on one line, and the meter column is a fixed track. */
+.lp-ev-table td { white-space: normal; vertical-align: top; }
+.lp-ev-table .lp-ev-num {
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lp-ev-table .lp-ev-meter-col { width: 108px; padding-top: 10px; }
+
+.lp-ev-id {
+  display: block;
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+/* The requirement as written, at a readable measure. This sentence is what was
+   actually checked, and the rail has no room for it. */
+.lp-ev-fretish {
+  display: block;
+  max-width: 62ch;
+  margin-top: 2px;
+  font-family: var(--font-body);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.lp-ev-reason {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--text-dimmest);
+}
+
+.lp-ev-table tr.is-violated .lp-ev-num { color: var(--coral-text); }
+.lp-ev-table tr.is-boundary .lp-ev-num { color: var(--cyan-text); }
+.lp-ev-table tr.is-not-applicable .lp-ev-fretish { color: var(--text-dim); }
+.lp-ev-table tr.is-not-applicable,
+.lp-ev-table tr.is-pending { opacity: 0.62; }
+
+/* ── One model's evidence ────────────────────────────────────────────────── */
+
+.lp-ev-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--line-inner);
+}
+
+.lp-ev-block:last-child { border-bottom: none; padding-bottom: 0; }
+
+.lp-ev-block-head { display: flex; align-items: center; gap: 8px; }
+.lp-ev-block-icon { font-size: 15px; color: var(--text-dim); }
+
+.lp-ev-block-head h5 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.lp-ev-validity { display: flex; gap: 5px; margin-left: auto; }
+
+/* The border carries the claim: solid where the number was measured, dashed
+   where it was modelled, dimmest where the model has no calibration behind it.
+   Same three tones the rail uses, so a reader learns them once. */
+.lp-ev-chip {
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-style: normal;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  white-space: nowrap;
+}
+
+.lp-ev-chip.is-measured { border: 1px solid var(--line-button); color: var(--text-2); }
+.lp-ev-chip.is-model { border: 1px dashed var(--line-button); color: var(--text-dim-2); }
+.lp-ev-chip.is-uncalibrated { border: 1px dashed var(--line-inner); color: var(--text-dimmest); }
+
+/* ── A framed, labelled note ─────────────────────────────────────────────── */
+
+.lp-ev-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-inner);
+  border-left-width: 2px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.lp-ev-note-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.lp-ev-note-label svg { font-size: 13px; }
+
+.lp-ev-note-body {
+  margin: 0;
+  max-width: 78ch;
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* The claim boundary is the one an operator must not miss, so it is the one
+   with a colour. Scope and absence are quieter -- they qualify, they do not
+   constrain what may be said. */
+.lp-ev-note.is-claim { border-left-color: var(--lavender); }
+.lp-ev-note.is-claim .lp-ev-note-label svg { color: var(--lavender); }
+.lp-ev-note.is-scope { border-left-color: var(--line-button); }
+.lp-ev-note.is-absent { border-style: dashed; border-left-color: var(--line-button); }
+
+.lp-ev-refs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 78ch;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-dimmest);
+}
+
+.lp-ev-refs-label {
+  font-family: var(--font-data);
+  letter-spacing: var(--track-label);
+  color: var(--text-dim-2);
+}

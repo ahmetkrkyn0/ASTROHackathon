@@ -1,0 +1,1158 @@
+/* ── Decision-support assistant ──────────────────────────────── */
+/* A tool the operator opens, not a tenant of the right rail. The launcher and
+   the window are fixed siblings of the toast stack; the rail is left exactly as
+   it was before the assistant existed. */
+
+/* Above every ordinary surface in the app (map overlays reach 3), below the
+   loading and landing screens (110, 120) and below toasts (150), which stay
+   readable whatever else is on screen. */
+/* Placement, surface and accent come from the cockpit's own assistant mock,
+   which is deleted with this change: a floating instrument in this console
+   sits 24px off the corner, is lavender-edged and blurs what it covers. The
+   geometry below stays this component's, because its bounds are
+   viewport-relative and the mock's were fixed pixels. */
+.chat-launcher {
+  position: fixed;
+  right: 16px;
+  /* Clears the 44px status strip: 44 + 12px of air. */
+  bottom: 56px;
+  z-index: 100;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid rgba(186, 175, 245, 0.4);
+  background: rgba(14, 19, 32, 0.94);
+  box-shadow: var(--shadow-pop);
+  color: rgba(199, 205, 219, 0.86);
+  cursor: grab;
+  /* The launcher is its own drag handle. touch-action is what lets a touch
+     drag reach the handler at all -- without it the browser claims the
+     gesture for scrolling and pointermove stops firing. */
+  touch-action: none;
+  transition: border-color 0.16s ease, color 0.16s ease, transform 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.chat-launcher.is-dragging {
+  cursor: grabbing;
+  /* No easing on the transform while it follows the pointer, or the button
+     lags behind the cursor and reads as heavy. */
+  transition: none;
+}
+
+/* The mark fills most of the button, because it is the product's mark and the
+   button is 46px. Width-driven with `height: auto`, so the artwork's own
+   proportions decide the rest rather than a square box squashing it. */
+.chat-launcher-mark {
+  width: 34px;
+  height: auto;
+  /* A dragged launcher carries an inline transform on the button; nothing here
+     may add its own or the two fight over the same property. */
+  pointer-events: none;
+}
+
+/* No lift on hover any more: the drag offset is a transform on this element,
+   and a hover rule setting transform would throw the button back to its
+   resting place the moment the pointer was over it. Colour carries the hover
+   instead, which is what the rest of the cockpit does. */
+.chat-launcher:hover {
+  border-color: var(--accent-lavender);
+  color: var(--text);
+  background: rgba(28, 34, 54, 0.96);
+}
+
+.chat-launcher:focus-visible {
+  outline: 2px solid rgba(186, 175, 245, 0.7);
+  outline-offset: 2px;
+}
+
+/* Open hides the launcher. Once the window is on screen it carries its own
+   minimize control, and the button was a lit toggle sitting under a panel it
+   could no longer be seen to operate -- while taking the space beside Mission
+   Report that button needs.
+
+   Hidden with opacity and pointer-events rather than `display: none` so the
+   element stays in the layout and keeps its ref: close() returns focus to the
+   launcher, and focusing a display:none element is a no-op that would drop
+   focus to <body>. aria-hidden is not set for the same reason -- a focused
+   element must never be inside an aria-hidden subtree. */
+.chat-launcher.is-open {
+  opacity: 0;
+  pointer-events: none;
+  /* No transform here. Once the launcher has been dragged it carries an inline
+     translate, which wins over this rule -- so a scale written here would be
+     silently dropped for any operator who has moved the button, and applied
+     for everyone else. One behaviour for both is worth more than a shrink
+     nobody is looking at: the button is on its way to invisible either way. */
+  transition: opacity 0.15s ease;
+}
+
+/* One dot, no count: an answer arrived while the window was hidden. */
+/* Bottom-right, not top: the mark carries a bright cyan bead in its upper
+   right, and two dots in one corner is two signals competing to be read. */
+.chat-launcher-dot {
+  position: absolute;
+  bottom: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--safe);
+  border: 2px solid rgba(17, 18, 27, 1);
+}
+
+.chat-window {
+  position: fixed;
+  right: 16px;
+  /* The launcher hides while this is open, so the window no longer has to
+     clear it -- it sits where the launcher was, 56px clear of the status
+     strip, rather than 114px up with an empty gap beneath it. */
+  bottom: 56px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 394px;
+  max-width: calc(100vw - 24px);
+  /* Every bound is viewport-relative, so a short window cannot push the
+     assistant off the top of the screen: height, floor and ceiling all shrink
+     together and 80px + height stays inside the viewport. */
+  height: min(640px, calc(100vh - 120px));
+  min-height: min(480px, calc(100vh - 92px));
+  max-height: calc(100vh - 92px);
+  opacity: 0;
+  transform: translateY(8px) scale(0.985);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    visibility 0s linear 0.15s;
+}
+
+.chat-window.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-window,
+  .chat-window.is-open {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Fills the window it lives in. The .rail-section surface it already carries
+   becomes the window surface, lifted for a floating context. */
+.chat-panel {
+  /* Zero basis, for the same reason the rail split needed one: the height comes
+     from the window, not from the conversation's content. */
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px;
+  overflow: hidden;
+  background: var(--bg-inset);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+}
+
+.chat-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* The header doubles as the window's drag handle.
+
+   `touch-action: none` is what makes a touch drag work at all: without it the
+   browser claims the gesture for scrolling and the pointermove events stop
+   arriving. user-select stops a drag across the title from painting a text
+   selection behind the window as it moves. */
+.chat-header.is-draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.chat-window.is-dragging .chat-header.is-draggable {
+  cursor: grabbing;
+}
+
+/* No transition on the transform while dragging: the offset is already
+   following the pointer every frame, and easing it adds a lag between the
+   cursor and the window that reads as the panel being heavy. */
+.chat-window.is-dragging {
+  transition: none;
+}
+
+.chat-header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Both header buttons rest on --line-button rather than a 0.4-alpha hairline.
+   App.css:325-348 is normative about it: a control at rest needs a faint fill,
+   a --line-button edge and a --text-2 label, because hover is not a channel
+   that exists on touch or before the pointer has arrived. */
+.chat-reset-position {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(186, 175, 245, 0.55);
+  background: rgba(186, 175, 245, 0.1);
+  color: var(--lavender-bright);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.chat-reset-position .lp-icon,
+.chat-new .lp-icon {
+  font-size: 15px;
+}
+
+.chat-reset-position:hover {
+  border-color: var(--lavender);
+  background: rgba(186, 175, 245, 0.2);
+}
+
+.chat-minimize {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-button);
+  background: var(--bg-raised);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+
+.chat-minimize .lp-icon {
+  font-size: 17px;
+}
+
+.chat-minimize:hover {
+  border-color: var(--lavender);
+  color: var(--text);
+}
+
+/* The panel names its product because it can be dragged anywhere over the map,
+   at which point nothing else on screen says what it belongs to. Set in the
+   condensed label face at the bottom of the text ramp: it identifies the panel,
+   it is not something to read. */
+.lp-assistant-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  color: var(--text-dim-2);
+  white-space: nowrap;
+}
+
+.lp-assistant-mark .lp-icon {
+  font-size: 14px;
+  color: var(--text-3);
+}
+
+.chat-header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.chat-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-button);
+  background: var(--bg-raised);
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+
+.chat-new:hover:not(:disabled) {
+  border-color: var(--lavender);
+  color: var(--text);
+}
+
+.chat-new:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Explanation level: an explicit choice, shown before the first question. */
+
+.chat-level {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.chat-level-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-dimmest);
+}
+
+.chat-level-label .lp-icon {
+  font-size: 15px;
+}
+
+.chat-level-flag {
+  font-style: normal;
+  color: rgba(186, 175, 245, 0.9);
+}
+
+.chat-levels {
+  display: flex;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.chat-level-option {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.chat-level-option .lp-icon {
+  font-size: 15px;
+}
+
+/* A hairline between the three. A real border rather than an inset shadow, so
+   it does not collide with the ring on .is-suggested below. */
+.chat-level-option + .chat-level-option {
+  border-left: 1px solid var(--line-card);
+}
+
+.chat-level-option:hover {
+  color: var(--text);
+}
+
+.chat-level-option.is-active {
+  background: rgba(186, 175, 245, 0.14);
+  color: var(--lavender-bright);
+}
+
+/* The default is shown as a suggestion until the operator confirms it, so a
+   visual default never passes for a choice they made. */
+/* Was `border-style: dashed` on a rule whose base is `border: 0`, so the hint
+   marking the suggested level drew nothing at all. An inset ring needs no
+   border box to hang on. */
+.chat-level-option.is-suggested {
+  box-shadow: inset 0 0 0 1px rgba(186, 175, 245, 0.4);
+}
+
+/* ── Conversation viewport ──────────────────────────────────────────────── */
+
+.chat-log {
+  /* offsetTop of the last turn is measured against this box. */
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+/* Everything the log shows before the first question. One flex column, so the
+   bands below space themselves and the whole thing scrolls as one. */
+.lp-assistant-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The opening line, marked rather than quoted: the badge says who is speaking,
+   which is what the border-left rule here used to be doing less clearly. */
+.chat-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 0;
+}
+
+.lp-assistant-intro-mark {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--lavender);
+  font-size: 16px;
+}
+
+.lp-assistant-intro-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-intro-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-strong);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.chat-intro-copy {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+/* One grouped list, not a scatter of pills. Eleven separate boxes at 2px radius
+   read as debris; sharing edges inside a single outline reads as a menu, which
+   is what it is. */
+.chat-suggestions {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.chat-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 0;
+  border-top: 1px solid var(--line-card);
+  border-radius: 0;
+  background: var(--bg-card);
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.chat-suggestion:first-child {
+  border-top: 0;
+}
+
+.chat-suggestion:hover:not(:disabled) {
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.chat-suggestion:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The glyph's colour is the one that quantity already has on the map and in the
+   report, so a chip teaches the same colour language rather than a new one. */
+.lp-assistant-chip-icon {
+  flex: 0 0 auto;
+  font-size: 18px;
+}
+
+.lp-assistant-chip-icon.is-route {
+  color: var(--text-2);
+}
+
+.lp-assistant-chip-icon.is-energy {
+  color: var(--mint);
+}
+
+.lp-assistant-chip-icon.is-risk {
+  color: var(--risk-high);
+}
+
+.lp-assistant-chip-icon.is-cell {
+  color: var(--lavender);
+}
+
+.lp-assistant-chip-icon.is-compare {
+  color: var(--cyan);
+}
+
+/* Product help is not a measurement, so it takes no reading's colour. */
+.lp-assistant-chip-icon.is-guide {
+  color: var(--text-3);
+}
+
+.lp-assistant-chip-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-intro-note,
+.chat-intro-blocked {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--text-dimmest);
+}
+
+.chat-intro-note .lp-icon {
+  flex: 0 0 auto;
+  font-size: 15px;
+}
+
+.chat-intro-blocked {
+  color: rgba(186, 175, 245, 0.82);
+}
+
+/* The one warm moment in the panel, and the only centred block -- which is what
+   marks it as the empty state rather than as content.
+
+   The artwork removes itself when the file is not on disk (ChatPanel sets
+   `hidden` from the img's onError), the same way SpaceBackdrop falls back to
+   its poster: a fresh clone that has not pulled the asset gets the headline and
+   no broken frame. */
+/* The empty state opens on the artwork, so it is the one block that centres --
+   everything under it is a left-aligned reading column. */
+.lp-assistant-hero {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 0;
+}
+
+/* A transparent PNG, so the panel's own ground shows through and the artwork
+   stays correct if --bg-inset is ever retoned. The cap is what stops it filling
+   the screen under the 980px breakpoint, where the panel becomes a full-screen
+   utility and `width: 100%` alone would scale it to the viewport. */
+.lp-assistant-hero-art {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+}
+
+/* ── Messages ───────────────────────────────────────────────────────────── */
+
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-radius: var(--radius);
+}
+
+/* Offset and narrower, so the operator's own words read as an aside rather
+   than as another analysis surface. */
+.chat-turn--user {
+  align-self: flex-end;
+  max-width: 88%;
+  padding: 8px 12px;
+  border: 1px solid rgba(186, 175, 245, 0.24);
+  background: rgba(38, 38, 60, 0.55);
+}
+
+.chat-turn--assistant {
+  align-self: stretch;
+  padding: 10px 12px;
+  border: 1px solid rgba(29, 36, 50, 0.24);
+  background: rgba(8, 11, 18, 0.55);
+}
+
+.chat-turn--pending {
+  border-style: dashed;
+}
+
+.chat-assistant-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chat-role {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-dimmest);
+}
+
+.chat-context {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-dim-2);
+}
+
+.chat-text {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-strong);
+  line-height: 1.6;
+  color: rgba(199, 205, 219, 0.92);
+  /* Plain text, wrapped honestly: no markdown renderer is loaded, so
+     whitespace from the model is preserved rather than silently collapsed. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-text.is-secondary {
+  font-size: var(--fs-body);
+  color: rgba(199, 205, 219, 0.74);
+}
+
+.chat-error-title {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.5;
+  color: rgba(199, 205, 219, 0.92);
+}
+
+/* Grounding fallback and transport failure: a clear caution, not a crash. */
+
+.chat-notice {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(214, 151, 112, 0.32);
+  border-left-width: 3px;
+  border-left-color: rgba(214, 151, 112, 0.75);
+  background: rgba(42, 36, 20, 0.35);
+}
+
+.chat-notice-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.45;
+  color: rgba(214, 151, 112, 0.95);
+}
+
+.chat-notice-title .lp-icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+}
+
+.chat-notice-copy {
+  margin: 4px 0 0;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: rgba(199, 205, 219, 0.78);
+}
+
+/* Mandatory warnings sit outside the assistant prose and are identical at
+   every explanation level. Severity is named as well as coloured. */
+
+.chat-warnings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(29, 36, 50, 0.34);
+  border-left-width: 3px;
+  background: rgba(20, 21, 30, 0.6);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+
+.chat-warning-tag {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 1px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+}
+
+.chat-warning-tag .lp-icon {
+  font-size: 14px;
+}
+
+.chat-warning-copy {
+  color: rgba(224, 222, 234, 0.86);
+}
+
+.chat-warning.is-info {
+  border-left-color: rgba(143, 160, 192, 0.7);
+}
+
+.chat-warning.is-info .chat-warning-tag {
+  color: rgba(143, 160, 192, 0.92);
+}
+
+.chat-warning.is-caution {
+  border-left-color: rgba(214, 151, 112, 0.8);
+  background: rgba(42, 36, 20, 0.32);
+}
+
+.chat-warning.is-caution .chat-warning-tag {
+  color: rgba(214, 151, 112, 0.95);
+}
+
+.chat-warning.is-critical {
+  border-left-color: var(--critical);
+  background: rgba(64, 14, 24, 0.36);
+}
+
+.chat-warning.is-critical .chat-warning-tag {
+  color: rgba(255, 160, 160, 0.95);
+}
+
+/* ── Limitations and evidence ───────────────────────────────────────────── */
+
+.chat-block-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-dimmest);
+}
+
+.chat-block-title .lp-icon {
+  flex: 0 0 auto;
+  font-size: 14px;
+}
+
+.chat-limitations {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-limitations ul {
+  margin: 0;
+  padding-left: 16px;
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: rgba(199, 205, 219, 0.72);
+}
+
+.chat-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(29, 36, 50, 0.24);
+}
+
+.chat-evidence-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chat-evidence-label {
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: rgba(199, 205, 219, 0.8);
+}
+
+.chat-pedigree {
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(29, 36, 50, 0.4);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  color: var(--text-muted-2);
+  white-space: nowrap;
+}
+
+.chat-pedigree.is-measurement {
+  border-color: rgba(74, 143, 216, 0.4);
+  color: rgba(140, 240, 190, 0.9);
+}
+
+.chat-pedigree.is-model {
+  border-color: rgba(143, 160, 192, 0.4);
+  color: rgba(190, 210, 255, 0.9);
+}
+
+.chat-pedigree.is-demo {
+  border-color: rgba(255, 234, 0, 0.34);
+  color: rgba(240, 225, 150, 0.9);
+}
+
+/* ── Pending ────────────────────────────────────────────────────────────── */
+
+.chat-stage {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: rgba(186, 175, 245, 0.88);
+}
+
+.chat-stage-note {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  color: var(--text-dimmest);
+}
+
+.chat-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.chat-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.3;
+  animation: chat-dot 1.1s infinite ease-in-out;
+}
+
+.chat-dots i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.chat-dots i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes chat-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-dots i {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* The pending stage is announced once, in its own small region -- the
+   conversation itself is not a live region. */
+.chat-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ── Composer ───────────────────────────────────────────────────────────── */
+
+.chat-composer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(29, 36, 50, 0.24);
+}
+
+/* The mark, the textarea and Gonder in one frame. The frame is what takes the
+   focus ring, via :focus-within, so focusing the textarea lights the whole
+   control the operator sees rather than a box inside it. Bottom-aligned: the
+   textarea grows upward to COMPOSER_MAX_PX and the button stays on the last
+   line. */
+.lp-assistant-field {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-button);
+  background: var(--bg-card);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.lp-assistant-field:focus-within {
+  border-color: var(--lavender);
+  box-shadow: 0 0 0 3px rgba(186, 175, 245, 0.16);
+}
+
+.lp-assistant-field-mark {
+  flex: 0 0 auto;
+  margin-bottom: 7px;
+  font-size: 17px;
+  color: var(--text-dim-2);
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  /* Height is driven by content, so a manual resize handle would fight it. */
+  resize: none;
+  overflow-y: auto;
+  max-height: 122px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-strong);
+  line-height: 1.5;
+}
+
+/* The frame draws focus for the whole control, so the field inside it must not
+   draw a second one. */
+.chat-input:focus,
+.chat-input:focus-visible {
+  outline: none;
+}
+
+.chat-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The hint alone, now that Gönder has moved inside the field above. */
+.chat-composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-hint {
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
+}
+
+/* The primary action, and the second of the two places the accent is spent --
+   the other is the chosen explanation level. A flat fill, not a glow:
+   App.css:184-189 is explicit that there are two shadows in this system and
+   neither is coloured. */
+.chat-send {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--lavender);
+  background: var(--lavender);
+  color: var(--void);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.chat-send .lp-icon {
+  font-size: 16px;
+}
+
+.chat-send:hover:not(:disabled) {
+  background: var(--lavender-bright);
+  border-color: var(--lavender-bright);
+}
+
+.chat-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-panel button:focus-visible {
+  outline: 2px solid rgba(186, 175, 245, 0.7);
+  outline-offset: 2px;
+}
+
+/* On a genuinely narrow screen a 404px anchored window has nowhere to sit, so
+   the assistant becomes a near-full-screen utility. Same component, same flex
+   chain -- only the shell changes shape. */
+@media (max-width: 980px) {
+  .chat-launcher {
+    right: 16px;
+    bottom: 16px;
+  }
+
+  /* The window covers the screen here and its header carries the minimize
+     control, so a second way out would only be in the way. */
+  .chat-launcher.is-open {
+    display: none;
+  }
+
+  .chat-window {
+    inset: 10px;
+    width: auto;
+    height: auto;
+    max-width: none;
+    min-height: 0;
+    max-height: none;
+  }
+
+  /* No vh cap on the conversation: inside a full-height window the flex chain
+     already gives it everything the header and composer do not use. */
+  .chat-log {
+    max-height: none;
+  }
+
+  .chat-turn--user {
+    max-width: 92%;
+  }
+}
+
+/* ── mode divider ──────────────────────────────────────────────────────────
+   A local marker in the transcript, not a message. It appears when a route is
+   generated (or cleared) mid-conversation, so the operator can see where the
+   evidence behind the answers changed. It is never sent to the server, and the
+   turns before it are not sent either -- see conversationForWire.
+
+   Prefixed per the ownership contract: new selectors in a feature stylesheet
+   use `.lp-<feature>-`. The `chat-` names above are older and are published
+   contracts (shell.css keys the toast stack off `.chat-window.is-open`), so
+   they stay as they are. */
+.lp-assistant-divider {
+  margin: 4px 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: var(--track-normal);
+  /* Was var(--chat-muted, var(--text-muted)); --chat-muted is declared nowhere
+     in the project, so the fallback was the only value this ever had. */
+  color: var(--text-muted);
+}
+
+.lp-assistant-divider::before,
+.lp-assistant-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.28;
+}
+
+/* ── Canvas header proportions ────────────────────────────────────────────
+   The assistant is an instrument in the cockpit, so its title is set like a
+   section label -- 11px, letterspaced -- rather than like an 18px page
+   heading, and the mission context under it is mono because it is a readout.
+   Scoped to .chat-panel: .panel-title and .panel-kicker are shared with the
+   rail panels, which want their own sizes. */
+.chat-panel .panel-title {
+  font-size: var(--fs-small);
+  font-weight: 500;
+  letter-spacing: var(--track-normal);
+}
+
+.chat-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Declares the panel's language, because it differs from the rest of the
+   application. A badge rather than a sentence: it has to survive beside a
+   title in a 394px panel. */
+.chat-lang-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 5px;
+  vertical-align: middle;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  letter-spacing: var(--track-caps);
+  color: var(--text-muted);
+}

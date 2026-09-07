@@ -18,10 +18,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 # Disable startup grid loading so the test server does not need .npy files.
 # The startup handler checks app.state.grids after load; we inject it manually.
+# app.state is the only grid store (backend review #7).
 os.environ["LUNAPATH_SKIP_STARTUP"] = "YES"  # harmless — startup still runs but fails gracefully
 
 from fastapi.testclient import TestClient
-import app.main as _main_module
+from app.cost_engine import COST_MODEL_ID
 from app.main import app
 from app.serializer import pixel_to_lonlat
 
@@ -67,15 +68,25 @@ def _make_grids(
                 "w_energy": 0.259,
                 "w_shadow": 0.142,
                 "w_thermal": 0.190,
+                # A grid stamped with THIS build's cost_model carries this
+                # build's weight set, which since C4 has five keys.
+                "w_roughness": 0.15,
             },
+            # Stamped so the stored cost grid counts as this build's: an
+            # unstamped grid is now recomputed rather than trusted, because a
+            # P1 .npy predating the review #1 energy change would otherwise
+            # keep planning on the old formula. (Review #5.)
+            "cost_model": COST_MODEL_ID,
+            # ... and which criteria it summed (C4): four, no roughness layer.
+            "cost_criteria": ["slope", "energy", "shadow", "thermal"],
+            "default_rover_id": "lpr_1",
         },
     }
 
 
 def _inject_grids(grids: dict) -> None:
-    """Push synthetic grids into app.state and module global."""
+    """Push synthetic grids into app.state, the single grid store."""
     app.state.grids = grids
-    _main_module._grids = grids
 
 
 def check(condition: bool, label: str) -> None:
@@ -110,7 +121,6 @@ def test_rovers_returns_catalog():
 def test_plan_503_when_no_grids():
     # Remove grids
     app.state.grids = None
-    _main_module._grids = None
 
     r = client.post("/api/plan", json={
         "start": {"row": 0, "col": 0},
@@ -277,7 +287,11 @@ def test_geo_input_with_metadata_origin_accepted():
 
 def test_impassable_start_returns_422():
     grids = _make_grids()
-    grids["traversable"][0, 0] = False  # Block only start
+    # Block the start through the TERRAIN, not by hand-editing the mask.
+    # grids_for_rover now derives traversability from slope/thermal every
+    # time rather than trusting a stored mask, so a mask that contradicts
+    # its own grids no longer survives -- that is the point of review #2.
+    grids["slope"][0, 0] = 89.0  # far above every rover's slope_max_deg
     _inject_grids(grids)
     r = client.post("/api/plan", json={
         "start": {"row": 0, "col": 0},
@@ -289,7 +303,7 @@ def test_impassable_start_returns_422():
 
 def test_impassable_goal_returns_422():
     grids = _make_grids()
-    grids["traversable"][5, 5] = False  # Block only goal
+    grids["slope"][5, 5] = 89.0  # see test_impassable_start_returns_422
     _inject_grids(grids)
     r = client.post("/api/plan", json={
         "start": {"row": 0, "col": 0},

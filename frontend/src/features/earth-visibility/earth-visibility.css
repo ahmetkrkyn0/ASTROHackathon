@@ -1,0 +1,123 @@
+/* A4 Earth visibility, in the Systems & Evidence drawer. */
+
+.ev-window {
+  margin: 0 0 12px;
+}
+
+.ev-headline {
+  margin: 0 0 4px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+/* Cyan for a link, amber for none -- and deliberately not red. At this
+   latitude the Earth is below the horizon over 90% of the time; that is the
+   site, not a fault, and a red readout would call the normal state an alarm. */
+.ev-headline.is-up { color: var(--cyan); }
+.ev-headline.is-down { color: var(--risk-med); }
+
+.ev-detail {
+  margin: 0 0 10px;
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.ev-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  margin: 0 0 8px;
+}
+
+.ev-facts div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ev-facts dt {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.ev-facts dd {
+  margin: 0;
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+
+.ev-mono {
+  font-family: var(--font-data);
+  color: var(--text);
+}
+
+.ev-series {
+  border-top: 1px solid rgba(199, 205, 219, 0.08);
+  padding-top: 10px;
+}
+
+.ev-sub {
+  margin: 0 0 6px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+/* One bar per slice. Bars sit on a baseline so a near-zero day still draws a
+   sliver -- a day with a 6% link is not the same as a day with none, and a bar
+   rounded away to nothing would say it was. */
+.ev-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 44px;
+  margin: 0 0 8px;
+  padding: 0 1px;
+  border-bottom: 1px solid rgba(199, 205, 219, 0.14);
+}
+
+.ev-bar {
+  flex: 1 1 0;
+  min-width: 2px;
+  background: rgba(79, 216, 240, 0.42);
+  border-radius: 1px 1px 0 0;
+  transition: background 140ms ease;
+}
+
+.ev-bar:hover {
+  background: rgba(79, 216, 240, 0.7);
+}
+
+/* Where the mission clock is. Marked rather than cropped to: the shape of the
+   month is what makes a single day's number mean anything. */
+.ev-bar.is-current {
+  background: var(--lavender);
+}
+
+.ev-note {
+  margin: 0 0 8px;
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.ev-note.is-error {
+  color: var(--accent-coral);
+}
+
+/* The date the strip is counted from, inside its own label. Lower contrast
+   than the label it qualifies but still legible: a timeline with no date on it
+   is a shape, not a reading. */
+.ev-epoch {
+  font-family: var(--font-data);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}

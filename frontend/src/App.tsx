@@ -1,12 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import './App.css'
+// After App.css on purpose: these rules resolve collisions between
+// independently-owned pieces and have to win. Never imported at all
+// until now, so the toast/assistant offset it documents had never
+// actually applied.
+import './shell/shell.css'
 import LandingPage from './LandingPage'
-import MapCanvas, {
-  type ClickMode,
-  DOWNSAMPLE,
-  type MapCanvasHandle,
-  type MapViewMode,
-} from './MapCanvas'
+import FleetSelectionView from './components/Fleet/FleetSelectionView'
+import {
+  type AppPhase,
+  hrefForLocation,
+  locationFromHref,
+  phaseFromHref,
+} from './shell/phaseUrl'
+import { Icon } from './components/Fleet/SpecIcons'
+import MapCanvas, { type ClickMode, DOWNSAMPLE, type MapViewMode } from './MapCanvas'
+import { generateRockField, type RockDescriptor } from './lidarSimulation'
+import SpaceBackdrop from './SpaceBackdrop'
+import SplashScreen, { type BootStage } from './SplashScreen'
+import TerrainCanvas3D from './TerrainCanvas3D'
+import {
+  advancePlaybackHours,
+  hoursForStep,
+  NOMINAL_ROVER_SPEED_MS,
+  resolvePlaybackState,
+  stepForHours,
+} from './mission/playbackClock'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -21,7 +48,29 @@ import {
   type RoverEntry,
   type Waypoint,
 } from './api'
-import { batteryToHex, riskToHex } from './colormap'
+
+// New Mission Control Workstation Components
+import TopBar, { type MissionMode } from './components/TopBar/TopBar'
+
+// Modular shell: App knows the slots, never the features.
+import { AssistantAskProvider } from './intent/AssistantAskProvider'
+import { MissionProvider } from './mission/MissionProvider'
+import { MissionRuntimeProvider } from './mission/MissionRuntimeProvider'
+import type { MissionActions, MissionRuntime, MissionValue } from './mission/types'
+import { OverlayProvider } from './overlay/OverlayProvider'
+import { FEATURES, selectFeatures } from './features/registry'
+import { SESSION_MISSION_TIME, type MissionTime } from './mission/missionTime'
+import { routeIdentity as computeRouteIdentity } from './mission/routeIdentity'
+import { readPlanConstraints, usePlanConstraints } from './features/plan-request'
+import SystemsDrawer from './shell/SystemsDrawer'
+import {
+  BottomDock,
+  CanvasOverlaySlot,
+  GlobalOverlaySlot,
+  LeftRailSlot,
+  RightRailSlot,
+  StatusBarSlot,
+} from './shell/slots'
 
 const DEFAULT_WEIGHTS: PlanWeights = {
   w_slope: 0.409,
@@ -31,41 +80,8 @@ const DEFAULT_WEIGHTS: PlanWeights = {
 }
 
 const DEFAULT_POINT: [number, number] = [250, 250]
-const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const
-const BATTERY_RADIUS = 58
-const BATTERY_CIRCUMFERENCE = 2 * Math.PI * BATTERY_RADIUS
 const TOAST_DURATION_MS = 5200
-const LOADING_STEPS = [
-  { delayMs: 160, progress: 28, message: 'Loading terrain matrices...' },
-  { delayMs: 640, progress: 56, message: 'Resolving thermal field...' },
-  { delayMs: 1120, progress: 82, message: 'Calibrating rover constraints...' },
-] as const
-const MAP_VIEW_OPTIONS: Array<{
-  id: MapViewMode
-  label: string
-  title: string
-}> = [
-  { id: 'surface', label: 'Surface', title: 'Lunar Surface DEM' },
-  { id: 'thermal', label: 'Thermal', title: 'Surface Temperature' },
-  { id: 'cost', label: 'Cost', title: 'Weighted Cost Grid' },
-  { id: 'shadow', label: 'Shadow', title: 'Shadow Ratio' },
-  { id: 'traversability', label: 'Traverse', title: 'Traversability Grid' },
-  { id: 'slope', label: 'Slope', title: 'Slope Grid' },
-  { id: 'aspect', label: 'Aspect', title: 'Aspect Grid' },
-] as const
-const WEIGHT_CONTROLS: Array<{
-  key: keyof PlanWeights
-  label: string
-}> = [
-  { key: 'w_slope', label: 'Slope Safety' },
-  { key: 'w_energy', label: 'Energy Use' },
-  { key: 'w_shadow', label: 'Shadow Exposure' },
-  { key: 'w_thermal', label: 'Thermal Risk' },
-] as const
-
-type RiskLevel = (typeof RISK_LEVELS)[number]
 type BootstrapState = 'loading' | 'ready' | 'error'
-type AppPhase = 'landing' | 'loading' | 'app'
 
 interface FocusTelemetry {
   row: number
@@ -85,16 +101,8 @@ const DEFAULT_FOCUS_TELEMETRY: FocusTelemetry = {
   lon: Number.NaN,
   altitudeM: null,
   thermalC: null,
-  resolutionM: 80,
-  spanKm: 40,
-}
-
-interface WaypointPreviewItem {
-  key: string
-  label: string
-  detail: string
-  status: string
-  accent: string
+  resolutionM: 5,
+  spanKm: 2.5,
 }
 
 interface ToastItem {
@@ -103,15 +111,49 @@ interface ToastItem {
   message: string
   detail?: string
   tone: 'warning' | 'error'
+  /**
+   * An optional way to carry out what the message asks for.
+   *
+   * The unreachable-cell warning told the operator to "select an adjacent
+   * terrain cell with manageable slope" while the default Surface layer shows
+   * no traversability at all -- correct advice that could not be followed on
+   * the screen that gave it. `actionLabel` is the id only; App supplies the
+   * handler, because the toast builder is a pure function and must stay one.
+   */
+  actionLabel?: string
+  actionId?: 'show-traversability'
 }
 
 export default function App() {
-  const [phase, setPhase] = useState<AppPhase>('landing')
+  // Phase and lifecycle. The address names the stage, so a reload comes back to
+  // it instead of restarting the landing sequence.
+  const [phase, setPhase] = useState<AppPhase>(() =>
+    typeof window === 'undefined' ? 'landing' : phaseFromHref(window.location.href),
+  )
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>('loading')
-  const [loadingProgress, setLoadingProgress] = useState(0)
-  const [loadingMessage, setLoadingMessage] = useState('Initializing navigation systems...')
-  const [loadingFloorReached, setLoadingFloorReached] = useState(false)
+  /* Which step of the bootstrap is running, for the splash to name. Separate
+     from bootstrapState, which only says whether it is over. */
+  const [bootStage, setBootStage] = useState<BootStage>('health')
+  const [splashOpen, setSplashOpen] = useState(true)
+  /* The curtain over a stage change: what it says, and what it does when it is
+     opaque. Null when nothing is crossing. */
+  const [crossing, setCrossing] = useState<{ caption: string; then: () => void } | null>(null)
+  const [planningEngaged, setPlanningEngaged] = useState(false)
 
+  // Workstation mode: the two working modes of the design, PLAN and ANALYZE.
+  // Seeded from the address like the phase, so ?stage=analysis opens on the
+  // analysis rather than opening on plan and then jumping.
+  const [missionMode, setMissionMode] = useState<MissionMode>(() =>
+    typeof window === 'undefined' ? 'plan' : locationFromHref(window.location.href).mode,
+  )
+  const [isSolving, setIsSolving] = useState(false)
+
+  // Rail and HUD collapse states
+  const [hudOpen, setHudOpen] = useState(true)
+  const [hudMinimized, setHudMinimized] = useState(false)
+  const [systemsOpen, setSystemsOpen] = useState(false)
+
+  // Raster layers
   const [elevationLayer, setElevationLayer] = useState<LayerResponse | null>(null)
   const [slopeLayer, setSlopeLayer] = useState<LayerResponse | null>(null)
   const [aspectLayer, setAspectLayer] = useState<LayerResponse | null>(null)
@@ -121,8 +163,19 @@ export default function App() {
   const [traversableLayer, setTraversableLayer] = useState<LayerResponse | null>(null)
   const [layerError, setLayerError] = useState<string | null>(null)
 
+  // Map & 3D controls
   const [viewMode, setViewMode] = useState<MapViewMode>('surface')
+  const [dimension, setDimension] = useState<'2d' | '3d'>('2d')
+  const [sliceIndex, setSliceIndex] = useState(0)
+  const [terrainSlices, setTerrainSlices] = useState(0)
+  const [photoDrape, setPhotoDrape] = useState(false)
+  const [terrainPhotoAvailable, setTerrainPhotoAvailable] = useState(false)
 
+  // Payload simulator specs
+  const [payloadW, setPayloadW] = useState(35)
+  const [heaterW, setHeaterW] = useState(10)
+
+  // Mission setup & targets
   const [clickMode, setClickMode] = useState<ClickMode>('idle')
   const [start, setStart] = useState<[number, number] | null>(null)
   const [goal, setGoal] = useState<[number, number] | null>(null)
@@ -130,15 +183,23 @@ export default function App() {
   const [rovers, setRovers] = useState<RoverEntry[]>([])
   const [selectedRoverId, setSelectedRoverId] = useState('lpr_1')
 
+  // Computed route
   const [planResult, setPlanResult] = useState<PlanResponse | null>(null)
-  const [planning, setPlanning] = useState(false)
+  // Yalnizca setter: bu bayragi okuyan yer kalmadi, kokpit "planlama suruyor"
+  // durumunu planningEngaged ve isSolving uzerinden gosteriyor. Bayrak yine de
+  // ayarlaniyor cunku istek yasam dongusunu uc yerde isaretliyor.
+  const [, setPlanning] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
   const [focusTelemetry, setFocusTelemetry] = useState<FocusTelemetry>(DEFAULT_FOCUS_TELEMETRY)
-  const [routePlaybackStep, setRoutePlaybackStep] = useState<number | null>(null)
+  // Computed once per plan, BEFORE calling planRoute, and handed to both the
+  // backend (as obstacle_cells, so A* actually routes around them) and
+  // TerrainCanvas3D (as the exact rocks to render) -- the same list either
+  // side of the request, so what got avoided and what gets drawn can never
+  // drift apart the way two independent generateRockField calls could.
+  const [obstacleRocks, setObstacleRocks] = useState<RockDescriptor[] | null>(null)
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
-  const mapRef = useRef<MapCanvasHandle>(null)
   const toastIdRef = useRef(0)
   const toastTimersRef = useRef<number[]>([])
 
@@ -150,54 +211,138 @@ export default function App() {
     (toast: Omit<ToastItem, 'id'>) => {
       const id = toastIdRef.current + 1
       toastIdRef.current = id
-
       setToasts((current) => [...current, { ...toast, id }])
-
-      const timer = window.setTimeout(() => {
-        dismissToast(id)
-      }, TOAST_DURATION_MS)
+      const timer = window.setTimeout(() => dismissToast(id), TOAST_DURATION_MS)
       toastTimersRef.current.push(timer)
     },
     [dismissToast],
   )
 
+  // ONE mission clock, in the planner's own elapsed hours, shared by the 2D
+  // map, the 3D scene and the transport bar.
+  //
+  // There used to be three, and none of them was the rover's speed:
+  // MapCanvas stepped a waypoint every 33 ms, the transport bar every 50 ms,
+  // and the 3D view compressed the whole traverse into a fixed 10-45 second
+  // window. A 230 m route that the planner charges ~20 minutes for finished
+  // in under two seconds -- somewhere north of 500x real time, with the
+  // factor depending on the route, so nothing on screen could be read as a
+  // duration. At timeScale 1 the rover now crosses the ground at exactly the
+  // 0.2 m/s the planner charged it for, and any speed-up is a number the
+  // operator chose and can see.
+  const [playbackHours, setPlaybackHours] = useState(0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [timeScale, setTimeScale] = useState(1)
+
+  const totalPlaybackHours = planResult?.waypoints[planResult.waypoints.length - 1]?.elapsed_hours ?? 0
+
+  // Read inside the animation frame without making the loop depend on them:
+  // re-creating the loop on every waypoint or scale change would reset its
+  // frame timing and stutter the drive.
+  const waypointsRef = useRef<Waypoint[] | null>(null)
+  waypointsRef.current = planResult?.waypoints ?? null
+  const timeScaleRef = useRef(timeScale)
+  timeScaleRef.current = timeScale
+  const roverSpeedRef = useRef(NOMINAL_ROVER_SPEED_MS)
+
   useEffect(() => {
+    if (!isPlaying || totalPlaybackHours <= 0) return
+
+    let raf = 0
+    let lastTs: number | null = null
+    const tick = (ts: number) => {
+      if (lastTs === null) lastTs = ts
+      // Clamped: a backgrounded tab hands back one enormous delta on
+      // return, which would teleport the rover to the end of the route.
+      const deltaMs = Math.min(ts - lastTs, 250)
+      lastTs = ts
+      setPlaybackHours((previous) => {
+        const next = advancePlaybackHours(
+          waypointsRef.current,
+          previous,
+          deltaMs,
+          roverSpeedRef.current,
+          timeScaleRef.current,
+        )
+        if (next >= totalPlaybackHours) {
+          setIsPlaying(false)
+          return totalPlaybackHours
+        }
+        return next
+      })
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [isPlaying, totalPlaybackHours])
+
+  // Everything derived from the clock: which waypoint the rover is on, how
+  // far between it and the next, whether this segment is a recharge stop,
+  // and the ground speed the planner's own timeline implies.
+  const playbackState = useMemo(
+    () => resolvePlaybackState(planResult?.waypoints, playbackHours, roverSpeedRef.current),
+    [planResult, playbackHours],
+  )
+  const activeWaypoint3D = playbackState.activeWaypoint
+  const roverFraction3D = playbackState.roverFraction
+
+  // Seeking by waypoint index (what the transport bar's scrubber offers)
+  // means moving the CLOCK to that waypoint's own timestamp, so every other
+  // reader of the clock follows without a second source of truth.
+  const seekPlaybackStep: Dispatch<SetStateAction<number | null>> = useCallback((update) => {
+    const waypoints = waypointsRef.current
+    if (!waypoints || waypoints.length === 0) return
+    setPlaybackHours((previousHours) => {
+      const nextStep =
+        typeof update === 'function' ? update(stepForHours(waypoints, previousHours)) : update
+      return hoursForStep(waypoints, nextStep)
+    })
+  }, [])
+  // The 2D map and every panel that reads "which waypoint are we on" follow
+  // the same clock rather than a timer of their own.
+  const routePlaybackStep = playbackState.stepIndex
+
+  useEffect(() => {
+    // Diziyi burada yakaliyoruz, temizlikte degil: .current yalnizca push ile
+    // buyuyor, hicbir yerde yeniden atanmiyor, dolayisiyla bu referans bilesen
+    // yasadigi surece ayni dizi. Yakalamak o degismezi acikca soyluyor ve
+    // temizligin baska bir diziyi bosaltma ihtimalini ortadan kaldiriyor.
+    const timers = toastTimersRef.current
     return () => {
-      toastTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+      timers.forEach((timer) => window.clearTimeout(timer))
     }
   }, [])
 
   useEffect(() => {
-    if (!layerError) {
-      return
-    }
-
+    if (!layerError) return
     pushToast(buildToastNotice('layer', layerError))
   }, [layerError, pushToast])
 
   useEffect(() => {
-    if (!planError) {
-      return
-    }
-
+    if (!planError) return
     pushToast(buildToastNotice('plan', planError))
   }, [planError, pushToast])
 
+  // Bootstrap data loading
   useEffect(() => {
     async function init() {
       setBootstrapState('loading')
+      setBootStage('health')
       try {
         const health = await checkHealth()
         if (!health.dem_loaded) {
+          setBootStage('dem')
           await loadPreprocessed()
         }
 
+        setBootStage('rovers')
         const roverCatalog = await fetchRovers()
         const initialRoverId = roverCatalog.default_rover_id
         const initialRover =
           roverCatalog.rovers.find((entry) => entry.id === initialRoverId) ?? roverCatalog.rovers[0]
         const initialWeights = initialRover?.default_weights ?? DEFAULT_WEIGHTS
 
+        setBootStage('layers')
         const [elevation, slope, aspect, shadow, thermal, cost, traversable] = await Promise.all([
           fetchLayer('elevation', DOWNSAMPLE, { roverId: initialRoverId }),
           fetchLayer('slope', DOWNSAMPLE, { roverId: initialRoverId }),
@@ -218,6 +363,7 @@ export default function App() {
         setThermalLayer(thermal)
         setCostLayer(cost)
         setTraversableLayer(traversable)
+        setBootStage('ready')
         setBootstrapState('ready')
       } catch (error) {
         setLayerError((error as Error).message)
@@ -228,56 +374,89 @@ export default function App() {
     void init()
   }, [])
 
+  /**
+   * Keep the address and the stage in step, in both directions.
+   *
+   * The push is guarded by comparing the address against the phase rather than
+   * by a flag: after a Back the browser has already rewritten the URL, so the
+   * two agree and nothing is pushed. That is what stops the listener below and
+   * this effect from feeding each other an endless history.
+   */
+  useEffect(() => {
+    const currentHref = window.location.href
+    const shown = locationFromHref(currentHref)
+    if (shown.phase === phase && shown.mode === missionMode) return
+    window.history.pushState(
+      { phase, mode: missionMode },
+      '',
+      hrefForLocation({ phase, mode: missionMode }, currentHref),
+    )
+  }, [phase, missionMode])
+
+  useEffect(() => {
+    const onPopState = () => {
+      const { phase: nextPhase, mode } = locationFromHref(window.location.href)
+      setPhase(nextPhase)
+      setMissionMode(mode)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  /**
+   * Analysis with nothing to analyse falls back to planning.
+   *
+   * ?stage=analysis is linkable and survives a reload, but the mission it
+   * described does not: route state is deliberately not in the address, so a
+   * fresh load of that link arrives with planResult still null. The ANALYZE
+   * tab is disabled in that state for exactly this reason -- the address is
+   * simply the one way in that can't be disabled.
+   *
+   * The mode is corrected rather than the panels being left empty, and the
+   * effect above then rewrites the address to match, so what is on screen and
+   * what the URL claims never disagree. Guarded on `isSolving` because a solve
+   * in flight is about to produce the route this is missing; without it,
+   * handlePlan's optimistic switch to analyze would be undone mid-flight.
+   */
+  useEffect(() => {
+    if (missionMode === 'analyze' && !planResult && !isSolving) {
+      setMissionMode('plan')
+    }
+  }, [missionMode, planResult, isSolving])
+
+  // Landing hands over to the hangar, not to the map: a rover is chosen
+  // before there is a surface to drive it on.
+  /* One at a time. The landing button used to call this twice -- once on click
+     and again when its own exit timer fired -- which was invisible while this
+     only set a phase and would restart the curtain now. */
+  const cross = useCallback((caption: string, then: () => void) => {
+    setCrossing((current) => (current ? current : { caption, then }))
+  }, [])
+
+  /* The two forward stage changes go behind the curtain. "Change vehicle"
+     deliberately does not: it is a correction, not a departure, and putting a
+     title card in front of someone fixing their rover choice is a toll. */
   const handleEnterMission = useCallback(() => {
-    setPhase('loading')
+    cross('Opening fleet hangar', () => setPhase('fleet'))
+  }, [cross])
+
+  const handleDeployToMap = useCallback(() => {
+    cross('Deploying to surface map', () => setPhase('app'))
+  }, [cross])
+
+  const handleOpenFleetSelect = useCallback(() => {
+    setPhase('fleet')
   }, [])
 
   useEffect(() => {
-    if (phase !== 'loading') {
-      return
+    if (clickMode !== 'idle') {
+      setPlanningEngaged(true)
     }
+  }, [clickMode])
 
-    setLoadingProgress(8)
-    setLoadingMessage('Initializing navigation systems...')
-    setLoadingFloorReached(false)
-
-    const timers = LOADING_STEPS.map(({ delayMs, progress, message }) =>
-      window.setTimeout(() => {
-        setLoadingProgress(progress)
-        setLoadingMessage(message)
-      }, delayMs),
-    )
-
-    const floorTimer = window.setTimeout(() => {
-      setLoadingFloorReached(true)
-    }, 1500)
-
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer))
-      window.clearTimeout(floorTimer)
-    }
-  }, [phase])
-
+  // Sync traversability when rover changes
   useEffect(() => {
-    if (phase !== 'loading' || !loadingFloorReached || bootstrapState === 'loading') {
-      return
-    }
-
-    setLoadingProgress(100)
-    setLoadingMessage(layerError ? 'Mission control online with warnings' : 'Mission ready')
-
-    const timer = window.setTimeout(() => {
-      setPhase('app')
-    }, 420)
-
-    return () => window.clearTimeout(timer)
-  }, [bootstrapState, layerError, loadingFloorReached, phase])
-
-  useEffect(() => {
-    if (bootstrapState === 'loading') {
-      return
-    }
-
+    if (bootstrapState === 'loading') return
     const controller = new AbortController()
 
     async function syncTraversability() {
@@ -289,25 +468,18 @@ export default function App() {
         setTraversableLayer(nextTraversableLayer)
         setLayerError(null)
       } catch (error) {
-        if (controller.signal.aborted) {
-          return
-        }
+        if (controller.signal.aborted) return
         setLayerError((error as Error).message)
       }
     }
 
     void syncTraversability()
-
-    return () => {
-      controller.abort()
-    }
+    return () => controller.abort()
   }, [bootstrapState, selectedRoverId])
 
+  // Sync cost map when weights change
   useEffect(() => {
-    if (bootstrapState === 'loading') {
-      return
-    }
-
+    if (bootstrapState === 'loading') return
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
       try {
@@ -319,9 +491,7 @@ export default function App() {
         setCostLayer(nextCostLayer)
         setLayerError(null)
       } catch (error) {
-        if (controller.signal.aborted) {
-          return
-        }
+        if (controller.signal.aborted) return
         setLayerError((error as Error).message)
       }
     }, 120)
@@ -332,65 +502,205 @@ export default function App() {
     }
   }, [bootstrapState, selectedRoverId, weights])
 
+  /**
+   * Which endpoint was placed last, so it can be taken back.
+   *
+   * There was no undo at all: the only recovery was Clear, which wiped BOTH
+   * endpoints, so one mis-click cost the operator the step they had got
+   * right. A single slot is enough -- the task has exactly two placements and
+   * a full history would be a stack nobody has a use for.
+   */
+  const lastPlacementRef = useRef<'start' | 'goal' | null>(null)
+
   const handleCellClick = useCallback(
     (row: number, col: number) => {
       setPlanResult(null)
       setPlanError(null)
-      setRoutePlaybackStep(null)
+      setIsPlaying(false)
+      setPlaybackHours(0)
 
       if (clickMode === 'start') {
         setStart([row, col])
         setClickMode('goal')
+        lastPlacementRef.current = 'start'
       } else if (clickMode === 'goal') {
         setGoal([row, col])
         setClickMode('idle')
+        lastPlacementRef.current = 'goal'
       }
     },
     [clickMode],
   )
 
-  const handleRoverSelect = useCallback((rover: RoverEntry) => {
-    if (rover.id === selectedRoverId) {
+  /**
+   * Typed placement. Same consequences as a click -- the drawn route no longer
+   * describes these endpoints, so it goes -- but the picker is left as it was.
+   */
+  const handlePlaceEndpoint = useCallback(
+    (which: 'start' | 'goal', cell: [number, number]) => {
+      setPlanResult(null)
+      setPlanError(null)
+      setIsPlaying(false)
+      setPlaybackHours(0)
+      if (which === 'start') setStart(cell)
+      else setGoal(cell)
+      lastPlacementRef.current = which
+    },
+    [],
+  )
+
+  const handleUndoPlacement = useCallback(() => {
+    const last = lastPlacementRef.current
+    if (!last) {
       return
     }
 
-    setSelectedRoverId(rover.id)
-    setWeights(rover.default_weights)
+    // Undoing an endpoint invalidates any route drawn from it, exactly as
+    // placing one does.
     setPlanResult(null)
     setPlanError(null)
-    setRoutePlaybackStep(null)
-  }, [selectedRoverId])
+    setIsPlaying(false)
+    setPlaybackHours(0)
 
-  const handlePlan = async () => {
-    if (!start || !goal) {
-      return
+    if (last === 'goal') {
+      setGoal(null)
+      setClickMode('goal')
+      lastPlacementRef.current = 'start'
+    } else {
+      setStart(null)
+      setGoal(null)
+      setClickMode('start')
+      lastPlacementRef.current = null
     }
+  }, [])
 
+  // Ctrl+Z / Cmd+Z, the binding every user already has for this. Ignored
+  // while a text field has focus so it cannot steal undo from the assistant's
+  // composer or a numeric input.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'z' || !(event.ctrlKey || event.metaKey) || event.shiftKey) {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+        return
+      }
+      if (!lastPlacementRef.current) {
+        return
+      }
+      event.preventDefault()
+      handleUndoPlacement()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handleUndoPlacement])
+
+  const handleRoverSelect = useCallback(
+    (rover: RoverEntry) => {
+      if (rover.id === selectedRoverId) return
+      setSelectedRoverId(rover.id)
+      setWeights(rover.default_weights)
+      setPlanResult(null)
+      setPlanError(null)
+      setIsPlaying(false)
+      setPlaybackHours(0)
+      setMissionMode('plan')
+    },
+    [selectedRoverId],
+  )
+
+  // Route calculation with authentic solving feedback
+  const handlePlan = useCallback(async () => {
+    if (!start || !goal || isSolving) return
+
+    setIsSolving(true)
     setPlanning(true)
     setPlanError(null)
     setPlanResult(null)
-    setRoutePlaybackStep(null)
+    setIsPlaying(false)
+    setPlaybackHours(0)
+
+    // Seed the rock field from start/goal alone, BEFORE the route exists --
+    // the only way for the backend to route around these cells is to know
+    // about them before it plans, not after. World<->grid conversion here
+    // is the same x = col*stepX - width/2 mapping TerrainCanvas3D uses for
+    // every other row/col <-> world placement in the scene.
+    let rocks: RockDescriptor[] = []
+    if (elevationLayer) {
+      const rows = elevationLayer.shape[0]
+      const cols = elevationLayer.shape[1]
+      const resolutionM = focusTelemetry.resolutionM
+      const width = cols * resolutionM
+      const depth = rows * resolutionM
+      const stepX = width / (cols - 1)
+      const stepZ = depth / (rows - 1)
+      const toWorld = (row: number, col: number) => ({
+        x: col * stepX - width / 2,
+        z: row * stepZ - depth / 2,
+      })
+      const startWorld = toWorld(start[0], start[1])
+      const goalWorld = toWorld(goal[0], goal[1])
+      const midX = (startWorld.x + goalWorld.x) / 2
+      const midZ = (startWorld.z + goalWorld.z) / 2
+      const halfDiagonal = Math.hypot(goalWorld.x - startWorld.x, goalWorld.z - startWorld.z) / 2
+      const radiusM = Math.min(500, halfDiagonal + 60)
+      rocks = generateRockField(midX, midZ, radiusM, { rows, cols, resolutionM })
+    }
+    setObstacleRocks(rocks.length > 0 ? rocks : null)
+
+    const obstacleCells = new Map<string, [number, number]>()
+    for (const rock of rocks) {
+      if (rock.row === undefined || rock.col === undefined) continue
+      obstacleCells.set(`${rock.row}:${rock.col}`, [rock.row, rock.col])
+    }
 
     try {
-      const result = await planRoute(start, goal, weights, selectedRoverId)
-      setPlanResult(result)
-      window.setTimeout(() => mapRef.current?.startAnimation(), 100)
+      const result = await planRoute(
+        start,
+        goal,
+        weights,
+        selectedRoverId,
+        Array.from(obstacleCells.values()),
+        // Read at issue time rather than closed over: the operator may have
+        // moved a constraint since this handler was created, and the request
+        // must carry what is set now.
+        readPlanConstraints(),
+      )
+      // Display the radar scanning search animation briefly for authentic mission control feedback
+      window.setTimeout(() => {
+        setPlanResult(result)
+        setIsSolving(false)
+        setPlanning(false)
+        setMissionMode('analyze')
+        window.setTimeout(() => {
+          setPlaybackHours(0)
+          setIsPlaying(true)
+        }, 100)
+      }, 750)
     } catch (error) {
-      setPlanError((error as Error).message)
-    } finally {
+      setIsSolving(false)
       setPlanning(false)
+      setPlanError((error as Error).message)
     }
-  }
+  }, [elevationLayer, focusTelemetry.resolutionM, goal, isSolving, selectedRoverId, start, weights])
 
-  const handleReset = () => {
+  // Reset full mission setup. Every call here is a state setter, so this is
+  // stable for the life of the app.
+  const handleReset = useCallback(() => {
     setStart(null)
     setGoal(null)
     setPlanResult(null)
     setPlanError(null)
     setClickMode('idle')
     setHoverPoint(null)
-    setRoutePlaybackStep(null)
-  }
+    setIsPlaying(false)
+    setPlaybackHours(0)
+    setObstacleRocks(null)
+    setMissionMode('plan')
+  }, [])
+
+  const toggleHud = useCallback(() => setHudOpen((open) => !open), [])
 
   const hasData = Boolean(
     elevationLayer &&
@@ -403,15 +713,19 @@ export default function App() {
   )
   const focusPoint = goal ?? start ?? DEFAULT_POINT
   const telemetryPoint = hoverPoint ?? focusPoint
-  const waypoints = planResult?.waypoints ?? []
-  const activeMapView = MAP_VIEW_OPTIONS.find((option) => option.id === viewMode) ?? MAP_VIEW_OPTIONS[0]
+  // MEMOISED. `?? []` her render'da yeni bir dizi kimligi uretiyordu ve bu
+  // dizi asagidaki odak telemetrisi efektinin bagimlilik listesinde; plan
+  // yokken efekt her render'da yeniden kosardi.
+  const waypoints = useMemo(() => planResult?.waypoints ?? [], [planResult])
   const selectedRover = rovers.find((entry) => entry.id === selectedRoverId) ?? null
+  // The clock's recharge-stop test compares against the selected rover's own
+  // top speed; a ref rather than a dependency so changing rover never
+  // restarts the animation frame loop mid-drive.
+  roverSpeedRef.current = selectedRover?.v_max_ms ?? NOMINAL_ROVER_SPEED_MS
 
+  // Telemetry sync
   useEffect(() => {
-    if (hoverPoint === null && routePlaybackStep !== null) {
-      return
-    }
-
+    if (hoverPoint === null && routePlaybackStep !== null) return
     if (!hasData) {
       setFocusTelemetry(DEFAULT_FOCUS_TELEMETRY)
       return
@@ -424,15 +738,10 @@ export default function App() {
     async function syncFocusTelemetry(point: [number, number]) {
       try {
         const telemetry = await fetchCellTelemetry(point[0], point[1], controller.signal)
-        if (cancelled) {
-          return
-        }
-
+        if (cancelled) return
         setFocusTelemetry(mapFocusTelemetryResponse(telemetry))
       } catch {
-        if (controller.signal.aborted) {
-          return
-        }
+        if (controller.signal.aborted) return
         if (!cancelled) {
           setFocusTelemetry((current) => ({
             ...current,
@@ -455,498 +764,509 @@ export default function App() {
   }, [hasData, hoverPoint, routePlaybackStep, telemetryPoint])
 
   useEffect(() => {
-    if (hoverPoint !== null || routePlaybackStep === null) {
-      return
-    }
-
+    if (hoverPoint !== null || routePlaybackStep === null) return
     const activeWaypoint = waypoints[routePlaybackStep]
-    if (!activeWaypoint) {
-      return
-    }
-
+    if (!activeWaypoint) return
     setFocusTelemetry((current) => mapWaypointToFocusTelemetry(activeWaypoint, current))
   }, [hoverPoint, routePlaybackStep, waypoints])
 
-  const summary = planResult?.summary
-  const metrics = planResult?.astar_metrics
-  const riskCounts = countRiskLevels(waypoints)
-  const totalRiskSamples = RISK_LEVELS.reduce((sum, level) => sum + riskCounts[level], 0)
-  const waypointPreview = buildWaypointPreview(waypoints)
-  const playbackWaypoint =
-    routePlaybackStep !== null && routePlaybackStep >= 0 && routePlaybackStep < waypoints.length
-      ? waypoints[routePlaybackStep]
-      : null
+  const missionStatus = layerError ? 'ATTN' : isSolving ? 'SOLVING' : planResult ? 'LOCKED' : 'NOMINAL'
+  // What each rail has to show in this mode. Asked of the registry rather
+  // than hardcoded per mode, so registering a feature for a rail is the only
+  // thing needed to bring its column back.
+  //
+  // Plan and analyze now use opposite halves of the cockpit: plan owns the
+  // left rail and no right one, analyze the right and no left. Neither is
+  // stated here -- both fall out of what FEATURES declares.
+  const leftRailFeatures = useMemo(
+    () => selectFeatures(FEATURES, 'leftRail', missionMode),
+    [missionMode],
+  )
+  const rightRailFeatures = useMemo(
+    () => selectFeatures(FEATURES, 'rightRail', missionMode),
+    [missionMode],
+  )
 
-  const averageVelocityMs =
-    summary && summary.total_elapsed_hours > 0
-      ? (summary.total_distance_km * 1000) / (summary.total_elapsed_hours * 3600)
-      : 0
-
-  const batteryPct = clamp(playbackWaypoint?.battery_pct ?? summary?.final_battery_pct ?? 100, 0, 100)
-  const batteryStrokeOffset = BATTERY_CIRCUMFERENCE * (1 - batteryPct / 100)
-  const batteryLabel = playbackWaypoint ? 'Live Playback' : summary ? 'Remaining' : 'Starting Reserve'
-  const batteryMeta = playbackWaypoint
-    ? `Waypoint ${String(playbackWaypoint.step).padStart(3, '0')} • ${playbackWaypoint.recharge_count} recharge${playbackWaypoint.recharge_count === 1 ? '' : 's'}`
-    : summary
-      ? `${summary.total_recharges} recharge${summary.total_recharges === 1 ? '' : 's'}`
-      : 'Mission start default'
-  const routeGuidance = !start
-    ? 'Choose a start point on the map to begin.'
-    : !goal
-      ? 'Choose a goal point to unlock route generation.'
-      : planResult
-        ? 'Route is ready. Hover the map or review checkpoints.'
-        : 'Tune priorities if needed, then generate the route.'
-
-  const riskState = resolveRiskState(riskCounts)
-  const mapStatus =
-    hoverPoint
-      ? 'Inspecting terrain'
-      : clickMode === 'start'
-      ? 'Pick a start point'
-      : clickMode === 'goal'
-        ? 'Pick a goal point'
-        : planResult
-          ? 'Route ready'
-          : 'Ready to plan'
-  const mapStatusTone =
-    hoverPoint
-      ? 'neutral'
-      : clickMode === 'start'
-        ? 'safe'
-        : clickMode === 'goal'
-          ? 'critical'
-          : planResult
-            ? 'ready'
-            : 'idle'
-
-  const missionStatus = layerError ? 'ATTN' : planning ? 'PLANNING' : planResult ? 'LOCKED' : 'NOMINAL'
   const appIsVisible = phase === 'app'
 
-  const [leftOpen, setLeftOpen] = useState(true)
-  const [rightOpen, setRightOpen] = useState(true)
+  // The one clock every time-dependent layer reads (spec 5.8): safe haven,
+  // Earth visibility, illumination, uncertainty, corridor, thermal dwell.
+  //
+  // An epoch plus an offset, not a bare instant. The endpoints take both --
+  // `start_utc` fixes the ephemeris, the offset says how far into the window
+  // the operator has scrubbed -- and deriving the epoch back out of a scrubbed
+  // instant would lose which window we are in.
+  //
+  // Seeded from MISSION_EPOCH_UTC rather than the wall clock so a run is
+  // reproducible; see mission/missionTime.ts for why that matters against
+  // caches built for specific epochs.
+  const [missionTime, setMissionTime] = useState<MissionTime>(SESSION_MISSION_TIME)
+
+  // Derived, never stored: an identity kept in state is one that can be left
+  // behind by an input it is supposed to describe. Constraints are empty until
+  // the plan-request contributors exist, and an empty object is deliberately
+  // identical to no constraints at all -- a feature switched on that sends no
+  // field must not invalidate an analysis.
+  // Subscribed, not read: a constraint change has to move the identity, which
+  // is what marks a post-route analysis stale. The store is module-level so
+  // this is the only place in App that knows constraints exist.
+  const planConstraints = usePlanConstraints()
+  const currentRouteIdentity = useMemo(
+    () => computeRouteIdentity({
+      roverId: selectedRoverId,
+      start,
+      goal,
+      weights,
+      constraints: planConstraints,
+    }),
+    [goal, planConstraints, selectedRoverId, start, weights],
+  )
+
+  // Exactly the fields MissionValue declares and no more: an extra one is a
+  // compile error, which is what keeps this object honest as the contract
+  // grows. Eleven fields already existed under these names; this task adds
+  // the four values the mission setup feature needs from its context.
+  const missionValue: MissionValue = useMemo(
+    () => ({
+      gridMeta: elevationLayer
+        ? {
+            rows: elevationLayer.shape[0],
+            cols: elevationLayer.shape[1],
+            resolutionM: focusTelemetry.resolutionM,
+          }
+        : null,
+      roverId: selectedRoverId,
+      rover: selectedRover,
+      rovers,
+      weights,
+      start,
+      goal,
+      planResult,
+      clickMode,
+      isSolving,
+      layerError,
+      // Always null, and deliberately: this cockpit has no "select a cell"
+      // control. Start and goal are placed by mode-scoped clicks and mean
+      // "route from here" / "route to here". A feature that wants today's
+      // analysis focus calls selectStableAnalysisCell by name.
+      selectedCell: null,
+      activeViewMode: viewMode,
+      dimension,
+      missionMode,
+      missionTime,
+      routeIdentity: currentRouteIdentity,
+    }),
+    [
+      currentRouteIdentity,
+      dimension,
+      clickMode,
+      elevationLayer,
+      focusTelemetry.resolutionM,
+      goal,
+      isSolving,
+      layerError,
+      missionMode,
+      missionTime,
+      planResult,
+      selectedRover,
+      selectedRoverId,
+      rovers,
+      start,
+      viewMode,
+      weights,
+    ],
+  )
+
+  // Writing is a separate contract from reading, so a control panel can take
+  // an action without subscribing to the mission snapshot. Every entry is
+  // already memoised above; this object exists so the identity of the whole
+  // does not churn either.
+  const handleSplashDone = useCallback(() => setSplashOpen(false), [])
+
+  const missionActions: MissionActions = useMemo(
+    () => ({
+      selectRover: handleRoverSelect,
+      openFleetSelect: handleOpenFleetSelect,
+      setWeights,
+      setClickMode,
+      placeEndpoint: handlePlaceEndpoint,
+      planRoute: handlePlan,
+      resetMission: handleReset,
+      undoPlacement: handleUndoPlacement,
+      setMissionMode,
+      setMissionTime,
+      setPlaybackStep: seekPlaybackStep,
+      setPlaying: setIsPlaying,
+      setTimeScale,
+      seekPlayback: setPlaybackHours,
+      setPayloadW,
+      setHeaterW,
+      setViewMode,
+      setDimension,
+      toggleHud,
+    }),
+    [
+      handlePlan,
+      handleReset,
+      handleRoverSelect,
+      handleOpenFleetSelect,
+      handlePlaceEndpoint,
+      handleUndoPlacement,
+      seekPlaybackStep,
+      toggleHud,
+    ],
+  )
+
+  const missionRuntimeValue: MissionRuntime = useMemo(
+    () => ({
+      routePlaybackStep,
+      payloadW,
+      heaterW,
+      playbackHours,
+      playbackTotalHours: totalPlaybackHours,
+      isPlaying,
+      timeScale,
+      isRecharging: playbackState.isRecharging,
+      groundSpeedMs: playbackState.groundSpeedMs,
+    }),
+    [
+      heaterW,
+      isPlaying,
+      payloadW,
+      playbackHours,
+      playbackState.groundSpeedMs,
+      playbackState.isRecharging,
+      routePlaybackStep,
+      timeScale,
+      totalPlaybackHours,
+    ],
+  )
 
   return (
-    <>
+    <MissionProvider
+      value={missionValue}
+      focusTelemetry={focusTelemetry}
+      actions={missionActions}
+    >
+      <MissionRuntimeProvider value={missionRuntimeValue}>
+      <OverlayProvider>
+      <AssistantAskProvider>
+      <SpaceBackdrop
+        stage={phase === 'app' ? 'deck' : 'ambient'}
+        frozen={planningEngaged}
+      />
+
+      {/* Over everything, including the landing screen, until the planner has
+          something to plan on. */}
+      {splashOpen && (
+        <SplashScreen
+          mode="boot"
+          stage={bootStage}
+          error={bootstrapState === 'error' ? (layerError ?? 'Bootstrap failed.') : null}
+          onDone={handleSplashDone}
+        />
+      )}
+
+      {crossing && (
+        <SplashScreen
+          mode="transition"
+          caption={crossing.caption}
+          onMidpoint={crossing.then}
+          onDone={() => setCrossing(null)}
+        />
+      )}
+
       {phase === 'landing' && <LandingPage onExplore={handleEnterMission} />}
 
-      <div className={`loading-screen ${phase === 'loading' ? 'is-active' : ''}`}>
-        <div className="loading-frame">
-          <span className="loading-brand">LUNAPATH</span>
-          <div className="loading-bar-track">
-            <div className="loading-bar-fill" style={{ width: `${loadingProgress}%` }} />
-          </div>
-          <div className="loading-copy-row">
-            <span className="loading-copy">{loadingMessage}</span>
-            <span className="loading-percent">{Math.round(loadingProgress)}%</span>
-          </div>
+      {/* Stage 01: the hangar. A full screen of its own between the landing
+          sequence and the cockpit -- the rover is picked here, with its specs
+          and the route weights in view, before any terrain is shown. */}
+      {phase === 'fleet' && (
+        <div className="fleet-screen">
+          {rovers.length > 0 ? (
+            <FleetSelectionView
+              rovers={rovers}
+              selectedRover={selectedRover}
+              onSelectRover={handleRoverSelect}
+              onDeployToMap={handleDeployToMap}
+            />
+          ) : (
+            <div className="fleet-screen-loading">
+              {bootstrapState === 'error'
+                ? layerError ?? 'The rover catalogue could not be loaded.'
+                : 'Loading rover catalogue…'}
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       <div className={`app-shell ${appIsVisible ? 'is-visible' : 'is-hidden'}`}>
-        <header className="topbar">
-        <div className="brand-lockup">
-          <span className="brand-mark">LUNAPATH</span>
-        </div>
-        <div className="topbar-status">
-          <span className="status-line">Mission: {missionStatus}</span>
-          <span className="status-line status-line-muted">
-            Data link: {hasData ? 'Active' : 'Syncing'}
-          </span>
-        </div>
-      </header>
+        {/* Modern Mission Control TopBar with PLAN / ANALYZE Switcher */}
+        <TopBar
+          mode={missionMode}
+          onModeChange={setMissionMode}
+          hasRoute={Boolean(planResult)}
+          missionStatus={missionStatus}
+          dataLinkActive={hasData}
+          isSolving={isSolving}
+          systemsOpen={systemsOpen}
+          onToggleSystems={() => setSystemsOpen((v) => !v)}
+        />
 
-      <main className={`content-grid ${!leftOpen ? 'left-collapsed' : ''} ${!rightOpen ? 'right-collapsed' : ''}`}>
-        <aside className={`left-rail ${!leftOpen ? 'is-collapsed' : ''}`}>
-          <button type="button" className="rail-toggle rail-toggle--left" onClick={() => setLeftOpen((v) => !v)} aria-label={leftOpen ? 'Collapse left panel' : 'Expand left panel'}>
-            {leftOpen ? '\u2039' : '\u203A'}
-          </button>
-          {leftOpen && (
-            <>
-              <div className="rail-scroll">
-                <section className="rail-section">
-                  <div className="rail-section-header">
-                    <div className="avatar-tile">MC</div>
-                    <div>
-                      <p className="panel-kicker">Mission Workspace</p>
-                      <h2 className="panel-title">South Pole Route Planner</h2>
-                      <p className="panel-description">
-                        Review terrain, place mission points, and generate a safer rover corridor.
-                      </p>
-                    </div>
+        {/* The cockpit. Rover selection lives in the hangar stage; "Change
+            vehicle", under the rover card that prompts the thought, returns
+            there rather than opening a modal over the map. */}
+        <main
+            className={[
+              'content-grid',
+              leftRailFeatures.length === 0 ? 'no-left-rail' : '',
+              rightRailFeatures.length === 0 ? 'no-right-rail' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {/* ── LEFT RAIL: MISSION SETUP, IN PLAN ──
+                Rendered only when the registry has something for it, exactly
+                like the right rail below. In analyze it has nothing, so the
+                column goes with it.
+
+                Neither rail collapses any more. They each used to carry a
+                40px strip for that, which spent the top of the panel plus a
+                hairline on a control for a problem nobody had -- the rails
+                hold what the cockpit is driven from, and a folded rail leaves
+                a map you cannot plan on. */}
+            {leftRailFeatures.length > 0 && (
+              <aside className="left-rail">
+                <LeftRailSlot />
+              </aside>
+            )}
+
+          {/* ── CENTER STAGE: 2D/3D TERRAIN WORKBENCH ───────────────────────── */}
+          <section className="center-stage">
+            <div className="map-stage">
+              {/* Top-Left: Collapsible & Minimizable Surface Telemetry HUD */}
+              {hudOpen && (
+                hudMinimized ? (
+                  <div
+                    className="map-overlay map-overlay-top-left lp-hud-minimized"
+                    onClick={() => setHudMinimized(false)}
+                    title="Click to expand Surface Telemetry HUD"
+                  >
+                    <span className="lp-hud-min-dot">📍</span>
+                    <span className="lp-hud-min-coords">
+                      {formatLatitude(focusTelemetry.lat)}, {formatLongitude(focusTelemetry.lon)}
+                    </span>
+                    <span className="lp-hud-min-sep">·</span>
+                    <span className="lp-hud-min-alt">{formatAltitude(focusTelemetry.altitudeM)}</span>
+                    <span className="lp-hud-min-expand-icon">▾</span>
                   </div>
-                </section>
-
-                <section className="rail-section">
-                  <p className="eyebrow">Active Rover</p>
-                  <p className="section-note">
-                    One rover is used per route. Changing rover refreshes traversability and energy cost.
-                  </p>
-                  <div className="rover-list">
-                    {rovers.map((rover) => (
-                      <button
-                        key={rover.id}
-                        type="button"
-                        className={`rover-card ${selectedRoverId === rover.id ? 'is-active' : ''}`}
-                        onClick={() => handleRoverSelect(rover)}
-                      >
-                        <div className="rover-card-head">
-                          <strong>{rover.name}</strong>
-                          <span>{selectedRoverId === rover.id ? 'Selected' : 'Available'}</span>
-                        </div>
-                        <div className="rover-card-specs">
-                          <span>{rover.e_cap_wh.toFixed(0)} Wh</span>
-                          <span>{rover.v_max_ms.toFixed(2)} m/s</span>
-                          <span>max {rover.slope_max_deg.toFixed(0)} deg</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                  {selectedRover && (
-                    <div className="coord-readout rover-summary-grid">
-                      <div className="coord-card">
-                        <span className="coord-label">Battery / Shadow</span>
-                        <strong className="coord-value">
-                          {selectedRover.e_cap_wh.toFixed(0)} Wh / {selectedRover.h_max_shadow_h.toFixed(0)} h
-                        </strong>
+                ) : (
+                  <div className="map-overlay map-overlay-top-left lp-hud-card">
+                    <div className="lp-hud-header">
+                      <div className="lp-hud-title-group">
+                        {/* A pulsing dot is a status light, and this readout
+                            has no status to report -- it said "live" beside
+                            four numbers that are simply where the pointer is.
+                            The crosshair says what the panel is instead. */}
+                        <Icon name="location" />
+                        <span className="lp-hud-title">Surface telemetry</span>
                       </div>
-                      <div className="coord-card">
-                        <span className="coord-label">Mass / Speed</span>
-                        <strong className="coord-value">
-                          {selectedRover.mass_kg.toFixed(0)} kg / {selectedRover.v_max_ms.toFixed(2)} m/s
-                        </strong>
+                      <div className="lp-hud-actions">
+                        <button
+                          type="button"
+                          className="lp-hud-btn"
+                          onClick={() => setHudMinimized(true)}
+                          title="Minimize HUD to compact chip"
+                          aria-label="Minimize HUD"
+                        >
+                          –
+                        </button>
                       </div>
                     </div>
-                  )}
-                </section>
 
-                <section className="rail-section">
-                  <p className="eyebrow">Route Priorities</p>
-                  <p className="section-note">
-                    Increase a priority to make the planner avoid that condition more aggressively.
-                  </p>
-                  <div className="slider-stack">
-                    {WEIGHT_CONTROLS.map(({ key, label }) => (
-                      <label key={key} className="slider-row">
-                        <span className="slider-head">
-                          <span className="slider-name">{label}</span>
-                          <span className="slider-value">{weights[key].toFixed(3)}</span>
+                    <div className="map-data-grid">
+                      <span className="map-data-label">LAT</span>
+                      <span className="map-data-value">{formatLatitude(focusTelemetry.lat)}</span>
+                      <span className="map-data-label">LON</span>
+                      <span className="map-data-value">{formatLongitude(focusTelemetry.lon)}</span>
+                      <span className="map-data-label">ALT</span>
+                      <span className="map-data-value">{formatAltitude(focusTelemetry.altitudeM)}</span>
+                      <span className="map-data-label">TMP</span>
+                      <span className="map-data-value">{formatTemperature(focusTelemetry.thermalC)}</span>
+                    </div>
+
+
+                  </div>
+                )
+              )}
+
+              {/* Primary Map Viewport (2D or 3D). .map-canvas-shell already
+                  carries position: relative (App.css:1208), which is what
+                  CanvasOverlaySlot sizes itself against. */}
+              <div className="map-canvas-shell">
+                <CanvasOverlaySlot />
+                {dimension === '2d' ? (
+                  <MapCanvas
+                    elevationGrid={elevationLayer?.data ?? null}
+                    slopeGrid={slopeLayer?.data ?? null}
+                    aspectGrid={aspectLayer?.data ?? null}
+                    shadowGrid={shadowLayer?.data ?? null}
+                    thermalGrid={thermalLayer?.data ?? null}
+                    costGrid={costLayer?.data ?? null}
+                    traversableGrid={traversableLayer?.data ?? null}
+                    waypoints={planResult?.waypoints ?? null}
+                    start={start}
+                    goal={goal}
+                    clickMode={clickMode}
+                    viewMode={viewMode}
+                    resolutionM={focusTelemetry.resolutionM}
+                    onCellClick={handleCellClick}
+                    playbackStep={routePlaybackStep}
+                    onHoverCellChange={setHoverPoint}
+                  />
+                ) : (
+                  <TerrainCanvas3D
+                    viewMode={viewMode}
+                    waypoints={planResult?.waypoints ?? null}
+                    activeWaypoint={activeWaypoint3D}
+                    roverFraction={roverFraction3D}
+                    isPlaying={isPlaying}
+                    obstacleRocks={obstacleRocks}
+                    clickMode={clickMode}
+                    onCellClick={handleCellClick}
+                    exaggeration={null}
+                    sliceIndex={sliceIndex}
+                    photo={photoDrape}
+                    onReady={({ slices, timeVarying, brightestSlice, photoAvailable }) => {
+                      setTerrainSlices(timeVarying ? slices : 0)
+                      setSliceIndex(brightestSlice)
+                      setTerrainPhotoAvailable(photoAvailable)
+                      // Mirror availability: the real NAC crop is strictly
+                      // more detailed than the shaded/procedural fallback, so
+                      // default to it whenever the current DEM window has one.
+                      setPhotoDrape(photoAvailable)
+                    }}
+                    onError={(message) =>
+                      pushToast({ tone: 'warning', title: '3D Terrain', message })
+                    }
+                  />
+                )}
+              </div>
+
+              {/* 3D Sun Position & LROC NAC Photo Drape Controls */}
+              {dimension === '3d' && (
+                <div className="map-overlay map-overlay-bottom-right terrain3d-time">
+                  <label className="terrain3d-photo">
+                    <input
+                      type="checkbox"
+                      checked={photoDrape}
+                      disabled={!terrainPhotoAvailable}
+                      onChange={(event) => setPhotoDrape(event.target.checked)}
+                    />
+                    <span>
+                      {terrainPhotoAvailable
+                        ? 'Photographic Overlay (LROC NAC, 1 m/px)'
+                        : 'Photographic Overlay (not aligned with current DEM window)'}
+                    </span>
+                  </label>
+                  {photoDrape ? (
+                    <span className="terrain3d-note">
+                      2010 solstice acquisition. Native shadows are fixed to acquisition epoch.
+                    </span>
+                  ) : (
+                    terrainSlices > 1 && (
+                      <>
+                        <span className="eyebrow tight">
+                          Solar Ephemeris · Day {(sliceIndex / 2).toFixed(1)}
                         </span>
                         <input
                           type="range"
                           min={0}
-                          max={2}
-                          step={0.01}
-                          value={weights[key]}
-                          onChange={(event) => {
-                            const nextValue = Number.parseFloat(event.target.value)
-                            setWeights((current) => ({ ...current, [key]: nextValue }))
-                            setPlanResult(null)
-                            setPlanError(null)
-                          }}
+                          max={terrainSlices - 1}
+                          step={1}
+                          value={sliceIndex}
+                          onChange={(event) => setSliceIndex(Number(event.target.value))}
                         />
-                      </label>
-                    ))}
-                  </div>
-                </section>
-              </div>
-            </>
-          )}
-        </aside>
-
-        <section className="center-stage">
-          <div className="map-stage">
-            <div className="map-overlay map-overlay-top-left">
-              <div className="map-data-grid">
-                <span className="map-data-label">LAT</span>
-                <span className="map-data-value">{formatLatitude(focusTelemetry.lat)}</span>
-                <span className="map-data-label">LON</span>
-                <span className="map-data-value">{formatLongitude(focusTelemetry.lon)}</span>
-                <span className="map-data-label">ALT</span>
-                <span className="map-data-value">{formatAltitude(focusTelemetry.altitudeM)}</span>
-                <span className="map-data-label">TMP</span>
-                <span className="map-data-value">{formatTemperature(focusTelemetry.thermalC)}</span>
-              </div>
-
-              <div className="route-control-inline">
-                <div className={`status-pill status-pill--${mapStatusTone}`}>{mapStatus}</div>
-                <p className="section-note">{routeGuidance}</p>
-                <div className="coord-chip-grid">
-                  <button
-                    type="button"
-                    className={`coord-chip ${clickMode === 'start' ? 'is-start' : ''}`}
-                    onClick={() => setClickMode(clickMode === 'start' ? 'idle' : 'start')}
-                  >
-                    {start ? `START ${start[0]},${start[1]}` : 'Select Start'}
-                  </button>
-                  <button
-                    type="button"
-                    className={`coord-chip ${clickMode === 'goal' ? 'is-goal' : ''}`}
-                    onClick={() => setClickMode(clickMode === 'goal' ? 'idle' : 'goal')}
-                  >
-                    {goal ? `GOAL ${goal[0]},${goal[1]}` : 'Select Goal'}
-                  </button>
-                </div>
-                <div className="route-control-actions">
-                  <button type="button" className="ghost-btn" onClick={handleReset}>
-                    Clear
-                  </button>
-                  <button
-                    type="button"
-                    className="primary-btn"
-                    onClick={handlePlan}
-                    disabled={!start || !goal || planning}
-                  >
-                    {planning ? 'Planning...' : 'Generate Route'}
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="map-overlay-top-right">
-              <div className="map-switch">
-                {MAP_VIEW_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className={viewMode === option.id ? 'is-active' : ''}
-                    onClick={() => setViewMode(option.id)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <div className="map-mode-card">
-                <span className="eyebrow tight">View</span>
-                <strong>{activeMapView.title}</strong>
-              </div>
-            </div>
-
-            <div className="map-canvas-shell">
-              <MapCanvas
-                ref={mapRef}
-                elevationGrid={elevationLayer?.data ?? null}
-                slopeGrid={slopeLayer?.data ?? null}
-                aspectGrid={aspectLayer?.data ?? null}
-                shadowGrid={shadowLayer?.data ?? null}
-                thermalGrid={thermalLayer?.data ?? null}
-                costGrid={costLayer?.data ?? null}
-                traversableGrid={traversableLayer?.data ?? null}
-                waypoints={planResult?.waypoints ?? null}
-                start={start}
-                goal={goal}
-                clickMode={clickMode}
-                viewMode={viewMode}
-                resolutionM={focusTelemetry.resolutionM}
-                onCellClick={handleCellClick}
-                onAnimationStepChange={setRoutePlaybackStep}
-                onHoverCellChange={setHoverPoint}
-              />
-            </div>
-
-            <div className="map-overlay map-overlay-bottom-left">
-              <div className="scale-line" />
-              <span className="scale-copy">
-                0 - {focusTelemetry.spanKm.toFixed(1)} KM | {focusTelemetry.resolutionM.toFixed(0)} M/PIX
-              </span>
-            </div>
-
-            <div className="map-overlay map-overlay-bottom-center legend-ribbon">
-              {LEGEND_ITEMS.map((item) => (
-                <span key={item.label} className="legend-item">
-                  <span className="legend-dot" style={{ color: item.color, background: item.color }} />
-                  {item.label}
-                </span>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <aside className={`right-rail ${!rightOpen ? 'is-collapsed' : ''}`}>
-          <button type="button" className="rail-toggle rail-toggle--right" onClick={() => setRightOpen((v) => !v)} aria-label={rightOpen ? 'Collapse right panel' : 'Expand right panel'}>
-            {rightOpen ? '\u203A' : '\u2039'}
-          </button>
-          {rightOpen && (
-            <>
-          <div className="telemetry-header">
-            <div>
-              <p className="panel-kicker">Mission Snapshot</p>
-              <h2 className="panel-title">Route Analytics</h2>
-              <p className="panel-description">
-                Selected cell telemetry and route health update here as you plan.
-              </p>
-            </div>
-            <span className={`signal-dot ${hasData ? 'is-live' : ''}`} />
-          </div>
-
-          <div className="telemetry-scroll">
-            <section className="telemetry-grid">
-              <TelemetryWell
-                label="Route Speed"
-                value={`${averageVelocityMs.toFixed(2)} M/S`}
-                accent="#a0a0ff"
-              />
-              <TelemetryWell
-                label="Steepest Segment"
-                value={summary ? `${summary.max_slope_deg.toFixed(1)} deg` : '--'}
-                accent="#adc6ff"
-              />
-              <TelemetryWell
-                label="Cell Temperature"
-                value={formatTemperature(focusTelemetry.thermalC)}
-                accent={focusTelemetry.thermalC !== null && focusTelemetry.thermalC < -150 ? '#ff6d00' : '#00e676'}
-              />
-              <TelemetryWell
-                label="Planner Effort"
-                value={metrics ? String(metrics.nodes_expanded ?? '--') : '--'}
-                accent="#00e676"
-              />
-            </section>
-
-            <section className="battery-card">
-              <div className="card-head">
-                <span className="eyebrow tight">Battery</span>
-                <span className="card-meta">{batteryMeta}</span>
-              </div>
-              <div className="battery-ring">
-                <svg viewBox="0 0 128 128" aria-hidden="true">
-                  <circle
-                    cx="64"
-                    cy="64"
-                    r={BATTERY_RADIUS}
-                    className="battery-track"
-                  />
-                  <circle
-                    cx="64"
-                    cy="64"
-                    r={BATTERY_RADIUS}
-                    className="battery-progress"
-                    stroke={batteryToHex(batteryPct)}
-                    strokeDasharray={BATTERY_CIRCUMFERENCE}
-                    strokeDashoffset={batteryStrokeOffset}
-                  />
-                </svg>
-                <div className="battery-copy">
-                  <strong>{batteryPct.toFixed(1)}%</strong>
-                  <span>{batteryLabel}</span>
-                </div>
-              </div>
-            </section>
-
-            <section className="risk-card">
-              <div className="risk-head">
-                <span className="eyebrow tight">Risk Mix</span>
-                <span className="risk-state" style={{ color: riskState.color }}>
-                  {riskState.label}
-                </span>
-              </div>
-              <div className="risk-bar">
-                {RISK_LEVELS.map((level) => {
-                  const width = totalRiskSamples > 0 ? (riskCounts[level] / totalRiskSamples) * 100 : 0
-                  return (
-                    <div
-                      key={level}
-                      style={{
-                        width: `${width}%`,
-                        background: riskToHex(level),
-                        opacity: width > 0 ? 1 : 0.18,
-                      }}
-                    />
-                  )
-                })}
-              </div>
-              <div className="risk-count-grid">
-                {RISK_LEVELS.map((level) => (
-                  <div key={level} className="risk-count-card">
-                    <span>{level}</span>
-                    <strong style={{ color: riskToHex(level) }}>{riskCounts[level]}</strong>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="waypoint-card">
-              <div className="risk-head">
-                <span className="eyebrow tight">Route Milestones</span>
-                <span className="waypoint-meta">
-                  {summary ? `${summary.waypoint_count} nodes` : 'No route'}
-                </span>
-              </div>
-              {summary && (
-                <div className="milestone-stats">
-                  <div className="milestone-stat">
-                    <span>Distance</span>
-                    <strong>{summary.total_distance_km.toFixed(2)} km</strong>
-                  </div>
-                  <div className="milestone-stat">
-                    <span>Recharges</span>
-                    <strong>{summary.total_recharges}</strong>
-                  </div>
-                  <div className="milestone-stat">
-                    <span>End Battery</span>
-                    <strong>{summary.final_battery_pct.toFixed(1)}%</strong>
-                  </div>
+                      </>
+                    )
+                  )}
                 </div>
               )}
-              <div className="waypoint-list">
-                {waypointPreview.map((item) => (
-                  <div key={item.key} className="waypoint-row">
-                    <div className="waypoint-main">
-                      <span className="waypoint-index" style={{ color: item.accent }}>
-                        {item.label}
-                      </span>
-                      <span className="waypoint-detail">{item.detail}</span>
-                    </div>
-                    <span className="waypoint-status" style={{ color: item.accent }}>
-                      {item.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-            </>
-          )}
-        </aside>
-      </main>
 
-      <div className="toast-stack" aria-live="polite" aria-atomic="true">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`toast-card toast-card--${toast.tone}`} role="status">
-            <div className="toast-copy">
-              <strong className="toast-title">{toast.title}</strong>
-              <p className="toast-message">{toast.message}</p>
-              {toast.detail && <span className="toast-detail">{toast.detail}</span>}
             </div>
-            <button
-              type="button"
-              className="toast-dismiss"
-              onClick={() => dismissToast(toast.id)}
-              aria-label="Dismiss notification"
-            >
-              Close
-            </button>
-          </div>
-        ))}
-      </div>
-      </div>
-    </>
-  )
-}
 
-function TelemetryWell({
-  label,
-  value,
-  accent,
-}: {
-  label: string
-  value: string
-  accent: string
-}) {
-  return (
-    <div className="telemetry-well" style={{ color: accent }}>
-      <span className="telemetry-label">{label}</span>
-      <strong className="telemetry-value">{value}</strong>
-    </div>
+            <BottomDock />
+
+            {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
+            <footer className={`lp-status-bar ${missionMode === 'analyze' ? 'is-analyze' : ''}`}>
+              <div className="lp-status-right">
+                <StatusBarSlot />
+              </div>
+            </footer>
+          </section>
+
+          {/* ── RIGHT RAIL: MISSION CONTEXT (PLAN) vs ROUTE ANALYSIS (ANALYZE) ── */}
+          {/* The right rail exists only when something is registered for it.
+              In plan nothing is: it is a column of readouts, and the map is
+              what the operator is actually working in -- so plan gets the
+              288px back rather than an empty bordered gutter beside the
+              terrain. .content-grid names its third column, so leaving the
+              <aside> in place and empty would have kept the column. */}
+          {rightRailFeatures.length > 0 && (
+            <aside className="right-rail">
+              <RightRailSlot />
+            </aside>
+          )}
+        </main>
+
+        {/* Application-level floating utilities. Sits immediately before the
+            toast stack and shares its parent: shell.css moves the toasts clear
+            of an open assistant with a sibling combinator, which needs both. */}
+        <GlobalOverlaySlot />
+
+        {/* Systems & Evidence: the diagnostics/proof panels, pulled out of the
+            rails so the default cockpit stays task + context. */}
+        <SystemsDrawer open={systemsOpen} onClose={() => setSystemsOpen(false)} />
+
+        {/* Floating System Toasts */}
+        {toasts.length > 0 && (
+          <aside className="toast-stack" aria-live="polite" aria-label="System notifications">
+            {toasts.map((toast) => (
+              <div key={toast.id} className={`toast-card toast-card--${toast.tone}`} role="status">
+                <div className="toast-body">
+                  <strong className="toast-title">{toast.title}</strong>
+                  <p className="toast-message">{toast.message}</p>
+                  {toast.detail && <p className="toast-detail">{toast.detail}</p>}
+                  {toast.actionId === 'show-traversability' && (
+                    <button
+                      type="button"
+                      className="toast-action"
+                      onClick={() => {
+                        setViewMode('traversability')
+                        dismissToast(toast.id)
+                      }}
+                    >
+                      {toast.actionLabel}
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="toast-dismiss"
+                  onClick={() => dismissToast(toast.id)}
+                  aria-label="Dismiss notification"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </aside>
+        )}
+      </div>
+      </AssistantAskProvider>
+      </OverlayProvider>
+      </MissionRuntimeProvider>
+    </MissionProvider>
   )
 }
 
@@ -976,140 +1296,26 @@ function mapWaypointToFocusTelemetry(waypoint: Waypoint, current: FocusTelemetry
   }
 }
 
-function countRiskLevels(waypoints: Waypoint[]): Record<RiskLevel, number> {
-  const counts: Record<RiskLevel, number> = {
-    LOW: 0,
-    MEDIUM: 0,
-    HIGH: 0,
-    CRITICAL: 0,
-  }
-
-  for (const waypoint of waypoints) {
-    counts[waypoint.risk_level] += 1
-  }
-
-  return counts
-}
-
-function resolveRiskState(counts: Record<RiskLevel, number>) {
-  if (counts.CRITICAL > 0) {
-    return { label: 'CRITICAL', color: '#ff1744' }
-  }
-  if (counts.HIGH > 0) {
-    return { label: 'HIGH', color: '#ff6d00' }
-  }
-  if (counts.MEDIUM > 0) {
-    return { label: 'CAUTION', color: '#ffea00' }
-  }
-  if (counts.LOW > 0) {
-    return { label: 'LOW', color: '#00e676' }
-  }
-  return { label: 'NO ROUTE', color: '#918f9d' }
-}
-
-function buildWaypointPreview(waypoints: Waypoint[]): WaypointPreviewItem[] {
-  if (waypoints.length === 0) {
-    return [
-      {
-        key: 'wp-start',
-        label: 'START',
-        detail: 'Choose a start point',
-        status: 'WAIT',
-        accent: '#918f9d',
-      },
-      {
-        key: 'wp-track',
-        label: 'ROUTE',
-        detail: 'Generate a route preview',
-        status: 'IDLE',
-        accent: '#918f9d',
-      },
-      {
-        key: 'wp-goal',
-        label: 'GOAL',
-        detail: 'Choose a goal point',
-        status: 'WAIT',
-        accent: '#918f9d',
-      },
-    ]
-  }
-
-  const lastIndex = waypoints.length - 1
-  const indexes = Array.from(
-    new Set([0, Math.floor(lastIndex * 0.33), Math.floor(lastIndex * 0.66), lastIndex]),
-  )
-
-  return indexes.map((index, position) => {
-    const waypoint = waypoints[index]
-    const status =
-      position === 0
-        ? 'START'
-        : position === indexes.length - 1
-          ? 'GOAL'
-          : waypoint.recharged_this_step
-            ? 'RECHARGE'
-            : waypoint.risk_level
-    const label =
-      position === 0
-        ? 'START'
-        : position === indexes.length - 1
-          ? 'GOAL'
-          : `WP ${String(waypoint.step).padStart(3, '0')}`
-    const detailParts = [
-      formatDistanceKm(waypoint.distance_m),
-      `${waypoint.battery_pct.toFixed(1)}% battery`,
-    ]
-
-    if (waypoint.recharge_count > 0) {
-      detailParts.push(`${waypoint.recharge_count} recharge${waypoint.recharge_count === 1 ? '' : 's'}`)
-    }
-
-    return {
-      key: `${waypoint.step}-${index}`,
-      label,
-      detail: detailParts.join(' | '),
-      status,
-      accent: waypoint.recharged_this_step ? '#8ca2ff' : riskToHex(waypoint.risk_level),
-    }
-  })
-}
-
 function formatLatitude(value: number): string {
-  if (!Number.isFinite(value)) {
-    return '--'
-  }
+  if (!Number.isFinite(value)) return '--'
   const hemisphere = value >= 0 ? 'N' : 'S'
-  return `${Math.abs(value).toFixed(4)} deg ${hemisphere}`
+  return `${Math.abs(value).toFixed(4)}° ${hemisphere}`
 }
 
 function formatLongitude(value: number): string {
-  if (!Number.isFinite(value)) {
-    return '--'
-  }
+  if (!Number.isFinite(value)) return '--'
   const hemisphere = value >= 0 ? 'E' : 'W'
-  return `${Math.abs(value).toFixed(4)} deg ${hemisphere}`
+  return `${Math.abs(value).toFixed(4)}° ${hemisphere}`
 }
 
 function formatAltitude(value: number | null): string {
-  if (value === null) {
-    return '--'
-  }
+  if (value === null) return '--'
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)} m`
 }
 
 function formatTemperature(value: number | null): string {
-  if (value === null) {
-    return '--'
-  }
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)} C`
-}
-
-function formatDistanceKm(distanceM: number): string {
-  return `${(distanceM / 1000).toFixed(2)} km`
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
+  if (value === null) return '--'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)} °C`
 }
 
 function buildToastNotice(source: 'layer' | 'plan', detail: string): Omit<ToastItem, 'id'> {
@@ -1121,8 +1327,10 @@ function buildToastNotice(source: 'layer' | 'plan', detail: string): Omit<ToastI
       tone: 'warning',
       title: 'Selected point is unavailable',
       message:
-        'That cell cannot be used for routing. Pick a nearby area with safer slope or temperature.',
+        'That cell cannot be traversed by the rover envelope. Switch to the traversability layer to see which cells are drivable, then pick one.',
       detail: normalizedDetail,
+      actionLabel: 'Show traversable cells',
+      actionId: 'show-traversability',
     }
   }
 
@@ -1131,7 +1339,7 @@ function buildToastNotice(source: 'layer' | 'plan', detail: string): Omit<ToastI
       tone: 'warning',
       title: 'Route could not be generated',
       message:
-        'The planner could not connect the selected points. Adjust the start, goal, or route priorities and try again.',
+        'The planner could not resolve a continuous safe corridor. Tweak start/goal or relax route priority weights.',
       detail: normalizedDetail,
     }
   }
@@ -1139,15 +1347,7 @@ function buildToastNotice(source: 'layer' | 'plan', detail: string): Omit<ToastI
   return {
     tone: 'error',
     title: 'Terrain data warning',
-    message:
-      'Some terrain data could not be refreshed. The current view may be temporarily out of date.',
+    message: 'Some terrain data could not be synchronized from the backend raster server.',
     detail: normalizedDetail,
   }
 }
-
-const LEGEND_ITEMS = [
-  { label: 'Safe', color: '#00e676' },
-  { label: 'Caution', color: '#ffea00' },
-  { label: 'High', color: '#ff6d00' },
-  { label: 'Critical', color: '#ff1744' },
-]

@@ -1,0 +1,148 @@
+/* A2 illumination corridor, in the Systems & Evidence drawer.
+ *
+ * NOT features/corridor/ -- that is the route corridor, a ribbon around a
+ * planned path. This is the lit-and-connected volume over time.
+ */
+
+.ic-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.ic-toggle input:disabled + span {
+  color: var(--text-dim-2);
+  cursor: default;
+}
+
+.ic-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.ic-field-btn {
+  background: rgba(8, 11, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 4px 9px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.ic-field-btn:hover {
+  border-color: var(--border-focus);
+  color: var(--text-2);
+}
+
+.ic-field-btn.is-active {
+  border-color: rgba(186, 175, 245, 0.55);
+  background: rgba(186, 175, 245, 0.14);
+  color: var(--text);
+}
+
+.ic-blurb {
+  margin: 0 0 10px;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* The constraint status. Amber and boxed because a corridor drawn beside a
+   route invites the reading that the route stayed inside it -- and it did not.
+   This is the one line that stops the map making a claim the data does not. */
+.ic-unenforced {
+  color: var(--risk-med);
+  border: 1px solid rgba(227, 213, 72, 0.28);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  background: rgba(227, 213, 72, 0.06);
+}
+
+.ic-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 0 0 10px;
+}
+
+.ic-facts div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ic-facts dt {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.ic-facts dd {
+  margin: 0;
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+
+.ic-mono {
+  font-family: var(--font-data);
+  color: var(--text);
+}
+
+.ic-sub {
+  display: block;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+.ic-note {
+  margin: 0 0 8px;
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.ic-note.is-error {
+  color: var(--accent-coral);
+}
+
+/* The backend's own definitions. Set apart rather than dimmed: a corridor is
+   only as meaningful as the rule that built it, and paraphrasing the rule
+   would change it. */
+.ic-rule {
+  border-left: 1px solid rgba(199, 205, 219, 0.14);
+  padding-left: 10px;
+}
+
+.ic-rule strong {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.ic-remedy {
+  display: block;
+  margin: 4px 0 8px;
+  padding: 3px 6px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  background: rgba(8, 11, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}

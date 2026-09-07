@@ -1,0 +1,71 @@
+/* Scale and risk key, over the terrain.
+
+   Inherits .map-overlay for its translucent ground, border and radius -- the
+   map's own chrome treatment -- and adds only the layout. Deliberately small:
+   this is a key, and a key that competes with the map it describes has stopped
+   being one. */
+
+.map-overlay-bottom-center {
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  /* The one edge free in both renderers: 3-D holds all four corners. */
+  z-index: 3;
+  max-width: calc(100% - 48px);
+}
+
+.lp-map-key {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.lp-map-key::-webkit-scrollbar { display: none; }
+
+.lp-map-key-scale { display: flex; align-items: center; gap: 7px; }
+
+.lp-map-key-rule {
+  width: 46px;
+  height: 5px;
+  border: 1px solid var(--text-muted-2);
+  border-top: none;
+}
+
+.lp-map-key-copy {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.lp-map-key-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--line-card);
+}
+
+.lp-map-key-risk { display: flex; align-items: center; gap: 10px; }
+
+.lp-map-key-label {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  color: var(--text-dim-2);
+}
+
+.lp-map-key-item { display: flex; align-items: center; gap: 5px; }
+
+.lp-map-key-line { width: 20px; height: 8px; flex: none; }
+
+/* On a narrow map the key would cover the terrain it describes, so the scale
+   keeps its place and the risk key steps aside. */
+@media (max-width: 900px) {
+  .lp-map-key-risk { display: none; }
+}

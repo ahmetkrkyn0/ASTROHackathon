@@ -1,0 +1,99 @@
+/* SHERPA Monte Carlo stress test (B5).
+
+   Console rules: flat, 2px radius, mono for data only. Lavender is the accent
+   for the rate bars -- a completion rate is a measurement, not a safety
+   verdict, so it takes the interaction accent rather than risk colour. Coral
+   appears only on the failure-cause counts, which are safety semantics. */
+
+.lp-st-result { display: flex; flex-direction: column; gap: 11px; }
+
+/* The headline rate and its axis are one block. */
+.lp-st-headline { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── Rates, with their interval ──────────────────────────────────────────── */
+
+.lp-st-rate { display: flex; flex-direction: column; gap: 3px; }
+
+.lp-st-rate-head { display: flex; align-items: baseline; justify-content: space-between; }
+.lp-st-rate-label { font-size: var(--fs-micro); color: var(--text-dim-2); }
+
+.lp-st-rate-value {
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-st-hist { display: flex; flex-direction: column; gap: 2px; }
+
+.lp-st-hist-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 34px;
+  padding: 0 1px;
+  border-bottom: 1px solid var(--line-inner);
+}
+
+.lp-st-hist-bar {
+  flex: 1;
+  min-width: 0;
+  min-height: 1px;
+  background: var(--cyan);
+  opacity: 0.55;
+  border-radius: 1px 1px 0 0;
+}
+
+.lp-st-hist-axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Failures ────────────────────────────────────────────────────────────── */
+
+.lp-st-failures {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.lp-st-failures li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+
+/* Safety semantics, so risk colour is correct here. */
+.lp-st-failures b {
+  font-family: var(--font-data);
+  font-weight: 500;
+  color: var(--coral-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Verdict, notes, states ──────────────────────────────────────────────── */
+
+.lp-st-verdict,
+.lp-st-note,
+.lp-st-verdict svg,
+.lp-st-note svg { flex: none; margin-top: 1px; font-size: 12px; }
+
+.lp-st-verdict {
+  padding: 7px 9px;
+  border-left: 2px solid var(--line-card);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text-3);
+}
+
+.lp-st-note { color: var(--text-dimmest); }

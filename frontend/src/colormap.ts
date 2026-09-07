@@ -1,6 +1,7 @@
 export type RGB = [number, number, number]
 
-const COOLWARM_STOPS: RGB[] = [
+/** Exported for the overlay contract, whose field command carries its stops. */
+export const COOLWARM_STOPS: RGB[] = [
   [59, 76, 192],
   [98, 130, 234],
   [141, 176, 254],
@@ -65,32 +66,92 @@ const DEFAULT_ORIGIN_X = 176000
 const DEFAULT_ORIGIN_Y = 48000
 const DEFAULT_RESOLUTION_M = 80
 
+export const START_MINT = '#5fe3b0'
+export const GOAL_CORAL = '#ed856e'
+/** The trajectory itself, not a risk reading. */
+export const ROUTE_CYAN = '#4fd8f0'
+export const LAVENDER_ACCENT = '#baaff5'
+
+/**
+ * The risk ramp, mirroring --risk-* in App.css.
+ *
+ * Written out because canvas strokeStyle and THREE.Color take a string, not a
+ * CSS variable. The two must move together; App.css carries the derivation
+ * and the measurements behind these four values.
+ */
 export function riskToHex(level: string): string {
   switch (level.toUpperCase()) {
     case 'LOW':
-      return '#00e676'
+      return '#4a8fd8'
     case 'MEDIUM':
-      return '#ffea00'
+      return '#e3d548'
     case 'HIGH':
-      return '#ff6d00'
+      return '#d69770'
     case 'CRITICAL':
-      return '#ff1744'
+      return '#ed4b3d'
     default:
-      return '#ffffff'
+      return '#8b94a6'
   }
 }
 
+/**
+ * The dash pattern that carries risk alongside its colour.
+ *
+ * Colour alone cannot do this job. Four steps on one colour channel have a
+ * measured ceiling of ~42 separation under the traffic-light metaphor, and
+ * the ramp we can actually ship reaches 27.8 -- better than the 15.4 it
+ * replaces, still not enough to be the only channel. The guidance is explicit:
+ * do not rely solely on colour.
+ *
+ * The progression is a metaphor rather than four arbitrary patterns: the line
+ * breaks up more as the risk rises. Solid ground, then gaps, then barely
+ * holding together. Someone who cannot see any of the four colours still reads
+ * the severity order off the line.
+ *
+ * Lengths are canvas units at the 2.8px stroke the route is drawn with; they
+ * are deliberately far apart so the patterns survive a short segment.
+ */
+export function riskToDash(level: string): number[] {
+  switch (level.toUpperCase()) {
+    case 'LOW':
+      return []
+    case 'MEDIUM':
+      return [10, 5]
+    case 'HIGH':
+      return [4, 4]
+    case 'CRITICAL':
+      return [1.5, 3.5]
+    default:
+      return []
+  }
+}
+
+/** The same patterns as an SVG stroke-dasharray, for the legend. */
+export function riskToDashArray(level: string): string {
+  const dash = riskToDash(level)
+  return dash.length ? dash.join(' ') : 'none'
+}
+
+/**
+ * Battery state of charge, on the risk ramp.
+ *
+ * Deliberately the same four values and the same four thresholds the backend
+ * uses to derive risk_level (simulation.py `_risk_level`): a battery at 20%
+ * IS a HIGH-risk rover, and showing that reading in a colour the risk ramp
+ * does not use would be the same defect the legend had -- one meaning, two
+ * colours.
+ */
 export function batteryToHex(percent: number): string {
   if (percent > 50) {
-    return '#00e676'
+    return riskToHex('LOW')
   }
   if (percent > 25) {
-    return '#ffea00'
+    return riskToHex('MEDIUM')
   }
   if (percent > 10) {
-    return '#ff6d00'
+    return riskToHex('HIGH')
   }
-  return '#ff1744'
+  return riskToHex('CRITICAL')
 }
 
 export function thermalToRgb(value: number | null, min: number, max: number, lut?: number[]): RGB {
@@ -165,6 +226,169 @@ export function grayReverseToRgb(value: number | null, min: number, max: number)
   const channel = Math.round(255 * (1 - clamp01(normalize(value, min, max))))
   return [channel, channel, channel]
 }
+
+/**
+ * Analysis-overlay ramps.
+ *
+ * Separate from the base-map ramps above because they are `FieldRamp` data for
+ * the overlay contract, not `(value) => RGB` functions: a callback would be a
+ * new identity every render, which is exactly what makes an overlay
+ * registration effect loop forever.
+ */
+
+/**
+ * Roughness, in metres. Cool where the ground is smooth, hot where it is not.
+ *
+ * Amber rather than red at the top: this is a fifth cost criterion, not a
+ * hazard. LDRM roughness never makes a cell impassable, and a red field over
+ * the map would say it did.
+ */
+export const ROUGHNESS_STOPS: RGB[] = [
+  [26, 42, 58],
+  [37, 92, 112],
+  [88, 148, 130],
+  [176, 178, 106],
+  [226, 160, 74],
+  [232, 118, 62],
+]
+
+/**
+ * Earth visibility, as a fraction of the sampled span.
+ *
+ * Dark where the Earth never rises, bright cyan where the link is always
+ * geometrically possible. Deliberately the route colour family: a link window
+ * is an operational affordance, not a warning.
+ */
+export const EARTH_VISIBILITY_STOPS: RGB[] = [
+  [14, 18, 28],
+  [24, 54, 78],
+  [34, 104, 132],
+  [58, 164, 186],
+  [110, 216, 232],
+]
+
+/**
+ * Time to the nearest reachable Safe Haven, in hours. Short is safe.
+ *
+ * There is no stop for "unreachable" and there must not be one. That value
+ * arrives as NaN, becomes null on the way to the overlay, and is left
+ * unpainted -- a cell with no reachable haven is not the far end of this ramp,
+ * it is off it entirely. Giving it the darkest colour would put it on the same
+ * axis as "eighteen hours away", which is a different statement.
+ */
+export const TIME_TO_HAVEN_STOPS: RGB[] = [
+  [95, 227, 176],
+  [140, 208, 140],
+  [206, 200, 104],
+  [226, 150, 84],
+  [214, 96, 77],
+]
+
+/**
+ * P(traversable) across NASA's 100 DEM clones.
+ *
+ * Diverging on purpose, with the uncertain middle the loudest part. 0 and 1
+ * are both CERTAIN -- certainly impassable, certainly passable -- and the
+ * interesting cells are the 0.05..0.95 band where the clones disagree. A
+ * monotonic ramp would make "certainly impassable" the eye-catching end and
+ * bury the only thing this layer adds over `traversable`.
+ */
+export const P_TRAVERSABLE_STOPS: RGB[] = [
+  [70, 32, 44],
+  [140, 70, 62],
+  [214, 158, 84],
+  [140, 152, 96],
+  [58, 122, 96],
+]
+
+/**
+ * A standard deviation, in the layer's own unit. Quiet where the ensemble
+ * agrees, bright where it does not.
+ *
+ * Shared by all three sigma layers so that `slope_sigma` (our ensemble, DERIVED)
+ * and `slope_sigma_nasa` (NASA's error model, MODEL) are read on the same scale
+ * of colour. They are not on the same scale of NUMBER -- their ranges differ by
+ * a factor of three -- and each ramp is domained on its own layer's measured
+ * min and max, which the provenance badge beside it explains.
+ */
+export const SIGMA_STOPS: RGB[] = [
+  [18, 24, 36],
+  [40, 66, 96],
+  [92, 106, 140],
+  [168, 142, 148],
+  [232, 196, 140],
+]
+
+/**
+ * P(safe) from the reach-avoid policy. Red at zero, green at one.
+ *
+ * Zero is a real and common answer here -- 28% of traversable blocks on this
+ * window -- so it gets the loudest end of the ramp rather than being left to
+ * look like missing data.
+ */
+export const P_SAFE_STOPS: RGB[] = [
+  [214, 76, 66],
+  [222, 132, 78],
+  [216, 186, 96],
+  [150, 180, 112],
+  [88, 176, 132],
+]
+
+/** Tolerable dwell, in hours. Short is the thing to notice. */
+export const DWELL_STOPS: RGB[] = [
+  [206, 86, 74],
+  [220, 146, 84],
+  [200, 190, 108],
+  [128, 176, 148],
+  [78, 150, 186],
+]
+
+/*
+ * Categorical codes. Single colours, never ramp stops.
+ *
+ * These are `units: "code"` fields. Putting them through a FieldRamp would
+ * produce a colour for a value between two codes -- half "wait", half "drive
+ * north" -- which is not an action the policy ever returned. Each is published
+ * as its own single-colour mask instead, so there is nothing to interpolate.
+ */
+
+/** best_action 254: already in the safe set. */
+export const ACTION_SAFE_RGB: RGB = [95, 227, 176]
+/** best_action 0-7: one of the eight compass moves. */
+export const ACTION_DRIVE_RGB: RGB = [79, 216, 240]
+/** best_action 8: hold position. */
+export const ACTION_WAIT_RGB: RGB = [186, 175, 245]
+/** best_action 255: no action reaches the safe set from here. */
+export const ACTION_NONE_RGB: RGB = [196, 88, 82]
+
+/** side 0: never leaves the envelope inside the lookahead. */
+export const SIDE_INSIDE_RGB: RGB = [110, 186, 150]
+/** side 1: reaches the cold limit first. */
+export const SIDE_COLD_RGB: RGB = [92, 152, 226]
+/** side 2: reaches the hot limit first. */
+export const SIDE_HOT_RGB: RGB = [226, 128, 76]
+
+/**
+ * A2 corridor membership. Two masks, not a two-stop ramp.
+ *
+ * `lit_safe` is the wider set and `corridor` the pruned one inside it, so the
+ * two are shades of one colour rather than two colours: they are the same
+ * quantity at two stages, and a contrasting pair would read as two unrelated
+ * layers.
+ */
+export const CORRIDOR_RGB: RGB = [120, 214, 196]
+export const LIT_SAFE_RGB: RGB = [72, 138, 132]
+
+/**
+ * The PSR mask, as a single colour.
+ *
+ * A boolean layer is not a ramp. Two stops would paint the whole map -- the
+ * zeros as much as the ones -- and PSR covers well under a percent of this
+ * window; the honest rendering leaves the rest untouched. `maskValues` nulls
+ * everything below threshold and this ramp then has only one value to serve,
+ * so both stops are the same colour on purpose.
+ */
+export const PSR_MASK_RGB: RGB = [126, 122, 214]
 
 export function aspectToRgb(value: number | null): RGB {
   if (value === null || !Number.isFinite(value)) {
@@ -246,8 +470,8 @@ export function pixelToApproxLonLat(
 const EQ_BINS = 256
 
 /**
- * Grid verisi üzerinden histogram equalization LUT'u oluşturur.
- * Sonuç: her bin için [0,1] arası eşitlenmiş değer dizisi.
+ * Builds a histogram-equalisation LUT from the grid.
+ * Result: one equalised value in [0,1] per bin.
  */
 export function buildEqualizationLut(grid: (number | null)[][], min: number, max: number): number[] {
   const histogram = new Uint32Array(EQ_BINS)
@@ -263,7 +487,7 @@ export function buildEqualizationLut(grid: (number | null)[][], min: number, max
     }
   }
 
-  // CDF oluştur
+  // Build the CDF
   const cdf = new Float64Array(EQ_BINS)
   cdf[0] = histogram[0]
   for (let i = 1; i < EQ_BINS; i++) {

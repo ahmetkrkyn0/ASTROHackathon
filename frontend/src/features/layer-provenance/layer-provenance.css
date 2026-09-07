@@ -1,0 +1,150 @@
+.lp-provenance-card {
+  border: 1px solid rgba(139, 148, 166, 0.22);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: rgba(12, 16, 24, 0.45);
+}
+
+.lp-provenance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.lp-provenance-name {
+  font-size: var(--fs-body);
+  letter-spacing: var(--track-normal);
+  color: var(--text-2);
+}
+
+.lp-provenance-badge {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  border: 1px solid currentColor;
+}
+
+/* Ranked weakest to strongest, and coloured that way on purpose: a
+   synthetic layer should be the one that catches the eye. */
+.lp-provenance-synthetic { color: var(--risk-med); }
+.lp-provenance-derived   { color: var(--cyan); }
+.lp-provenance-model     { color: var(--lavender); }
+.lp-provenance-measured  { color: var(--risk-low); }
+.lp-provenance-unknown   { color: var(--text-muted); }
+
+.lp-provenance-why,
+.lp-provenance-desc {
+  margin: 0 0 8px;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.lp-provenance-facts {
+  display: flex;
+  gap: 18px;
+  margin: 0;
+}
+
+.lp-provenance-facts div { display: flex; flex-direction: column; gap: 2px; }
+
+.lp-provenance-facts dt {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-dim-2);
+}
+
+.lp-provenance-facts dd {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-provenance-note { margin: 0; font-size: var(--fs-small); color: var(--text-muted); }
+.lp-provenance-warn { color: var(--risk-med); }
+
+/* The B3 pedigree card, under the per-layer one. Same card shape, spaced so
+   the two read as related rather than as one block. */
+.lp-dem-card {
+  margin-top: 10px;
+}
+
+.lp-dem-facts {
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.lp-provenance-desc a {
+  color: var(--cyan);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(79, 216, 240, 0.35);
+}
+
+.lp-provenance-desc a:hover {
+  border-bottom-color: var(--cyan);
+}
+
+/* B3's time half. Two bars in one column per slice: the mean as a quiet fill
+   and the uncertain fraction on top of it. They are not comparable magnitudes
+   -- one is a probability, the other a share of cells -- so they share a
+   column rather than sitting side by side, and the column reads as "how lit,
+   and how sure". */
+.lp-us-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 40px;
+  margin: 8px 0;
+  padding-bottom: 1px;
+  border-bottom: 1px solid rgba(199, 205, 219, 0.14);
+}
+
+.lp-us-col {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 3px;
+  height: 100%;
+}
+
+.lp-us-mean,
+.lp-us-uncertain {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 1px 1px 0 0;
+}
+
+.lp-us-mean {
+  background: rgba(79, 216, 240, 0.28);
+}
+
+/* Louder than the mean it sits on: disagreement is the finding, and a strip
+   that only showed the mean would look identical whether the clones agreed or
+   not. */
+.lp-us-uncertain {
+  background: var(--risk-med);
+}
+
+.lp-us-col.is-current .lp-us-mean {
+  background: rgba(186, 175, 245, 0.42);
+}
+
+.lp-us-remedy {
+  display: block;
+  margin: 4px 0 0;
+  padding: 3px 6px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  background: rgba(8, 11, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}

@@ -1,0 +1,34 @@
+# Line endings.
+#
+# Before this file the repo had no policy, and the result was the worst
+# possible split: 128 files LF, 14 CRLF, and the CRLF set was not some
+# forgotten corner -- it held App.tsx, MapCanvas.tsx, mission/types.ts,
+# features/registry.ts and RouteAnalysisInspector.tsx, which are the files
+# everyone touches. mission/types.ts had at one point been left with a mix of
+# both inside the same file.
+#
+# That produces conflicts on lines nobody edited: two people save the same
+# untouched region with different endings and git sees every line as changed.
+# It also makes real diffs unreadable, which is how a 15-line change once
+# showed up as 1102.
+#
+# text=auto lets git decide what is text (it looks for NUL bytes, and already
+# classifies all 48 binaries here correctly); eol=lf commits and checks out
+# text as LF, matching the existing majority. The explicit binary lines below
+# are belt and braces for the formats present -- a misclassified binary is
+# silently corrupted by normalisation, and bsc5.bin in particular is a packed
+# Float32 array full of bytes that would otherwise look like line endings.
+* text=auto eol=lf
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.glb  binary
+*.woff2 binary
+*.pdf  binary
+*.zip  binary
+*.bin  binary
+*.tif  binary
+*.tiff binary
+*.npy  binary
+*.mp4  binary

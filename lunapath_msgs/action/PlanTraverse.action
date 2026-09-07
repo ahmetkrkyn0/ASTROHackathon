@@ -1,0 +1,32 @@
+# Goal
+geometry_msgs/PoseStamped start
+geometry_msgs/PoseStamped goal
+string rover_id
+MissionWeights weights
+builtin_interfaces/Time epoch          # reserved for the 4-D planner; see below
+bool use_start
+---
+# Result -- error codes deliberately match nav2_msgs/action/ComputePathToPose.
+# Verify against the INSTALLED Nav2 (Task 1 Step 2) before committing; Nav2
+# has added codes across releases.
+uint16 NONE=0
+uint16 UNKNOWN=200
+uint16 INVALID_PLANNER=201
+uint16 TF_ERROR=202
+uint16 START_OUTSIDE_MAP=203
+uint16 GOAL_OUTSIDE_MAP=204
+uint16 START_OCCUPIED=205
+uint16 GOAL_OCCUPIED=206
+uint16 TIMEOUT=207
+uint16 NO_VALID_PATH=208
+
+nav_msgs/Path path
+Corridor corridor
+PlanMetrics metrics
+builtin_interfaces/Duration planning_time
+uint16 error_code
+string error_msg
+---
+# Feedback
+float32 progress
+uint32 nodes_expanded

@@ -1,0 +1,45 @@
+/* Risk appetite sweep (B2). Console rules; lavender because a sweep is a
+   comparison of preferences, not a hazard reading. */
+
+.lp-rs { display: flex; flex-direction: column; gap: 9px; }
+
+.lp-rs-result { display: flex; flex-direction: column; gap: 7px; }
+
+.lp-rs-nominal { margin: 0; font-size: var(--fs-micro); color: var(--text-dim); }
+.lp-rs-nominal b {
+  font-family: var(--font-data);
+  font-weight: 500;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-rs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+
+.lp-rs-row { display: flex; flex-direction: column; gap: 4px; }
+
+.lp-rs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+
+.lp-rs-alpha {
+  font-family: var(--font-data);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-rs-moved {
+  font-family: var(--font-data);
+  color: var(--text-2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-rs-delta {
+  align-self: flex-end;
+  font-family: var(--font-data);
+  color: var(--text-dimmest);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-rs-note,
+.lp-rs-note svg { flex: none; margin-top: 1px; font-size: 12px; }
+
+.lp-rs-note { color: var(--text-dimmest); }

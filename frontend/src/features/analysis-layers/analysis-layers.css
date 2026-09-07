@@ -1,0 +1,204 @@
+/* Analysis overlay toggles.
+ *
+ * Same dock idiom as the layer picker next to it -- a trigger that opens a
+ * floating panel -- reusing the shared tokens rather than inventing values, so
+ * the two controls read as one family. New rules live here rather than in
+ * App.css, which is legacy and global base only.
+ */
+
+.map-overlay-analysis {
+  position: absolute;
+  /* Under the layer picker's dock, which sits at top: 24px and is ~34px tall.
+     Left of the right edge by the same 24px, so the two triggers line up. */
+  top: 68px;
+  right: 24px;
+  z-index: 2;
+}
+
+.lp-analysis-dock {
+  position: relative;
+  z-index: 24;
+}
+
+.lp-analysis-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(8, 11, 18, 0.88);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 160ms ease;
+}
+
+.lp-analysis-trigger:hover,
+.lp-analysis-trigger.is-open {
+  border-color: var(--border-focus);
+}
+
+/* Something is drawn over the map that the base-layer name does not account
+   for. The trigger says so even while the panel is shut. */
+.lp-analysis-trigger.has-active {
+  border-color: rgba(186, 175, 245, 0.55);
+}
+
+.lp-analysis-layers {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 292px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  padding: 8px;
+  z-index: 100;
+}
+
+.lp-analysis-header {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(199, 205, 219, 0.05);
+  margin-bottom: 6px;
+}
+
+.lp-analysis-items {
+  display: grid;
+  gap: 4px;
+}
+
+.lp-analysis-item {
+  border-radius: var(--radius);
+  padding: 6px 8px 8px;
+  transition: background 140ms ease;
+}
+
+.lp-analysis-item.is-on {
+  background: rgba(186, 175, 245, 0.12);
+}
+
+.lp-analysis-toggle {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* A layer with no data can still be clicked -- the click is how an operator
+   finds out why. It reads as inert rather than as an error. */
+.lp-analysis-item.is-unavailable .lp-analysis-name,
+.lp-analysis-item.is-unavailable .lp-analysis-blurb {
+  color: var(--text-muted);
+}
+
+.lp-analysis-check {
+  color: var(--lavender);
+  font-size: var(--fs-body);
+  line-height: 1.35;
+}
+
+.lp-analysis-item.is-unavailable .lp-analysis-check {
+  color: var(--text-dim-2);
+}
+
+.lp-analysis-text {
+  display: grid;
+  gap: 1px;
+}
+
+.lp-analysis-name {
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.lp-analysis-item.is-on .lp-analysis-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.lp-analysis-status {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-analysis-blurb {
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+}
+
+/* The claim boundary. Indented under the label so it reads as a qualifier on
+   the layer rather than as a second description. */
+.lp-analysis-limit {
+  margin: 4px 0 0 22px;
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--text-dim-2);
+  border-left: 1px solid rgba(199, 205, 219, 0.12);
+  padding-left: 8px;
+}
+
+/* A missing cache. Deliberately not styled as an error: nothing is broken and
+   the operator can fix it in one command. */
+.lp-analysis-note {
+  margin: 6px 0 0 22px;
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.lp-analysis-note.is-error {
+  color: var(--accent-coral);
+}
+
+.lp-analysis-remedy {
+  display: block;
+  margin: 4px 0 0 22px;
+  padding: 3px 6px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  background: rgba(8, 11, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+@media (max-width: 900px) {
+  .map-overlay-analysis {
+    top: 56px;
+    right: 12px;
+  }
+
+  .lp-analysis-layers {
+    width: 260px;
+  }
+}
+
+/* The layer's provenance, read off X-Layer-Validity on the payload actually
+   received rather than from a table.
+   
+   It sits inline with the label because two entries in this list are the same
+   physical quantity from different sources -- slope sigma from our clone
+   ensemble (DERIVED) and from NASA's published error model (MODEL) -- and the
+   label alone cannot say which is which. Same colour assignment as the
+   provenance badge in the systems drawer, so a reader who has seen one
+   recognises the other. */
+.lp-analysis-validity {
+  margin-left: 6px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+}
+
+.lp-validity-measured  { color: var(--risk-low); }
+.lp-validity-model     { color: var(--lavender); }
+.lp-validity-derived   { color: var(--cyan); }
+.lp-validity-synthetic { color: var(--risk-med); }

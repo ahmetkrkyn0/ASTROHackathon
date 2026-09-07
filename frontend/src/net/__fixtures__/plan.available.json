@@ -1,0 +1,2930 @@
+{
+  "status": "success",
+  "astar_metrics": {
+    "total_distance_m": 371.53,
+    "total_energy_wh": null,
+    "total_shadow_hours": null,
+    "max_slope_deg": 21.97,
+    "max_segment_slope_deg": 21.97,
+    "max_cell_slope_deg": 23.55,
+    "slope_definitions": {
+      "max_segment_slope_deg": "elevation difference across each driven step",
+      "max_cell_slope_deg": "np.gradient slope grid, the traversability gate"
+    },
+    "max_thermal_risk": 0.9997,
+    "min_surface_temp_c": -67.99,
+    "max_surface_temp_c": 18.48,
+    "total_weighted_cost": 792.5598,
+    "total_weighted_cost_cells_only": 681.2961,
+    "barrier_share": 0.140385,
+    "cost_units": "weighted_metres",
+    "path_length_nodes": 67,
+    "computation_time_ms": 271.8,
+    "nodes_expanded": 3717,
+    "edges_rejected": {
+      "step_slope": 15,
+      "lateral_slope": 4449,
+      "thermal_barrier": 0,
+      "slope_barrier": 0,
+      "lateral_barrier": 0
+    },
+    "constraints_applied": {
+      "max_slope_deg": 25.0,
+      "slope_lateral_max_deg": 18.0,
+      "source": "rover"
+    }
+  },
+  "summary": {
+    "total_distance_km": 0.359,
+    "total_elapsed_hours": 3.736,
+    "final_battery_pct": 78.69,
+    "min_battery_pct": 78.69,
+    "max_slope_deg": 23.55,
+    "max_segment_slope_deg": 23.27,
+    "total_energy_consumed_wh": 1872.53,
+    "total_solar_energy_wh": 717.7,
+    "total_shadow_exposure": 1.9855,
+    "critical_steps_count": 0,
+    "high_or_above_steps_count": 0,
+    "waypoint_count": 67,
+    "total_recharges": 0,
+    "stranded": false,
+    "stranded_at_step": null,
+    "max_continuous_shadow_h": 3.736,
+    "shadow_limit_h": 50.0,
+    "shadow_limit_exceeded": false,
+    "peak_power_exceeded_steps": 23
+  },
+  "geojson": {
+    "type": "Feature",
+    "geometry": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -69.205885,
+          -88.60668
+        ],
+        [
+          -69.212224,
+          -88.606738
+        ],
+        [
+          -69.218563,
+          -88.606797
+        ],
+        [
+          -69.224903,
+          -88.606855
+        ],
+        [
+          -69.231244,
+          -88.606914
+        ],
+        [
+          -69.237585,
+          -88.606972
+        ],
+        [
+          -69.243926,
+          -88.607031
+        ],
+        [
+          -69.250268,
+          -88.607089
+        ],
+        [
+          -69.256611,
+          -88.607147
+        ],
+        [
+          -69.262954,
+          -88.607206
+        ],
+        [
+          -69.269297,
+          -88.607264
+        ],
+        [
+          -69.275641,
+          -88.607323
+        ],
+        [
+          -69.281986,
+          -88.607381
+        ],
+        [
+          -69.288331,
+          -88.607439
+        ],
+        [
+          -69.294677,
+          -88.607498
+        ],
+        [
+          -69.301023,
+          -88.607556
+        ],
+        [
+          -69.30737,
+          -88.607614
+        ],
+        [
+          -69.31132,
+          -88.607827
+        ],
+        [
+          -69.315272,
+          -88.608039
+        ],
+        [
+          -69.319224,
+          -88.608252
+        ],
+        [
+          -69.325575,
+          -88.60831
+        ],
+        [
+          -69.323178,
+          -88.608464
+        ],
+        [
+          -69.32953,
+          -88.608522
+        ],
+        [
+          -69.335883,
+          -88.60858
+        ],
+        [
+          -69.342236,
+          -88.608639
+        ],
+        [
+          -69.348589,
+          -88.608697
+        ],
+        [
+          -69.346194,
+          -88.608851
+        ],
+        [
+          -69.350154,
+          -88.609063
+        ],
+        [
+          -69.354115,
+          -88.609276
+        ],
+        [
+          -69.351719,
+          -88.60943
+        ],
+        [
+          -69.349323,
+          -88.609584
+        ],
+        [
+          -69.346927,
+          -88.609739
+        ],
+        [
+          -69.34453,
+          -88.609893
+        ],
+        [
+          -69.342132,
+          -88.610047
+        ],
+        [
+          -69.339734,
+          -88.610201
+        ],
+        [
+          -69.337336,
+          -88.610356
+        ],
+        [
+          -69.334937,
+          -88.61051
+        ],
+        [
+          -69.332537,
+          -88.610664
+        ],
+        [
+          -69.330137,
+          -88.610818
+        ],
+        [
+          -69.327736,
+          -88.610973
+        ],
+        [
+          -69.325335,
+          -88.611127
+        ],
+        [
+          -69.331699,
+          -88.611185
+        ],
+        [
+          -69.329298,
+          -88.611339
+        ],
+        [
+          -69.326896,
+          -88.611494
+        ],
+        [
+          -69.324494,
+          -88.611648
+        ],
+        [
+          -69.328459,
+          -88.61186
+        ],
+        [
+          -69.332424,
+          -88.612073
+        ],
+        [
+          -69.330021,
+          -88.612227
+        ],
+        [
+          -69.333988,
+          -88.612439
+        ],
+        [
+          -69.331585,
+          -88.612594
+        ],
+        [
+          -69.329182,
+          -88.612748
+        ],
+        [
+          -69.33315,
+          -88.61296
+        ],
+        [
+          -69.330746,
+          -88.613115
+        ],
+        [
+          -69.328341,
+          -88.613269
+        ],
+        [
+          -69.325936,
+          -88.613423
+        ],
+        [
+          -69.32353,
+          -88.613577
+        ],
+        [
+          -69.329906,
+          -88.613636
+        ],
+        [
+          -69.336282,
+          -88.613694
+        ],
+        [
+          -69.342658,
+          -88.613752
+        ],
+        [
+          -69.349035,
+          -88.61381
+        ],
+        [
+          -69.353009,
+          -88.614023
+        ],
+        [
+          -69.356985,
+          -88.614235
+        ],
+        [
+          -69.360961,
+          -88.614447
+        ],
+        [
+          -69.364939,
+          -88.61466
+        ],
+        [
+          -69.368919,
+          -88.614872
+        ],
+        [
+          -69.366515,
+          -88.615026
+        ],
+        [
+          -69.364111,
+          -88.615181
+        ]
+      ]
+    },
+    "properties": {
+      "total_cost": 60.6657,
+      "waypoint_count": 67
+    }
+  },
+  "corridor": {
+    "waypoints": [
+      [
+        -39500.0,
+        15000.0
+      ],
+      [
+        -39500.0,
+        14995.0
+      ],
+      [
+        -39500.0,
+        14990.0
+      ],
+      [
+        -39500.0,
+        14985.0
+      ],
+      [
+        -39500.0,
+        14980.0
+      ],
+      [
+        -39500.0,
+        14975.0
+      ],
+      [
+        -39500.0,
+        14970.0
+      ],
+      [
+        -39500.0,
+        14965.0
+      ],
+      [
+        -39500.0,
+        14960.0
+      ],
+      [
+        -39500.0,
+        14955.0
+      ],
+      [
+        -39500.0,
+        14950.0
+      ],
+      [
+        -39500.0,
+        14945.0
+      ],
+      [
+        -39500.0,
+        14940.0
+      ],
+      [
+        -39500.0,
+        14935.0
+      ],
+      [
+        -39500.0,
+        14930.0
+      ],
+      [
+        -39500.0,
+        14925.0
+      ],
+      [
+        -39500.0,
+        14920.0
+      ],
+      [
+        -39495.0,
+        14915.0
+      ],
+      [
+        -39490.0,
+        14910.0
+      ],
+      [
+        -39485.0,
+        14905.0
+      ],
+      [
+        -39485.0,
+        14900.0
+      ],
+      [
+        -39480.0,
+        14900.0
+      ],
+      [
+        -39480.0,
+        14895.0
+      ],
+      [
+        -39480.0,
+        14890.0
+      ],
+      [
+        -39480.0,
+        14885.0
+      ],
+      [
+        -39480.0,
+        14880.0
+      ],
+      [
+        -39475.0,
+        14880.0
+      ],
+      [
+        -39470.0,
+        14875.0
+      ],
+      [
+        -39465.0,
+        14870.0
+      ],
+      [
+        -39460.0,
+        14870.0
+      ],
+      [
+        -39455.0,
+        14870.0
+      ],
+      [
+        -39450.0,
+        14870.0
+      ],
+      [
+        -39445.0,
+        14870.0
+      ],
+      [
+        -39440.0,
+        14870.0
+      ],
+      [
+        -39435.0,
+        14870.0
+      ],
+      [
+        -39430.0,
+        14870.0
+      ],
+      [
+        -39425.0,
+        14870.0
+      ],
+      [
+        -39420.0,
+        14870.0
+      ],
+      [
+        -39415.0,
+        14870.0
+      ],
+      [
+        -39410.0,
+        14870.0
+      ],
+      [
+        -39405.0,
+        14870.0
+      ],
+      [
+        -39405.0,
+        14865.0
+      ],
+      [
+        -39400.0,
+        14865.0
+      ],
+      [
+        -39395.0,
+        14865.0
+      ],
+      [
+        -39390.0,
+        14865.0
+      ],
+      [
+        -39385.0,
+        14860.0
+      ],
+      [
+        -39380.0,
+        14855.0
+      ],
+      [
+        -39375.0,
+        14855.0
+      ],
+      [
+        -39370.0,
+        14850.0
+      ],
+      [
+        -39365.0,
+        14850.0
+      ],
+      [
+        -39360.0,
+        14850.0
+      ],
+      [
+        -39355.0,
+        14845.0
+      ],
+      [
+        -39350.0,
+        14845.0
+      ],
+      [
+        -39345.0,
+        14845.0
+      ],
+      [
+        -39340.0,
+        14845.0
+      ],
+      [
+        -39335.0,
+        14845.0
+      ],
+      [
+        -39335.0,
+        14840.0
+      ],
+      [
+        -39335.0,
+        14835.0
+      ],
+      [
+        -39335.0,
+        14830.0
+      ],
+      [
+        -39335.0,
+        14825.0
+      ],
+      [
+        -39330.0,
+        14820.0
+      ],
+      [
+        -39325.0,
+        14815.0
+      ],
+      [
+        -39320.0,
+        14810.0
+      ],
+      [
+        -39315.0,
+        14805.0
+      ],
+      [
+        -39310.0,
+        14800.0
+      ],
+      [
+        -39305.0,
+        14800.0
+      ],
+      [
+        -39300.0,
+        14800.0
+      ]
+    ],
+    "half_width_m": [
+      10.0,
+      10.0,
+      10.0,
+      11.180339887498949,
+      11.180339887498949,
+      7.0710678118654755,
+      5.0,
+      5.0,
+      7.0710678118654755,
+      11.180339887498949,
+      14.142135623730951,
+      14.142135623730951,
+      11.180339887498949,
+      10.0,
+      10.0,
+      10.0,
+      7.0710678118654755,
+      7.0710678118654755,
+      10.0,
+      15.0,
+      20.0,
+      20.615528128088304,
+      20.615528128088304,
+      20.0,
+      20.0,
+      15.0,
+      11.180339887498949,
+      11.180339887498949,
+      7.0710678118654755,
+      5.0,
+      5.0,
+      5.0,
+      7.0710678118654755,
+      11.180339887498949,
+      15.811388300841898,
+      18.027756377319946,
+      21.213203435596423,
+      25.0,
+      25.495097567963924,
+      20.615528128088304,
+      20.615528128088304,
+      18.027756377319946,
+      14.142135623730951,
+      11.180339887498949,
+      11.180339887498949,
+      11.180339887498949,
+      10.0,
+      10.0,
+      15.811388300841898,
+      18.027756377319946,
+      21.213203435596423,
+      28.284271247461902,
+      32.01562118716424,
+      36.05551275463989,
+      40.311288741492746,
+      44.721359549995796,
+      47.169905660283014,
+      50.0,
+      53.15072906367325,
+      56.568542494923804,
+      63.63961030678928,
+      70.71067811865476,
+      77.78174593052023,
+      84.85281374238569,
+      89.02246907382428,
+      87.3212459828649
+    ],
+    "max_slope_deg": [
+      23.26844370860405,
+      22.016336469324063,
+      21.26713522917705,
+      22.331595456331698,
+      22.331595456331698,
+      22.714213173309837,
+      23.29329071692559,
+      23.29329071692559,
+      22.8110997687209,
+      22.518402641648983,
+      22.24874257389385,
+      22.940317372657653,
+      23.55145474338366,
+      23.55145474338366,
+      23.135562180600623,
+      21.385381363256265,
+      19.704350293074686,
+      19.704350293074686,
+      17.780210420542296,
+      18.62261952852026,
+      19.313111917697103,
+      20.092437362478602,
+      20.723457465673434,
+      20.970934647426564,
+      20.970934647426564,
+      20.27854040306494,
+      19.709248496949236,
+      16.742917543179292,
+      16.575214676469827,
+      22.733385301157305,
+      22.733385301157305,
+      22.727112848684136,
+      22.223911085970244,
+      21.960173187387067,
+      22.577032237445934,
+      22.81628615582151,
+      23.456670756275106,
+      23.456670756275106,
+      22.383601735834755,
+      20.202078073617464,
+      20.202078073617464,
+      20.55230843576326,
+      20.55230843576326,
+      19.997391307817768,
+      18.89614964327415,
+      18.89614964327415,
+      16.365797997562108,
+      17.63476013992096,
+      19.09000441411232,
+      19.09000441411232,
+      18.637602128504273,
+      19.444718864729932,
+      19.918173546414465,
+      19.918173546414465,
+      20.096768921443847,
+      20.177666009081168,
+      20.63248233101522,
+      20.63248233101522,
+      20.364858470855193,
+      19.613409462470067,
+      17.482097345187263,
+      14.732248685839814,
+      15.587352513643573,
+      15.587352513643573,
+      15.644708582329121,
+      16.344951388100373
+    ],
+    "energy_budget_wh": [
+      39.022850555900426,
+      37.186552312726675,
+      36.127980620043026,
+      37.64079852326026,
+      37.64079852326026,
+      38.19933431009791,
+      39.06017950384405,
+      39.06017950384405,
+      38.342047991125405,
+      37.91249287176099,
+      37.52090221606223,
+      38.53320172440096,
+      39.450150801313605,
+      39.450150801313605,
+      38.823817767058884,
+      36.29313738636418,
+      30.131187427827662,
+      30.131187427827662,
+      11.751857423958366,
+      11.186330390321327,
+      15.955439504781562,
+      32.4030621453695,
+      35.3776017731197,
+      35.71735359139329,
+      35.71735359139329,
+      34.77425045545192,
+      30.26010308247768,
+      9.049524517231545,
+      6.177201328127322,
+      38.22753334874885,
+      38.22753334874885,
+      38.21830535861275,
+      37.48504063183418,
+      37.10618431610049,
+      37.99815740253723,
+      38.34970227974028,
+      39.30652343764029,
+      39.30652343764029,
+      37.71624635067501,
+      34.67150888577689,
+      34.67150888577689,
+      35.14438296509235,
+      35.14438296509235,
+      28.701092033559306,
+      17.909416594465764,
+      17.909416594465764,
+      5.923444307264475,
+      11.26732338511316,
+      13.995549076481245,
+      13.995549076481245,
+      15.920701917879253,
+      17.412347065006866,
+      26.220865589728685,
+      26.220865589728685,
+      32.595395836007796,
+      34.638764578376346,
+      35.25345681003308,
+      35.25345681003308,
+      34.89056685490901,
+      27.92990683793823,
+      10.80406814785932,
+      6.412494385451094,
+      7.291384782007819,
+      7.291384782007819,
+      5.204613983422087,
+      5.899466943730199
+    ],
+    "thermal_budget_K_s": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      9756.189255006166,
+      5624.604678431177,
+      5230.8300294815635,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      13084.50418483251,
+      3418.1280033722974,
+      3178.5646746355615,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      12317.218564405333,
+      0.0,
+      7913.5408137038885,
+      2262.1354599685346,
+      5414.764385069253,
+      0.0,
+      6462.319823725402,
+      7084.259223819732,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      12107.421844321023,
+      3995.3449430724822,
+      2572.909699277627,
+      2849.865018126098,
+      2849.865018126098,
+      2030.7266910268781,
+      2942.291322623248
+    ],
+    "fallback_points": [
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ],
+      [
+        -38820.0,
+        15480.0
+      ]
+    ],
+    "crs": "PROJCS[\"unnamed\",GEOGCS[\"unnamed ellipse\",DATUM[\"unknown\",SPHEROID[\"unnamed\",1737400,0]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]]],PROJECTION[\"Polar_Stereographic\"],PARAMETER[\"latitude_of_origin\",-90],PARAMETER[\"central_meridian\",0],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1],AXIS[\"Easting\",NORTH],AXIS[\"Northing\",NORTH]]",
+    "corridor_id": "18ed60b3e33a"
+  },
+  "route_statistics": {
+    "waypoint_count": 67,
+    "slope_histogram": [
+      {
+        "bin_low_deg": 0.0,
+        "bin_high_deg": 5.0,
+        "count": 0,
+        "pct": 0.0
+      },
+      {
+        "bin_low_deg": 5.0,
+        "bin_high_deg": 10.0,
+        "count": 0,
+        "pct": 0.0
+      },
+      {
+        "bin_low_deg": 10.0,
+        "bin_high_deg": 15.0,
+        "count": 3,
+        "pct": 4.48
+      },
+      {
+        "bin_low_deg": 15.0,
+        "bin_high_deg": 20.0,
+        "count": 29,
+        "pct": 43.28
+      },
+      {
+        "bin_low_deg": 20.0,
+        "bin_high_deg": 25.0,
+        "count": 35,
+        "pct": 52.24
+      }
+    ],
+    "risk_breakdown_pct": {
+      "LOW": 100.0
+    },
+    "min_surface_temp_c": -20.96,
+    "max_surface_temp_c": 18.48
+  },
+  "execution": {
+    "stranded": false,
+    "planned_nodes": 67,
+    "executable_nodes": 67,
+    "truncated": false,
+    "reason": null
+  },
+  "rover": {
+    "id": "lpr_1",
+    "name": "LPR-1 (Default)"
+  },
+  "waypoints": [
+    {
+      "step": 0,
+      "row": 100,
+      "col": 100,
+      "lon": -69.205885,
+      "lat": -88.60668,
+      "altitude_m": 1539.12,
+      "battery_pct": 100.0,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 23.27,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.9373,
+      "elapsed_hours": 0.0,
+      "distance_m": 0.0,
+      "step_energy_wh": 0.0
+    },
+    {
+      "step": 1,
+      "row": 101,
+      "col": 100,
+      "lon": -69.212224,
+      "lat": -88.606738,
+      "altitude_m": 1537.16,
+      "battery_pct": 99.52,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.02,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.9285,
+      "elapsed_hours": 0.0808,
+      "distance_m": 5.0,
+      "step_energy_wh": 41.5006
+    },
+    {
+      "step": 2,
+      "row": 102,
+      "col": 100,
+      "lon": -69.218563,
+      "lat": -88.606797,
+      "altitude_m": 1535.38,
+      "battery_pct": 99.07,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.75,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.916,
+      "elapsed_hours": 0.1602,
+      "distance_m": 10.0,
+      "step_energy_wh": 39.6509
+    },
+    {
+      "step": 3,
+      "row": 103,
+      "col": 100,
+      "lon": -69.224903,
+      "lat": -88.606855,
+      "altitude_m": 1533.7,
+      "battery_pct": 98.61,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 21.27,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.919,
+      "elapsed_hours": 0.2402,
+      "distance_m": 15.0,
+      "step_energy_wh": 40.3618
+    },
+    {
+      "step": 4,
+      "row": 104,
+      "col": 100,
+      "lon": -69.231244,
+      "lat": -88.606914,
+      "altitude_m": 1531.8,
+      "battery_pct": 98.12,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.33,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.9311,
+      "elapsed_hours": 0.3213,
+      "distance_m": 20.0,
+      "step_energy_wh": 41.9743
+    },
+    {
+      "step": 5,
+      "row": 105,
+      "col": 100,
+      "lon": -69.237585,
+      "lat": -88.606972,
+      "altitude_m": 1530.01,
+      "battery_pct": 97.64,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.14,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.9295,
+      "elapsed_hours": 0.4023,
+      "distance_m": 25.0,
+      "step_energy_wh": 41.6789
+    },
+    {
+      "step": 6,
+      "row": 106,
+      "col": 100,
+      "lon": -69.243926,
+      "lat": -88.607031,
+      "altitude_m": 1528.19,
+      "battery_pct": 97.14,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.71,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.9339,
+      "elapsed_hours": 0.4839,
+      "distance_m": 30.0,
+      "step_energy_wh": 42.5569
+    },
+    {
+      "step": 7,
+      "row": 107,
+      "col": 100,
+      "lon": -69.250268,
+      "lat": -88.607089,
+      "altitude_m": 1526.25,
+      "battery_pct": 96.63,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 23.29,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.9374,
+      "elapsed_hours": 0.5662,
+      "distance_m": 35.0,
+      "step_energy_wh": 43.4553
+    },
+    {
+      "step": 8,
+      "row": 108,
+      "col": 100,
+      "lon": -69.256611,
+      "lat": -88.607147,
+      "altitude_m": 1524.23,
+      "battery_pct": 96.11,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.81,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.938,
+      "elapsed_hours": 0.6479,
+      "distance_m": 40.0,
+      "step_energy_wh": 42.7666
+    },
+    {
+      "step": 9,
+      "row": 109,
+      "col": 100,
+      "lon": -69.262954,
+      "lat": -88.607206,
+      "altitude_m": 1522.31,
+      "battery_pct": 95.59,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.52,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.936,
+      "elapsed_hours": 0.7293,
+      "distance_m": 45.0,
+      "step_energy_wh": 42.3182
+    },
+    {
+      "step": 10,
+      "row": 110,
+      "col": 100,
+      "lon": -69.269297,
+      "lat": -88.607264,
+      "altitude_m": 1520.38,
+      "battery_pct": 95.09,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.12,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.565,
+      "node_cost": 1.0069,
+      "elapsed_hours": 0.8102,
+      "distance_m": 50.0,
+      "step_energy_wh": 41.7175
+    },
+    {
+      "step": 11,
+      "row": 111,
+      "col": 100,
+      "lon": -69.275641,
+      "lat": -88.607323,
+      "altitude_m": 1518.52,
+      "battery_pct": 94.6,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.25,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 1.0045,
+      "elapsed_hours": 0.8913,
+      "distance_m": 55.0,
+      "step_energy_wh": 41.8492
+    },
+    {
+      "step": 12,
+      "row": 112,
+      "col": 100,
+      "lon": -69.281986,
+      "lat": -88.607381,
+      "altitude_m": 1516.64,
+      "battery_pct": 94.1,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.94,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 1.0095,
+      "elapsed_hours": 0.9732,
+      "distance_m": 60.0,
+      "step_energy_wh": 42.9053
+    },
+    {
+      "step": 13,
+      "row": 113,
+      "col": 100,
+      "lon": -69.288331,
+      "lat": -88.607439,
+      "altitude_m": 1514.7,
+      "battery_pct": 93.58,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 23.55,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 1.0129,
+      "elapsed_hours": 1.0558,
+      "distance_m": 65.0,
+      "step_energy_wh": 43.8624
+    },
+    {
+      "step": 14,
+      "row": 114,
+      "col": 100,
+      "lon": -69.294677,
+      "lat": -88.607498,
+      "altitude_m": 1512.74,
+      "battery_pct": 93.07,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 23.14,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 1.0107,
+      "elapsed_hours": 1.1379,
+      "distance_m": 70.0,
+      "step_energy_wh": 43.2086
+    },
+    {
+      "step": 15,
+      "row": 115,
+      "col": 100,
+      "lon": -69.301023,
+      "lat": -88.607556,
+      "altitude_m": 1510.89,
+      "battery_pct": 92.6,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 21.39,
+      "surface_temp_c": 14.55,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.9964,
+      "elapsed_hours": 1.218,
+      "distance_m": 75.0,
+      "step_energy_wh": 40.5696
+    },
+    {
+      "step": 16,
+      "row": 116,
+      "col": 100,
+      "lon": -69.30737,
+      "lat": -88.607614,
+      "altitude_m": 1509.17,
+      "battery_pct": 92.42,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.19,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.963,
+      "elapsed_hours": 1.2527,
+      "distance_m": 80.0,
+      "step_energy_wh": 16.6894
+    },
+    {
+      "step": 17,
+      "row": 117,
+      "col": 101,
+      "lon": -69.31132,
+      "lat": -88.607827,
+      "altitude_m": 1507.63,
+      "battery_pct": 92.02,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.7,
+      "surface_temp_c": 1.44,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.9768,
+      "elapsed_hours": 1.3221,
+      "distance_m": 87.07,
+      "step_energy_wh": 33.8892
+    },
+    {
+      "step": 18,
+      "row": 118,
+      "col": 102,
+      "lon": -69.315272,
+      "lat": -88.608039,
+      "altitude_m": 1506.34,
+      "battery_pct": 91.93,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 15.2,
+      "surface_temp_c": -20.96,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.6938,
+      "elapsed_hours": 1.3401,
+      "distance_m": 94.14,
+      "step_energy_wh": 7.8339
+    },
+    {
+      "step": 19,
+      "row": 119,
+      "col": 103,
+      "lon": -69.319224,
+      "lat": -88.608252,
+      "altitude_m": 1505.89,
+      "battery_pct": 91.79,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 17.78,
+      "surface_temp_c": -5.23,
+      "shadow_ratio": 0.536,
+      "node_cost": 0.9241,
+      "elapsed_hours": 1.3686,
+      "distance_m": 101.21,
+      "step_energy_wh": 13.2749
+    },
+    {
+      "step": 20,
+      "row": 120,
+      "col": 103,
+      "lon": -69.325575,
+      "lat": -88.60831,
+      "altitude_m": 1504.53,
+      "battery_pct": 91.65,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 18.62,
+      "surface_temp_c": -5.23,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.8887,
+      "elapsed_hours": 1.3951,
+      "distance_m": 106.21,
+      "step_energy_wh": 12.5909
+    },
+    {
+      "step": 21,
+      "row": 120,
+      "col": 104,
+      "lon": -69.323178,
+      "lat": -88.608464,
+      "altitude_m": 1505.51,
+      "battery_pct": 91.46,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.31,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9066,
+      "elapsed_hours": 1.4323,
+      "distance_m": 111.21,
+      "step_energy_wh": 17.9219
+    },
+    {
+      "step": 22,
+      "row": 121,
+      "col": 104,
+      "lon": -69.32953,
+      "lat": -88.608522,
+      "altitude_m": 1504.05,
+      "battery_pct": 91.06,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.09,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9212,
+      "elapsed_hours": 1.5062,
+      "distance_m": 116.21,
+      "step_energy_wh": 36.3157
+    },
+    {
+      "step": 23,
+      "row": 122,
+      "col": 104,
+      "lon": -69.335883,
+      "lat": -88.60858,
+      "altitude_m": 1502.5,
+      "battery_pct": 90.62,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.72,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9308,
+      "elapsed_hours": 1.5855,
+      "distance_m": 121.21,
+      "step_energy_wh": 39.5807
+    },
+    {
+      "step": 24,
+      "row": 123,
+      "col": 104,
+      "lon": -69.342236,
+      "lat": -88.608639,
+      "altitude_m": 1500.9,
+      "battery_pct": 90.17,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.97,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.934,
+      "elapsed_hours": 1.6652,
+      "distance_m": 126.21,
+      "step_energy_wh": 39.9343
+    },
+    {
+      "step": 25,
+      "row": 124,
+      "col": 104,
+      "lon": -69.348589,
+      "lat": -88.608697,
+      "altitude_m": 1499.36,
+      "battery_pct": 89.75,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.28,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.923,
+      "elapsed_hours": 1.7441,
+      "distance_m": 131.21,
+      "step_energy_wh": 38.9296
+    },
+    {
+      "step": 26,
+      "row": 124,
+      "col": 105,
+      "lon": -69.346194,
+      "lat": -88.608851,
+      "altitude_m": 1500.45,
+      "battery_pct": 89.48,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.71,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9144,
+      "elapsed_hours": 1.7934,
+      "distance_m": 136.21,
+      "step_energy_wh": 24.0068
+    },
+    {
+      "step": 27,
+      "row": 125,
+      "col": 106,
+      "lon": -69.350154,
+      "lat": -88.609063,
+      "altitude_m": 1499.92,
+      "battery_pct": 89.37,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 16.74,
+      "surface_temp_c": -7.86,
+      "shadow_ratio": 0.56,
+      "node_cost": 0.8141,
+      "elapsed_hours": 1.816,
+      "distance_m": 143.28,
+      "step_energy_wh": 10.271
+    },
+    {
+      "step": 28,
+      "row": 126,
+      "col": 107,
+      "lon": -69.354115,
+      "lat": -88.609276,
+      "altitude_m": 1499.66,
+      "battery_pct": 89.3,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 13.96,
+      "surface_temp_c": -18.03,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.5764,
+      "elapsed_hours": 1.8318,
+      "distance_m": 150.36,
+      "step_energy_wh": 6.6568
+    },
+    {
+      "step": 29,
+      "row": 126,
+      "col": 108,
+      "lon": -69.351719,
+      "lat": -88.60943,
+      "altitude_m": 1500.64,
+      "battery_pct": 89.22,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 16.58,
+      "surface_temp_c": -3.11,
+      "shadow_ratio": 0.548,
+      "node_cost": 0.7962,
+      "elapsed_hours": 1.8473,
+      "distance_m": 155.36,
+      "step_energy_wh": 7.0104
+    },
+    {
+      "step": 30,
+      "row": 126,
+      "col": 109,
+      "lon": -69.349323,
+      "lat": -88.609584,
+      "altitude_m": 1502.51,
+      "battery_pct": 88.71,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.73,
+      "surface_temp_c": 18.48,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.952,
+      "elapsed_hours": 1.929,
+      "distance_m": 160.36,
+      "step_energy_wh": 42.647
+    },
+    {
+      "step": 31,
+      "row": 126,
+      "col": 110,
+      "lon": -69.346927,
+      "lat": -88.609739,
+      "altitude_m": 1504.49,
+      "battery_pct": 88.2,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.73,
+      "surface_temp_c": 18.48,
+      "shadow_ratio": 0.548,
+      "node_cost": 0.9997,
+      "elapsed_hours": 2.0106,
+      "distance_m": 165.36,
+      "step_energy_wh": 42.601
+    },
+    {
+      "step": 32,
+      "row": 126,
+      "col": 111,
+      "lon": -69.34453,
+      "lat": -88.609893,
+      "altitude_m": 1506.2,
+      "battery_pct": 87.69,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.22,
+      "surface_temp_c": 18.48,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.998,
+      "elapsed_hours": 2.0916,
+      "distance_m": 170.36,
+      "step_energy_wh": 41.8721
+    },
+    {
+      "step": 33,
+      "row": 126,
+      "col": 112,
+      "lon": -69.342132,
+      "lat": -88.610047,
+      "altitude_m": 1507.81,
+      "battery_pct": 87.21,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 21.89,
+      "surface_temp_c": 16.72,
+      "shadow_ratio": 0.548,
+      "node_cost": 0.9944,
+      "elapsed_hours": 2.1723,
+      "distance_m": 175.36,
+      "step_energy_wh": 41.3296
+    },
+    {
+      "step": 34,
+      "row": 126,
+      "col": 113,
+      "lon": -69.339734,
+      "lat": -88.610201,
+      "altitude_m": 1509.32,
+      "battery_pct": 86.71,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 21.96,
+      "surface_temp_c": 16.72,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.9972,
+      "elapsed_hours": 2.253,
+      "distance_m": 180.36,
+      "step_energy_wh": 41.4769
+    },
+    {
+      "step": 35,
+      "row": 126,
+      "col": 114,
+      "lon": -69.337336,
+      "lat": -88.610356,
+      "altitude_m": 1510.91,
+      "battery_pct": 86.23,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.58,
+      "surface_temp_c": 16.72,
+      "shadow_ratio": 0.512,
+      "node_cost": 0.9962,
+      "elapsed_hours": 2.3345,
+      "distance_m": 185.36,
+      "step_energy_wh": 42.2985
+    },
+    {
+      "step": 36,
+      "row": 126,
+      "col": 115,
+      "lon": -69.334937,
+      "lat": -88.61051,
+      "altitude_m": 1512.4,
+      "battery_pct": 85.74,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.82,
+      "surface_temp_c": 16.72,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.9972,
+      "elapsed_hours": 2.4162,
+      "distance_m": 190.36,
+      "step_energy_wh": 42.653
+    },
+    {
+      "step": 37,
+      "row": 126,
+      "col": 116,
+      "lon": -69.332537,
+      "lat": -88.610664,
+      "altitude_m": 1513.82,
+      "battery_pct": 85.25,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 23.46,
+      "surface_temp_c": 16.72,
+      "shadow_ratio": 0.506,
+      "node_cost": 1.001,
+      "elapsed_hours": 2.4987,
+      "distance_m": 195.36,
+      "step_energy_wh": 43.6511
+    },
+    {
+      "step": 38,
+      "row": 126,
+      "col": 117,
+      "lon": -69.330137,
+      "lat": -88.610818,
+      "altitude_m": 1515.31,
+      "battery_pct": 84.78,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 22.38,
+      "surface_temp_c": 16.72,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.9941,
+      "elapsed_hours": 2.5799,
+      "distance_m": 200.36,
+      "step_energy_wh": 41.9925
+    },
+    {
+      "step": 39,
+      "row": 126,
+      "col": 118,
+      "lon": -69.327736,
+      "lat": -88.610973,
+      "altitude_m": 1516.37,
+      "battery_pct": 84.53,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.68,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.9625,
+      "elapsed_hours": 2.6279,
+      "distance_m": 205.36,
+      "step_energy_wh": 23.3193
+    },
+    {
+      "step": 40,
+      "row": 126,
+      "col": 119,
+      "lon": -69.325335,
+      "lat": -88.611127,
+      "altitude_m": 1516.93,
+      "battery_pct": 84.1,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.2,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.9716,
+      "elapsed_hours": 2.7067,
+      "distance_m": 210.36,
+      "step_energy_wh": 38.8227
+    },
+    {
+      "step": 41,
+      "row": 127,
+      "col": 119,
+      "lon": -69.331699,
+      "lat": -88.611185,
+      "altitude_m": 1515.65,
+      "battery_pct": 83.88,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.53,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9609,
+      "elapsed_hours": 2.7497,
+      "distance_m": 215.36,
+      "step_energy_wh": 20.849
+    },
+    {
+      "step": 42,
+      "row": 127,
+      "col": 120,
+      "lon": -69.329298,
+      "lat": -88.611339,
+      "altitude_m": 1516.94,
+      "battery_pct": 83.45,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.55,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.8916,
+      "elapsed_hours": 2.8289,
+      "distance_m": 220.36,
+      "step_energy_wh": 39.3145
+    },
+    {
+      "step": 43,
+      "row": 127,
+      "col": 121,
+      "lon": -69.326896,
+      "lat": -88.611494,
+      "altitude_m": 1518.17,
+      "battery_pct": 83.1,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.0,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.8828,
+      "elapsed_hours": 2.8945,
+      "distance_m": 225.36,
+      "step_energy_wh": 32.1558
+    },
+    {
+      "step": 44,
+      "row": 127,
+      "col": 122,
+      "lon": -69.324494,
+      "lat": -88.611648,
+      "altitude_m": 1519.19,
+      "battery_pct": 83.02,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 16.71,
+      "surface_temp_c": -7.86,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.7552,
+      "elapsed_hours": 2.9104,
+      "distance_m": 230.36,
+      "step_energy_wh": 7.1978
+    },
+    {
+      "step": 45,
+      "row": 128,
+      "col": 123,
+      "lon": -69.328459,
+      "lat": -88.61186,
+      "altitude_m": 1517.35,
+      "battery_pct": 82.75,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 18.9,
+      "surface_temp_c": 1.44,
+      "shadow_ratio": 0.696,
+      "node_cost": 0.8868,
+      "elapsed_hours": 2.9526,
+      "distance_m": 237.43,
+      "step_energy_wh": 20.3297
+    },
+    {
+      "step": 46,
+      "row": 129,
+      "col": 124,
+      "lon": -69.332424,
+      "lat": -88.612073,
+      "altitude_m": 1516.67,
+      "battery_pct": 82.64,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 16.37,
+      "surface_temp_c": -7.86,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.7484,
+      "elapsed_hours": 2.9738,
+      "distance_m": 244.5,
+      "step_energy_wh": 9.5234
+    },
+    {
+      "step": 47,
+      "row": 129,
+      "col": 125,
+      "lon": -69.330021,
+      "lat": -88.612227,
+      "altitude_m": 1517.3,
+      "battery_pct": 82.57,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 15.71,
+      "surface_temp_c": -18.03,
+      "shadow_ratio": 0.56,
+      "node_cost": 0.6564,
+      "elapsed_hours": 2.9874,
+      "distance_m": 249.5,
+      "step_energy_wh": 5.9968
+    },
+    {
+      "step": 48,
+      "row": 130,
+      "col": 126,
+      "lon": -69.333988,
+      "lat": -88.612439,
+      "altitude_m": 1517.24,
+      "battery_pct": 82.43,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 17.63,
+      "surface_temp_c": -5.23,
+      "shadow_ratio": 0.548,
+      "node_cost": 0.8935,
+      "elapsed_hours": 3.0148,
+      "distance_m": 256.57,
+      "step_energy_wh": 12.7417
+    },
+    {
+      "step": 49,
+      "row": 130,
+      "col": 127,
+      "lon": -69.331585,
+      "lat": -88.612594,
+      "altitude_m": 1518.62,
+      "battery_pct": 82.25,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.09,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.565,
+      "node_cost": 0.9366,
+      "elapsed_hours": 3.0476,
+      "distance_m": 261.57,
+      "step_energy_wh": 15.7698
+    },
+    {
+      "step": 50,
+      "row": 130,
+      "col": 128,
+      "lon": -69.329182,
+      "lat": -88.612748,
+      "altitude_m": 1519.93,
+      "battery_pct": 82.16,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 17.62,
+      "surface_temp_c": -5.23,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.8884,
+      "elapsed_hours": 3.0669,
+      "distance_m": 266.57,
+      "step_energy_wh": 8.9482
+    },
+    {
+      "step": 51,
+      "row": 131,
+      "col": 129,
+      "lon": -69.33315,
+      "lat": -88.61296,
+      "altitude_m": 1519.6,
+      "battery_pct": 81.96,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 18.64,
+      "surface_temp_c": -7.86,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9165,
+      "elapsed_hours": 3.1047,
+      "distance_m": 273.64,
+      "step_energy_wh": 17.9189
+    },
+    {
+      "step": 52,
+      "row": 131,
+      "col": 130,
+      "lon": -69.330746,
+      "lat": -88.613115,
+      "altitude_m": 1520.44,
+      "battery_pct": 81.75,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.44,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9619,
+      "elapsed_hours": 3.1451,
+      "distance_m": 278.64,
+      "step_energy_wh": 19.5509
+    },
+    {
+      "step": 53,
+      "row": 131,
+      "col": 131,
+      "lon": -69.328341,
+      "lat": -88.613269,
+      "altitude_m": 1521.38,
+      "battery_pct": 81.43,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.92,
+      "surface_temp_c": 6.29,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9708,
+      "elapsed_hours": 3.2051,
+      "distance_m": 283.64,
+      "step_energy_wh": 29.4014
+    },
+    {
+      "step": 54,
+      "row": 131,
+      "col": 132,
+      "lon": -69.325936,
+      "lat": -88.613423,
+      "altitude_m": 1522.34,
+      "battery_pct": 81.17,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.67,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9664,
+      "elapsed_hours": 3.2529,
+      "distance_m": 288.64,
+      "step_energy_wh": 23.26
+    },
+    {
+      "step": 55,
+      "row": 131,
+      "col": 133,
+      "lon": -69.32353,
+      "lat": -88.613577,
+      "altitude_m": 1523.23,
+      "battery_pct": 80.77,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.1,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9739,
+      "elapsed_hours": 3.3272,
+      "distance_m": 293.64,
+      "step_energy_wh": 36.5308
+    },
+    {
+      "step": 56,
+      "row": 132,
+      "col": 133,
+      "lon": -69.329906,
+      "lat": -88.613636,
+      "altitude_m": 1521.62,
+      "battery_pct": 80.35,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.18,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.974,
+      "elapsed_hours": 3.4061,
+      "distance_m": 298.64,
+      "step_energy_wh": 38.7887
+    },
+    {
+      "step": 57,
+      "row": 133,
+      "col": 133,
+      "lon": -69.336282,
+      "lat": -88.613694,
+      "altitude_m": 1519.93,
+      "battery_pct": 79.91,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.63,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9821,
+      "elapsed_hours": 3.4854,
+      "distance_m": 303.64,
+      "step_energy_wh": 39.4516
+    },
+    {
+      "step": 58,
+      "row": 134,
+      "col": 133,
+      "lon": -69.342658,
+      "lat": -88.613752,
+      "altitude_m": 1518.24,
+      "battery_pct": 79.48,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 20.36,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.977,
+      "elapsed_hours": 3.5644,
+      "distance_m": 308.64,
+      "step_energy_wh": 39.0505
+    },
+    {
+      "step": 59,
+      "row": 135,
+      "col": 133,
+      "lon": -69.349035,
+      "lat": -88.61381,
+      "altitude_m": 1516.61,
+      "battery_pct": 79.24,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 19.61,
+      "surface_temp_c": 3.91,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.9652,
+      "elapsed_hours": 3.61,
+      "distance_m": 313.64,
+      "step_energy_wh": 22.1642
+    },
+    {
+      "step": 60,
+      "row": 136,
+      "col": 134,
+      "lon": -69.353009,
+      "lat": -88.614023,
+      "altitude_m": 1515.84,
+      "battery_pct": 79.12,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 17.48,
+      "surface_temp_c": -7.86,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.9052,
+      "elapsed_hours": 3.6364,
+      "distance_m": 320.71,
+      "step_energy_wh": 12.1964
+    },
+    {
+      "step": 61,
+      "row": 137,
+      "col": 135,
+      "lon": -69.356985,
+      "lat": -88.614235,
+      "altitude_m": 1515.27,
+      "battery_pct": 79.04,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 14.71,
+      "surface_temp_c": -18.03,
+      "shadow_ratio": 0.518,
+      "node_cost": 0.6571,
+      "elapsed_hours": 3.6534,
+      "distance_m": 327.78,
+      "step_energy_wh": 7.2931
+    },
+    {
+      "step": 62,
+      "row": 138,
+      "col": 136,
+      "lon": -69.360961,
+      "lat": -88.614447,
+      "altitude_m": 1515.08,
+      "battery_pct": 78.97,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 14.73,
+      "surface_temp_c": -18.03,
+      "shadow_ratio": 0.506,
+      "node_cost": 0.6538,
+      "elapsed_hours": 3.6704,
+      "distance_m": 334.85,
+      "step_energy_wh": 7.3091
+    },
+    {
+      "step": 63,
+      "row": 139,
+      "col": 137,
+      "lon": -69.364939,
+      "lat": -88.61466,
+      "altitude_m": 1515.02,
+      "battery_pct": 78.89,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 15.59,
+      "surface_temp_c": -18.03,
+      "shadow_ratio": 0.488,
+      "node_cost": 0.7046,
+      "elapsed_hours": 3.6893,
+      "distance_m": 341.92,
+      "step_energy_wh": 8.2761
+    },
+    {
+      "step": 64,
+      "row": 140,
+      "col": 138,
+      "lon": -69.368919,
+      "lat": -88.614872,
+      "altitude_m": 1514.96,
+      "battery_pct": 78.82,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 15.35,
+      "surface_temp_c": -18.03,
+      "shadow_ratio": 0.488,
+      "node_cost": 0.6892,
+      "elapsed_hours": 3.7076,
+      "distance_m": 348.99,
+      "step_energy_wh": 7.9767
+    },
+    {
+      "step": 65,
+      "row": 140,
+      "col": 139,
+      "lon": -69.366515,
+      "lat": -88.615026,
+      "altitude_m": 1515.86,
+      "battery_pct": 78.76,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 15.64,
+      "surface_temp_c": -18.03,
+      "shadow_ratio": 0.488,
+      "node_cost": 0.7099,
+      "elapsed_hours": 3.721,
+      "distance_m": 353.99,
+      "step_energy_wh": 5.9063
+    },
+    {
+      "step": 66,
+      "row": 140,
+      "col": 140,
+      "lon": -69.364111,
+      "lat": -88.615181,
+      "altitude_m": 1516.75,
+      "battery_pct": 78.69,
+      "recharge_count": 0,
+      "recharged_this_step": false,
+      "risk_level": "LOW",
+      "slope_deg": 16.34,
+      "surface_temp_c": -5.23,
+      "shadow_ratio": 0.488,
+      "node_cost": 0.7832,
+      "elapsed_hours": 3.736,
+      "distance_m": 358.99,
+      "step_energy_wh": 6.6784
+    }
+  ],
+  "safety_margins": {
+    "monitor": {
+      "engine": "builtin",
+      "rtamt_version": null,
+      "cross_check": null,
+      "semantics": "discrete-time offline STL, space robustness (Donze & Maler 2010; RTAMT 0.3.5 conventions): unbounded G/F over the finite trace, FRET scopes as sample masks",
+      "trace": {
+        "kind": "2d",
+        "n_samples": 67,
+        "duration_h": 3.736,
+        "complete": true,
+        "stranded": false,
+        "extended_h": null,
+        "thermal_source": "static_layer",
+        "soc_signal": "battery_low_pct",
+        "shadow_threshold": 0.2,
+        "planned_length_m": 358.995
+      },
+      "recharge_deadline_h": 6.0,
+      "claim": "checked by runtime monitoring of the planned trace (STL robustness); not proven by model checking -- the verdict is about this trace only",
+      "requirements_file": "docs/requirements/lunapath.fret.json"
+    },
+    "requirements": [
+      {
+        "id": "LP-R01",
+        "name": "shadow_endurance",
+        "class": "safety",
+        "applicable": true,
+        "reason": null,
+        "engine": "builtin",
+        "rho": 46.264029,
+        "unit": "h",
+        "rho_normalized": 0.925281,
+        "satisfied": true,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 50.0,
+        "rover_parameter": "h_max_shadow_h",
+        "threshold_source": "rover",
+        "signal": "shadow_continuous_h",
+        "scope": null,
+        "worst_at": {
+          "index": 66,
+          "hours": 3.736,
+          "row": 140,
+          "col": 140
+        },
+        "fretish": "The rover shall always satisfy shadow_continuous_h <= h_max_shadow_h",
+        "stl": "always (shadow_continuous_h <= 50)"
+      },
+      {
+        "id": "LP-R02",
+        "name": "soc_reserve",
+        "class": "safety",
+        "applicable": true,
+        "reason": null,
+        "engine": "builtin",
+        "rho": 58.693334,
+        "unit": "pct",
+        "rho_normalized": 2.934667,
+        "satisfied": true,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 20.0,
+        "rover_parameter": "soc_min_pct",
+        "threshold_source": "rover",
+        "signal": "soc_pct",
+        "scope": null,
+        "worst_at": {
+          "index": 66,
+          "hours": 3.736,
+          "row": 140,
+          "col": 140
+        },
+        "fretish": "The rover shall always satisfy soc_pct >= soc_min",
+        "stl": "always (soc_pct >= 20)"
+      },
+      {
+        "id": "LP-R03",
+        "name": "soc_recovery",
+        "class": "safety",
+        "applicable": true,
+        "reason": null,
+        "engine": "builtin",
+        "rho": 6.0,
+        "unit": "h",
+        "rho_normalized": 1.0,
+        "satisfied": true,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 6.0,
+        "rover_parameter": null,
+        "threshold_source": "catalogue",
+        "signal": "hours_below_reserve_h",
+        "scope": null,
+        "worst_at": {
+          "index": 0,
+          "hours": 0.0,
+          "row": 100,
+          "col": 100
+        },
+        "fretish": "Upon soc_pct < soc_min the rover shall within 6 hours satisfy charging",
+        "stl": "always (hours_below_reserve_h <= 6)"
+      },
+      {
+        "id": "LP-R04",
+        "name": "electronics_thermal",
+        "class": "safety",
+        "applicable": true,
+        "reason": null,
+        "engine": "builtin",
+        "rho": -28.559749,
+        "unit": "degC",
+        "rho_normalized": -1.14239,
+        "satisfied": false,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": [
+          -10.0,
+          40.0
+        ],
+        "rover_parameter": "elec_op_min_c/elec_op_max_c",
+        "threshold_source": "rover",
+        "signal": "inner_temp_c",
+        "scope": null,
+        "worst_at": {
+          "index": 17,
+          "hours": 1.3221,
+          "row": 117,
+          "col": 101
+        },
+        "fretish": "The rover shall always satisfy elec_op_min_c <= inner_temp_c <= elec_op_max_c",
+        "stl": "always ((inner_temp_c >= -10) and (inner_temp_c <= 40))"
+      },
+      {
+        "id": "LP-R05",
+        "name": "battery_thermal",
+        "class": "safety",
+        "applicable": true,
+        "reason": null,
+        "engine": "builtin",
+        "rho": -38.559749,
+        "unit": "degC",
+        "rho_normalized": -2.203414,
+        "satisfied": false,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": [
+          0.0,
+          35.0
+        ],
+        "rover_parameter": "bat_op_min_c/bat_op_max_c",
+        "threshold_source": "rover",
+        "signal": "inner_temp_c",
+        "scope": null,
+        "worst_at": {
+          "index": 17,
+          "hours": 1.3221,
+          "row": 117,
+          "col": 101
+        },
+        "fretish": "The rover shall always satisfy bat_op_min_c <= inner_temp_c <= bat_op_max_c",
+        "stl": "always ((inner_temp_c >= 0) and (inner_temp_c <= 35))"
+      },
+      {
+        "id": "LP-R06",
+        "name": "step_slope",
+        "class": "safety",
+        "applicable": true,
+        "reason": null,
+        "engine": "builtin",
+        "rho": 1.448545,
+        "unit": "deg",
+        "rho_normalized": 0.057942,
+        "satisfied": true,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 25.0,
+        "rover_parameter": "slope_max_deg",
+        "threshold_source": "rover",
+        "signal": "drive_slope_deg",
+        "scope": null,
+        "worst_at": {
+          "index": 13,
+          "hours": 1.0558,
+          "row": 113,
+          "col": 100
+        },
+        "fretish": "The rover shall always satisfy drive_slope_deg <= slope_max_deg",
+        "stl": "always (drive_slope_deg <= 25)"
+      },
+      {
+        "id": "LP-R07",
+        "name": "cross_slope",
+        "class": "safety",
+        "applicable": true,
+        "reason": null,
+        "engine": "builtin",
+        "rho": 0.118013,
+        "unit": "deg",
+        "rho_normalized": 0.006556,
+        "satisfied": true,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 18.0,
+        "rover_parameter": "slope_lateral_max_deg",
+        "threshold_source": "rover",
+        "signal": "lateral_slope_deg",
+        "scope": null,
+        "worst_at": {
+          "index": 38,
+          "hours": 2.5799,
+          "row": 126,
+          "col": 117
+        },
+        "fretish": "The rover shall always satisfy lateral_slope_deg <= slope_lateral_max_deg",
+        "stl": "always (lateral_slope_deg <= 18)"
+      },
+      {
+        "id": "LP-R08",
+        "name": "dte_while_moving",
+        "class": "safety",
+        "applicable": false,
+        "reason": "signal earth_link_h not in trace",
+        "engine": null,
+        "rho": null,
+        "unit": "h",
+        "rho_normalized": null,
+        "satisfied": null,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 0.0,
+        "rover_parameter": null,
+        "threshold_source": "fixed",
+        "signal": "earth_link_h",
+        "scope": "moving",
+        "worst_at": null,
+        "fretish": "In moving mode the rover shall always satisfy earth_visible",
+        "stl": "always (earth_link_h > 0)"
+      },
+      {
+        "id": "LP-R09",
+        "name": "safe_haven_leg",
+        "class": "safety",
+        "applicable": false,
+        "reason": "signal haven_margin_h not in trace",
+        "engine": null,
+        "rho": null,
+        "unit": "h",
+        "rho_normalized": null,
+        "satisfied": null,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 0.0,
+        "rover_parameter": null,
+        "threshold_source": "fixed",
+        "signal": "haven_margin_h",
+        "scope": null,
+        "worst_at": null,
+        "fretish": "The rover shall always satisfy time_to_haven_h <= hours_until_earthset",
+        "stl": "always (haven_margin_h >= 0)"
+      },
+      {
+        "id": "LP-R10",
+        "name": "goal_reached",
+        "class": "mission",
+        "applicable": true,
+        "reason": null,
+        "engine": "builtin",
+        "rho": 0.0,
+        "unit": "m",
+        "rho_normalized": 0.0,
+        "satisfied": true,
+        "boundary": true,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 0.0,
+        "rover_parameter": null,
+        "threshold_source": "fixed",
+        "signal": "dist_to_goal_m",
+        "scope": null,
+        "worst_at": {
+          "index": 66,
+          "hours": 3.736,
+          "row": 140,
+          "col": 140
+        },
+        "fretish": "The rover shall eventually satisfy at_goal",
+        "stl": "eventually (dist_to_goal_m <= 0)"
+      },
+      {
+        "id": "LP-R11",
+        "name": "soc_at_goal",
+        "class": "safety",
+        "applicable": true,
+        "reason": null,
+        "engine": "builtin",
+        "rho": 58.693334,
+        "unit": "pct",
+        "rho_normalized": 2.934667,
+        "satisfied": true,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 20.0,
+        "rover_parameter": "soc_min_pct",
+        "threshold_source": "rover",
+        "signal": "soc_pct",
+        "scope": "at_goal",
+        "worst_at": {
+          "index": 66,
+          "hours": 3.736,
+          "row": 140,
+          "col": 140
+        },
+        "fretish": "In at_goal mode the rover shall always satisfy soc_pct >= soc_min",
+        "stl": "always (soc_pct >= 20)"
+      },
+      {
+        "id": "LP-R12",
+        "name": "thermal_dwell",
+        "class": "safety",
+        "applicable": false,
+        "reason": "signal dwell_margin_h not in trace",
+        "engine": null,
+        "rho": null,
+        "unit": "h",
+        "rho_normalized": null,
+        "satisfied": null,
+        "boundary": false,
+        "open_ended": false,
+        "pending": false,
+        "threshold": 0.0,
+        "rover_parameter": null,
+        "threshold_source": "fixed",
+        "signal": "dwell_margin_h",
+        "scope": null,
+        "worst_at": null,
+        "fretish": "The rover shall always satisfy stay_h <= max_dwell_h",
+        "stl": "always (dwell_margin_h >= 0)"
+      }
+    ],
+    "min_margin": {
+      "id": "LP-R05",
+      "rho": -38.559749,
+      "unit": "degC",
+      "rho_normalized": -2.203414
+    },
+    "n_applicable": 9,
+    "n_violated": 2,
+    "violated": [
+      "LP-R04",
+      "LP-R05"
+    ],
+    "verdict": "violated"
+  },
+  "slip_model": {
+    "applied": true,
+    "validity": "MODEL",
+    "model_id": "anchored_loglinear_v1",
+    "route": {
+      "moves": 66,
+      "skipped_edges": 0,
+      "mean_slip": 0.7519502890789306,
+      "max_slip": 0.9,
+      "max_slip_slope_deg": 20.364858470855193,
+      "distance_factor": 6.529385030439736,
+      "extra_hours": 3.172851764491115,
+      "extra_drawn_wh": 1598.667426809269
+    },
+    "claim": "Literature-anchored MODEL, not a measurement: the curve passes through VIPER's mobility design requirement (a maximum of 40 percent slip up a 15 deg slope, GRC-1 simulant at 15-20 percent relative density; PSJ 2025) and Yutu-2's measured slip ratio (0 to -0.075 on slopes up to 8.86 deg at the Chang'e-4 site; Nature Communications 2024), is exponential between and beyond the anchors (an assumption) and is capped at 0.9. Nothing here was measured on polar regolith; anchors transferred between profiles are labelled 'assumption'."
+  },
+  "risk": {
+    "alpha": null,
+    "applied": false,
+    "validity": "MODEL",
+    "measure": "cvar_normal_closed_form_v1",
+    "multiplier": null,
+    "scope": "ranking cost only: the slope criterion reads min(slope_max, slope + sigma_slope * m_alpha) and the energy criterion prices the cell at CVaR_alpha(slip); travel time, battery, safety margins, corridor budgets and the Monte Carlo use the mean. risk_alpha=None is the nominal grid, bit for bit; alpha=0.5 is mu + 0.798 sigma, not the mean.",
+    "criteria": {
+      "slope": "nominal",
+      "energy": "nominal"
+    },
+    "sigma_sources": {
+      "slip": {
+        "source": "C3 anchors: sigma per anchor (Yutu-2's measured 0..0.075 range read as +-2 sigma; a relative spread of 0.5 transferred to the other anchors as an assumption), interpolated in slope; plus the slope sigma carried into slip by the delta method (ds/dslope = k * s)",
+        "validity": "MODEL",
+        "relative_spread_at_anchors": [
+          {
+            "slope_deg": 0.0,
+            "sigma_over_mu": 0.5
+          },
+          {
+            "slope_deg": 15.0,
+            "sigma_over_mu": 0.5
+          }
+        ]
+      },
+      "slope": {
+        "source": "none",
+        "validity": null,
+        "reason": "no DEM clone cache beside the processed grids; the slope criterion reads the nominal slope and the slip tail carries no slope sigma (scripts/build_dem_clone_cache.py)"
+      },
+      "roughness": {
+        "source": "none",
+        "validity": null,
+        "reason": "LOLA LDRM publishes no per-pixel roughness sigma (LDSM has one, LDRM does not); the roughness criterion reads its nominal value at every alpha"
+      }
+    },
+    "route": null,
+    "claim": "CVaR of MODEL-labelled distributions, not a measured risk: the slip sigma is Yutu-2's measured range read as +-2 sigma and a transferred relative spread of 0.5 elsewhere (assumptions, see each anchor's source); the slope sigma is derived from NASA's DEM clones (B3) where cached; the thermal field has no published sigma and is not tail-adjusted. Alpha changes the ranking cost only -- every hour, Wh and margin in this response is the mean-slip physics. Endo et al.'s success-rate figures are from their synthetic experiments, not from this site."
+  },
+  "roughness": {
+    "applied": true,
+    "validity": "MEASURED",
+    "scale_validity": "MODEL",
+    "product": "LDRM_80S_50MPP_ADJ_ROUGH_100M",
+    "baseline_m": 100,
+    "resolution_m": 50,
+    "product_url": "https://pgda.gsfc.nasa.gov/products/90",
+    "weight": 0.15,
+    "route": {
+      "n_cells": 67,
+      "nan_cells": 0,
+      "mean_roughness_m": 0.8682631814657752,
+      "max_roughness_m": 1.2381007671356201,
+      "mean_f_roughness": 0.7139002316812656,
+      "cells_in_psr": 0,
+      "grid": "fine: cell values"
+    },
+    "reason": null,
+    "claim": "LOLA LDRM roughness, MEASURED from LOLA spot residuals around a plane fit (NASA GSFC PGDA product 90, Barker et al. 2023), posted at 50 m/px with a 100 m baseline. Every 5 m cell carries the statistic of the 50 m pixel that contains it: a hectometre-scale block statistic, NOT the roughness of the cell itself, and not a rock count (Diviner rock abundance stops at 80 S and is not used). The [0, 1] criterion is the cell's percentile rank among the 80-90 S region's 50 m pixels -- a statistical scale (MODEL), not a rover tolerance; no roughness sigma is published, so the criterion has no risk tail.",
+    "references": [
+      "Barker, M. K. et al. (2023), A New View of the Lunar South Pole from LOLA, Planet. Sci. J. 4:183, doi:10.3847/PSJ/acf3e1",
+      "NASA GSFC PGDA product 90 (LDRM roughness, LDSM slope, LPSR PSR maps), https://pgda.gsfc.nasa.gov/products/90, data DOI 10.60903/gsfcpgda-lola-spole",
+      "Large-scale Roughness Properties of the Lunar North and South Polar Regions, Planet. Sci. J. (2025), doi:10.3847/PSJ/adbc9d",
+      "Kreslavsky, M. A. et al. (2013), Lunar topographic roughness maps from LOLA data, Icarus 226",
+      "Rosenburg, M. A. et al. (2011), Global surface slopes and roughness of the Moon from LOLA, JGR 116, E02001",
+      "Powell, T. M. et al. (2023), Diviner rock abundance -- coverage limited to +-80 latitude, JGR Planets 128 (why rock abundance is NOT used here)"
+    ]
+  }
+}
