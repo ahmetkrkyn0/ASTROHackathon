@@ -157,6 +157,49 @@ bayt-bayt eski").
 
 ---
 
+## Backend: ölçüldü, merge kaynaklı değil
+
+Bu merge `backend/` ve `lunapath/src/` altında **hiçbir dosyaya dokunmadı** — B'nin dalı da
+dokunmamıştı (`git log b8143f4..HEAD -- backend/ lunapath/src/` boş). Yine de tam suite koşuldu ve
+iki şey çıktı; ikisi de merge'den önce de oradaydı.
+
+**1. Ağır modüller çok yavaş.** `python -m pytest -q` 47 dakikada bitmedi. Dosya başına
+ölçüldüğünde on üç modül 75 saniyeyi aşıyor — hepsi gerçek veri okuyanlar:
+
+```
+test_benchmark_real_data.py          test_safe_haven_real_grid.py
+test_earth_visibility_real_grid.py   test_safety_monitor_real_grid.py
+test_illumination_corridor_real_grid.py  test_slip_calibration_real_grid.py
+test_plan_4d_real_grid.py            test_survival_real_grid.py
+test_risk_sweep_real_grid.py         test_thermal_dwell_real_grid.py
+test_thermal_model.py                test_uncertainty_real_grid.py
+```
+
+Geri kalan her modül 20 saniyenin altında ve geçiyor. `CLAUDE.local.md`'deki "~4.5 dakika" rakamı
+80 m grid dönemine ait; 5 m'de bu modüller ağırlaştı.
+
+**2. `test_uncertainty_real_grid.py` içinde bir hata var, ve bilinen sınıftan:**
+
+```
+test_the_surface_two_pass_horizon_is_the_production_cube
+AssertionError: assert 12.564656891849795 < 5.0
+```
+
+Eşik **Site11** üzerinde kalibre edilmiş — testi ekleyen commit'in adı bunu söylüyor
+(`64acd65 feat(uncertainty): ... NASA's 100 Site11 DEM clones`). Yerel veri başka bir pencere.
+`test_plan_4d_real_grid.py`'nin `CLAUDE.local.md` §3'te kayıtlı üç hatasıyla **aynı sınıf**: başka
+bir bölge/çözünürlük için seçilmiş sabit sayılar. Bu modüller `metadata.json` yokken tümüyle
+atlandığı için CI yeşil; yalnızca yerel pipeline çıktısı olan makine görüyor.
+
+Hızlı doğrulama (15 saniye, 102 test, hepsi geçer):
+
+```bash
+cd backend
+"C:/Users/goktugtabak/AppData/Local/Programs/Python/Python311/python.exe" -m pytest -q   test_plan_endpoint.py test_cost_vec.py test_review_fixes.py
+```
+
+---
+
 ## Bu makinede iş gören not
 
 **`backend/.venv` artık boş değil ve `python`'u gölgeliyor.** `CLAUDE.local.md` onu "yalnızca pip
