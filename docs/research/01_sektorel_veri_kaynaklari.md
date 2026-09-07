@@ -122,7 +122,7 @@ Gerçek projelerde veriyi "indir ve kullan" değil, **yönetilen bir varlık** o
       "instrument": null,
       "processing_level": "model",
       "physical_validity": "NOT_MEASURED",
-      "model_ref": "docs/lunapath_referans_belgesi_2.md#32",
+      "model_ref": "docs/archive/lunapath_referans_belgesi_2.md#32",
       "known_limitations": [
         "ray-tracing yok", "horizon masking yok",
         "zamana bağlı değişim yok", "elevasyonla yapay korelasyon"
@@ -164,7 +164,7 @@ def test_pipeline_is_deterministic(tmp_path):
 
 **Sektörde:** Farklı enstrümanlardan gelen ürünler tek bir "reference frame + projection + grid" üzerine resample edilir; her adım loglanır.
 
-`docs/ay_termal_navigasyon_proje_dokumani.md` §10.1 Risk 2 bu riski zaten tanımlamış ama kod bunu **doğrulamıyor** — çünkü tek kaynak var, hizalama sorunu henüz doğmadı. Diviner ve illumination ekleyince **hemen** doğacak:
+`docs/archive/ay_termal_navigasyon_proje_dokumani.md` §10.1 Risk 2 bu riski zaten tanımlamış ama kod bunu **doğrulamıyor** — çünkü tek kaynak var, hizalama sorunu henüz doğmadı. Diviner ve illumination ekleyince **hemen** doğacak:
 
 - LOLA 80 m: polar stereographic, MOON_ME, R = 1737400 m küre
 - Diviner GHRM: 128 ppd **silindirik (cylindrical)** projeksiyon, 70°S–70°N → **kutup için ayrı kutup ürünü gerekir**

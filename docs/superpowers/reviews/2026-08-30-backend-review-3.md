@@ -31,7 +31,7 @@ dosyayı açıp görülebilecek şeyler değil; ancak ölçülerek görülüyor.
 
 ### H-1 — Belgelenen maliyet fonksiyonu çalışmıyordu
 
-`docs/lunapath_referans_belgesi_2.md:105` maliyet formülünü "4 penalty
+`docs/archive/lunapath_referans_belgesi_2.md:105` maliyet formülünü "4 penalty
 bileşeninin AHP-ağırlıklı toplamı **artı log-barrier cezası**" olarak tanımlıyor
 ve özet tabloda teslim edilmiş sayıyor. `cost_engine.total_edge_cost` ve
 `log_barrier_penalty` üretimde hiç çağrılmıyordu. Sonuç: yanal eğim (devrilme)

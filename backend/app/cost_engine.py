@@ -1,7 +1,7 @@
 """Cost engine — all penalty functions and combined edge cost.
 
 Every penalty returns MRU [0, 1]. Formulas match
-``docs/lunapath_referans_belgesi_2.md``.
+``docs/archive/lunapath_referans_belgesi_2.md``.
 """
 
 from __future__ import annotations
@@ -889,7 +889,7 @@ def log_barrier_penalty(
     """Full spec-form barrier, including the path-dependent SOC term.
 
     Kept as the reference implementation of
-    ``docs/lunapath_referans_belgesi_2.md`` 2.3.5 and used by
+    ``docs/archive/lunapath_referans_belgesi_2.md`` 2.3.5 and used by
     :func:`total_edge_cost`. The planner calls
     :func:`edge_barrier_penalty` instead, which drops only the SOC term --
     see that function for why.

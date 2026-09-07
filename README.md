@@ -584,7 +584,7 @@ Transferred anchors are marked `assumption:` in the catalogue.
 
 ## Further reading
 
-- [`docs/lunapath_referans_belgesi_2.md`](docs/lunapath_referans_belgesi_2.md) — formulas, constants, cost model
+- [`docs/archive/lunapath_referans_belgesi_2.md`](docs/archive/lunapath_referans_belgesi_2.md) — formulas, constants, cost model
 - [`docs/BACKEND_ENVANTER.md`](docs/BACKEND_ENVANTER.md) — full backend inventory audit
 - [`docs/research/`](docs/research/) — 30 research and measurement documents
 - [`docs/ROS2_KULLANIM_KILAVUZU.md`](docs/ROS2_KULLANIM_KILAVUZU.md) — ROS 2 usage guide

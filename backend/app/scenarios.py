@@ -10,7 +10,7 @@ from . import constants as C
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 SCENARIOS_DIR = os.path.join(DATA_DIR, "scenarios")
 
-# Weights and constraints frozen at v3.2 spec (docs/lunapath_referans_belgesi_2.md §5.2).
+# Weights and constraints frozen at v3.2 spec (docs/archive/lunapath_referans_belgesi_2.md §5.2).
 # C4 adds the fifth criterion, w_roughness, to every profile at the catalogue
 # default: no profile has a published roughness weighting, so none is invented
 # per profile, and the four frozen weights are NOT rescaled (their unit sum was

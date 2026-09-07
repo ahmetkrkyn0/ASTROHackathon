@@ -19,7 +19,7 @@ Oynatmayı izle → Görev raporunu oku`.
 
 | Kaynak | Rol |
 |--------|-----|
-| `docs/stitch_design_brief.md` | Hedef kitle ve tasarım yönü |
+| `docs/archive/stitch_design_brief.md` | Hedef kitle ve tasarım yönü |
 | `frontend/src/App.tsx`, `MapCanvas.tsx`, `TerrainCanvas3D.tsx` | Kabuk ve harita |
 | `frontend/src/features/**` (17 feature) | Panel ve etkileşim katmanı |
 | `frontend/src/App.css` + 11 feature CSS (7.138 satır) | Tasarım sistemi |

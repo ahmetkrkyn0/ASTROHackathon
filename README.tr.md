@@ -587,7 +587,7 @@ Aktarılan çapalar katalogda `assumption:` ile işaretlidir.
 
 ## Daha fazlası
 
-- [`docs/lunapath_referans_belgesi_2.md`](docs/lunapath_referans_belgesi_2.md) — formüller, sabitler, maliyet modeli
+- [`docs/archive/lunapath_referans_belgesi_2.md`](docs/archive/lunapath_referans_belgesi_2.md) — formüller, sabitler, maliyet modeli
 - [`docs/BACKEND_ENVANTER.md`](docs/BACKEND_ENVANTER.md) — tam backend envanter denetimi
 - [`docs/research/`](docs/research/) — 30 araştırma ve ölçüm belgesi
 - [`docs/ROS2_KULLANIM_KILAVUZU.md`](docs/ROS2_KULLANIM_KILAVUZU.md) — ROS 2 kullanım kılavuzu
