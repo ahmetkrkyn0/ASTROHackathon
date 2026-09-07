@@ -2763,6 +2763,16 @@ export default function TerrainCanvas3D({
 
   // ── 3D Camera Mode (FPS Surface View vs Orbit Overview) ─────────────────────
   const fpsAngles = useRef({ yaw: 0.35, pitch: 0.02 })
+  /** Set once the user drags the mouse in FPS mode. The pose effect below runs
+   *  on every playback tick, and it used to re-derive yaw/pitch from the local
+   *  terrain gradient each time -- which wiped any look direction the user had
+   *  just dragged to, roughly every 50 ms while the rover was moving. Looking
+   *  around only "stuck" while playback was paused. Once this flag is set the
+   *  pose effect keeps updating the eye *position* along the route but leaves
+   *  the aim to the user, the way a head does inside a moving vehicle.
+   *  Cleared when FPS mode is re-entered, so a fresh entry still gets the
+   *  auto-aimed horizon view. */
+  const fpsUserLook = useRef(false)
 
   useEffect(() => {
     const state = sceneRef.current
@@ -2836,6 +2846,19 @@ export default function TerrainCanvas3D({
         : altM
     const targetWorldY = targetAltM - minM + 1.6
 
+    if (fpsUserLook.current) {
+      // The user is steering the view: keep their angles, just re-apply them
+      // from the new eye position so the aim travels with the rover.
+      const { yaw: userYaw, pitch: userPitch } = fpsAngles.current
+      camera.lookAt(
+        rx + Math.sin(userYaw) * Math.cos(userPitch) * LOOKAHEAD_M,
+        ry + Math.sin(userPitch) * LOOKAHEAD_M,
+        rz - Math.cos(userYaw) * Math.cos(userPitch) * LOOKAHEAD_M,
+      )
+      camera.updateProjectionMatrix()
+      return
+    }
+
     camera.lookAt(targetWorldX, targetWorldY, targetWorldZ)
     camera.updateProjectionMatrix()
 
@@ -2885,6 +2908,9 @@ export default function TerrainCanvas3D({
     const { camera } = state
     if (!camera) return
 
+    // Fresh entry into FPS mode starts from the auto-aimed horizon view again.
+    fpsUserLook.current = false
+
     let isDown = false
     let startX = 0
     let startY = 0
@@ -2912,6 +2938,7 @@ export default function TerrainCanvas3D({
       isDown = true
       startX = e.clientX
       startY = e.clientY
+      container.style.cursor = 'grabbing'
       container.setPointerCapture?.(e.pointerId)
     }
 
@@ -2922,6 +2949,7 @@ export default function TerrainCanvas3D({
       startX = e.clientX
       startY = e.clientY
 
+      if (dx !== 0 || dy !== 0) fpsUserLook.current = true
       fpsAngles.current.yaw -= dx * 0.003
       fpsAngles.current.pitch = THREE.MathUtils.clamp(
         fpsAngles.current.pitch - dy * 0.003,
@@ -2933,6 +2961,7 @@ export default function TerrainCanvas3D({
 
     const onPointerUp = (e: PointerEvent) => {
       isDown = false
+      container.style.cursor = 'grab'
       container.releasePointerCapture?.(e.pointerId)
     }
 
@@ -2941,6 +2970,9 @@ export default function TerrainCanvas3D({
       camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.03, 28, 65)
       camera.updateProjectionMatrix()
     }
+
+    const previousCursor = container.style.cursor
+    container.style.cursor = 'grab'
 
     container.addEventListener('pointerdown', onPointerDown)
     container.addEventListener('pointermove', onPointerMove)
@@ -2954,6 +2986,7 @@ export default function TerrainCanvas3D({
       container.removeEventListener('pointerup', onPointerUp)
       container.removeEventListener('pointercancel', onPointerUp)
       container.removeEventListener('wheel', onWheel)
+      container.style.cursor = previousCursor
     }
   }, [cameraMode, status])
 
