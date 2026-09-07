@@ -8,6 +8,11 @@ import {
   useState,
 } from 'react'
 import './App.css'
+// After App.css on purpose: these rules resolve collisions between
+// independently-owned pieces and have to win. Never imported at all
+// until now, so the toast/assistant offset it documents had never
+// actually applied.
+import './shell/shell.css'
 import LandingPage from './LandingPage'
 import FleetSelectionView from './components/Fleet/FleetSelectionView'
 import {

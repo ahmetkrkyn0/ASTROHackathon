@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react'
+import type { IconName } from '../components/Fleet/SpecIcons'
 import type { MissionMode } from '../mission/types'
 import { MissionConstraints } from './mission-constraints'
 import { MissionContextFeature } from './mission-context'
@@ -62,6 +63,30 @@ export type FeatureSlot =
  */
 export type FeatureGroup = 'primary' | 'systems'
 
+/**
+ * Which tab of the analyze rail a feature belongs to.
+ *
+ * The rail holds eleven panels once the twelve backend features are in it, and
+ * a column you scroll for two screens to reach the stress test is a column
+ * nobody scrolls. Tabs keep every panel in the right column -- which is where
+ * they belong, beside the map they are about -- without stacking them.
+ *
+ * Four rather than one per feature, grouped by the question being asked:
+ *
+ *   route     what was planned, and what does a cell cost
+ *   safety    is it sound, and under which model was that decided
+ *   analysis  the jobs that re-price it: clones, Monte Carlo, risk sweep
+ *   compare   this route against others, and LunaPath against the outside
+ */
+export type RailTab = 'route' | 'safety' | 'analysis' | 'compare'
+
+export const RAIL_TABS: ReadonlyArray<{ id: RailTab; label: string; icon: IconName }> = [
+  { id: 'route', label: 'Route', icon: 'route' },
+  { id: 'safety', label: 'Safety', icon: 'shield' },
+  { id: 'analysis', label: 'Analysis', icon: 'analytics' },
+  { id: 'compare', label: 'Compare', icon: 'balance' },
+]
+
 export interface FeatureRegistration {
   /** Stable, unique, and used as the React key. */
   id: string
@@ -84,6 +109,12 @@ export interface FeatureRegistration {
    * it in a flat grid rather than in that rail.
    */
   group?: FeatureGroup
+  /**
+   * Which analyze-rail tab this sits in. Only meaningful for `rightRail` +
+   * `primary`; omitted means the feature is not tabbed and renders above the
+   * tab bar, which is how a permanent readout stays permanent.
+   */
+  tab?: RailTab
 }
 
 /**
@@ -103,7 +134,7 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // and while a route is being placed the operator is looking at the map, not
   // at a column describing it. Restricting it is what empties the right rail
   // in plan, which is the point: plan gets the wider map.
-  { id: 'mission-context', slot: 'rightRail', Component: MissionContextFeature, modes: ['analyze'] },
+  { id: 'mission-context', slot: 'rightRail', Component: MissionContextFeature, modes: ['analyze'], tab: 'route' },
   // Plan only: meaningful after the hangar's rover selection is complete.
   { id: 'mission-setup', slot: 'leftRail', Component: MissionSetup, modes: ['plan'] },
   // Registered for no mode, which is how a feature is retired without being
@@ -116,13 +147,13 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // else -- exactly what the top bar's PLAN tab does. That tab is enabled
   // throughout analyze, so removing this panel takes no route back with it.
   { id: 'mission-snapshot', slot: 'leftRail', Component: MissionSnapshot, modes: [] },
-  { id: 'route-analysis', slot: 'rightRail', Component: RouteAnalysis, modes: ['analyze'] },
+  { id: 'route-analysis', slot: 'rightRail', Component: RouteAnalysis, modes: ['analyze'], tab: 'route' },
   // Analyze only, and NOT in the systems drawer: the twelve requirements are
   // checked on every route whether anyone asks or not, and the plan is
   // explicit that a result which exists must be visible rather than parked
   // behind a control. It renders nothing when a response carries no block, so
   // an older backend costs the rail nothing.
-  { id: 'safety-margins', slot: 'rightRail', Component: SafetyMargins, modes: ['analyze'] },
+  { id: 'safety-margins', slot: 'rightRail', Component: SafetyMargins, modes: ['analyze'], tab: 'safety' },
   // Slip, risk appetite, roughness, survival and thermal dwell -- five blocks
   // that also arrive unasked, kept as ONE panel with labelled sections rather
   // than five cards.
@@ -133,7 +164,7 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // moment-to-moment task of reading a route. Keeping it in the primary rail
   // took analyze from four permanent panels to six, which is the direction
   // the theme-preservation gate exists to stop.
-  { id: 'route-model', slot: 'rightRail', Component: RouteModel, modes: ['analyze'], group: 'systems' },
+  { id: 'route-model', slot: 'rightRail', Component: RouteModel, modes: ['analyze'], tab: 'safety' },
   // analyze only, from App.tsx's `missionMode === 'analyze' && planResult`
   // guard. Only the mode half becomes a registration: the bar already
   // renders nothing without waypoints, so knowing what an empty route looks
@@ -185,17 +216,17 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // and needs a preprocessing cache many deployments will not have. It never
   // blocks the route -- an unavailable ensemble costs this panel and nothing
   // else.
-  { id: 'uncertainty', slot: 'rightRail', Component: Uncertainty, modes: ['analyze'], group: 'systems' },
-  { id: 'stress-test', slot: 'rightRail', Component: StressTest, modes: ['analyze'], group: 'systems' },
-  { id: 'risk-sweep', slot: 'rightRail', Component: RiskSweep, modes: ['analyze'], group: 'systems' },
+  { id: 'uncertainty', slot: 'rightRail', Component: Uncertainty, modes: ['analyze'], tab: 'analysis' },
+  { id: 'stress-test', slot: 'rightRail', Component: StressTest, modes: ['analyze'], tab: 'analysis' },
+  { id: 'risk-sweep', slot: 'rightRail', Component: RiskSweep, modes: ['analyze'], tab: 'analysis' },
   // Offline evidence, so it belongs to no mission mode: the figures are the
   // same in plan and analyze because an external validation result does not
   // depend on the route on screen.
-  { id: 'benchmark', slot: 'leftRail', Component: Benchmark, group: 'systems' },
+  { id: 'benchmark', slot: 'rightRail', Component: Benchmark, modes: ['analyze'], tab: 'compare' },
   // Analyze only. The cost under the pointer is worth reading in both modes,
   // but it is the last primary occupant of the right rail, and leaving it
   // registered in plan would keep a 288px column open for one hover readout.
-  { id: 'cost-explain', slot: 'rightRail', Component: CostExplain, modes: ['analyze'] },
+  { id: 'cost-explain', slot: 'rightRail', Component: CostExplain, modes: ['analyze'], tab: 'route' },
   // Floating, not railed: the assistant opens over the mission and has to
   // keep working with both rails collapsed.
   { id: 'assistant', slot: 'globalOverlay', Component: Assistant },
@@ -206,7 +237,7 @@ export const FEATURES: readonly FeatureRegistration[] = [
   { id: 'mission-report', slot: 'globalOverlay', Component: MissionReport, modes: ['analyze'] },
   // Analyze only: it compares a route that already exists against alternative
   // weightings, which is a question asked after one has been planned.
-  { id: 'profile-compare', slot: 'rightRail', Component: ProfileCompare, modes: ['analyze'] },
+  { id: 'profile-compare', slot: 'rightRail', Component: ProfileCompare, modes: ['analyze'], tab: 'compare' },
 ]
 
 /**

@@ -46,3 +46,93 @@
     width: auto;
   }
 }
+
+/* ── Analyze rail tabs ───────────────────────────────────────────────────────
+   Eleven panels live in this column, and a two-screen scroll is not a column
+   anyone reads to the bottom of. The bar is sticky so the tabs never leave
+   while a long panel scrolls under them.
+
+   An underline rather than the filled block the PLAN/ANALYZE switch uses:
+   that is a two-way toggle for the whole cockpit and earns the weight; this is
+   four-way navigation inside one column, and four filled blocks stacked at the
+   top of a rail would out-shout the panels they lead to. */
+
+.lp-rail-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--line-card);
+}
+
+.lp-rail-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.lp-rail-tab svg { font-size: 15px; }
+
+.lp-rail-tab:hover:not(:disabled) { color: var(--text-2); background: var(--bg-inset); }
+
+.lp-rail-tab:disabled { opacity: 0.3; cursor: default; }
+
+.lp-rail-tab.is-active { color: var(--text); }
+
+/* The indicator sits on the bar's own bottom rule rather than beside it. */
+.lp-rail-tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--lavender);
+}
+
+.lp-rail-tab:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: -2px;
+}
+
+/* The count of violated requirements, on a tab that may not be open. The
+   failure mode of tabs is hiding something that needed attention, so anything
+   that can be missed behind one has to be announced by it. Risk colour is
+   correct here: this is a safety count. */
+.lp-rail-tab-badge {
+  position: absolute;
+  top: 4px;
+  right: calc(50% - 20px);
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--coral);
+  color: #0a0c14;
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.lp-rail-tab.has-finding { color: var(--coral-text); }
+
+.lp-rail-panels {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}

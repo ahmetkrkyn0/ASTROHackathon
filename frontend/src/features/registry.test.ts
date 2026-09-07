@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   FEATURES,
+  RAIL_TABS,
   selectFeatures,
   selectSystemsFeatures,
   type FeatureGroup,
@@ -189,5 +190,45 @@ describe('FEATURES', () => {
     // panel keeping the other one's state rather than as an error.
     const ids = FEATURES.map((feature) => feature.id)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+describe('analyze rail tabs', () => {
+  const analyzeRail = selectFeatures(FEATURES, 'rightRail', 'analyze')
+
+  it('gives every panel in the analyze rail a tab', () => {
+    // A panel with no tab renders above the bar and is therefore permanent.
+    // That is a deliberate choice, not a default, so nothing should reach it
+    // by omission.
+    const untabbed = analyzeRail.filter((feature) => !feature.tab).map((f) => f.id)
+    expect(untabbed).toEqual([])
+  })
+
+  it('leaves no tab empty', () => {
+    // An empty tab is a disabled button the operator has to discover is
+    // pointless.
+    for (const tab of RAIL_TABS) {
+      expect(analyzeRail.filter((feature) => feature.tab === tab.id).length)
+        .toBeGreaterThan(0)
+    }
+  })
+
+  it('keeps the rail from stacking more than four panels in one tab', () => {
+    // The point of tabbing was to stop the column being a scroll. Four is the
+    // most that fits without becoming one again.
+    for (const tab of RAIL_TABS) {
+      expect(analyzeRail.filter((feature) => feature.tab === tab.id).length)
+        .toBeLessThanOrEqual(4)
+    }
+  })
+
+  it('tabs nothing outside the analyze right rail', () => {
+    // `tab` is meaningless on any other slot, and a stray one would read as a
+    // panel that had been forgotten rather than never tabbed.
+    for (const feature of FEATURES) {
+      if (feature.tab === undefined) continue
+      expect(feature.slot).toBe('rightRail')
+      expect(feature.group ?? 'primary').toBe('primary')
+    }
   })
 })

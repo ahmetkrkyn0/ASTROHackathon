@@ -1,4 +1,5 @@
 import { FeatureHost } from './FeatureHost'
+import { RailTabs } from './RailTabs'
 
 /**
  * The six integration points App.tsx offers features.
@@ -13,9 +14,15 @@ export function LeftRailSlot() {
   return <FeatureHost slot="leftRail" />
 }
 
-/** Right rail, below Mission Snapshot. */
+/**
+ * Right rail. Tabbed, because analyze fills it with eleven panels and a
+ * two-screen scroll is not a column anyone reads to the bottom of.
+ *
+ * RailTabs still asks the registry what belongs here, so adding a feature is
+ * still one line in registry.ts -- it just carries a tab now.
+ */
 export function RightRailSlot() {
-  return <FeatureHost slot="rightRail" />
+  return <RailTabs />
 }
 
 /** The strip under the map stage. */
