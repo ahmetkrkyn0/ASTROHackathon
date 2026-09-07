@@ -1,0 +1,117 @@
+{
+  "rover_id": "lpr_1",
+  "rover_name": "LPR-1 (Default)",
+  "start_utc": "2027-05-30T00:00:00",
+  "t_hours": 0.0,
+  "lookahead_hours": 24.0,
+  "dwell_model": {
+    "model": "inner_temperature_first_order_lag_v1",
+    "validity": "MODEL",
+    "thermal_lag_validity": "UNCALIBRATED",
+    "n_start_bins": 48,
+    "n_slices": 48,
+    "slices_per_bin": 1,
+    "blocks": [
+      125,
+      125
+    ],
+    "n_states": 750000,
+    "slice_hours": 0.5,
+    "tau_s": 7200.0,
+    "initial_inner_c": 17.5,
+    "initial_outside_envelope": false,
+    "heater_model": "none",
+    "heater_source": null,
+    "envelope": {
+      "lo_c": 0.0,
+      "hi_c": 35.0,
+      "lo_component": "battery",
+      "hi_component": "battery"
+    },
+    "compute_ms": 414.761
+  },
+  "shadow_model": {
+    "model": "spice_horizon",
+    "time_varying": true,
+    "start_utc": "2027-05-30T00:00:00"
+  },
+  "summary": {
+    "slice": 0,
+    "traversable_blocks": 8623,
+    "lookahead_h": 24.0,
+    "fraction_unlimited": 0.132089,
+    "fraction_cold_limited": 0.503653,
+    "fraction_hot_limited": 0.364258,
+    "finite_median_h": 1.9388,
+    "finite_p5_h": 0.423,
+    "finite_p95_h": 4.0767
+  },
+  "grid": {
+    "rows": 125,
+    "cols": 125,
+    "resolution_m": 20.0,
+    "coarsen": 4,
+    "downsample": 4
+  },
+  "fields": {
+    "max_dwell_h": {
+      "units": "h",
+      "min": 0.327869176864624,
+      "max": 24.0,
+      "nodata": 7002,
+      "binary_url": "/api/thermal-dwell?start_utc=2027-05-30T00%3A00%3A00&rover_id=lpr_1&t_hours=0.0&lookahead_hours=24.0&slice_hours=0.5&coarsen=4&heater_model=none&format=f32&field=max_dwell_h"
+    },
+    "side": {
+      "units": "code",
+      "min": 0.0,
+      "max": 2.0,
+      "nodata": 7002,
+      "binary_url": "/api/thermal-dwell?start_utc=2027-05-30T00%3A00%3A00&rover_id=lpr_1&t_hours=0.0&lookahead_hours=24.0&slice_hours=0.5&coarsen=4&heater_model=none&format=f32&field=side"
+    },
+    "open_ended": {
+      "units": "boolean",
+      "min": 0.0,
+      "max": 1.0,
+      "nodata": 7002,
+      "binary_url": "/api/thermal-dwell?start_utc=2027-05-30T00%3A00%3A00&rover_id=lpr_1&t_hours=0.0&lookahead_hours=24.0&slice_hours=0.5&coarsen=4&heater_model=none&format=f32&field=open_ended"
+    }
+  },
+  "binary_format": {
+    "dtype": "float32",
+    "endian": "little",
+    "order": "row-major",
+    "shape": [
+      125,
+      125
+    ],
+    "nodata": "NaN"
+  },
+  "quoted": {
+    "source": "ICES-2025-376 (Slusser et al. 2025), read 5 Sep 2026",
+    "max_polar_sun_elevation_deg": 1.5,
+    "sun_elevation_rule": "the maximum solar elevation angle at the lunar poles is 1.5 deg, increasing by one degree for every degree in latitude from the pole (Sec. III.D)",
+    "envelope_axes": "downslope solar azimuth angle relative to the rover heading (angular, 16 evenly spaced) vs slope angle (radial, 0-15 deg in 3 deg steps); the slope direction is kept parallel to the solar azimuth and the solar elevation is the mission maximum; the rover is parked in its highest continuous power state (Sec. V.G)",
+    "case_matrix": 96,
+    "case_matrix_note": "16 azimuths x 6 slopes, steady-state; negative (Sun-averted) slopes left out as more benign",
+    "components_screened": "more than 60 critical components",
+    "aft_exceedance_example": {
+      "component": "an avionics box",
+      "aft_c": 65.0,
+      "modelled_c": 77.0,
+      "exceedance_c": 12.0,
+      "note": "the normalisation example (Sec. V.G), not a specific slope/elevation case"
+    },
+    "parked_hotspot_onset": "typically a few hours (Sec. V.H, Fig. 12)",
+    "tolerable_entrenched_time": "the finite time a vehicle may remain static after a mobility fault before it can no longer complete the direct traverse and arrive at the destination safe haven before lunar night; off-nominal thermal transients are bounded by it (Sec. V.H)",
+    "entrenched_time_caveats": "does not take into account state-of-charge variances, transient shadow allowances, or a fault anywhere along a nominal traverse; VIPER's speed means it is always at risk of reaching thermal balance with its environment (Sec. V.H)",
+    "safe_haven_night_hours": {
+      "shortest": 50.0,
+      "typical_range": [
+        85.0,
+        150.0
+      ]
+    },
+    "tool": "Thermal Desktop"
+  },
+  "claim": "MODEL, uncalibrated: the surface temperature is heat1d's (slope x aspect) annual peak coupled to the SPICE shadow series with an UNCALIBRATED regolith lag, and the inner temperature is the catalogue's piecewise offset model relaxed with the catalogue's thermal_tau_s; no Diviner comparison is made here (C5). The offsets are piecewise on the surface sign, so the surfaces that map into the LPR-1/VIPER battery envelope are -60..-25 C (cold branch) and 40..75 C (hot branch): a 'hot-limited' verdict on a -25..0 C surface is that offset model, not overheating. The heater has no sourced W-to-K link; heater_model='thermostat_assumed' is an explicit assumption and the default is 'none'. The dwell cube assumes the rover arrives at its nominal inner temperature; the route trace integrates the actual one. JSC's envelope axes (slope x Sun azimuth relative to the rover heading, at the mission's maximum Sun elevation) need a rover body model LunaPath does not have; ours are Sun elevation x Sun-parallel slope from heat1d's transient -- the same method on our model, not a comparison. JSC's numbers are quoted, never mixed with a measurement."
+}

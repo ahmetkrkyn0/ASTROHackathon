@@ -1,0 +1,118 @@
+{
+  "start_utc": "2027-05-30T00:00:00",
+  "rover_id": "lpr_1",
+  "n_slices": 8,
+  "slice_hours": 6.0,
+  "slice_hours_source": "request",
+  "horizon_hours": 48.0,
+  "coarsen": 4,
+  "lit_rule": "all",
+  "grid": {
+    "rows": 125,
+    "cols": 125,
+    "resolution_m": 20.0,
+    "coarsen": 4
+  },
+  "shadow_model": {
+    "model": "spice_horizon",
+    "time_varying": true,
+    "horizon_cache": "<repo>/lunapath/data/processed/horizon_map.npy",
+    "start_utc": "2027-05-30T00:00:00"
+  },
+  "corridor": {
+    "enforced": false,
+    "lit_rule": "all",
+    "lit_rule_definition": "a coarse block is lit only if every fine cell in it is lit at that slice (block shadow fraction 0)",
+    "edge_rule": "MOVE (r,c,t)->(r',c',t+d) with d = max(1, ceil(edge travel / slice)) as the planner counts it; both blocks lit and passable at every slice t..t+d; gates as astar_4d (passable, corner cut, step slope, cross-slope). WAIT (t->t+1) needs both voxels lit.",
+    "pruning": "forward reach from the lit layer at slice 0 AND backward reach from the lit layer at the last slice: CMU's two-pass root / dead-end pruning, move-time aware",
+    "n_slices": 8,
+    "slice_hours": 6.0,
+    "grid": {
+      "rows": 125,
+      "cols": 125,
+      "resolution_m": 20.0
+    },
+    "voxels": {
+      "traversable": 68984,
+      "lit_safe": 58816,
+      "corridor": 58024,
+      "corridor_fraction_of_lit_safe": 0.9865342763873776,
+      "pruned_fraction": 0.013465723612622438
+    },
+    "slices": {
+      "first_lit": 0,
+      "last_lit": 7,
+      "lit_safe_cells_t0": 7115,
+      "corridor_cells_t0": 7089,
+      "corridor_cells_last": 7497
+    },
+    "components": {
+      "method": "scipy.ndimage.label, 26-neighbourhood (CMU's flood fill)",
+      "count": 143,
+      "largest_voxels": 49114,
+      "largest_fraction": 0.8350448857453754,
+      "spanning_count": 139
+    },
+    "start": null,
+    "goal": null,
+    "route": {
+      "inside": null,
+      "states_inside": null,
+      "states_total": null,
+      "moves_outside": null,
+      "waits_outside": null,
+      "path_dark_hours_max": null,
+      "max_dwell_hours": null,
+      "dwell_horizon_limited": null,
+      "dwell_opportunities": []
+    },
+    "provenance": {
+      "shadow_model": "spice_horizon",
+      "time_varying": true,
+      "start_utc": "2027-05-30T00:00:00",
+      "claim": "Inside the corridor the model's shadow series never shows a dark block: SPICE Sun position + horizon cube (72 azimuth bins, two scales), coarse blocks, sampled slices. A statement about the model, not about the real surface.",
+      "uncertainty_note": "B3: on 2027-05-30, 10.8 percent of cells are undecided lit/dark across NASA's 100 Site11 DEM clones (docs/research/dem_uncertainty_report.md); the corridor is only as certain as the DEM it was cast on.",
+      "reference": "Otten, Jones, Wettergreen, Whittaker: Planning Routes of Continuous Illumination and Traversable Slope using Connected Component Analysis (ICRA 2015); Strategic Autonomy for Reducing Risk of Sun-Synchronous Lunar Polar Exploration (FSR 2017)"
+    },
+    "timings_ms": {
+      "lit_volume": 25.054,
+      "edges": 19.584,
+      "prune": 34.427,
+      "dwell": 1.803,
+      "total": 80.868,
+      "components_ms": 13.033,
+      "reach_ms": 0.0
+    }
+  },
+  "fields": {
+    "corridor": {
+      "units": "0/1",
+      "min": 0.0,
+      "max": 1.0,
+      "binary_url": "/api/illumination-corridor?rover_id=lpr_1&n_slices=8&slice_hours=6.0&coarsen=4&lit_rule=all&format=f32&start_utc=2027-05-30T00%3A00%3A00&field=corridor"
+    },
+    "lit_safe": {
+      "units": "0/1",
+      "min": 0.0,
+      "max": 1.0,
+      "binary_url": "/api/illumination-corridor?rover_id=lpr_1&n_slices=8&slice_hours=6.0&coarsen=4&lit_rule=all&format=f32&start_utc=2027-05-30T00%3A00%3A00&field=lit_safe"
+    },
+    "dwell_hours": {
+      "units": "h",
+      "min": 0.0,
+      "max": 48.0,
+      "binary_url": "/api/illumination-corridor?rover_id=lpr_1&n_slices=8&slice_hours=6.0&coarsen=4&lit_rule=all&format=f32&start_utc=2027-05-30T00%3A00%3A00&field=dwell_hours"
+    }
+  },
+  "binary_format": {
+    "dtype": "float32",
+    "endian": "little",
+    "order": "slice-major, then row-major",
+    "shape": [
+      8,
+      125,
+      125
+    ],
+    "nodata": "NaN"
+  }
+}

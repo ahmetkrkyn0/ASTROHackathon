@@ -227,6 +227,169 @@ export function grayReverseToRgb(value: number | null, min: number, max: number)
   return [channel, channel, channel]
 }
 
+/**
+ * Analysis-overlay ramps.
+ *
+ * Separate from the base-map ramps above because they are `FieldRamp` data for
+ * the overlay contract, not `(value) => RGB` functions: a callback would be a
+ * new identity every render, which is exactly what makes an overlay
+ * registration effect loop forever.
+ */
+
+/**
+ * Roughness, in metres. Cool where the ground is smooth, hot where it is not.
+ *
+ * Amber rather than red at the top: this is a fifth cost criterion, not a
+ * hazard. LDRM roughness never makes a cell impassable, and a red field over
+ * the map would say it did.
+ */
+export const ROUGHNESS_STOPS: RGB[] = [
+  [26, 42, 58],
+  [37, 92, 112],
+  [88, 148, 130],
+  [176, 178, 106],
+  [226, 160, 74],
+  [232, 118, 62],
+]
+
+/**
+ * Earth visibility, as a fraction of the sampled span.
+ *
+ * Dark where the Earth never rises, bright cyan where the link is always
+ * geometrically possible. Deliberately the route colour family: a link window
+ * is an operational affordance, not a warning.
+ */
+export const EARTH_VISIBILITY_STOPS: RGB[] = [
+  [14, 18, 28],
+  [24, 54, 78],
+  [34, 104, 132],
+  [58, 164, 186],
+  [110, 216, 232],
+]
+
+/**
+ * Time to the nearest reachable Safe Haven, in hours. Short is safe.
+ *
+ * There is no stop for "unreachable" and there must not be one. That value
+ * arrives as NaN, becomes null on the way to the overlay, and is left
+ * unpainted -- a cell with no reachable haven is not the far end of this ramp,
+ * it is off it entirely. Giving it the darkest colour would put it on the same
+ * axis as "eighteen hours away", which is a different statement.
+ */
+export const TIME_TO_HAVEN_STOPS: RGB[] = [
+  [95, 227, 176],
+  [140, 208, 140],
+  [206, 200, 104],
+  [226, 150, 84],
+  [214, 96, 77],
+]
+
+/**
+ * P(traversable) across NASA's 100 DEM clones.
+ *
+ * Diverging on purpose, with the uncertain middle the loudest part. 0 and 1
+ * are both CERTAIN -- certainly impassable, certainly passable -- and the
+ * interesting cells are the 0.05..0.95 band where the clones disagree. A
+ * monotonic ramp would make "certainly impassable" the eye-catching end and
+ * bury the only thing this layer adds over `traversable`.
+ */
+export const P_TRAVERSABLE_STOPS: RGB[] = [
+  [70, 32, 44],
+  [140, 70, 62],
+  [214, 158, 84],
+  [140, 152, 96],
+  [58, 122, 96],
+]
+
+/**
+ * A standard deviation, in the layer's own unit. Quiet where the ensemble
+ * agrees, bright where it does not.
+ *
+ * Shared by all three sigma layers so that `slope_sigma` (our ensemble, DERIVED)
+ * and `slope_sigma_nasa` (NASA's error model, MODEL) are read on the same scale
+ * of colour. They are not on the same scale of NUMBER -- their ranges differ by
+ * a factor of three -- and each ramp is domained on its own layer's measured
+ * min and max, which the provenance badge beside it explains.
+ */
+export const SIGMA_STOPS: RGB[] = [
+  [18, 24, 36],
+  [40, 66, 96],
+  [92, 106, 140],
+  [168, 142, 148],
+  [232, 196, 140],
+]
+
+/**
+ * P(safe) from the reach-avoid policy. Red at zero, green at one.
+ *
+ * Zero is a real and common answer here -- 28% of traversable blocks on this
+ * window -- so it gets the loudest end of the ramp rather than being left to
+ * look like missing data.
+ */
+export const P_SAFE_STOPS: RGB[] = [
+  [214, 76, 66],
+  [222, 132, 78],
+  [216, 186, 96],
+  [150, 180, 112],
+  [88, 176, 132],
+]
+
+/** Tolerable dwell, in hours. Short is the thing to notice. */
+export const DWELL_STOPS: RGB[] = [
+  [206, 86, 74],
+  [220, 146, 84],
+  [200, 190, 108],
+  [128, 176, 148],
+  [78, 150, 186],
+]
+
+/*
+ * Categorical codes. Single colours, never ramp stops.
+ *
+ * These are `units: "code"` fields. Putting them through a FieldRamp would
+ * produce a colour for a value between two codes -- half "wait", half "drive
+ * north" -- which is not an action the policy ever returned. Each is published
+ * as its own single-colour mask instead, so there is nothing to interpolate.
+ */
+
+/** best_action 254: already in the safe set. */
+export const ACTION_SAFE_RGB: RGB = [95, 227, 176]
+/** best_action 0-7: one of the eight compass moves. */
+export const ACTION_DRIVE_RGB: RGB = [79, 216, 240]
+/** best_action 8: hold position. */
+export const ACTION_WAIT_RGB: RGB = [186, 175, 245]
+/** best_action 255: no action reaches the safe set from here. */
+export const ACTION_NONE_RGB: RGB = [196, 88, 82]
+
+/** side 0: never leaves the envelope inside the lookahead. */
+export const SIDE_INSIDE_RGB: RGB = [110, 186, 150]
+/** side 1: reaches the cold limit first. */
+export const SIDE_COLD_RGB: RGB = [92, 152, 226]
+/** side 2: reaches the hot limit first. */
+export const SIDE_HOT_RGB: RGB = [226, 128, 76]
+
+/**
+ * A2 corridor membership. Two masks, not a two-stop ramp.
+ *
+ * `lit_safe` is the wider set and `corridor` the pruned one inside it, so the
+ * two are shades of one colour rather than two colours: they are the same
+ * quantity at two stages, and a contrasting pair would read as two unrelated
+ * layers.
+ */
+export const CORRIDOR_RGB: RGB = [120, 214, 196]
+export const LIT_SAFE_RGB: RGB = [72, 138, 132]
+
+/**
+ * The PSR mask, as a single colour.
+ *
+ * A boolean layer is not a ramp. Two stops would paint the whole map -- the
+ * zeros as much as the ones -- and PSR covers well under a percent of this
+ * window; the honest rendering leaves the rest untouched. `maskValues` nulls
+ * everything below threshold and this ramp then has only one value to serve,
+ * so both stops are the same colour on purpose.
+ */
+export const PSR_MASK_RGB: RGB = [126, 122, 214]
+
 export function aspectToRgb(value: number | null): RGB {
   if (value === null || !Number.isFinite(value)) {
     return [8, 8, 11]

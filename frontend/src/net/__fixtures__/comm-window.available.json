@@ -1,0 +1,17 @@
+{
+  "utc": "2026-09-07T00:00:00Z",
+  "row": 250,
+  "col": 250,
+  "visible_now": false,
+  "minutes_remaining": null,
+  "minutes_until_visible": null,
+  "next_change_utc": null,
+  "search_limited": true,
+  "searched_hours": 336.0,
+  "step_minutes": 30.0,
+  "trigger_minutes_remaining": 0.0,
+  "earth_elevation_deg": 4.768338684598224,
+  "earth_azimuth_true_deg": 71.07821866921483,
+  "earth_azimuth_grid_deg": 1.2688102936847372,
+  "horizon_deg": 18.44375228881836
+}

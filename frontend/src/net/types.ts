@@ -58,6 +58,36 @@ export interface TerrainManifest {
   rover: { id: string; name: string }
   weights: PlanWeights | null
   layers: Record<string, LayerManifestEntry>
+  /**
+   * B3 pedigree. Present only where the DEM clone cache exists, which is
+   * also the only case in which the four uncertainty layers appear above.
+   *
+   * Worth publishing in full because the three `*_held_fixed` flags are
+   * what the layers do NOT cover: the thermal field, the far-field horizon
+   * and Earth visibility were not re-derived per clone, so an uncertainty
+   * band drawn from these layers is a band over terrain alone.
+   */
+  dem_uncertainty?: DemUncertaintyPedigree
+}
+
+export interface DemUncertaintyPedigree {
+  /** `nasa_pgda_clones` for the real product, `synthetic` for a stand-in. */
+  model: string
+  site: string
+  product_url: string
+  reference: string
+  n_clones: number
+  clone_indices?: number[]
+  near_range_m: number
+  /** NASA's own toterr/slperr statistics and their source URLs. */
+  sigma?: Record<string, unknown>
+  /** These three say what the ensemble did NOT vary. */
+  thermal_field_held_fixed: boolean
+  far_field_held_fixed: boolean
+  earth_visibility_cloned: boolean
+  rover_id?: string
+  slope_max_deg?: number
+  [key: string]: unknown
 }
 
 // ── GET /api/cell-telemetry ────────────────────────────────────────────────
@@ -74,7 +104,86 @@ export interface CostBreakdown {
   energy: number | null
   shadow: number | null
   thermal: number | null
+  /** C4's fifth slice. Absent, not null, where the roughness layer is unloaded. */
+  roughness?: number | null
   total: number | null
+}
+
+/**
+ * The `{model, reason}` shape several endpoints publish to say, inside a
+ * 200 response, that they could not compute anything. A 200 is not
+ * evidence the data is there.
+ */
+export interface ModelStatus {
+  model: string
+  reason?: string | null
+  [key: string]: unknown
+}
+
+/** A1: the safe-haven verdict for one cell. Present only with a start epoch. */
+export interface CellSafeHaven {
+  is_safe_haven: boolean
+  max_dark_hours_without_dte_h: number | null
+  earth_below_hours: number | null
+  /**
+   * Driving hours to the nearest reachable haven.
+   *
+   * `null` means NO REACHABLE SAFE HAVEN -- the same fact the binary grid
+   * encodes as NaN. It is never 0.0 h: zero means the cell IS a haven,
+   * which is the opposite statement.
+   */
+  time_to_safe_haven_h: number | null
+  h_max_shadow_h: number | null
+}
+
+/** B1 for one cell: the policy's verdict where the rover is standing. */
+export interface CellSurvival {
+  /** Probability of reaching the safe set from here. Zero is a real answer. */
+  p_safe: number
+  p_safe_next: number | null
+  /** 0-7 a compass move, 8 wait, 254 already safe, 255 nothing helps. */
+  best_action: number
+  /** The same code in words -- `N`, `wait`, `safe`, `none`. */
+  best_action_name: string
+  next_block: [number, number] | null
+  next_pixel: [number, number] | null
+  /** The coarse block this fine cell falls in. */
+  block: [number, number]
+  coarsen: number
+  soc_frac: number
+  t_hours: number
+  safe_set: string
+  step_hours: number
+  horizon_hours: number
+}
+
+/** C6 for one cell. */
+export interface CellThermalDwell {
+  /**
+   * Hours before the inner temperature leaves the envelope.
+   *
+   * Read `open_ended` first: where it is true this number was CLIPPED to
+   * `lookahead_h` and means "at least", not "exactly".
+   */
+  max_dwell_h: number | null
+  open_ended: boolean
+  side: 'cold' | 'hot' | null
+  component: string | null
+  initial_inner_c: number
+  heater_model: string
+  heater_source: string | null
+  lookahead_h: number
+  slice_hours: number
+  inner_equilibrium_c?: { peak: number | null; cold_end: number | null }
+  surface_c?: Record<string, number | null>
+  envelope: { lo_c: number; hi_c: number; lo_component: string; hi_component: string }
+  envelope_verdict?: { peak: string | null; cold_end: string | null }
+  /** UNCALIBRATED. Shown beside every hour above. */
+  thermal_lag_validity: string
+  initial_outside_envelope: boolean
+  /** Two independent countdowns: thermal, and the safe-haven window. */
+  tolerable_entrenched?: Record<string, Record<string, unknown>>
+  [key: string]: unknown
 }
 
 export interface CellTelemetryResponse {
@@ -89,6 +198,21 @@ export interface CellTelemetryResponse {
   span_km: number
   cost_breakdown: CostBreakdown
   layer_validity: Record<string, Validity>
+  /** C4. Metres, from the covering 50 m LDRM pixel. Null when unloaded. */
+  roughness_m?: number | null
+  /** C4. The criterion in [0, 1] -- a regional percentile rank, not a rover tolerance. */
+  f_roughness?: number | null
+  /** C4. Inside NASA's PGDA PSR mask. Analysis data, not a no-go area. */
+  in_psr?: boolean | null
+  /** A1. Null without a start epoch; `safe_haven_model.reason` says why. */
+  safe_haven?: CellSafeHaven | null
+  safe_haven_model?: ModelStatus | null
+  /** B1. Null unless `survival=true`; needs an epoch and a goal. */
+  survival?: CellSurvival | null
+  survival_model?: ModelStatus | null
+  /** C6. Null unless `thermal_dwell=true`. */
+  thermal_dwell?: CellThermalDwell | null
+  thermal_dwell_model?: ModelStatus | null
 }
 
 // ── POST /api/plan -> corridor, route_statistics ───────────────────────────

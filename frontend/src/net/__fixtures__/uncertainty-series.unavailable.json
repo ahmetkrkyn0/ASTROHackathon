@@ -1,0 +1,7 @@
+{
+  "model": "unavailable",
+  "reason": "no dem_clone_horizons.npy beside the processed grids; run scripts/build_dem_clone_cache.py (with horizon_map.npy present) to build one horizon cube per DEM clone",
+  "slices": 4,
+  "slice_hours": 24.0,
+  "start_utc": "2027-05-30T00:00:00"
+}

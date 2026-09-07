@@ -136,7 +136,28 @@ export interface PlanWeights {
   w_energy: number
   w_shadow: number
   w_thermal: number
+  /**
+   * The fifth criterion (C4), optional because it is only real where the
+   * LOLA roughness layer is loaded.
+   *
+   * Optional rather than defaulted on purpose: `planRoute` serialises this
+   * object as-is, so an always-present key would put `w_roughness` into
+   * every plan request on every deployment -- including ones with no
+   * roughness grid, where the weight steers nothing and the backend says
+   * so. Undefined means the operator has not chosen one and the backend's
+   * own per-rover default stands.
+   */
+  w_roughness?: number
 }
+
+/**
+ * The four weights every plan request has always carried.
+ *
+ * Named separately so a table over "the weights" keeps meaning the four
+ * that are always present: `keyof PlanWeights` now admits an optional key,
+ * and indexing with it yields `number | undefined` at every readout.
+ */
+export type CoreWeightKey = 'w_slope' | 'w_energy' | 'w_shadow' | 'w_thermal'
 
 // ── 3-D scene contract (docs/frontend/3b-veri-sozlesmesi.md) ──────────────────
 
@@ -434,11 +455,44 @@ export async function fetchCellTelemetry(
   row: number,
   col: number,
   signal?: AbortSignal,
+  /**
+   * Optional, and omitted from the query when absent.
+   *
+   * `rover_id` picks whose slope limit and weights explain the cell -- the
+   * loaded grid's rover otherwise. `start_utc` is what turns the safe
+   * haven verdict on: a haven is defined against the Earth's and the Sun's
+   * motion, so without an epoch the backend answers `safe_haven: null` and
+   * explains itself in `safe_haven_model.reason` rather than guessing one.
+   *
+   * Both are omitted rather than defaulted so an existing caller's request
+   * is unchanged.
+   */
+  options: {
+    roverId?: string
+    startUtc?: string | null
+    /** B1. Also needs an epoch and, for the leg safe set, a goal. */
+    survival?: boolean
+    goal?: [number, number] | null
+    /** C6. Needs an epoch; without one the shadow series is static. */
+    thermalDwell?: boolean
+  } = {},
 ): Promise<CellTelemetryResponse> {
   const query = new URLSearchParams({
     row: String(row),
     col: String(col),
   })
+  if (options.roverId) query.set('rover_id', options.roverId)
+  if (options.startUtc) query.set('start_utc', options.startUtc)
+  // Each flag is set only when true, so a caller that asks for neither
+  // sends exactly the query it sent before these existed.
+  if (options.survival) {
+    query.set('survival', 'true')
+    if (options.goal) {
+      query.set('goal_row', String(options.goal[0]))
+      query.set('goal_col', String(options.goal[1]))
+    }
+  }
+  if (options.thermalDwell) query.set('thermal_dwell', 'true')
   const r = await fetch(`${BASE}/cell-telemetry?${query.toString()}`, { signal })
   if (!r.ok) {
     const err = await r.json().catch(() => ({ detail: r.statusText }))

@@ -1,0 +1,3 @@
+{
+  "detail": "no thermal envelope cache beside the processed grids; run scripts/build_thermal_envelope_cache.py (needs heat1d GitHub main with slope support, about a minute) to enable /api/thermal-envelope"
+}
