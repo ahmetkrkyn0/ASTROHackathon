@@ -249,6 +249,32 @@ export const PLAN_REQUEST_CONTRIBUTORS: readonly PlanRequestContributor[] = [
 ]
 
 /**
+ * The contributors the 2-D request builder can actually honour.
+ *
+ * Derived by asking each one, not by a second hand-maintained list: a
+ * contributor that returns null when switched on with no context is one whose
+ * field `POST /api/plan` would accept and ignore, and a contributor appended
+ * later is classified without anyone remembering to.
+ *
+ * This is what the constraints panel renders. Showing the 4-D-only switches
+ * there would put controls in front of an operator that change nothing when
+ * the button beside them is pressed -- the exact failure the measurement at
+ * the top of this file was made to prevent. They belong beside the "Plan
+ * through time" button, which issues the request that honours them.
+ */
+export const STORE_CONTRIBUTORS: readonly PlanRequestContributor[] =
+  PLAN_REQUEST_CONTRIBUTORS.filter((contributor) => {
+    const probe: ConstraintState = {
+      enabled: true,
+      value:
+        contributor.control.kind === 'number' || contributor.control.kind === 'choice'
+          ? contributor.control.initial
+          : true,
+    }
+    return contributor.fields(probe) !== null
+  })
+
+/**
  * The state a contributor sees when the request is described by a context
  * rather than by the store -- the 4-D builder's path.
  *

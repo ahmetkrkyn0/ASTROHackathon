@@ -1,6 +1,6 @@
 import { Icon } from '../../components/Fleet/SpecIcons'
 import {
-  PLAN_REQUEST_CONTRIBUTORS,
+  STORE_CONTRIBUTORS,
   setConstraint,
   useConstraint,
   usePlanConstraints,
@@ -16,6 +16,11 @@ import './mission-constraints.css'
  * integration plan warns against. The panel has no per-constraint code either
  * -- it renders whatever the contributor registry describes -- so the next one
  * is an append to that list and nothing here changes.
+ *
+ * STORE_CONTRIBUTORS, not the whole list. The environmental constraints are
+ * accepted by POST /api/plan and then silently ignored, so their switches live
+ * beside the 4-D "Plan through time" button that honours them. A switch here
+ * that changed nothing would be worse than no switch.
  *
  * The footer states what the panel is for: with everything off, the request is
  * byte-for-byte the one this product has always sent. That is worth saying on
@@ -93,7 +98,7 @@ export function MissionConstraintsPanel() {
   return (
     <div className="lp-mc">
       <ul className="lp-mc-list">
-        {PLAN_REQUEST_CONTRIBUTORS.map((contributor) => (
+        {STORE_CONTRIBUTORS.map((contributor) => (
           <ConstraintRow key={contributor.id} contributor={contributor} />
         ))}
       </ul>
