@@ -1024,15 +1024,37 @@
 }
 
 /* ── Evidence: formal safety + cost model ───────────────────────────────────
-   The prose the rail panels deliberately do not carry. Built ON the report's
-   own card and table rather than beside them -- only the FRETISH column is
-   different, because it is a sentence and the rest of that table is figures. */
+   Built ON the report's own card and table rather than beside them. A report
+   is not an excuse for a wall of text: every claim is a framed, labelled block
+   so a reader scanning for "what is this number allowed to mean" finds it by
+   shape rather than by reading four paragraphs to see which one it is in. */
 
-.lp-ev { display: flex; flex-direction: column; gap: 14px; }
+.lp-ev { display: flex; flex-direction: column; gap: 16px; }
 
-/* Inherits .lp-report-table. Two overrides only. */
+.lp-ev-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.lp-ev-meta {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
+}
+
+/* Inherits .lp-report-table. Three overrides: the sentence column wraps, the
+   figures stay on one line, and the meter column is a fixed track. */
 .lp-ev-table td { white-space: normal; vertical-align: top; }
-.lp-ev-table .lp-ev-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.lp-ev-table .lp-ev-num {
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lp-ev-table .lp-ev-meter-col { width: 108px; padding-top: 10px; }
 
 .lp-ev-id {
   display: block;
@@ -1040,8 +1062,8 @@
   color: var(--text-dim-2);
 }
 
-/* The requirement as written, at a readable measure. This sentence is what
-   was actually checked, and the rail has no room for it. */
+/* The requirement as written, at a readable measure. This sentence is what was
+   actually checked, and the rail has no room for it. */
 .lp-ev-fretish {
   display: block;
   max-width: 62ch;
@@ -1063,23 +1085,23 @@
 .lp-ev-table tr.is-violated .lp-ev-num { color: var(--coral-text); }
 .lp-ev-table tr.is-boundary .lp-ev-num { color: var(--cyan-text); }
 .lp-ev-table tr.is-not-applicable .lp-ev-fretish { color: var(--text-dim); }
+.lp-ev-table tr.is-not-applicable,
+.lp-ev-table tr.is-pending { opacity: 0.62; }
+
+/* ── One model's evidence ────────────────────────────────────────────────── */
 
 .lp-ev-block {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding-bottom: 13px;
+  gap: 8px;
+  padding-bottom: 15px;
   border-bottom: 1px solid var(--line-inner);
 }
 
 .lp-ev-block:last-child { border-bottom: none; padding-bottom: 0; }
 
-.lp-ev-block-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
+.lp-ev-block-head { display: flex; align-items: center; gap: 8px; }
+.lp-ev-block-icon { font-size: 15px; color: var(--text-dim); }
 
 .lp-ev-block-head h5 {
   margin: 0;
@@ -1089,16 +1111,52 @@
   color: var(--text);
 }
 
-.lp-ev-validity {
+.lp-ev-validity { display: flex; gap: 5px; margin-left: auto; }
+
+/* The border carries the claim: solid where the number was measured, dashed
+   where it was modelled, dimmest where the model has no calibration behind it.
+   Same three tones the rail uses, so a reader learns them once. */
+.lp-ev-chip {
+  padding: 1px 6px;
+  border-radius: var(--radius);
   font-family: var(--font-data);
+  font-style: normal;
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
-  color: var(--text-dim-2);
   white-space: nowrap;
 }
 
-.lp-ev-claim,
-.lp-ev-scope {
+.lp-ev-chip.is-measured { border: 1px solid var(--line-button); color: var(--text-2); }
+.lp-ev-chip.is-model { border: 1px dashed var(--line-button); color: var(--text-dim-2); }
+.lp-ev-chip.is-uncalibrated { border: 1px dashed var(--line-inner); color: var(--text-dimmest); }
+
+/* ── A framed, labelled note ─────────────────────────────────────────────── */
+
+.lp-ev-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-inner);
+  border-left-width: 2px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.lp-ev-note-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.lp-ev-note-label svg { font-size: 13px; }
+
+.lp-ev-note-body {
   margin: 0;
   max-width: 78ch;
   font-size: var(--fs-small);
@@ -1106,28 +1164,13 @@
   color: var(--text-3);
 }
 
-.lp-ev-scope {
-  padding: 8px 10px;
-  border-left: 2px solid var(--line-card);
-  border-radius: var(--radius);
-  background: var(--bg-inset);
-}
-
-.lp-ev-claim-label {
-  display: block;
-  margin-bottom: 3px;
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
-  color: var(--text-dim-2);
-}
-
-.lp-ev-meta {
-  margin: 0;
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  color: var(--text-dimmest);
-}
+/* The claim boundary is the one an operator must not miss, so it is the one
+   with a colour. Scope and absence are quieter -- they qualify, they do not
+   constrain what may be said. */
+.lp-ev-note.is-claim { border-left-color: var(--lavender); }
+.lp-ev-note.is-claim .lp-ev-note-label svg { color: var(--lavender); }
+.lp-ev-note.is-scope { border-left-color: var(--line-button); }
+.lp-ev-note.is-absent { border-style: dashed; border-left-color: var(--line-button); }
 
 .lp-ev-refs {
   margin: 0;
