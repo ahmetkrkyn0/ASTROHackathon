@@ -25,6 +25,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { createSky } from './sky'
 import { createLunarHorizon } from './lunarHorizon'
+import { ribbonHalfWidthM, ribbonHeight } from './routeRibbon'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
@@ -255,6 +256,78 @@ function createEarth(): { group: THREE.Group; dispose: () => void } {
     texture.dispose()
     sprite.material.dispose()
   } }
+}
+
+/**
+ * The planned route's ribbon: a HUD overlay, not a painted stripe.
+ *
+ * Drawn as a shader rather than a flat translucent quad because the three
+ * things that make a route read as an instrument -- bright containment edges,
+ * a body you can still see the ground through, and motion that shows which
+ * way the plan runs -- all need the fragment's own position across and along
+ * the band, and none of them survive being baked into a single opacity.
+ *
+ * Additive, so it lights the surface instead of greying it: the regolith
+ * underneath stays visible through the ribbon at every angle, which is the
+ * point of an overlay a driver has to see terrain through.
+ */
+function createRouteRibbonMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uCore: { value: new THREE.Color(0x2bf5a0) },
+      uEdge: { value: new THREE.Color(0xa8fff0) },
+    },
+    vertexShader: `
+      attribute float aAcross;
+      attribute float aAlong;
+      varying float vAcross;
+      varying float vAlong;
+      void main() {
+        vAcross = aAcross;
+        vAlong = aAlong;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform vec3 uCore;
+      uniform vec3 uEdge;
+      varying float vAcross;
+      varying float vAlong;
+      void main() {
+        float across = abs(vAcross);
+
+        // Containment rails. Sharp enough to read as a drawn edge at ground
+        // level, and the widest-lived part of the signal from orbit, where
+        // the band is only a few pixels across.
+        float edge = smoothstep(0.55, 1.0, across);
+        edge = pow(edge, 1.6);
+
+        // The body stays faint: this is a window onto the terrain, not a
+        // coat of paint over it.
+        float body = 0.16 * (1.0 - across * 0.55);
+
+        // Energy running toward the goal. Metres, so the pulse travels at a
+        // fixed ground speed whatever the route's length; 9 m apart at 6 m/s
+        // reads as purposeful rather than frantic.
+        float flow = fract(vAlong / 9.0 - uTime * 0.66);
+        float pulse = smoothstep(0.72, 1.0, flow) * (1.0 - across * 0.7);
+
+        // A slow breath over the whole ribbon, so a stationary route still
+        // looks live rather than printed.
+        float breathe = 0.9 + 0.1 * sin(uTime * 1.7);
+
+        vec3 colour = mix(uCore, uEdge, edge * 0.8 + pulse * 0.5);
+        float alpha = (body + edge * 0.62 + pulse * 0.5) * breathe;
+        gl_FragColor = vec4(colour * alpha, alpha);
+      }
+    `,
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  })
 }
 
 function createSunFlareSprite(): THREE.Sprite {
@@ -1098,6 +1171,9 @@ export default function TerrainCanvas3D({
     regolithTexture: THREE.CanvasTexture
     photoAvailable: boolean
     routeGroup: THREE.Group
+    /** Live while a route is drawn; the render loop drives its uTime so the
+     *  ribbon's flow runs off the frame clock rather than a timer. */
+    routeRibbonMaterial: THREE.ShaderMaterial | null
     rockGroup: THREE.Group
     /** One InstancedMesh per gravel variant; see buildPebbleVariants. */
     pebbleMeshes: THREE.InstancedMesh[]
@@ -1677,6 +1753,7 @@ export default function TerrainCanvas3D({
         regolithTexture,
         photoAvailable,
         routeGroup,
+        routeRibbonMaterial: null,
         rockGroup,
         pebbleMeshes,
         rockMarkerGroup,
@@ -1874,6 +1951,11 @@ export default function TerrainCanvas3D({
       // Celestial directions stay fixed as the camera moves across the DEM.
       distantSky.position.copy(camera.position)
       const state = sceneRef.current
+      // The route ribbon's flow and breath run off the frame clock, so they
+      // stay smooth whatever the playback rate is doing.
+      if (state?.routeRibbonMaterial) {
+        state.routeRibbonMaterial.uniforms.uTime.value = performance.now() / 1000
+      }
       // Orbit mode draws the rover oversized so a 1.5 m vehicle is findable
       // across a 2.5 km overview. Held at a fixed 10x that also meant the
       // rover was a 15 m monster the moment anyone zoomed in to look at it
@@ -2710,12 +2792,17 @@ export default function TerrainCanvas3D({
     const { routeGroup, manifest, mesh } = state
 
     for (const child of routeGroup.children) {
+      // THREE.LineSegments extends Line, so the waypoint ticks are covered.
       if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
         child.geometry.dispose()
         ;(child.material as THREE.Material).dispose()
       }
     }
     routeGroup.clear()
+    // The material just disposed above is the one the render loop animates,
+    // so drop the reference with it rather than leaving the loop writing a
+    // uniform on a dead program.
+    state.routeRibbonMaterial = null
     if (!waypoints || waypoints.length < 2) return
 
     const { rows, cols, resolution_m: res } = manifest.grid
@@ -2734,22 +2821,39 @@ export default function TerrainCanvas3D({
       // Row 0 is the north (-Z) edge after the -90 deg tilt.
       const x = w.col * stepX - halfX
       const z = w.row * stepZ - halfZ
-      const y = ((w.altitude_m ?? minM) - minM) * vx + 4
+      // See routeRibbon.ts: the lift off the surface follows the camera,
+      // because a single offset cannot serve both a 2.5 km overview and an
+      // eye 1.6 m off the ground.
+      const y = ribbonHeight({
+        altitudeM: w.altitude_m, minM, verticalScale: vx, cameraMode,
+      })
       return new THREE.Vector3(x, y, z)
     })
-    // A flat, glowing ribbon rather than a thin wire: reference perception
-    // HUDs draw the planned path as a road-width band on the ground, not a
-    // 1px line lost against a metre-scale rock field. Each segment gets its
-    // own perpendicular (cross of travel direction with world-up), so a
-    // sharp turn seams rather than mitres -- fine at this width.
-    const RIBBON_HALF_WIDTH_M = 0.9
+    // A flat ribbon rather than a thin wire: reference perception HUDs draw
+    // the planned path as a road-width band on the ground, not a 1px line
+    // lost against a metre-scale rock field. Each segment gets its own
+    // perpendicular (cross of travel direction with world-up), so a sharp
+    // turn seams rather than mitres -- fine at this width.
+    //
+    // The band is built with two extra attributes the shader needs:
+    //   aAcross  -1..1 across the width, so it can find its own edges
+    //   aAlong   metres travelled, so the flow runs at a real ground speed
+    //            instead of a rate that changes with route length.
+    // See routeRibbon.ts: narrower than the chassis on the surface so the
+    // rover is never swallowed by its own route, wider in orbit so the route
+    // does not vanish at 2.5 km.
+    const RIBBON_HALF_WIDTH_M = ribbonHalfWidthM(cameraMode)
     const ribbonVerts: number[] = []
+    const ribbonAcross: number[] = []
+    const ribbonAlong: number[] = []
     const up = new THREE.Vector3(0, 1, 0)
+    let travelled = 0
     for (let i = 0; i < points.length - 1; i++) {
       const a = points[i]
       const b = points[i + 1]
       const dir = new THREE.Vector3().subVectors(b, a)
       if (dir.lengthSq() < 1e-6) continue
+      const segment = dir.length()
       dir.normalize()
       const perp = new THREE.Vector3().crossVectors(dir, up).normalize().multiplyScalar(RIBBON_HALF_WIDTH_M)
       const aL = new THREE.Vector3().addVectors(a, perp)
@@ -2760,41 +2864,104 @@ export default function TerrainCanvas3D({
         aL.x, aL.y, aL.z, aR.x, aR.y, aR.z, bR.x, bR.y, bR.z,
         aL.x, aL.y, aL.z, bR.x, bR.y, bR.z, bL.x, bL.y, bL.z,
       )
+      ribbonAcross.push(1, -1, -1, 1, -1, 1)
+      const s0 = travelled
+      const s1 = travelled + segment
+      ribbonAlong.push(s0, s0, s1, s0, s1, s1)
+      travelled = s1
     }
     const ribbonGeometry = new THREE.BufferGeometry()
     ribbonGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ribbonVerts), 3))
-    ribbonGeometry.computeVertexNormals()
-    routeGroup.add(
-      new THREE.Mesh(
-        ribbonGeometry,
-        new THREE.MeshBasicMaterial({
-          color: 0x39ff6a,
-          transparent: true,
-          opacity: 0.5,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
-      ),
-    )
+    ribbonGeometry.setAttribute('aAcross', new THREE.BufferAttribute(new Float32Array(ribbonAcross), 1))
+    ribbonGeometry.setAttribute('aAlong', new THREE.BufferAttribute(new Float32Array(ribbonAlong), 1))
+    const ribbonMaterial = createRouteRibbonMaterial()
+    const ribbon = new THREE.Mesh(ribbonGeometry, ribbonMaterial)
+    // Over the terrain and the rocks, under the LiDAR returns: the route is
+    // a planning overlay, but a live sensor reading still wins over it.
+    ribbon.renderOrder = 2
+    routeGroup.add(ribbon)
+    state.routeRibbonMaterial = ribbonMaterial
+
+    // Waypoint ticks: short cross-bars at each planned node, the way a
+    // nav display marks the fixes along a leg rather than drawing one
+    // undifferentiated band. Dropped in orbit, where 81 of them across
+    // 2.5 km would read as noise on the ribbon.
+    if (cameraMode === 'fps') {
+      const tickVerts: number[] = []
+      for (let i = 1; i < points.length - 1; i++) {
+        const prev = points[i - 1]
+        const next = points[i + 1]
+        const dir = new THREE.Vector3().subVectors(next, prev)
+        if (dir.lengthSq() < 1e-6) continue
+        dir.normalize()
+        const perp = new THREE.Vector3().crossVectors(dir, up).normalize()
+          .multiplyScalar(RIBBON_HALF_WIDTH_M * 1.25)
+        const p = points[i]
+        tickVerts.push(
+          p.x + perp.x, p.y + 0.02, p.z + perp.z,
+          p.x - perp.x, p.y + 0.02, p.z - perp.z,
+        )
+      }
+      if (tickVerts.length) {
+        const tickGeometry = new THREE.BufferGeometry()
+        tickGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tickVerts), 3))
+        const ticks = new THREE.LineSegments(
+          tickGeometry,
+          new THREE.LineBasicMaterial({
+            color: 0x8ffcd0, transparent: true, opacity: 0.5,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+          }),
+        )
+        ticks.renderOrder = 3
+        routeGroup.add(ticks)
+      }
+    }
+
     const centerlinePoints = points.map((p) => new THREE.Vector3(p.x, p.y + 0.12, p.z))
     const centerline = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(centerlinePoints),
-      new THREE.LineDashedMaterial({ color: 0xd6ffde, dashSize: 3, gapSize: 2 }),
+      new THREE.LineDashedMaterial({
+        color: 0xd6ffde, dashSize: 3, gapSize: 2,
+        transparent: true, opacity: 0.75,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
     )
     centerline.computeLineDistances()
+    centerline.renderOrder = 3
     routeGroup.add(centerline)
-    // res * 2.5 = 12.5 m radius, a 25 m ball -- fine as a landmark against a
-    // 2.5 km overview, but the scene now also renders 0.3-2 m rocks and a
-    // LiDAR cloud at metre scale, and up close this dwarfed all of it. res
-    // * 0.6 = 3 m radius still reads clearly from orbit while sitting only
-    // a little larger than the rover itself at ground level.
-    const marker = (p: THREE.Vector3, color: number) =>
-      new THREE.Mesh(
-        new THREE.SphereGeometry(res * 0.6, 12, 12),
-        new THREE.MeshBasicMaterial({ color }),
-      ).translateX(p.x).translateY(p.y).translateZ(p.z)
-    routeGroup.add(marker(points[0], 0x2ee59d))
-    routeGroup.add(marker(points[points.length - 1], 0xff5252))
+    // Endpoint markers, sized to the view they are read in. A solid ball is
+    // wrong at ground level -- it is an opaque object sitting on the route it
+    // is meant to annotate -- so the surface gets a flat ring laid on the
+    // ground, the pad a lander marks a site with, and orbit keeps a filled
+    // sphere because a 1 m ring is invisible from 2.5 km up.
+    const marker = (p: THREE.Vector3, colour: number) => {
+      if (cameraMode === 'orbit') {
+        return new THREE.Mesh(
+          new THREE.SphereGeometry(res * 0.6, 12, 12),
+          new THREE.MeshBasicMaterial({
+            color: colour, transparent: true, opacity: 0.85,
+          }),
+        ).translateX(p.x).translateY(p.y).translateZ(p.z)
+      }
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(1.5, 2.1, 40),
+        new THREE.MeshBasicMaterial({
+          color: colour, transparent: true, opacity: 0.6,
+          side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      )
+      // RingGeometry is built in the XY plane; lay it flat on the ground.
+      ring.rotation.x = -Math.PI / 2
+      ring.position.set(p.x, p.y + 0.03, p.z)
+      return ring
+    }
+    const start = marker(points[0], 0x2ee59d)
+    const goal = marker(points[points.length - 1], 0xff5252)
+    start.renderOrder = 3
+    goal.renderOrder = 3
+    routeGroup.add(start)
+    routeGroup.add(goal)
   }, [waypoints, exaggeration, cameraMode, status])
 
   // ── 3D Camera Mode (FPS Surface View vs Orbit Overview) ─────────────────────
