@@ -5853,6 +5853,12 @@ select {
    backdrop clip is running underneath from the first frame, and a translucent
    boot screen would show a moon drifting behind a progress bar, which reads as
    the app having already started. */
+/* The photographed sky, over the void and under the drawn starfield below.
+   `background-color` is kept separate from `background-image` on purpose: the
+   colour paints on the first frame, and the photograph arrives whenever it
+   arrives, so a boot screen still comes up instantly on a cold cache. The
+   scrim above it is what keeps the wordmark and the progress copy legible
+   across a frame whose brightness we do not control. */
 .splash-screen {
   position: fixed;
   inset: 0;
@@ -5860,16 +5866,23 @@ select {
   display: grid;
   place-items: center;
   padding: 32px;
-  background: var(--void);
+  background-color: var(--void);
+  background-image:
+    linear-gradient(rgba(5, 7, 13, 0.34), rgba(5, 7, 13, 0.78)),
+    url('/starmap.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   transition: opacity 0.52s ease, visibility 0.52s ease;
 }
 
-/* ── The starfield ──
-   Drawn rather than photographed: three layers of tiny radial gradients tile
-   at different sizes, so the field never repeats visibly and stays a crisp
-   point of light at any resolution instead of a JPEG's grey smudge. It costs
-   no request and no decode on a boot screen whose whole job is to be up
-   before anything else is.
+/* ── The drawn starfield, over the photograph ──
+   Three layers of tiny radial gradients tile at different sizes, so the field
+   never repeats visibly and stays a crisp point of light at any resolution
+   where a JPEG resolves to a grey smudge. It costs no request and no decode,
+   which is why it is still here now that a photographed sky sits underneath:
+   on a cold cache this layer is the whole picture, and a boot screen whose
+   job is to be up before anything else cannot wait on an image to paint.
 
    A wash of lavender at the top left keeps it from being a flat black field
    with specks on it -- the same colour the console uses for its one accent. */
