@@ -42,10 +42,11 @@ import {
   seededRandom,
   simulateLidarScan,
 } from './lidarSimulation'
+import { buildLocalOccupancyGrid, observeObstaclesFromLidar } from './localPerception'
+import { planLocalDetour, type LocalPlanDecision } from './localPlanner'
 import type {
   LidarScanResult,
   LidarScanSummary,
-  RockDescriptor,
   RockShape,
   TerrainField,
 } from './lidarSimulation'
@@ -932,6 +933,21 @@ function disposeObjectTree(root: THREE.Object3D): void {
   materials.forEach((material) => material.dispose())
 }
 
+export interface LocalNavigationRequest {
+  current: { row: number; col: number }
+  decision: LocalPlanDecision
+  /** Bounded local path; present for LOCAL_DETOUR and ends at global rejoin. */
+  local_waypoints: Array<{ row: number; col: number }>
+  observed_obstacles: Array<{
+    row: number
+    col: number
+    radius_m: number
+    confidence: number
+    observed_at_s: number
+    source: 'lidar'
+  }>
+}
+
 interface Props {
   viewMode: MapViewMode
   waypoints: Waypoint[] | null
@@ -957,16 +973,6 @@ interface Props {
    * back over the moment the rover settles.
    */
   isPlaying?: boolean
-  /**
-   * Rocks App.tsx generated (via the same generateRockField this file's
-   * fallback path also calls) BEFORE the route was planned, and already
-   * sent to the backend as obstacle_cells. Rendering these exact instances
-   * instead of independently re-rolling the field keeps what got avoided
-   * and what gets drawn from ever drifting apart. Null/absent (no route
-   * yet, or the grid metadata App.tsx needs wasn't ready) falls back to
-   * this file's own route-bounding-box field.
-   */
-  obstacleRocks?: RockDescriptor[] | null
   exaggeration: number | null
   sliceIndex: number
   /** Drape the real NAC photograph instead of shading a flat albedo. */
@@ -974,6 +980,8 @@ interface Props {
   /** Mirrors MapCanvas's own start/goal picker so both views share one flow. */
   clickMode?: ClickMode
   onCellClick?: (row: number, col: number) => void
+  /** Invoked once for a bounded local detour or a safe-stop replan. */
+  onLocalNavigation?: (request: LocalNavigationRequest) => void
   onReady?: (info: {
     slices: number
     timeVarying: boolean
@@ -991,12 +999,12 @@ export default function TerrainCanvas3D({
   activeWaypoint,
   roverFraction = 0,
   isPlaying = false,
-  obstacleRocks = null,
   exaggeration,
   sliceIndex,
   photo,
   clickMode,
   onCellClick,
+  onLocalNavigation,
   onReady,
   onError,
 }: Props) {
@@ -1008,6 +1016,11 @@ export default function TerrainCanvas3D({
   const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('fps')
   const [lidarEnabled, setLidarEnabled] = useState(true)
   const [lidarTelemetry, setLidarTelemetry] = useState<LidarScanSummary | null>(null)
+  const [localNavigation, setLocalNavigation] = useState<{
+    observedObstacles: number
+    occupiedCells: number
+    decision: LocalPlanDecision
+  } | null>(null)
   // Real NASA Astromaterials 3D lunar sample scans (decimated offline --
   // see frontend/simplify_rock.mjs -- from ~100k verts down to a few
   // hundred), used as the rock field's shape templates once they arrive.
@@ -1050,6 +1063,9 @@ export default function TerrainCanvas3D({
   // driving. Tracking the last actual run lets it fire on a fixed cadence
   // instead, so LiDAR keeps refreshing throughout the drive.
   const lastLidarRunRef = useRef(0)
+  // A stopped rover keeps scanning. Deduplicate the same obstacle snapshot so
+  // a 5 Hz LiDAR cannot issue a replan storm while the request is in flight.
+  const lastLocalStopKeyRef = useRef<string | null>(null)
   // The rock field is seeded once per ROUTE (keyed on the waypoints array
   // reference itself, which App.tsx replaces with a new array only when a
   // route is actually (re)planned) rather than on the rover's live
@@ -2457,16 +2473,10 @@ export default function TerrainCanvas3D({
         state.rockMarkerGroup.clear()
 
         const rockTemplates = rockTemplatesRef.current
-        // When App.tsx already generated this route's rock field (and sent
-        // it to the backend as obstacle_cells), render those exact
-        // instances rather than rolling a second, independent field -- the
-        // only way the rover visibly avoiding a rock and the rock actually
-        // being there stay guaranteed consistent. Falls back to generating
-        // locally (idle view, or obstacleRocks not ready yet) otherwise.
-        const rockDescriptors =
-          waypoints && waypoints.length > 0 && obstacleRocks
-            ? obstacleRocks
-            : generateRockField(fieldCenterX, fieldCenterZ, fieldRadiusM)
+        // Rocks are scene truth for the LiDAR simulation only. They are
+        // deliberately generated after the global route exists and never
+        // cross the API boundary into the global planner.
+        const rockDescriptors = generateRockField(fieldCenterX, fieldCenterZ, fieldRadiusM)
         const rockUp = new THREE.Vector3(0, 1, 0)
         for (const descriptor of rockDescriptors) {
           const groundY = sampleTerrainHeight(terrain, descriptor.x, descriptor.z)
@@ -2634,6 +2644,66 @@ export default function TerrainCanvas3D({
       state.terrainNet.geometry = new THREE.BufferGeometry()
       state.terrainNet.geometry.setAttribute('position', new THREE.BufferAttribute(netPositions, 3))
 
+      // This is the only route from scene sensing into local navigation:
+      // first returns -> anonymous obstacle hypotheses -> occupancy -> bounded
+      // local decision. No mesh ID or pre-generated rock list reaches the
+      // planner, and the global API is never called from this path.
+      const observations = observeObstaclesFromLidar(scan, performance.now() / 1000)
+      const occupancy = buildLocalOccupancyGrid({ x_m: roverX, z_m: roverZ }, observations)
+      const activeIndex = source && waypoints
+        ? waypoints.findIndex((waypoint) => waypoint === source || (
+          waypoint.row === source.row && waypoint.col === source.col
+        ))
+        : -1
+      const nextWaypoint = activeIndex >= 0 ? waypoints?.[activeIndex + 1] : undefined
+      const localPlan = nextWaypoint
+        ? planLocalDetour({
+          pose: { x_m: roverX, z_m: roverZ },
+          lookahead: {
+            x_m: nextWaypoint.col * stepX - width / 2,
+            z_m: nextWaypoint.row * stepZ - depth / 2,
+          },
+          obstacles: observations,
+          rover_radius_m: 0.5,
+          safety_margin_m: 0.35,
+          max_deviation_m: 5,
+        })
+        : null
+      const decision = localPlan?.decision ?? 'FOLLOW'
+      setLocalNavigation({
+        observedObstacles: observations.length,
+        occupiedCells: occupancy.cells.filter((cell) => cell === 'occupied').length,
+        decision,
+      })
+      if (decision !== 'FOLLOW' && onLocalNavigation) {
+        const confirmed = observations.filter((obstacle) => obstacle.confidence >= 0.65)
+        const obstacleCells = confirmed.map((obstacle) => ({
+          row: THREE.MathUtils.clamp(Math.round((obstacle.z_m + depth / 2) / stepZ), 0, rows - 1),
+          col: THREE.MathUtils.clamp(Math.round((obstacle.x_m + width / 2) / stepX), 0, cols - 1),
+          radius_m: obstacle.radius_m,
+          confidence: obstacle.confidence,
+          observed_at_s: obstacle.observed_at_s,
+          source: obstacle.source,
+        }))
+        const localWaypoints = (localPlan?.waypoints ?? []).map((point) => ({
+          row: THREE.MathUtils.clamp(Math.round((point.z_m + depth / 2) / stepZ), 0, rows - 1),
+          col: THREE.MathUtils.clamp(Math.round((point.x_m + width / 2) / stepX), 0, cols - 1),
+        }))
+        const currentRow = THREE.MathUtils.clamp(Math.round((roverZ + depth / 2) / stepZ), 0, rows - 1)
+        const currentCol = THREE.MathUtils.clamp(Math.round((roverX + width / 2) / stepX), 0, cols - 1)
+        const stopKey = JSON.stringify({ row: currentRow, col: currentCol, decision, obstacleCells, localWaypoints })
+        if (obstacleCells.length > 0 && stopKey !== lastLocalStopKeyRef.current) {
+          lastLocalStopKeyRef.current = stopKey
+          onLocalNavigation({
+            current: { row: currentRow, col: currentCol },
+            decision,
+            local_waypoints: localWaypoints,
+            observed_obstacles: obstacleCells,
+          })
+        }
+      } else {
+        lastLocalStopKeyRef.current = null
+      }
       setLidarTelemetry(scan.summary)
     }, delay)
 
@@ -2645,7 +2715,7 @@ export default function TerrainCanvas3D({
     // rockTemplatesReady forces exactly one extra run once the NASA rock
     // shapes arrive, so the field does not stay on icosahedra all session
     // just because nothing else happened to change afterwards.
-  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints, rockTemplatesReady, isPlaying, obstacleRocks])
+  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints, rockTemplatesReady, isPlaying, onLocalNavigation])
 
   useEffect(() => {
     const state = sceneRef.current
@@ -3057,6 +3127,7 @@ export default function TerrainCanvas3D({
                 <div><span>RANGE</span><strong>{LIDAR_CONFIG.maxRangeM} m</strong></div>
                 <div><span>RETURNS</span><strong>{lidarTelemetry.returns.toLocaleString()}</strong></div>
                 <div><span>ROCK HITS</span><strong>{lidarTelemetry.rockReturns}</strong></div>
+                <div><span>OCCUPIED</span><strong>{localNavigation?.occupiedCells ?? 0}</strong></div>
                 <div>
                   <span>NEAREST</span>
                   <strong className={
@@ -3082,6 +3153,11 @@ export default function TerrainCanvas3D({
                 }>
                   {lidarTelemetry.detectedRocks} rocks tracked
                 </b>
+                {localNavigation && (
+                  <b className={localNavigation.decision === 'FOLLOW' ? '' : 'is-danger'}>
+                    {localNavigation.observedObstacles} observed · {localNavigation.decision}
+                  </b>
+                )}
               </div>
             </>
           )}

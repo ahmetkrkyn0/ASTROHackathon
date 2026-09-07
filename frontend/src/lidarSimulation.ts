@@ -53,15 +53,6 @@ export interface RockDescriptor {
   /** Bedding tilt applied on top of the terrain normal, radians. */
   tiltX: number
   tiltZ: number
-  /**
-   * Grid cell this rock sits in, only populated when generateRockField is
-   * given grid metadata to convert into. App.tsx uses this to tell the
-   * backend planner which cells these (otherwise purely client-side,
-   * decorative) rocks occupy, so a route can actually be planned around
-   * them instead of just rendered on top of them.
-   */
-  row?: number
-  col?: number
 }
 
 export interface LidarScanSummary {
@@ -77,6 +68,8 @@ export interface LidarScanSummary {
 export interface LidarScanResult {
   positions: Float32Array
   colors: Float32Array
+  /** First-return points classified as non-terrain by the local sensor pass. */
+  obstacleReturns: Float32Array
   /** Nearest first-return for every azimuth; used by the animated sweep fan. */
   azimuthEndpoints: Array<THREE.Vector3 | null>
   summary: LidarScanSummary
@@ -438,12 +431,6 @@ export function generateRockField(
   originX: number,
   originZ: number,
   radiusM = LIDAR_CONFIG.maxRangeM + 8,
-  // Optional: when given, each descriptor also gets the (row, col) grid
-  // cell its world position falls in, using the exact inverse of the
-  // x = col*stepX - width/2 / z = row*stepZ - depth/2 mapping every other
-  // world<->grid conversion in this codebase already uses. Only App.tsx's
-  // pre-planning obstacle pass needs this; rendering call sites can omit it.
-  grid?: { rows: number; cols: number; resolutionM: number },
 ): RockDescriptor[] {
   const chunkM = ROCK_FIELD.chunkM
   // One chunk of overscan: rocks just outside the requested radius still
@@ -517,14 +504,6 @@ export function generateRockField(
   for (const rock of kept) {
     const distance = Math.hypot(rock.x - originX, rock.z - originZ)
     if (distance > radiusM || distance < ROCK_FIELD.safetyRadiusM) continue
-    if (grid) {
-      const gridWidth = grid.cols * grid.resolutionM
-      const gridDepth = grid.rows * grid.resolutionM
-      const stepX = gridWidth / (grid.cols - 1)
-      const stepZ = gridDepth / (grid.rows - 1)
-      rock.col = Math.round((rock.x + gridWidth / 2) / stepX)
-      rock.row = Math.round((rock.z + gridDepth / 2) / stepZ)
-    }
     rocks.push(rock)
   }
   return rocks
@@ -632,6 +611,7 @@ export function simulateLidarScan(
   scanSeed = 1,
 ): LidarScanResult {
   const positions: number[] = []
+  const obstacleReturns: number[] = []
   const azimuthEndpoints: Array<THREE.Vector3 | null> = []
   const raycaster = new THREE.Raycaster()
   raycaster.near = LIDAR_CONFIG.minRangeM
@@ -678,6 +658,7 @@ export function simulateLidarScan(
 
       if (rockDistance < groundDistance) {
         rockReturns++
+        obstacleReturns.push(point.x, point.y, point.z)
         const rockId = String(rockHit.object.userData.lidarRockId ?? rockHit.object.uuid)
         detectedRockIds.add(rockId)
         nearestObstacleM = nearestObstacleM === null
@@ -712,6 +693,7 @@ export function simulateLidarScan(
   return {
     positions: new Float32Array(positions),
     colors,
+    obstacleReturns: new Float32Array(obstacleReturns),
     azimuthEndpoints,
     summary: {
       beams,
@@ -779,6 +761,7 @@ export function buildLidarScanFromBackend(
 ): LidarScanResult {
   const verticalScale = terrain.verticalScale
   const positions: number[] = []
+  const obstacleReturns: number[] = []
   const random = seededRandom(scanSeed)
   const detectedRockIds = new Set<string>()
   let rockReturns = 0
@@ -865,6 +848,7 @@ export function buildLidarScanFromBackend(
       if (measuredDistance === null) continue
       const point = origin.clone().addScaledVector(direction, measuredDistance)
       rockReturns++
+      obstacleReturns.push(point.x, point.y, point.z)
       const rockId = String(rockHit.object.userData.lidarRockId ?? rockHit.object.uuid)
       detectedRockIds.add(rockId)
       nearestObstacleM = nearestObstacleM === null
@@ -895,6 +879,7 @@ export function buildLidarScanFromBackend(
   return {
     positions: new Float32Array(positions),
     colors,
+    obstacleReturns: new Float32Array(obstacleReturns),
     azimuthEndpoints,
     summary: {
       beams,

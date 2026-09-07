@@ -18,7 +18,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field, conlist, field_validator
+from pydantic import BaseModel, ConfigDict, Field, conlist, field_validator
 
 from .constants import (
     DEFAULT_ROVER_ID,
@@ -507,17 +507,15 @@ _RISK_ALPHA_FIELD = Field(
 
 
 class PlanRequest(BaseModel):
+    # A global plan must not silently accept browser-only scene state. In
+    # particular, metre-scale rocks are discovered locally by LiDAR, not a
+    # mission-wide map supplied before the rover has seen them.
+    model_config = ConfigDict(extra="forbid")
     start: Union[StartGoalPixel, StartGoalGeo]
     goal: Union[StartGoalPixel, StartGoalGeo]
     rover_id: str = DEFAULT_ROVER_ID
     weights: PlanWeights = Field(default_factory=PlanWeights)
     include_simulation: bool = True
-    # Cells the caller's own scene has already placed a rock (or other local
-    # obstacle) on -- generated client-side, so the planner has no other way
-    # to know about them. Optional and defaulted to empty rather than
-    # required: every existing caller that doesn't send it keeps planning
-    # exactly as before.
-    obstacle_cells: list[StartGoalPixel] = Field(default_factory=list)
     risk_alpha: Optional[float] = _RISK_ALPHA_FIELD
 
 
@@ -553,6 +551,13 @@ class ReplanRequest(BaseModel):
         description="Telemetry snapshot evaluated against the replan triggers.",
     )
     force: bool = False
+    observed_obstacles: list["ObservedObstaclePixel"] = Field(
+        default_factory=list,
+        description=(
+            "Local LiDAR observations already seen by the rover. These are "
+            "accepted only by replan, never by the initial global plan."
+        ),
+    )
     # With an epoch the backend computes comm_minutes_remaining itself, from
     # the rover's cell and the Earth's position, when the caller did not
     # supply one. (A4.)
@@ -595,6 +600,17 @@ class ReplanRequest(BaseModel):
     )
 
     _check_state = field_validator("state")(_reject_non_finite_telemetry)
+
+
+class ObservedObstaclePixel(BaseModel):
+    """One confidence-bearing local obstacle projected into the active grid."""
+
+    row: int
+    col: int
+    radius_m: float = Field(gt=0.0, le=20.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    observed_at_s: float = Field(ge=0.0)
+    source: Literal["lidar"]
 
 
 class Plan4DRequest(BaseModel):
@@ -1264,9 +1280,51 @@ def get_cell_telemetry(
     }
 
 
+def _with_observed_obstacles(
+    grids_for_plan: dict[str, Any],
+    observations: list[ObservedObstaclePixel],
+    rows: int,
+    cols: int,
+    resolution_m: float,
+    start: tuple[int, int],
+) -> tuple[dict[str, Any], int]:
+    """Overlay confirmed, already-seen LiDAR obstacles for a replan only."""
+    accepted = [obstacle for obstacle in observations if obstacle.confidence >= 0.65]
+    if not accepted:
+        return grids_for_plan, 0
+    traversable = np.array(grids_for_plan["traversable"], dtype=bool, copy=True)
+    applied = 0
+    for obstacle in accepted:
+        radius_cells = max(1, math.ceil(obstacle.radius_m / resolution_m))
+        changed = False
+        for dr in range(-radius_cells, radius_cells + 1):
+            for dc in range(-radius_cells, radius_cells + 1):
+                if math.hypot(dr * resolution_m, dc * resolution_m) > obstacle.radius_m:
+                    continue
+                row, col = obstacle.row + dr, obstacle.col + dc
+                # A rover can observe a rock against its own footprint. That
+                # must not turn its current position into an invalid start.
+                if not (0 <= row < rows and 0 <= col < cols) or (row, col) == start:
+                    continue
+                traversable[row, col] = False
+                changed = True
+        if changed:
+            applied += 1
+    return {**grids_for_plan, "traversable": traversable}, applied
+
+
 @app.post("/api/plan")
 def plan(req: PlanRequest, request: Request):
-    """Plan a single route with physics simulation."""
+    """Plan an initial global route, without local obstacle observations."""
+    return _plan(req, request)
+
+
+def _plan(
+    req: PlanRequest,
+    request: Request,
+    observed_obstacles: list[ObservedObstaclePixel] | None = None,
+):
+    """Shared implementation; observations are internal replan-only state."""
     grids = _active_grids(request)
     rover = get_rover(req.rover_id)
     weights_dict = req.weights.model_dump()
@@ -1310,24 +1368,17 @@ def plan(req: PlanRequest, request: Request):
             ),
         )
 
-    # Client-side decorative rocks (see TerrainCanvas3D's rock field) have no
-    # other way to reach the planner: they are generated in the browser, not
-    # part of the DEM this grid was built from. Blocking their cells in a
-    # COPY of the traversable mask -- never grids_for_plan["traversable"]
-    # itself, which can be the shared base_grids array when no rover/weight
-    # adaptation was needed -- makes astar() route around them exactly the
-    # way it already does for a slope or thermal barrier, no separate
-    # obstacle-avoidance code path required.
-    if req.obstacle_cells:
-        traversable_with_obstacles = np.array(grids_for_plan["traversable"], dtype=bool, copy=True)
-        for cell in req.obstacle_cells:
-            r, c = cell.row, cell.col
-            if not (0 <= r < rows and 0 <= c < cols):
-                continue
-            if (r, c) == tuple(start) or (r, c) == tuple(goal):
-                continue
-            traversable_with_obstacles[r, c] = False
-        grids_for_plan = {**grids_for_plan, "traversable": traversable_with_obstacles}
+    # Only POST /api/replan can supply this internal argument. The public
+    # global-plan schema rejects obstacle fields, so no unseen scene state can
+    # arrive here during initial planning.
+    grids_for_plan, _ = _with_observed_obstacles(
+        grids_for_plan,
+        observed_obstacles or [],
+        rows,
+        cols,
+        float(metadata["resolution_m"]),
+        start,
+    )
 
     astar_result = astar(
         grids_for_plan,
@@ -1735,6 +1786,11 @@ def replan(req: ReplanRequest, request: Request):
             # entrenchment_model unless state.entrenched_hours and utc.
             "entrenchment": entrenchment,
             "entrenchment_model": entrenchment_model,
+            "observed_obstacles": {
+                "received": len(req.observed_obstacles),
+                "accepted": 0,
+                "reason": "replan was not requested",
+            },
         }
 
     plan_request = PlanRequest(
@@ -1744,7 +1800,10 @@ def replan(req: ReplanRequest, request: Request):
         weights=req.weights,
         include_simulation=True,
     )
-    payload = plan(plan_request, request)
+    payload = _plan(plan_request, request, req.observed_obstacles)
+    accepted_observations = sum(
+        1 for obstacle in req.observed_obstacles if obstacle.confidence >= 0.65
+    )
     return {
         "replanned": True,
         "triggers": [
@@ -1756,6 +1815,12 @@ def replan(req: ReplanRequest, request: Request):
         # computed here rather than supplied. (A4.)
         "comm_window": window,
         "plan": payload,
+        "observed_obstacles": {
+            "received": len(req.observed_obstacles),
+            "accepted": accepted_observations,
+            "confidence_threshold": 0.65,
+            "source": "lidar",
+        },
         # The recovery policy's advice from the current block (B1): the
         # arg-min action, where it leads and P_safe; null unless requested.
         "recovery_suggestion": suggestion,
