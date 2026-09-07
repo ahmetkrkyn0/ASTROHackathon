@@ -1,4 +1,5 @@
 import { Icon } from '../../components/Fleet/SpecIcons'
+import { Divide, Meter, Readout, type Tone } from '../../components/Instrument'
 import { JobState, type AnalysisJob } from '../analysis-job'
 import type { Histogram, Rate, StressTestResponse } from '../../net/stressTest'
 import './stress-test.css'
@@ -25,26 +26,47 @@ const FAILURE_LABEL: Record<string, string> = {
   horizon_exceeded: 'Horizon exceeded',
 }
 
-function RateBar({ rate, label }: { rate: Rate; label: string }) {
+/**
+ * A rate with its interval on the same axis.
+ *
+ * The interval is drawn as the bar's own extent and the point estimate as a
+ * marker inside it, so how well the rate is pinned down is read at the same
+ * moment as the rate. 0.30 from a thousand runs and 0.30 from ten are the same
+ * number and completely different findings.
+ */
+function RateBar({ rate, label, headline }: { rate: Rate; label: string; headline?: boolean }) {
   const [lo, hi] = rate.ci95
+  const tone: Tone = rate.rate >= 0.95 ? 'ok' : rate.rate >= 0.5 ? 'warn' : 'bad'
+
+  if (headline) {
+    return (
+      <div className="lp-st-headline">
+        <Readout
+          label={label}
+          value={(rate.rate * 100).toFixed(1)}
+          unit="%"
+          tone={tone}
+          sub={`${rate.count} runs · 95% CI ${(lo * 100).toFixed(1)}–${(hi * 100).toFixed(1)}%`}
+        />
+        <Meter
+          fraction={hi - lo < 0.004 ? 0.004 : hi - lo}
+          tone={tone}
+          ticks={4}
+          marker={rate.rate}
+          low="0%"
+          high="100%"
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="lp-st-rate">
       <div className="lp-st-rate-head">
         <span className="lp-st-rate-label">{label}</span>
         <b className="lp-st-rate-value">{(rate.rate * 100).toFixed(1)}%</b>
       </div>
-      <div className="lp-st-rate-track" aria-hidden="true">
-        {/* The interval is drawn behind the point estimate, so how well the
-            rate is pinned down is read at the same time as the rate. */}
-        <span
-          className="lp-st-rate-ci"
-          style={{ left: `${lo * 100}%`, width: `${Math.max(hi - lo, 0.004) * 100}%` }}
-        />
-        <span className="lp-st-rate-fill" style={{ width: `${rate.rate * 100}%` }} />
-      </div>
-      <p className="lp-st-rate-foot">
-        {rate.count} runs · 95% CI {(lo * 100).toFixed(1)}–{(hi * 100).toFixed(1)}%
-      </p>
+      <Meter fraction={rate.rate} tone={tone} ticks={4} marker={undefined} />
     </div>
   )
 }
@@ -76,18 +98,18 @@ function Result({ value }: { value: StressTestResponse }) {
   const rates = value.rates ?? {}
   const failures = Object.entries(value.failures ?? {}).filter(([, count]) => count > 0)
   const histograms = value.histograms ?? {}
-  const duration = histograms.duration_h
-  const battery = histograms.min_battery_pct
 
   return (
     <div className="lp-st-result">
-      {rates.completion ? <RateBar rate={rates.completion} label="Reached the goal" /> : null}
+      {rates.completion ? (
+        <RateBar rate={rates.completion} label="Reached the goal" headline />
+      ) : null}
       {rates.full_success ? <RateBar rate={rates.full_success} label="Full success" /> : null}
 
       {/* The backend's decision sentence, verbatim. It is the one line that
-          says what the rates mean for this particular route -- including, in
-          the measured case, that full success is zero because no haven exists
-          in that lunar day rather than because the rover failed. */}
+          says what the rates mean for THIS route -- including, in the measured
+          case, that full success is zero because no haven exists in that lunar
+          day rather than because the rover failed. */}
       {value.verdict?.text ? (
         <p className="lp-st-verdict">
           <Icon name="guide" />
@@ -95,23 +117,23 @@ function Result({ value }: { value: StressTestResponse }) {
         </p>
       ) : null}
 
-      {duration ? (
-        <div className="lp-st-block">
-          <span className="lp-st-block-label">Duration</span>
-          <Bars histogram={duration} unit=" h" />
-        </div>
+      {histograms.duration_h ? (
+        <>
+          <Divide label="Duration" />
+          <Bars histogram={histograms.duration_h} unit=" h" />
+        </>
       ) : null}
 
-      {battery ? (
-        <div className="lp-st-block">
-          <span className="lp-st-block-label">Lowest battery</span>
-          <Bars histogram={battery} unit="%" />
-        </div>
+      {histograms.min_battery_pct ? (
+        <>
+          <Divide label="Lowest battery" />
+          <Bars histogram={histograms.min_battery_pct} unit="%" />
+        </>
       ) : null}
 
       {failures.length > 0 ? (
-        <div className="lp-st-block">
-          <span className="lp-st-block-label">First failure cause</span>
+        <>
+          <Divide label="First failure cause" />
           <ul className="lp-st-failures">
             {failures.map(([cause, count]) => (
               <li key={cause}>
@@ -120,7 +142,7 @@ function Result({ value }: { value: StressTestResponse }) {
               </li>
             ))}
           </ul>
-        </div>
+        </>
       ) : null}
 
       <p className="lp-st-note">

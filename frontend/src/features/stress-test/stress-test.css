@@ -5,10 +5,10 @@
    verdict, so it takes the interaction accent rather than risk colour. Coral
    appears only on the failure-cause counts, which are safety semantics. */
 
-.lp-st { display: flex; flex-direction: column; gap: 10px; }
-
-
 .lp-st-result { display: flex; flex-direction: column; gap: 11px; }
+
+/* The headline rate and its axis are one block. */
+.lp-st-headline { display: flex; flex-direction: column; gap: 6px; }
 
 /* ── Rates, with their interval ──────────────────────────────────────────── */
 
@@ -23,51 +23,6 @@
   font-weight: 500;
   color: var(--text);
   font-variant-numeric: tabular-nums;
-}
-
-.lp-st-rate-track {
-  position: relative;
-  height: 7px;
-  border-radius: 2px;
-  background: var(--bg-inset);
-  overflow: hidden;
-}
-
-/* Behind the estimate, so how well the rate is pinned down reads at the same
-   time as the rate itself. */
-.lp-st-rate-ci {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: rgba(186, 175, 245, 0.25);
-}
-
-.lp-st-rate-fill {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: 0;
-  border-radius: 2px;
-  background: var(--lavender);
-}
-
-.lp-st-rate-foot {
-  margin: 0;
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  color: var(--text-dimmest);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Histograms, from the backend's own bins ─────────────────────────────── */
-
-.lp-st-block { display: flex; flex-direction: column; gap: 4px; }
-.lp-st-block-label {
-  font-family: var(--font-body);
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
-  color: var(--text-muted);
-  text-transform: uppercase;
 }
 
 .lp-st-hist { display: flex; flex-direction: column; gap: 2px; }

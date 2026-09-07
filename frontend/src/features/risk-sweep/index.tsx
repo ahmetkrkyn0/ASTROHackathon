@@ -1,4 +1,5 @@
 import { Icon } from '../../components/Fleet/SpecIcons'
+import { Meter } from '../../components/Instrument'
 import { JobState } from '../analysis-job'
 import type { RiskSweepResponse, SweepDelta } from '../../net/riskSweep'
 import { useRiskSweep } from './useRiskSweep'
@@ -24,20 +25,21 @@ function Row({ delta }: { delta: SweepDelta }) {
   const moved = 1 - delta.overlap_with_nominal
   return (
     <li className="lp-rs-row">
-      <span className="lp-rs-alpha">α {delta.risk_alpha}</span>
-      <span className="lp-rs-track" aria-hidden="true">
-        <span className="lp-rs-fill" style={{ width: `${moved * 100}%` }} />
-      </span>
-      <span className="lp-rs-moved">
-        {moved === 0 ? 'unchanged' : `${(moved * 100).toFixed(0)}% new`}
-      </span>
-      <span className="lp-rs-delta">
-        {delta.hours === 0 && delta.energy_wh === 0
-          ? '—'
-          : `${delta.hours >= 0 ? '+' : ''}${delta.hours.toFixed(2)} h · ${
-              delta.energy_wh >= 0 ? '+' : ''
-            }${delta.energy_wh.toFixed(0)} Wh`}
-      </span>
+      <div className="lp-rs-head">
+        <span className="lp-rs-alpha">α {delta.risk_alpha}</span>
+        <span className="lp-rs-moved">
+          {moved === 0 ? 'route unchanged' : `${(moved * 100).toFixed(0)}% new cells`}
+        </span>
+      </div>
+      {/* How much of the route MOVED is the reading: alpha answers which route
+          you take, not what that route costs. */}
+      <Meter fraction={moved} tone={moved === 0 ? 'muted' : 'data'} ticks={4} />
+      {delta.hours !== 0 || delta.energy_wh !== 0 ? (
+        <span className="lp-rs-delta">
+          {delta.hours >= 0 ? '+' : ''}{delta.hours.toFixed(2)} h ·{' '}
+          {delta.energy_wh >= 0 ? '+' : ''}{delta.energy_wh.toFixed(0)} Wh
+        </span>
+      ) : null}
     </li>
   )
 }

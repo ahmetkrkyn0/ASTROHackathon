@@ -1,4 +1,5 @@
 import { Icon } from '../../components/Fleet/SpecIcons'
+import { Divide, Field, FieldRow, Meter } from '../../components/Instrument'
 import { JobState, type AnalysisJob } from '../analysis-job'
 import type { UncertaintyResponse, UncertaintyBand } from '../../net/uncertainty'
 import type { UncertaintySummary } from './useUncertainty'
@@ -38,32 +39,23 @@ function Band({
   digits: number
   unit: string
 }) {
-  // The drawing scale spans the clones and the nominal together, so a nominal
-  // that falls outside the band is visibly outside it rather than clipped to
-  // the edge and made to look marginal.
+  // The scale spans the clones AND the nominal together, so a nominal that
+  // falls outside the band is visibly outside it rather than clipped to the
+  // edge and made to look marginal.
   const low = Math.min(band.min, nominal ?? band.min)
   const high = Math.max(band.max, nominal ?? band.max)
   const span = high - low || 1
-  const pct = (value: number) => ((value - low) / span) * 100
+  const at = (value: number) => (value - low) / span
 
   return (
-    <div className="lp-unc-row">
-      <div className="lp-unc-track" aria-hidden="true">
-        <span
-          className="lp-unc-band"
-          style={{ left: `${pct(band.p5)}%`, width: `${pct(band.p95) - pct(band.p5)}%` }}
-        />
-        <span className="lp-unc-median" style={{ left: `${pct(band.p50)}%` }} />
-        {nominal !== null ? (
-          <span className="lp-unc-nominal" style={{ left: `${pct(nominal)}%` }} />
-        ) : null}
-      </div>
-      <div className="lp-unc-numbers">
-        <span>{band.p5.toFixed(digits)}</span>
-        <b>{band.p50.toFixed(digits)}{unit}</b>
-        <span>{band.p95.toFixed(digits)}</span>
-      </div>
-    </div>
+    <Meter
+      fraction={at(band.p95) - at(band.p5)}
+      tone="warn"
+      ticks={4}
+      marker={nominal !== null ? at(nominal) : at(band.p50)}
+      low={`${band.p5.toFixed(digits)}${unit}`}
+      high={`${band.p95.toFixed(digits)}${unit}`}
+    />
   )
 }
 
@@ -76,19 +68,21 @@ function Result({ value }: { value: UncertaintyResponse }) {
     <div className="lp-unc-result">
       <p className="lp-unc-scale">
         <span className="lp-unc-key"><i className="lp-unc-swatch is-band" />p5–p95</span>
-        <span className="lp-unc-key"><i className="lp-unc-swatch is-median" />p50</span>
         <span className="lp-unc-key"><i className="lp-unc-swatch is-nominal" />surface DEM</span>
       </p>
 
       {shown.map((metric) => (
         <div key={metric.key} className="lp-unc-metric">
-          <span className="lp-unc-label">{metric.label}</span>
+          <Divide label={metric.label} />
           <Band
             band={metrics[metric.key]}
             nominal={typeof nominal[metric.key] === 'number' ? nominal[metric.key] : null}
             digits={metric.digits}
             unit={metric.unit}
           />
+          <span className="lp-unc-median">
+            p50 {metrics[metric.key].p50.toFixed(metric.digits)}{metric.unit}
+          </span>
         </div>
       ))}
 
@@ -124,21 +118,14 @@ export function UncertaintyPanel({
       {/* The cheap half, when the ensemble exists: it rides along with the
           plan and costs milliseconds. */}
       {summary ? (
-        <dl className="lp-unc-summary">
-          <div>
-            <dt>P traversable</dt>
-            <dd>
-              {summary.pTraversableMean !== null ? summary.pTraversableMean.toFixed(2) : '--'}
-              <span className="lp-unc-sub">
-                min {summary.pTraversableMin !== null ? summary.pTraversableMin.toFixed(2) : '--'}
-              </span>
-            </dd>
-          </div>
-          <div>
-            <dt>Clones</dt>
-            <dd>{summary.nClones ?? '--'}</dd>
-          </div>
-        </dl>
+        <FieldRow>
+          <Field
+            label="P traversable"
+            value={summary.pTraversableMean !== null ? summary.pTraversableMean.toFixed(2) : '--'}
+            hint={`min ${summary.pTraversableMin !== null ? summary.pTraversableMin.toFixed(2) : '--'}`}
+          />
+          <Field label="Clones" value={summary.nClones ?? '--'} />
+        </FieldRow>
       ) : null}
 
       <JobState

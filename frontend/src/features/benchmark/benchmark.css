@@ -46,33 +46,6 @@
   color: var(--text-dimmest);
 }
 
-/* One track, two marks. The bar is LunaPath under its own safety rule; the
-   tick is the same benchmark under the model that allows corner-cutting. */
-.lp-bm-track {
-  position: relative;
-  height: 6px;
-  border-radius: 2px;
-  background: var(--bg-inset);
-}
-
-.lp-bm-fill {
-  position: absolute;
-  top: 1px;
-  bottom: 1px;
-  left: 0;
-  border-radius: 2px;
-  background: var(--lavender);
-}
-
-.lp-bm-mark {
-  position: absolute;
-  top: -2px;
-  bottom: -2px;
-  width: 2px;
-  margin-left: -2px;
-  background: var(--text-2);
-}
-
 .lp-bm-why {
   margin: 0;
   font-size: var(--fs-micro);

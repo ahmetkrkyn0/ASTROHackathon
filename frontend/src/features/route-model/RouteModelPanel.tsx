@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
+import { Field, FieldRow } from '../../components/Instrument'
 import type { RouteModelView } from './routeModel'
 import './route-model.css'
 
@@ -30,16 +31,6 @@ function Validity({ level }: { level: string }) {
       ? 'is-measured'
       : 'is-model'
   return <span className={`lp-rm-chip ${tone}`}>{level}</span>
-}
-
-function Figure({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="lp-rm-figure">
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-      {hint ? <span className="lp-rm-hint">{hint}</span> : null}
-    </div>
-  )
 }
 
 function Section({
@@ -89,17 +80,17 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
         >
           {view.slip.applied ? (
             <>
-              <dl className="lp-rm-figures">
-                <Figure label="Mean slip" value={n(view.slip.meanSlip)} />
-                <Figure
+              <FieldRow>
+                <Field label="Mean slip" value={n(view.slip.meanSlip)} />
+                <Field
                   label="Max slip"
                   value={n(view.slip.maxSlip)}
                   hint={view.slip.maxSlipSlopeDeg !== null
                     ? `at ${view.slip.maxSlipSlopeDeg.toFixed(1)}°`
                     : undefined}
                 />
-                <Figure label="Wheel dist." value={n(view.slip.distanceFactor, 2, '×')} />
-              </dl>
+                <Field label="Wheel dist." value={n(view.slip.distanceFactor, 2, '×')} />
+              </FieldRow>
               {/* What slip cost THIS route, which is the figure an operator
                   plans against rather than what slip is in general. */}
               <p className="lp-rm-cost">
@@ -124,14 +115,14 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
         >
           {view.risk.applied && view.risk.alpha !== null ? (
             <>
-              <dl className="lp-rm-figures">
-                <Figure label="Alpha" value={view.risk.alpha.toFixed(3)} />
-                <Figure label="Tail mult." value={n(view.risk.multiplier, 3, '×')} />
-                <Figure
+              <FieldRow>
+                <Field label="Alpha" value={view.risk.alpha.toFixed(3)} />
+                <Field label="Tail mult." value={n(view.risk.multiplier, 3, '×')} />
+                <Field
                   label="Slip μ → tail"
                   value={`${n(view.risk.meanSlipMu)} → ${n(view.risk.meanSlipCvar)}`}
                 />
-              </dl>
+              </FieldRow>
               {/* Both figures, always. The planner's clock does not move with
                   alpha, so the adjusted hours alone would be a schedule nobody
                   is flying. */}
@@ -163,17 +154,17 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
         >
           {view.roughness.applied ? (
             <>
-              <dl className="lp-rm-figures">
-                <Figure label="Mean" value={n(view.roughness.meanRoughnessM, 2, ' m')} />
-                <Figure label="Max" value={n(view.roughness.maxRoughnessM, 2, ' m')} />
-                <Figure
+              <FieldRow>
+                <Field label="Mean" value={n(view.roughness.meanRoughnessM, 2, ' m')} />
+                <Field label="Max" value={n(view.roughness.maxRoughnessM, 2, ' m')} />
+                <Field
                   label="In PSR"
                   // Null is not zero: without the mask, nobody checked.
                   value={view.roughness.cellsInPsr === null
                     ? 'not checked'
                     : `${view.roughness.cellsInPsr}`}
                 />
-              </dl>
+              </FieldRow>
               <p className="lp-rm-cost">
                 <Icon name="layers" />
                 <span>
@@ -200,21 +191,21 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
         >
           {view.survival.applied ? (
             <>
-              <dl className="lp-rm-figures">
-                <Figure
+              <FieldRow>
+                <Field
                   label="Failure prob."
                   value={view.survival.executionFailureProbability !== null
                     ? `${(view.survival.executionFailureProbability * 100).toFixed(2)}%`
                     : '--'}
                 />
-                <Figure label="β" value={n(view.survival.beta, 3)} />
-                <Figure
+                <Field label="β" value={n(view.survival.beta, 3)} />
+                <Field
                   label="Moves refused"
                   value={view.survival.movesRefused !== null
                     ? `${view.survival.movesRefused}`
                     : '--'}
                 />
-              </dl>
+              </FieldRow>
               {/* A transferred failure rate is an assumption, and the contract
                   prefixes it as one. Hiding that is a named acceptance failure
                   in the integration plan. */}
@@ -250,16 +241,16 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
         >
           {view.thermal.applied ? (
             <>
-              <dl className="lp-rm-figures">
-                <Figure label="Min margin" value={n(view.thermal.minDwellMarginH, 2, ' h')} />
-                <Figure
+              <FieldRow>
+                <Field label="Min margin" value={n(view.thermal.minDwellMarginH, 2, ' h')} />
+                <Field
                   label="Inner temp"
                   value={`${n(view.thermal.innerMinC, 1)} … ${n(view.thermal.innerMaxC, 1)}°C`}
                   hint={view.thermal.envelopeLoC !== null
                     ? `envelope ${view.thermal.envelopeLoC}–${view.thermal.envelopeHiC}°C`
                     : undefined}
                 />
-                <Figure
+                <Field
                   label="Open-ended"
                   // Not the same as a large finite dwell, and never rendered
                   // as infinity: the contract is explicit that these are
@@ -268,7 +259,7 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
                     ? `${view.thermal.openEndedStates} states`
                     : '--'}
                 />
-              </dl>
+              </FieldRow>
               <p className="lp-rm-cost">
                 <Icon name="info" />
                 <span>

@@ -64,35 +64,6 @@
   color: var(--text-dim);
 }
 
-/* ── Figures ─────────────────────────────────────────────────────────────── */
-
-.lp-rm-figures {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin: 0;
-}
-
-.lp-rm-figure { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-
-.lp-rm-figure dt {
-  font-size: var(--fs-micro);
-  color: var(--text-dim-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.lp-rm-figure dd {
-  margin: 0;
-  font-family: var(--font-data);
-  font-size: var(--fs-small);
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.lp-rm-hint { font-size: var(--fs-micro); color: var(--text-dimmest); }
-
 /* ── The line that says what it cost ─────────────────────────────────────── */
 
 .lp-rm-cost {

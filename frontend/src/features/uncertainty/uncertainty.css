@@ -6,28 +6,6 @@
 
 .lp-unc { display: flex; flex-direction: column; gap: 10px; }
 
-.lp-unc-summary {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  margin: 0;
-}
-
-.lp-unc-summary dt { font-size: var(--fs-micro); color: var(--text-dim-2); }
-
-.lp-unc-summary dd {
-  margin: 0;
-  font-family: var(--font-data);
-  font-size: var(--fs-small);
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.lp-unc-sub { margin-left: 6px; font-size: var(--fs-micro); color: var(--text-dimmest); }
-
-
-/* ── The bands ───────────────────────────────────────────────────────────── */
-
 .lp-unc-result { display: flex; flex-direction: column; gap: 9px; }
 
 .lp-unc-scale {
@@ -46,60 +24,6 @@
 .lp-unc-swatch.is-median { width: 2px; height: 9px; background: var(--cyan); }
 .lp-unc-swatch.is-nominal { width: 2px; height: 9px; background: var(--text-2); }
 
-.lp-unc-metric { display: flex; flex-direction: column; gap: 3px; }
-
-.lp-unc-label {
-  font-family: var(--font-body);
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
-  color: var(--text-muted);
-  text-transform: uppercase;
-}
-
-.lp-unc-row { display: flex; flex-direction: column; gap: 3px; }
-
-.lp-unc-track {
-  position: relative;
-  height: 9px;
-  border-radius: 2px;
-  background: var(--bg-inset);
-}
-
-.lp-unc-band {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  min-width: 2px;
-  border-radius: 2px;
-  background: rgba(79, 216, 240, 0.35);
-}
-
-.lp-unc-median,
-.lp-unc-nominal {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  margin-left: -1px;
-}
-
-.lp-unc-median { background: var(--cyan); }
-
-/* The surface-DEM figure on the same scale. Where it sits outside the band is
-   the interesting case, and it is visible rather than clipped. */
-.lp-unc-nominal { background: var(--text-2); }
-
-.lp-unc-numbers {
-  display: flex;
-  justify-content: space-between;
-  font-family: var(--font-data);
-  font-size: var(--fs-micro);
-  color: var(--text-dimmest);
-  font-variant-numeric: tabular-nums;
-}
-
-.lp-unc-numbers b { font-weight: 500; color: var(--text-2); }
-
 .lp-unc-feasible {
   display: flex;
   align-items: center;
@@ -112,4 +36,13 @@
 .lp-unc-feasible svg { flex: none; font-size: 12px; }
 .lp-unc-feasible b { font-family: var(--font-data); font-weight: 500; color: var(--text-2); }
 
+.lp-unc-metric { display: flex; flex-direction: column; gap: 4px; }
 
+/* The median, under the band it sits in rather than crowded into the axis. */
+.lp-unc-median {
+  align-self: flex-end;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}

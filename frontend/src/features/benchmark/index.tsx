@@ -1,4 +1,5 @@
 import { Icon } from '../../components/Fleet/SpecIcons'
+import { Meter } from '../../components/Instrument'
 import {
   MOONPLANBENCH_CLAIM,
   MOONPLANBENCH_SOURCE,
@@ -40,18 +41,16 @@ export function Benchmark() {
                 </span>
               </div>
 
-              {/* One track, two marks: the gap IS the finding, and two separate
-                  numbers would let either be quoted on its own. */}
-              <div className="lp-bm-track" aria-hidden="true">
-                <span
-                  className="lp-bm-fill"
-                  style={{ width: `${variant.lunapathSuccess * 100}%` }}
-                />
-                <span
-                  className="lp-bm-mark"
-                  style={{ left: `${variant.benchmarkModelSuccess * 100}%` }}
-                />
-              </div>
+              {/* One track, two marks: the gap IS the finding, and two
+                  separate numbers would let either be quoted alone. The bar is
+                  LunaPath under its own safety rule; the marker is the same
+                  benchmark under the model that allows corner-cutting. */}
+              <Meter
+                fraction={variant.lunapathSuccess}
+                tone={variant.lunapathSuccess >= variant.benchmarkModelSuccess ? 'ok' : 'data'}
+                ticks={4}
+                marker={variant.benchmarkModelSuccess}
+              />
 
               <p className="lp-bm-why">
                 {variant.cornerCutOnlyMaps > 0
