@@ -1,0 +1,65 @@
+/* The two blocks the measured products added to the cell inspector.
+ *
+ * Reuses the panel's existing mono grid and header row; only what is genuinely
+ * new lives here. New styling goes in the feature's own stylesheet, not in
+ * App.css, which is legacy and global base.
+ */
+
+/* Same shape and the same MEASURED colour as the provenance badge in the
+   systems drawer, so a reader who has seen one recognises the other. It is a
+   claim about where the number came from, and it should read identically
+   wherever that claim is made. */
+.lp-provenance-chip {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  border: 1px solid currentColor;
+  color: var(--risk-low);
+}
+
+/* The claim boundary under a block of numbers. Dimmer than the values it
+   qualifies, but not so dim it reads as decoration -- it is the sentence that
+   stops a 100 m block statistic being read as this cell's own roughness. */
+.lp-cell-note {
+  margin: 8px 0 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* "No reachable haven" where every neighbouring cell shows a number.
+ *
+ * It has to survive being skimmed: an operator scanning a column of hours must
+ * not read this as a small one. So it is not a number, it does not use the
+ * data font's tabular alignment, and it is the one value in the grid that is
+ * coloured. Zero hours means the cell IS a haven -- the opposite fact -- and
+ * these two must never be mistakable for each other. */
+.lp-mono-val.is-unreachable {
+  color: var(--risk-med);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+}
+
+/* Model provenance in a section header. Smaller than the MEASURED chip beside
+   the NASA products: a modelled number and a measured one should not present
+   with equal weight, and the badge is where that difference lives. */
+.lp-model-chip {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  border: 1px solid currentColor;
+  color: var(--lavender);
+}
+
+/* Louder than MODEL. A modelled quantity whose parameter nobody has measured
+   is a weaker claim again, and the dwell hours are exactly that. */
+.lp-model-chip.is-uncal {
+  color: var(--risk-med);
+}
