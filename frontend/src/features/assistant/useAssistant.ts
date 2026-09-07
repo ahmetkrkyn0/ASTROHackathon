@@ -1,0 +1,165 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAssistantAsk } from '../../intent/AssistantAskContext'
+import type { AssistantAsk } from '../../intent/types'
+import { selectStableAnalysisCell } from '../../mission/selectors'
+import type { MissionValue } from '../../mission/types'
+import { buildMissionSnapshot, type AiMissionSnapshot } from './aiContext'
+
+/**
+ * Which of the two jobs the assistant is doing right now.
+ *
+ * Derived from the mission, never chosen by the operator: a toggle would let
+ * the panel offer route analysis with no route, which is the state this whole
+ * distinction exists to handle.
+ */
+export type AssistantMode = 'planning' | 'analysis'
+
+export interface AssistantShell {
+  isOpen: boolean
+  unread: boolean
+  mode: AssistantMode
+  launcherRef: React.RefObject<HTMLButtonElement>
+  toggle: () => void
+  close: () => void
+  markUnread: () => void
+  missionSnapshot: AiMissionSnapshot
+  /**
+   * A question another feature wants asked, or null.
+   *
+   * Read-only, and it reaches the composer -- never the wire. The panel still
+   * refuses to send until the operator picks an explanation level and presses
+   * Gönder, which is what keeps "a feature can suggest" apart from "a feature
+   * can ask on the operator's behalf".
+   */
+  ask: AssistantAsk | null
+}
+
+/**
+ * The assistant's shell state, which used to live in App.tsx.
+ *
+ * Everything here is about the floating window: whether it is open, whether an
+ * answer arrived while it was not, and where focus goes when it closes. The
+ * conversation itself -- turns, draft, pending request, chosen explanation
+ * level -- stays inside ChatPanel, which is never unmounted. This is a move,
+ * not a rewrite of that state machine.
+ */
+export function useAssistant(mission: MissionValue): AssistantShell {
+  const [isOpen, setIsOpen] = useState(false)
+  const [unread, setUnread] = useState(false)
+  const launcherRef = useRef<HTMLButtonElement>(null)
+
+  const open = useCallback(() => {
+    setIsOpen(true)
+    // Cleared on open, deterministically: the dot means "you have not looked
+    // since the answer arrived", and opening is looking.
+    setUnread(false)
+  }, [])
+
+  const close = useCallback(() => {
+    setIsOpen(false)
+    // The launcher is where the operator came from, so it is where they end up.
+    launcherRef.current?.focus()
+  }, [])
+
+  const toggle = useCallback(() => {
+    if (isOpen) close()
+    else open()
+  }, [close, isOpen, open])
+
+  const markUnread = useCallback(() => setUnread(true), [])
+
+  /**
+   * Escape minimizes the assistant, from anywhere.
+   *
+   * The window is not modal and does not trap focus, so the operator can click
+   * the map with the assistant still open -- at which point a handler bound to
+   * the window element would never see the key. The listener is document-wide
+   * and installed only while the assistant is open.
+   *
+   * It minimizes and nothing else. No conversation is ever cleared by a key.
+   */
+  useEffect(() => {
+    if (!isOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      // Escape during IME composition cancels the composition, not the panel.
+      if (event.isComposing || event.keyCode === 229) return
+      close()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [close, isOpen])
+
+  /**
+   * A value snapshot for the panel.
+   *
+   * Deliberately built from mission values rather than passed as state: the
+   * panel receives what the operator has chosen and no way to change any of it.
+   * The raw plan is reduced here, before it can reach the wire -- see
+   * sanitizePlanForAi.
+   *
+   * Memoised on the individual fields rather than on the mission object, so
+   * switching map layer or dimension does not rebuild the snapshot and churn
+   * the panel's suggestions and send callback for a change the assistant does
+   * not see.
+   */
+  const missionSnapshot = useMemo(
+    () =>
+      buildMissionSnapshot({
+        start: mission.start,
+        goal: mission.goal,
+        roverId: mission.roverId,
+        weights: mission.weights,
+        // mission.selectedCell is null by design; the assistant's focus is a
+        // policy it names explicitly, and it is never the hover cell.
+        focusedCell: selectStableAnalysisCell(mission.start, mission.goal),
+        plan: mission.planResult,
+      }),
+    [mission.goal, mission.planResult, mission.roverId, mission.start, mission.weights],
+  )
+
+  const mode: AssistantMode =
+    missionSnapshot.currentPlan === null ? 'planning' : 'analysis'
+
+  /*
+   * A finished route no longer opens the assistant.
+   *
+   * It used to: the operator had just produced the thing analysis mode exists
+   * to explain, so the window put itself on screen. In use that lands a panel
+   * over the map at the exact moment the operator wants to look at the route
+   * they just got, and it arrives without being asked for. The launcher is one
+   * click away and it is the operator's click to make.
+   *
+   * The one remaining path that opens this window on its own is the ask channel
+   * below, and that one IS a request: another feature only publishes an ask
+   * because the operator pressed something.
+   */
+
+  /**
+   * An ask from another feature opens the window.
+   *
+   * Opening is all it does: the question lands in the composer and stops
+   * there. Keyed on the id rather than the text, so the operator asking the
+   * same thing twice is two asks, and guarded by a ref so a re-render with the
+   * same ask still pending cannot reopen a window the operator minimized.
+   */
+  const ask = useAssistantAsk()
+  const openedAskRef = useRef<number>(0)
+  useEffect(() => {
+    if (ask === null || ask.id === openedAskRef.current) return
+    openedAskRef.current = ask.id
+    open()
+  }, [ask, open])
+
+  return {
+    isOpen,
+    unread,
+    mode,
+    launcherRef,
+    toggle,
+    close,
+    markUnread,
+    missionSnapshot,
+    ask,
+  }
+}

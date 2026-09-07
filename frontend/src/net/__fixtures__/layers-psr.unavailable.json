@@ -1,0 +1,3 @@
+{
+  "detail": "psr is not present in the loaded grids. It is NASA's measured product (PGDA 90): run scripts/build_roughness_cache.py (fetches the LOLA LDRM roughness and LPSR PSR windows over /vsicurl/), then reload with POST /api/load-preprocessed."
+}

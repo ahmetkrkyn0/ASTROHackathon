@@ -1,0 +1,147 @@
+.lp-time-card {
+  border: 1px solid rgba(139, 148, 166, 0.22);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  background: rgba(12, 16, 24, 0.6);
+}
+
+.lp-time-row { display: flex; align-items: center; gap: 10px; }
+
+.lp-time-play,
+.lp-time-plan {
+  border-radius: var(--radius);
+  border: 1px solid rgba(79, 216, 240, 0.4);
+  background: rgba(79, 216, 240, 0.12);
+  color: var(--cyan-text);
+  font-size: var(--fs-small);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.lp-time-play:disabled,
+.lp-time-plan:disabled { opacity: 0.45; cursor: default; }
+
+.lp-time-slider { flex: 1; accent-color: var(--cyan); }
+
+.lp-time-clock {
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+  text-align: right;
+}
+
+/* The field's on/off, beside the picker that says which field. Disabled the
+   select rather than hiding it: which layer would be drawn is worth reading
+   even when none is. */
+.lp-time-layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lp-time-layer-toggle input {
+  accent-color: var(--lavender);
+  cursor: pointer;
+}
+
+.lp-time-field {
+  background: rgba(12, 16, 24, 0.65);
+  border: 1px solid rgba(139, 148, 166, 0.24);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  padding: 4px 6px;
+}
+
+.lp-time-field:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lp-time-note { margin: 8px 0 0; font-size: var(--fs-small); line-height: 1.5; color: var(--text-muted); }
+.lp-time-warn { color: var(--risk-med); }
+.lp-time-note code { color: var(--text-2); }
+
+.lp-time-verdict { margin: 8px 0 0; font-size: var(--fs-body); line-height: 1.5; color: var(--text-2); }
+.lp-time-verdict strong { color: var(--risk-med); }
+
+/* The forward constraints, beside the 4-D plan button.
+ *
+ * A row of toggles rather than checkboxes: they read as modifiers on the
+ * button next to them, which is what they are -- nothing here changes until
+ * that button is pressed. */
+.lp-time-constraints {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.lp-time-constraints-label {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.lp-time-constraint {
+  background: rgba(8, 11, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 3px 9px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.lp-time-constraint:hover:not(:disabled) {
+  border-color: var(--border-focus);
+  color: var(--text-2);
+}
+
+.lp-time-constraint.is-on {
+  border-color: rgba(186, 175, 245, 0.55);
+  background: rgba(186, 175, 245, 0.14);
+  color: var(--text);
+}
+
+/* A constraint the deployment cannot enforce. Still listed, so its absence is
+   visible rather than a control that was never there. */
+.lp-time-constraint:disabled {
+  color: var(--text-dim-2);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Why a constraint is dark. Visible text, not a tooltip: a disabled button
+   cannot be hovered on touch and is skipped by the keyboard, so a hidden
+   reason is unreachable exactly when it is needed. */
+.lp-time-constraint-notes {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.lp-time-constraint-note {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-muted);
+  padding-left: 8px;
+  border-left: 1px solid rgba(199, 205, 219, 0.14);
+}
+
+.lp-time-constraint-note strong {
+  color: var(--text-2);
+  font-weight: 600;
+}

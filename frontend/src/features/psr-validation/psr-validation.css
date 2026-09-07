@@ -1,0 +1,109 @@
+/* PSR validation card, in the Systems & Evidence drawer.
+ *
+ * Same idiom as the layer-provenance panel beside it: a kicker, a fact list,
+ * and the backend's own prose underneath. The two are read together -- one
+ * says where a layer came from, the other how far it agrees with the measured
+ * product -- so they are deliberately not styled as different kinds of thing.
+ */
+
+.psr-headline {
+  margin: 0 0 10px;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.psr-headline a {
+  color: var(--cyan);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(79, 216, 240, 0.35);
+}
+
+.psr-headline a:hover {
+  border-bottom-color: var(--cyan);
+}
+
+.psr-mono {
+  font-family: var(--font-data);
+  color: var(--text);
+}
+
+.psr-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  margin: 0 0 10px;
+}
+
+.psr-facts div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.psr-facts dt {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.psr-facts dd {
+  margin: 0;
+  font-size: var(--fs-body);
+  /* Wraps rather than clipping: "816 of 250,000" is longer than its column at
+     narrow rail widths, and a truncated count reads as a different number. */
+  overflow-wrap: anywhere;
+}
+
+.psr-note {
+  margin: 0 0 8px;
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* The backend's statement of what the product is and is not. Set apart with a
+   rule rather than styled down: it is the sentence that stops the PSR mask
+   being read as a planning constraint, and it should not look optional. */
+.psr-claim {
+  border-left: 1px solid rgba(199, 205, 219, 0.14);
+  padding-left: 10px;
+}
+
+.psr-note.is-error {
+  color: var(--accent-coral);
+}
+
+.psr-remedy {
+  display: block;
+  margin: 4px 0 8px;
+  padding: 3px 6px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  background: rgba(8, 11, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.psr-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.psr-provenance-item .psr-mono {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}

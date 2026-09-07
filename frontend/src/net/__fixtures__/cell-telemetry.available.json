@@ -1,0 +1,50 @@
+{
+  "row": 250,
+  "col": 250,
+  "lon": -69.809408,
+  "lat": -88.638503,
+  "altitude_m": 1473.3857421875,
+  "thermal_c": 6.2908830642700195,
+  "thermal_min_c": -41.04867935180664,
+  "resolution_m": 5.0,
+  "span_km": 2.5,
+  "cost_breakdown": {
+    "slope": 0.36207929238824726,
+    "energy": 0.259,
+    "shadow": 0.02901857879327361,
+    "thermal": 0.18979332079282157,
+    "roughness": 0.11370332507314417,
+    "total": 0.9535945170474868
+  },
+  "layer_validity": {
+    "elevation": "MEASURED",
+    "slope": "DERIVED",
+    "aspect": "DERIVED",
+    "shadow_ratio": "DERIVED",
+    "thermal": "DERIVED",
+    "thermal_min": "DERIVED",
+    "traversable": "DERIVED",
+    "cost": "DERIVED",
+    "earth_visibility": "DERIVED",
+    "roughness": "MEASURED",
+    "psr": "MEASURED"
+  },
+  "roughness_m": 0.8045191764831543,
+  "f_roughness": 0.7580221671542945,
+  "in_psr": false,
+  "safe_haven": null,
+  "safe_haven_model": {
+    "model": "unavailable",
+    "reason": "no start epoch given; a safe haven is defined against the Earth's and the Sun's motion and cannot be computed without one"
+  },
+  "survival": null,
+  "survival_model": {
+    "model": "unavailable",
+    "reason": "not requested (survival=false)"
+  },
+  "thermal_dwell": null,
+  "thermal_dwell_model": {
+    "model": "unavailable",
+    "reason": "not requested (thermal_dwell=false)"
+  }
+}

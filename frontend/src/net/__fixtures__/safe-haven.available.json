@@ -1,0 +1,75 @@
+{
+  "rover_id": "nasa_viper",
+  "rover_name": "NASA VIPER",
+  "h_max_shadow_h": 96.0,
+  "start_utc": "2027-05-30T00:00:00Z",
+  "span_hours": 708.7,
+  "step_hours": 2.0,
+  "n_steps": 355,
+  "safe_haven_model": {
+    "model": "spice_horizon",
+    "rule": "safe haven: while the Earth is below the horizon, continuous shadow <= h_max_shadow_h, and lit at least once in the window (VIPER; Shirley & Balaban 2022)",
+    "start_utc": "2027-05-30T00:00:00Z",
+    "span_hours": 708.7,
+    "step_hours": 2.0,
+    "n_steps": 355,
+    "rover_id": "nasa_viper",
+    "h_max_shadow_h": 96.0,
+    "safe_haven_cells": 9224,
+    "traversable_cells": 89508,
+    "safe_haven_fraction": 0.10305224114045672,
+    "earth_below_fraction": 0.934912281690141,
+    "horizon_cache": "<repo>/lunapath/data/processed/horizon_map.npy",
+    "time_to_haven_finite_fraction": 0.7823211333065201
+  },
+  "safe_haven_fraction": 0.10305224114045672,
+  "safe_haven_cells": 9224,
+  "traversable_cells": 89508,
+  "earth_below_fraction": 0.934912281690141,
+  "grid": {
+    "rows": 500,
+    "cols": 500,
+    "resolution_m": 5.0,
+    "downsample": 1
+  },
+  "fields": {
+    "safe_haven": {
+      "units": "bool",
+      "min": 0.0,
+      "max": 1.0,
+      "nodata": 0,
+      "binary_url": "/api/safe-haven?start_utc=2027-05-30T00%3A00%3A00&rover_id=nasa_viper&span_hours=708.7&step_hours=2.0&downsample=1&format=f32&field=safe_haven"
+    },
+    "max_dark_hours_without_dte": {
+      "units": "hours",
+      "min": 0.0,
+      "max": 710.0,
+      "nodata": 0,
+      "binary_url": "/api/safe-haven?start_utc=2027-05-30T00%3A00%3A00&rover_id=nasa_viper&span_hours=708.7&step_hours=2.0&downsample=1&format=f32&field=max_dark_hours_without_dte"
+    },
+    "earth_below_hours": {
+      "units": "hours",
+      "min": 0.0,
+      "max": 710.0,
+      "nodata": 0,
+      "binary_url": "/api/safe-haven?start_utc=2027-05-30T00%3A00%3A00&rover_id=nasa_viper&span_hours=708.7&step_hours=2.0&downsample=1&format=f32&field=earth_below_hours"
+    },
+    "time_to_safe_haven": {
+      "units": "hours",
+      "min": 0.0,
+      "max": 17.39028352206377,
+      "nodata": 179976,
+      "binary_url": "/api/safe-haven?start_utc=2027-05-30T00%3A00%3A00&rover_id=nasa_viper&span_hours=708.7&step_hours=2.0&downsample=1&format=f32&field=time_to_safe_haven"
+    }
+  },
+  "binary_format": {
+    "dtype": "float32",
+    "endian": "little",
+    "order": "row-major",
+    "shape": [
+      500,
+      500
+    ],
+    "nodata": "NaN"
+  }
+}

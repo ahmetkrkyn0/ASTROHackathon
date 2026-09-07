@@ -1,0 +1,54 @@
+# LunaPath CI
+#
+# Added by the backend review (#18): the repository had no automated
+# verification at all, which is why a finding like "the energy criterion
+# decides nothing" could sit in main indefinitely. This runs the backend
+# suite -- including the two standalone harness suites, via
+# backend/test_legacy_harness.py -- plus the offline lunapath/src tests.
+#
+# rasterio/GDAL is the heavy dependency here; it is only needed by
+# data_loader's DEM path, so the job installs the full requirements file to
+# keep CI honest about what the app actually imports.
+
+stages:
+  - test
+
+default:
+  image: python:3.11-slim
+  before_script:
+    - python -m pip install --upgrade pip
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .cache/pip
+
+backend-tests:
+  stage: test
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git build-essential
+    - python -m pip install --upgrade pip
+    - python -m pip install -r backend/requirements.txt
+  script:
+    - cd backend
+    - python -m pytest -q
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+lunapath-offline-tests:
+  stage: test
+  # lunapath/src's offline tests (virtual LiDAR, grid logic) need only NumPy
+  # and the backend package on sys.path -- no rasterio, no SPICE kernels.
+  before_script:
+    - python -m pip install --upgrade pip
+    - python -m pip install numpy==2.2.1 scipy==1.15.0 pytest==8.3.4
+  script:
+    - cd lunapath/src
+    - python -m pytest test_virtual_lidar.py -q
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH

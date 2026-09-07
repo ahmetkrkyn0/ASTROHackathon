@@ -1,0 +1,70 @@
+{
+  "slices": 4,
+  "slice_hours": 24.0,
+  "start_utc": "2026-09-07T00:00:00",
+  "grid": {
+    "rows": 63,
+    "cols": 63,
+    "resolution_m": 40.0,
+    "downsample": 8
+  },
+  "earth_model": {
+    "model": "spice_horizon",
+    "time_varying": true,
+    "horizon_cache": "<repo>/lunapath/data/processed/horizon_map.npy",
+    "start_utc": "2026-09-07T00:00:00"
+  },
+  "earth": [
+    {
+      "index": 0,
+      "utc": "2026-09-07T00:00:00Z",
+      "azimuth_true_deg": 71.07821866921483,
+      "azimuth_grid_deg": 1.2688102936847372,
+      "elevation_deg": 4.768338684598224,
+      "visible_fraction": 0.088712
+    },
+    {
+      "index": 1,
+      "utc": "2026-09-08T00:00:00Z",
+      "azimuth_true_deg": 72.15367099625813,
+      "azimuth_grid_deg": 2.3442626207280455,
+      "elevation_deg": 3.3121350367074616,
+      "visible_fraction": 0.081336
+    },
+    {
+      "index": 2,
+      "utc": "2026-09-09T00:00:00Z",
+      "azimuth_true_deg": 73.13368006465323,
+      "azimuth_grid_deg": 3.3242716891231225,
+      "elevation_deg": 1.6848725508428646,
+      "visible_fraction": 0.072276
+    },
+    {
+      "index": 3,
+      "utc": "2026-09-10T00:00:00Z",
+      "azimuth_true_deg": 73.9642477668655,
+      "azimuth_grid_deg": 4.154839391335372,
+      "elevation_deg": -0.0029678076594276273,
+      "visible_fraction": 0.06372
+    }
+  ],
+  "fields": {
+    "earth_visible": {
+      "units": "fraction",
+      "min": 0.0,
+      "max": 1.0,
+      "binary_url": "/api/earth-series?n_slices=4&slice_hours=24.0&downsample=8&format=f32&start_utc=2026-09-07T00%3A00%3A00&field=earth_visible"
+    }
+  },
+  "binary_format": {
+    "dtype": "float32",
+    "endian": "little",
+    "order": "slice-major, then row-major",
+    "shape": [
+      4,
+      63,
+      63
+    ],
+    "nodata": "NaN"
+  }
+}

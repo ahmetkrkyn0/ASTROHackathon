@@ -1,0 +1,140 @@
+{
+  "model": "clone_horizon",
+  "n_clones": 20,
+  "clone_indices": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20
+  ],
+  "slices": 8,
+  "slice_hours": 6.0,
+  "start_utc": "2027-05-30T00:00:00",
+  "grid": {
+    "rows": 125,
+    "cols": 125,
+    "resolution_m": 20.0,
+    "stride": 4,
+    "row_offset": 2,
+    "col_offset": 2
+  },
+  "near_range_m": 1000.0,
+  "far_field_held_fixed": true,
+  "neglected_horizon_shift_deg_max": 0.0253,
+  "sun": [
+    {
+      "index": 0,
+      "utc": "2027-05-30T00:00:00Z",
+      "azimuth_true_deg": 317.69836496063624,
+      "azimuth_grid_deg": 247.88895658510614,
+      "elevation_deg": -0.4149854052476755
+    },
+    {
+      "index": 1,
+      "utc": "2027-05-30T06:00:00Z",
+      "azimuth_true_deg": 314.6426656743036,
+      "azimuth_grid_deg": 244.83325729877356,
+      "elevation_deg": -0.4615029790385868
+    },
+    {
+      "index": 2,
+      "utc": "2027-05-30T12:00:00Z",
+      "azimuth_true_deg": 311.5866023920553,
+      "azimuth_grid_deg": 241.7771940165252,
+      "elevation_deg": -0.5107276822432169
+    },
+    {
+      "index": 3,
+      "utc": "2027-05-30T18:00:00Z",
+      "azimuth_true_deg": 308.5301761729149,
+      "azimuth_grid_deg": 238.72076779738472,
+      "elevation_deg": -0.5625104397783567
+    },
+    {
+      "index": 4,
+      "utc": "2027-05-31T00:00:00Z",
+      "azimuth_true_deg": 305.47338827269107,
+      "azimuth_grid_deg": 235.66397989716097,
+      "elevation_deg": -0.6166945621881017
+    },
+    {
+      "index": 5,
+      "utc": "2027-05-31T06:00:00Z",
+      "azimuth_true_deg": 302.4162402116876,
+      "azimuth_grid_deg": 232.60683183615743,
+      "elevation_deg": -0.6731162052908367
+    },
+    {
+      "index": 6,
+      "utc": "2027-05-31T12:00:00Z",
+      "azimuth_true_deg": 299.3587338527434,
+      "azimuth_grid_deg": 229.5493254772133,
+      "elevation_deg": -0.7316048535772484
+    },
+    {
+      "index": 7,
+      "utc": "2027-05-31T18:00:00Z",
+      "azimuth_true_deg": 296.3008714884592,
+      "azimuth_grid_deg": 226.49146311292907,
+      "elevation_deg": -0.7919838260943818
+    }
+  ],
+  "per_slice": {
+    "mean": [
+      0.902243,
+      0.901014,
+      0.900467,
+      0.899747,
+      0.920506,
+      0.920106,
+      0.920074,
+      0.920362
+    ],
+    "uncertain_fraction": [
+      0.060096,
+      0.058688,
+      0.059776,
+      0.060096,
+      0.023552,
+      0.023744,
+      0.022592,
+      0.023808
+    ]
+  },
+  "fields": {
+    "p_illuminated": {
+      "units": "fraction",
+      "description": "Fraction of NASA's DEM clones in which the cell sees the Sun at the slice; 0.05-0.95 is the band the ensemble cannot call.",
+      "min": 0.0,
+      "max": 1.0,
+      "binary_url": "/api/uncertainty-series?start_utc=2027-05-30T00%3A00%3A00&n_slices=8&slice_hours=6.0&format=f32"
+    }
+  },
+  "binary_format": {
+    "dtype": "float32",
+    "endian": "little",
+    "order": "slice-major, then row-major",
+    "shape": [
+      8,
+      125,
+      125
+    ],
+    "nodata": "NaN"
+  }
+}

@@ -3,10 +3,11 @@ import React, {
   useEffect,
   useCallback,
   useState,
-  forwardRef,
-  useImperativeHandle,
 } from 'react'
 import type { Waypoint } from './api'
+import { drawOverlays } from './overlay/draw2d'
+import type { OverlayCommand } from './overlay/types'
+import { useOverlayCommands } from './overlay/useOverlays'
 import {
   aspectToRgb,
   computeHillshade,
@@ -14,13 +15,30 @@ import {
   lunarRegolithToRgb,
   magmaToRgb,
   riskToHex,
+  riskToDash,
   rdYlGnToRgb,
   shadeRegolith,
   thermalToRgb,
   viridisToRgb,
+  START_MINT,
+  GOAL_CORAL,
+  ROUTE_CYAN,
 } from './colormap'
 
+/**
+ * How long the planned route takes to sweep onto the map, in milliseconds.
+ * Fixed for the whole route rather than per waypoint, so route length does
+ * not change how long the answer takes to appear.
+ */
+const ROUTE_REVEAL_MS = 1100
+
 const CANVAS_SIZE = 500
+// Full resolution. fetchLayer reads the binary float32 layer, which carries
+// the whole 500x500 grid in 1.00 MB and is exempt from the MAX_LAYER_CELLS
+// ceiling that caps the JSON representation at a 256x256 preview. Rendering
+// is resolution-agnostic anyway -- cellPx is CANVAS_SIZE / rows and the
+// hillshade reads effectiveResolution -- and the click mapping is in canvas
+// pixels, which equal full-resolution grid indices at CANVAS_SIZE 500.
 const DOWNSAMPLE = 1
 
 export type ClickMode = 'start' | 'goal' | 'idle'
@@ -48,47 +66,82 @@ interface Props {
   viewMode: MapViewMode
   resolutionM: number
   onCellClick: (row: number, col: number) => void
-  onAnimationStepChange?: (step: number | null) => void
+  /**
+   * Playback cursor, owned by App's single mission clock -- see
+   * mission/playbackClock.ts. The map runs no timer of its own. It used to:
+   * it stepped a waypoint every 33 ms while the transport bar stepped one
+   * every 50 ms and the 3D view compressed the whole traverse into a fixed
+   * 10-45 second window, so the same route finished at three different
+   * times and none of them was the rover's speed.
+   */
+  playbackStep: number | null
   onHoverCellChange?: (cell: [number, number] | null) => void
 }
 
-export interface MapCanvasHandle {
-  startAnimation: () => void
-}
+function MapCanvas({
+  elevationGrid,
+  slopeGrid,
+  aspectGrid,
+  shadowGrid,
+  thermalGrid,
+  costGrid,
+  traversableGrid,
+  waypoints,
+  start,
+  goal,
+  clickMode,
+  viewMode,
+  resolutionM,
+  onCellClick,
+  playbackStep,
+  onHoverCellChange,
+}: Props) {
+  // The marks features registered, read here rather than passed down: App
+  // renders OverlayProvider and so cannot consume it, and the hook falls back
+  // to one shared empty list outside a provider, which keeps this canvas
+  // usable on its own.
+  const overlays = useOverlayCommands()
 
-const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
-  {
-    elevationGrid,
-    slopeGrid,
-    aspectGrid,
-    shadowGrid,
-    thermalGrid,
-    costGrid,
-    traversableGrid,
-    waypoints,
-    start,
-    goal,
-    clickMode,
-    viewMode,
-    resolutionM,
-    onCellClick,
-    onAnimationStepChange,
-    onHoverCellChange,
-  },
-  ref,
-) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const baseImageRef = useRef<ImageData | null>(null)
-  const animationTimerRef = useRef<number | null>(null)
-  const [animStep, setAnimStep] = useState<number | null>(null)
   const [hoverCell, setHoverCell] = useState<[number, number] | null>(null)
 
-  const stopAnimation = useCallback(() => {
-    if (animationTimerRef.current !== null) {
-      window.clearTimeout(animationTimerRef.current)
-      animationTimerRef.current = null
+  // The loaded grid's own row count, not CANVAS_SIZE. Every layer is
+  // fetched at the same downsample, so elevation's shape is the grid's
+  // shape. Zero before the first fetch lands, and drawOverlays draws
+  // nothing at zero -- there is no base map to be out of register with yet.
+  const gridRows = elevationGrid?.length ?? 0
+  const gridCols = elevationGrid?.[0]?.length ?? 0
+
+  // How much of the planned line has been drawn in.
+  //
+  // This is a ROUTE REVEAL, not the drive -- two different things that used
+  // to share one counter, which is how the map ended up either crawling for
+  // twenty minutes before showing the route it had found, or racing the
+  // rover marker along at a hundred times its own speed. The line is the
+  // planner's answer and wants to be legible immediately; the marker is the
+  // rover and belongs on the mission clock. So: the line sweeps in over a
+  // fixed budget no matter how long the route is, and then stays.
+  const [revealStep, setRevealStep] = useState(0)
+  useEffect(() => {
+    if (!waypoints || waypoints.length === 0) {
+      setRevealStep(0)
+      return
     }
-  }, [])
+    const total = waypoints.length - 1
+    // Time-based rather than one timeout per waypoint, so a 40-node route
+    // and a 400-node one take the same moment to appear.
+    let frame = 0
+    let startedAt: number | null = null
+    const tick = (timestamp: number) => {
+      if (startedAt === null) startedAt = timestamp
+      const progress = Math.min(1, (timestamp - startedAt) / ROUTE_REVEAL_MS)
+      setRevealStep(Math.round(progress * total))
+      if (progress < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [waypoints])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -115,7 +168,15 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     })
 
     baseImageRef.current = imageData
-    redraw(ctx, imageData, waypoints, start, goal, animStep, hoverCell)
+    redraw(ctx, imageData, waypoints, start, goal, revealStep, playbackStep, hoverCell, gridRows, overlays)
+    // Overlay degerleri (waypoints/start/goal/animStep/hoverCell/overlays)
+    // bilerek bagimlilikta degil: onlari bir sonraki efekt yeniden ciziyor.
+    // Buraya eklemek, her hover'da -- ve her overlay degisikliginde, yani
+    // zaman kaydiricisinin her adiminda -- taban goruntuyu bastan uretmek
+    // demek olurdu. Bu efekt kostugunda closure zaten o render'in guncel
+    // degerlerini tasir; gridRows da elevationGrid'den turedigi icin
+    // asagidaki listede zaten temsil ediliyor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aspectGrid, costGrid, elevationGrid, resolutionM, shadowGrid, slopeGrid, thermalGrid, traversableGrid, viewMode])
 
   useEffect(() => {
@@ -129,53 +190,12 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       return
     }
 
-    redraw(ctx, baseImageRef.current, waypoints, start, goal, animStep, hoverCell)
-  }, [animStep, goal, hoverCell, start, waypoints])
-
-  useEffect(() => {
-    if (!waypoints || waypoints.length === 0) {
-      setAnimStep(null)
-      stopAnimation()
-    }
-  }, [stopAnimation, waypoints])
-
-  useEffect(() => {
-    onAnimationStepChange?.(animStep)
-  }, [animStep, onAnimationStepChange])
+    redraw(ctx, baseImageRef.current, waypoints, start, goal, revealStep, playbackStep, hoverCell, gridRows, overlays)
+  }, [playbackStep, goal, gridRows, hoverCell, overlays, revealStep, start, waypoints])
 
   useEffect(() => {
     onHoverCellChange?.(hoverCell)
   }, [hoverCell, onHoverCellChange])
-
-  const startAnimation = useCallback(() => {
-    if (!waypoints || waypoints.length === 0) {
-      return
-    }
-
-    stopAnimation()
-    let nextStep = 0
-    setAnimStep(0)
-
-    const tick = () => {
-      nextStep += 1
-      if (nextStep >= waypoints.length) {
-        setAnimStep(waypoints.length - 1)
-        animationTimerRef.current = null
-        return
-      }
-
-      setAnimStep(nextStep)
-      animationTimerRef.current = window.setTimeout(tick, 33)
-    }
-
-    animationTimerRef.current = window.setTimeout(tick, 66)
-  }, [stopAnimation, waypoints])
-
-  useImperativeHandle(ref, () => ({ startAnimation }), [startAnimation])
-
-  useEffect(() => {
-    return () => stopAnimation()
-  }, [stopAnimation])
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -216,6 +236,79 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     setHoverCell(null)
   }, [])
 
+  /**
+   * Placing an endpoint from the keyboard.
+   *
+   * Until this existed the application's primary task -- put a Start and a
+   * Goal on the terrain -- could only be done with a mouse: the canvas had a
+   * click handler and nothing else, so keyboard and screen-reader users could
+   * not use LunaPath at all (WCAG 2.1.1, Level A).
+   *
+   * The cursor is `hoverCell`, deliberately the same state the pointer writes.
+   * That state already draws the crosshair on the canvas and already feeds the
+   * LAT/LON/ALT readout through onHoverCellChange, so driving it from the
+   * keyboard makes both follow the keys with no second code path to keep in
+   * register -- and no second definition of where "here" is.
+   *
+   * Shift multiplies the step because a 500-cell grid is 500 keypresses wide
+   * at one cell per press, which is a working alternative in name only.
+   */
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+      if (gridRows === 0 || gridCols === 0) {
+        return
+      }
+
+      const step = event.shiftKey ? 10 : 1
+      const delta: Record<string, [number, number]> = {
+        ArrowUp: [-step, 0],
+        ArrowDown: [step, 0],
+        ArrowLeft: [0, -step],
+        ArrowRight: [0, step],
+      }
+      const move = delta[event.key]
+
+      if (move) {
+        // The arrows scroll the page by default, which would drag the map out
+        // of view on the first keypress.
+        event.preventDefault()
+        setHoverCell((current) => {
+          const [row, col] = current ?? [Math.floor(gridRows / 2), Math.floor(gridCols / 2)]
+          return [
+            Math.min(gridRows - 1, Math.max(0, row + move[0])),
+            Math.min(gridCols - 1, Math.max(0, col + move[1])),
+          ]
+        })
+        return
+      }
+
+      if (event.key === 'Enter' || event.key === ' ') {
+        // Space scrolls too, and on a focused element it is the conventional
+        // partner to Enter for "activate".
+        event.preventDefault()
+        if (clickMode === 'idle' || !hoverCell) {
+          return
+        }
+        onCellClick(hoverCell[0], hoverCell[1])
+      }
+    },
+    [clickMode, gridCols, gridRows, hoverCell, onCellClick],
+  )
+
+  /**
+   * Focus has to land somewhere visible.
+   *
+   * Tabbing to a map whose cursor is null would show nothing at all and read
+   * as a dead control, so focus seeds the cursor at the centre of the grid --
+   * but only when the pointer has not already put it somewhere.
+   */
+  const handleFocus = useCallback(() => {
+    if (gridRows === 0 || gridCols === 0) {
+      return
+    }
+    setHoverCell((current) => current ?? [Math.floor(gridRows / 2), Math.floor(gridCols / 2)])
+  }, [gridCols, gridRows])
+
   const loading =
     viewMode === 'surface' ? !elevationGrid :
     viewMode === 'thermal' ? !thermalGrid :
@@ -243,16 +336,43 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
         onClick={handleClick}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        /* role="application" tells a screen reader to stop intercepting the
+           arrow keys and hand them to this element, which is what makes the
+           cursor movable at all. It is the right role precisely because the
+           arrows here mean "move the cursor over the terrain" and not "move
+           to the next item". */
+        tabIndex={0}
+        role="application"
+        aria-label={
+          clickMode === 'idle'
+            ? 'Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time.'
+            : `Terrain map. Arrow keys move the cursor, hold Shift to move ten cells at a time. Press Enter to place ${clickMode === 'start' ? 'Start' : 'Goal'} at the cursor.`
+        }
+        /* Deliberately NOT `map-canvas`: App.css already owns that name with an
+           `aspect-ratio: 1/1` and a `calc(100vh - 130px)` cap, and borrowing it
+           for a cursor squared the terrain and took ~500px off its width. */
+        className={
+          clickMode === 'start'
+            ? 'lp-map-pick-start'
+            : clickMode === 'goal'
+              ? 'lp-map-pick-goal'
+              : undefined
+        }
         style={{
           width: '100%',
           height: '100%',
-          border: '1px solid rgba(160, 160, 255, 0.2)',
-          background: '#030408',
+          border: '1px solid rgba(186, 175, 245, 0.2)',
+          background: '#05070d',
           boxShadow: '0 24px 64px rgba(0, 0, 0, 0.45)',
-          cursor: clickMode === 'idle' ? 'default' : 'crosshair',
           imageRendering: viewMode === 'traversability' || viewMode === 'cost' ? 'pixelated' : 'auto',
         }}
       />
+
+      <p className="lp-visually-hidden" aria-live="polite">
+        {hoverCell ? `Cursor at row ${hoverCell[0]}, column ${hoverCell[1]}.` : ''}
+      </p>
 
       {loading && (
         <div
@@ -262,9 +382,9 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(3, 4, 8, 0.86)',
-            color: '#c7c5d3',
-            fontFamily: "'IBM Plex Mono', monospace",
+            background: 'rgba(5, 7, 13, 0.86)',
+            color: '#c8cddb',
+            fontFamily: "var(--font-data)",
             fontSize: 12,
             letterSpacing: '0.14em',
             textTransform: 'uppercase',
@@ -275,7 +395,7 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       )}
     </div>
   )
-})
+}
 
 export default MapCanvas
 export { DOWNSAMPLE }
@@ -286,18 +406,29 @@ function redraw(
   waypoints: Waypoint[] | null,
   start: [number, number] | null,
   goal: [number, number] | null,
-  currentStep: number | null,
+  /** How much of the planned line has swept in; see revealStep. */
+  revealStep: number,
+  /** Where the rover is on the mission clock; see the playbackStep prop. */
+  roverStep: number | null,
   hoverCell: [number, number] | null,
+  gridRows: number,
+  overlays?: readonly OverlayCommand[],
 ) {
   if (baseImage) {
     ctx.putImageData(baseImage, 0, 0)
   } else {
-    ctx.fillStyle = '#030408'
+    ctx.fillStyle = '#05070d'
     ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE)
   }
 
+  // Before the route and the markers: a field overlay is a backdrop, and the
+  // planned route must stay readable on top of it.
+  if (overlays && overlays.length) {
+    drawOverlays(ctx, overlays, gridRows, CANVAS_SIZE)
+  }
+
   if (waypoints && waypoints.length > 1) {
-    const drawUpTo = currentStep ?? waypoints.length - 1
+    const drawUpTo = Math.min(waypoints.length - 1, Math.max(revealStep, roverStep ?? 0))
 
     ctx.save()
     ctx.lineCap = 'round'
@@ -305,38 +436,100 @@ function redraw(
     ctx.shadowColor = 'rgba(0, 0, 0, 0.55)'
     ctx.shadowBlur = 12
 
+    // Runs of one risk level, not one path per segment.
+    //
+    // The segment between two waypoints is about a cell long, and a dash
+    // pattern restarted on every one of those would draw the same first dash
+    // every time -- four identical lines wearing four colours, which is the
+    // problem the pattern exists to solve. Stroking the whole run as a single
+    // path lets the pattern actually repeat and be recognised.
+    ctx.lineWidth = 2.8
+    let runStart = 1
     for (let index = 1; index <= drawUpTo; index += 1) {
-      const previous = waypoints[index - 1]
-      const current = waypoints[index]
-      ctx.strokeStyle = riskToHex(current.risk_level)
-      ctx.lineWidth = 2.6
+      const level = waypoints[index].risk_level
+      // Ground already covered reads at full strength, the road ahead is held
+      // back. Without this the whole route looks identical the moment the
+      // reveal finishes and the marker is the only thing saying how far along
+      // the rover actually is.
+      const covered = roverStep === null || index <= roverStep
+      const isLastSegment = index === drawUpTo
+      // A run therefore ends at the rover as well as where the risk level
+      // changes: one path cannot carry two alpha values.
+      //
+      // isLastSegment stays first in the chain -- it short-circuits the
+      // waypoints[index + 1] read, which is undefined on the final segment.
+      const runEnds =
+        isLastSegment || waypoints[index + 1].risk_level !== level || index === roverStep
+
+      if (!runEnds) {
+        continue
+      }
+
+      // Cyan is the calm trajectory; a risk colour is a departure from it, so
+      // LOW keeps the base line and the other three announce themselves.
+      ctx.strokeStyle = level === 'LOW' ? ROUTE_CYAN : riskToHex(level)
+      ctx.setLineDash(riskToDash(level))
+      ctx.globalAlpha = covered ? 1 : 0.42
       ctx.beginPath()
-      ctx.moveTo(previous.col, previous.row)
-      ctx.lineTo(current.col, current.row)
+      ctx.moveTo(waypoints[runStart - 1].col, waypoints[runStart - 1].row)
+      for (let step = runStart; step <= index; step += 1) {
+        ctx.lineTo(waypoints[step].col, waypoints[step].row)
+      }
       ctx.stroke()
+
+      // A severe stretch has to be findable, not just readable once found.
+      // The marker sits where the run begins and is drawn solid, so it
+      // survives whatever the dash pattern is doing.
+      if (level === 'HIGH' || level === 'CRITICAL') {
+        ctx.save()
+        ctx.setLineDash([])
+        ctx.fillStyle = riskToHex(level)
+        ctx.strokeStyle = '#05070d'
+        ctx.lineWidth = 1
+        const wp = waypoints[runStart - 1]
+        const size = level === 'CRITICAL' ? 4.6 : 3.8
+        ctx.beginPath()
+        // Triangle for CRITICAL, square for HIGH: two shapes nobody has to
+        // compare against a legend to tell apart.
+        if (level === 'CRITICAL') {
+          ctx.moveTo(wp.col, wp.row - size)
+          ctx.lineTo(wp.col + size, wp.row + size * 0.8)
+          ctx.lineTo(wp.col - size, wp.row + size * 0.8)
+          ctx.closePath()
+        } else {
+          ctx.rect(wp.col - size / 2, wp.row - size / 2, size, size)
+        }
+        ctx.fill()
+        ctx.stroke()
+        ctx.restore()
+      }
+
+      runStart = index + 1
     }
 
+    ctx.globalAlpha = 1
+    ctx.setLineDash([])
     ctx.restore()
 
-    if (currentStep !== null && currentStep < waypoints.length) {
-      const rover = waypoints[currentStep]
+    if (roverStep !== null && roverStep < waypoints.length) {
+      const rover = waypoints[roverStep]
       ctx.save()
-      ctx.fillStyle = '#f5f7ff'
-      ctx.shadowColor = 'rgba(255, 255, 255, 0.55)'
+      ctx.fillStyle = '#e7eaf1'
+      ctx.shadowColor = ROUTE_CYAN
       ctx.shadowBlur = 14
       ctx.beginPath()
-      ctx.arc(rover.col, rover.row, 4.4, 0, Math.PI * 2)
+      ctx.arc(rover.col, rover.row, 4.8, 0, Math.PI * 2)
       ctx.fill()
       ctx.shadowBlur = 0
-      ctx.strokeStyle = riskToHex(rover.risk_level)
-      ctx.lineWidth = 1.4
+      ctx.strokeStyle = ROUTE_CYAN
+      ctx.lineWidth = 1.6
       ctx.stroke()
       ctx.restore()
     }
   }
 
-  drawMarker(ctx, start, '#00e676', 'S')
-  drawMarker(ctx, goal, '#ff1744', 'G')
+  drawMarker(ctx, start, START_MINT, 'S')
+  drawMarker(ctx, goal, GOAL_CORAL, 'G')
   drawHoverCrosshair(ctx, hoverCell)
 }
 
@@ -371,7 +564,7 @@ function drawHoverCrosshair(
   const y = row + 0.5
 
   ctx.save()
-  ctx.strokeStyle = 'rgba(196, 203, 255, 0.18)'
+  ctx.strokeStyle = 'rgba(186, 175, 245, 0.18)'
   ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(x, 0)
@@ -380,7 +573,7 @@ function drawHoverCrosshair(
   ctx.lineTo(CANVAS_SIZE, y)
   ctx.stroke()
 
-  ctx.strokeStyle = 'rgba(245, 247, 255, 0.92)'
+  ctx.strokeStyle = 'rgba(231, 234, 241, 0.92)'
   ctx.lineWidth = 1.2
   ctx.beginPath()
   ctx.moveTo(x - 8, y)
@@ -389,7 +582,7 @@ function drawHoverCrosshair(
   ctx.lineTo(x, y + 8)
   ctx.stroke()
 
-  ctx.fillStyle = '#f5f7ff'
+  ctx.fillStyle = '#e7eaf1'
   ctx.beginPath()
   ctx.arc(x, y, 1.8, 0, Math.PI * 2)
   ctx.fill()
@@ -590,8 +783,8 @@ function drawMarker(
   ctx.fill()
 
   ctx.shadowBlur = 0
-  ctx.fillStyle = '#050507'
-  ctx.font = 'bold 8px IBM Plex Mono, monospace'
+  ctx.fillStyle = '#05070d'
+  ctx.font = 'bold 8px "Azeret Mono", ui-monospace, monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(label, col, row + 0.5)

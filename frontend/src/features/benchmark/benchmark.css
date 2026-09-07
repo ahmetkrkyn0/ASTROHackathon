@@ -1,0 +1,113 @@
+/* MoonPlanBench (D2). Offline evidence, so no loading, no error, no absence:
+   the figures are the same every session. Console rules throughout; the accent
+   is lavender because a benchmark score is a measurement, not a hazard. */
+
+.lp-bm { display: flex; flex-direction: column; gap: 10px; }
+
+.lp-bm-lede {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.lp-bm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.lp-bm-row { display: flex; flex-direction: column; gap: 3px; }
+
+.lp-bm-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+
+.lp-bm-label {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-bm-rate { display: flex; align-items: baseline; gap: 6px; }
+
+.lp-bm-rate b {
+  font-family: var(--font-data);
+  font-weight: 500;
+  font-size: var(--fs-small);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-bm-vs {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
+}
+
+.lp-bm-why {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--text-dimmest);
+}
+
+.lp-bm-match,
+.lp-bm-source {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+
+.lp-bm-match svg,
+.lp-bm-source svg { flex: none; margin-top: 1px; font-size: 12px; }
+
+.lp-bm-match {
+  padding: 7px 9px;
+  border-left: 2px solid var(--mint);
+  border-radius: var(--radius);
+  background: rgba(95, 227, 176, 0.06);
+  color: var(--text-3);
+}
+
+.lp-bm-match svg { color: var(--mint); }
+
+.lp-bm-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-inner);
+  border-left: 2px solid var(--lavender);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.lp-bm-note-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.lp-bm-note-label svg { font-size: 13px; color: var(--lavender); }
+
+.lp-bm-note p {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-dimmest);
+}
+
+.lp-bm-source {
+  font-family: var(--font-data);
+  color: var(--text-dimmest);
+}

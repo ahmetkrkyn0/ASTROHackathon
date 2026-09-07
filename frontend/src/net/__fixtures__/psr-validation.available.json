@@ -1,0 +1,132 @@
+{
+  "threshold": 0.99,
+  "n_cells": 250000,
+  "n_psr": 816,
+  "psr_fraction": 0.003264,
+  "n_dark": 1004,
+  "n_intersection": 691,
+  "n_union": 1129,
+  "jaccard": 0.6120460584588131,
+  "psr_recall": 0.8468137254901961,
+  "dark_precision": 0.6882470119521913,
+  "false_positive_fraction": 0.3117529880478087,
+  "mean_shadow_inside_psr": 0.9772627797050804,
+  "mean_shadow_outside_psr": 0.5216119836588179,
+  "thermal_min_median_inside_psr": -183.14999389648438,
+  "thermal_min_median_outside_psr": -32.8000602722168,
+  "product": "LPSR_80S_20MPP_ADJ",
+  "resolution_m": 20,
+  "product_url": "https://pgda.gsfc.nasa.gov/products/90",
+  "psr_meta": {
+    "layer": "psr",
+    "validity": "MEASURED",
+    "product": "LPSR_80S_20MPP_ADJ",
+    "product_url": "https://pgda.gsfc.nasa.gov/products/90",
+    "data_doi": "10.60903/gsfcpgda-lola-spole",
+    "file_url": "https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LPSR_80S_20MPP_ADJ.TIF",
+    "resolution_m": 20,
+    "product_feature_count": 506349,
+    "units": "boolean (1.0 inside a PSR)",
+    "fetched_utc": "2026-09-06T22:25:35Z",
+    "raster": {
+      "url": "https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LPSR_80S_20MPP_ADJ.TIF",
+      "crs_wkt": "PROJCS[\"Moon (2015) - Sphere / Ocentric / South Polar\",GEOGCS[\"Moon (2015) - Sphere / Ocentric\",DATUM[\"Moon (2015) - Sphere\",SPHEROID[\"Moon (2015) - Sphere\",1737400,0]],PRIMEM[\"Reference Meridian\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]]],PROJECTION[\"Polar_Stereographic\"],PARAMETER[\"latitude_of_origin\",-90],PARAMETER[\"central_meridian\",0],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1],AXIS[\"Easting\",NORTH],AXIS[\"Northing\",NORTH]]",
+      "transform": [
+        20.0,
+        0.0,
+        -304000.0,
+        0.0,
+        -20.0,
+        304000.0
+      ],
+      "resolution_m": 20.0,
+      "shape": [
+        30400,
+        30400
+      ],
+      "dtype": "float32",
+      "nodata": null,
+      "tiled": true,
+      "block_shape": [
+        512,
+        512
+      ],
+      "compression": "DEFLATE",
+      "tags": {
+        "NC_GLOBAL#Conventions": "CF-1.7",
+        "NC_GLOBAL#GMT_version": "6.5.0_daaa813_2022.09.22 [64-bit]",
+        "NC_GLOBAL#node_offset": "1",
+        "NC_GLOBAL#title": "Produced by grdcut",
+        "x#actual_range": "{-304000,304000}",
+        "x#axis": "X",
+        "x#long_name": "x",
+        "y#actual_range": "{-304000,304000}",
+        "y#axis": "Y",
+        "y#long_name": "y",
+        "z#actual_range": "{0,1}",
+        "z#long_name": "z",
+        "z#_FillValue": "nan",
+        "AREA_OR_POINT": "Area"
+      }
+    },
+    "window": {
+      "row0": 14420,
+      "col0": 13195,
+      "rows": 135,
+      "cols": 135,
+      "pad_px": 5,
+      "transform": [
+        20.0,
+        0.0,
+        -40100.0,
+        0.0,
+        -20.0,
+        15600.0
+      ],
+      "seconds": 0.5
+    },
+    "crs_match": {
+      "same_projection": true,
+      "grid_crs_name": "unnamed",
+      "product_crs_name": "Moon (2015) - Sphere / Ocentric / South Polar",
+      "rule": "projection parameters compared (proj, lat_0, lon_0, x_0, y_0, sphere radius); names ignored"
+    },
+    "destination": {
+      "transform": [
+        5.0,
+        0.0,
+        -40000.0,
+        0.0,
+        -5.0,
+        15500.0
+      ],
+      "resolution_m": 5.0,
+      "shape": [
+        500,
+        500
+      ],
+      "origin_rule": "metadata origin is the upper-left CORNER of cell (0, 0), as the Site11 TIF transform gives it"
+    },
+    "resampling": "nearest",
+    "n_psr_cells": 816,
+    "psr_fraction": 0.003264,
+    "n_psr_pixels_product": 51,
+    "n_nan_cells": 0,
+    "claim": "PGDA LPSR_80S_20MPP_ADJ: NASA's MEASURED permanently-shadowed-region map at 20 m/px, nearest-neighbour on the 5 m grid (each 5 m cell carries the value of the 20 m pixel that contains it). It is NOT a planning input -- VIPER's science targets are inside PSRs and the thermal gate already blocks them -- but a layer, a cell-card field and a check of our own shadow_ratio: the overlap numbers are measured on this window and reported as they come out.",
+    "references": [
+      "Barker, M. K. et al. (2023), A New View of the Lunar South Pole from LOLA, Planet. Sci. J. 4:183, doi:10.3847/PSJ/acf3e1",
+      "NASA GSFC PGDA product 90 (LDRM roughness, LDSM slope, LPSR PSR maps), https://pgda.gsfc.nasa.gov/products/90, data DOI 10.60903/gsfcpgda-lola-spole",
+      "Large-scale Roughness Properties of the Lunar North and South Polar Regions, Planet. Sci. J. (2025), doi:10.3847/PSJ/adbc9d",
+      "Kreslavsky, M. A. et al. (2013), Lunar topographic roughness maps from LOLA data, Icarus 226",
+      "Rosenburg, M. A. et al. (2011), Global surface slopes and roughness of the Moon from LOLA, JGR 116, E02001",
+      "Powell, T. M. et al. (2023), Diviner rock abundance -- coverage limited to +-80 latitude, JGR Planets 128 (why rock abundance is NOT used here)"
+    ],
+    "built_by": "scripts/build_roughness_cache.py"
+  },
+  "validity": {
+    "psr": "MEASURED",
+    "shadow_ratio": "DERIVED"
+  },
+  "claim": "PGDA LPSR_80S_20MPP_ADJ: NASA's MEASURED permanently-shadowed-region map at 20 m/px, nearest-neighbour on the 5 m grid (each 5 m cell carries the value of the 20 m pixel that contains it). It is NOT a planning input -- VIPER's science targets are inside PSRs and the thermal gate already blocks them -- but a layer, a cell-card field and a check of our own shadow_ratio: the overlap numbers are measured on this window and reported as they come out.",
+  "reading": "jaccard is the overlap of the two sets; psr_recall the share of NASA's PSR cells our model calls dark; dark_precision the share of our dark cells that NASA calls PSR (1 - false_positive_fraction). The mask is 20 m/px on a 5 m grid, so a few-cell disagreement at every PSR edge is the resolution ratio, not a model error."
+}

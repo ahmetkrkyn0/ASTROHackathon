@@ -8,6 +8,7 @@ import numpy as np
 from app.traversability import (
     compute_traversability,
     compute_traversability_bool,
+    weakest_validity,
     THERMAL_MIN_TRAVERSABLE_C,
 )
 from app.constants import SLOPE_MAX_DEG
@@ -98,6 +99,24 @@ print("\n=== Constants consistency ===")
 
 check("SLOPE_MAX_DEG == 25", SLOPE_MAX_DEG == 25)
 check("THERMAL_MIN == -150", THERMAL_MIN_TRAVERSABLE_C == -150.0)
+
+
+# ── 7. weakest_validity ─────────────────────────────────────────────────────
+print("\n=== weakest_validity ===")
+
+check("MEASURED+SYNTHETIC -> SYNTHETIC",
+      weakest_validity("MEASURED", "SYNTHETIC") == "SYNTHETIC")
+check("DERIVED+MODEL -> DERIVED",
+      weakest_validity("DERIVED", "MODEL") == "DERIVED")
+check("single value is itself",
+      weakest_validity("MODEL") == "MODEL")
+check("unknown value ranks weakest",
+      weakest_validity("MEASURED", "SOMETHING_UNKNOWN") == "SOMETHING_UNKNOWN")
+try:
+    weakest_validity()
+    check("empty call raises ValueError", False)
+except ValueError:
+    check("empty call raises ValueError", True)
 
 
 # ── Summary ────────────────────────────────────────────────────────────────

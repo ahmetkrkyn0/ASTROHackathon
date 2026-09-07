@@ -1,0 +1,114 @@
+{
+  "rover_id": "lpr_1",
+  "rover_name": "LPR-1 (Default)",
+  "start_utc": "2027-05-30T00:00:00",
+  "t_hours": 0.0,
+  "soc_pct": 1.0,
+  "goal": [
+    140,
+    140
+  ],
+  "survival_model": {
+    "model": "reach_avoid_value_iteration_v1",
+    "validity": "MODEL",
+    "step_hours": 0.316091,
+    "slices_per_bin": 1,
+    "n_bins": 76,
+    "horizon_hours": 24.0229,
+    "n_soc_bins": 16,
+    "soc_bin_wh": 338.75,
+    "grid": [
+      125,
+      125
+    ],
+    "n_states": 19000000,
+    "nbytes": 96250000,
+    "safe_set": "leg",
+    "safe_cells": 198,
+    "failure_model": {
+      "rate_per_km": 0.2,
+      "recovery_h": 10.0,
+      "source": "assumption: Lamarre, Malhotra, Kelly -- Recovery Policies for Safe Exploration of Lunar PSRs (Acta Astronautica 2023, arXiv 2307.16786) experiment 3 and Safe Mission-Level Path Planning (IEEE AERO 2024, arXiv 2401.08558) Table II: Poisson faults at 1 per 5 000 m driven, 36 000 s to recover; no rover profile in this catalogue publishes either number",
+      "outcomes": "no fault / fault in the first half (hold at the origin) / fault in the second half (hold at the destination)"
+    },
+    "compute_s": 116.318,
+    "provenance": {
+      "shadow_model": {
+        "model": "spice_horizon",
+        "time_varying": true,
+        "start_utc": "2027-05-30T00:00:00"
+      },
+      "shadow_extension": {
+        "model": "spice_horizon",
+        "time_varying": true,
+        "start_utc": "2027-05-30T20:13:47",
+        "n_slices": 12
+      },
+      "haven_model": {
+        "model": "spice_horizon",
+        "h_max_shadow_h": 50.0,
+        "coarse_safe_haven_cells": 197
+      },
+      "start_utc": "2027-05-30T00:00:00",
+      "plan_horizon_hours": 24.0229,
+      "coarsen": 4,
+      "rover_id": "lpr_1"
+    },
+    "shadow_model": {
+      "model": "spice_horizon",
+      "time_varying": true,
+      "start_utc": "2027-05-30T00:00:00"
+    },
+    "haven_model": {
+      "model": "spice_horizon",
+      "h_max_shadow_h": 50.0,
+      "coarse_safe_haven_cells": 197
+    }
+  },
+  "summary": {
+    "traversable_blocks": 8623,
+    "mean_p_safe": 0.675932,
+    "fraction_at_least_0_95": 0.530558,
+    "fraction_at_least_0_5": 0.714369,
+    "fraction_zero": 0.2854,
+    "time_bin": [
+      0,
+      0
+    ],
+    "soc_bin": 15
+  },
+  "grid": {
+    "rows": 125,
+    "cols": 125,
+    "resolution_m": 20.0,
+    "coarsen": 4,
+    "downsample": 4
+  },
+  "fields": {
+    "p_safe": {
+      "units": "fraction",
+      "min": 0.0,
+      "max": 1.0,
+      "nodata": 7002,
+      "binary_url": "/api/survival?start_utc=2027-05-30T00%3A00%3A00&rover_id=lpr_1&horizon_hours=24.0&soc_pct=1.0&t_hours=0.0&coarsen=4&safe_set=leg&soc_bins=16&format=f32&field=p_safe&goal_row=140&goal_col=140"
+    },
+    "best_action": {
+      "units": "code",
+      "min": 0.0,
+      "max": 255.0,
+      "nodata": 7002,
+      "binary_url": "/api/survival?start_utc=2027-05-30T00%3A00%3A00&rover_id=lpr_1&horizon_hours=24.0&soc_pct=1.0&t_hours=0.0&coarsen=4&safe_set=leg&soc_bins=16&format=f32&field=best_action&goal_row=140&goal_col=140"
+    }
+  },
+  "binary_format": {
+    "dtype": "float32",
+    "endian": "little",
+    "order": "row-major",
+    "shape": [
+      125,
+      125
+    ],
+    "nodata": "NaN"
+  },
+  "claim": "MODEL: a reach-avoid value iteration under an ASSUMED Poisson fault model (rate and recovery time are Lamarre et al.'s experiment values, not a rover specification) on a coarsened grid with a coarsened time axis; P_safe is the success probability of the best policy the discretised model can express: the charge is read by linear interpolation between SOC bin centres (Lamarre's 'interpolation map', unbiased in expectation -- his conservative lower-bin map charges a whole bin per 20 m move here and is unusable), the time by the worse of the two neighbouring bins, and every action takes at least one bin (the field's clock is slower than the rover's). Conservativeness is therefore EMPIRICAL, checked against a Monte Carlo of the policy in continuous time, never assumed; P_safe is never a measured rate. The default safe set (goal or haven) is NOT Lamarre's haven-only set: on Site11 LPR-1 has no haven at any probed epoch. Lamarre's numbers (41.5 M states, beta 2 percent -> 1.5 percent realised, +0.5 km and +2 h for the risk-bounded plan) are quoted from the papers, not reproduced."
+}

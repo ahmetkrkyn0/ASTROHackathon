@@ -10,16 +10,21 @@ from . import constants as C
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 SCENARIOS_DIR = os.path.join(DATA_DIR, "scenarios")
 
-# Weights and constraints frozen at v3.2 spec (docs/lunapath_referans_belgesi_2.md §5.2)
+# Weights and constraints frozen at v3.2 spec (docs/archive/lunapath_referans_belgesi_2.md §5.2).
+# C4 adds the fifth criterion, w_roughness, to every profile at the catalogue
+# default: no profile has a published roughness weighting, so none is invented
+# per profile, and the four frozen weights are NOT rescaled (their unit sum was
+# a convention, not a constraint the planner reads; see the C4 spec).
 MISSION_PROFILES: dict[str, dict] = {
     "balanced": {
-        "name": "Dengeli Kesif",
-        "description": "Tum riskleri dengeli sekilde dikkate alan standart mod.",
+        "name": "Balanced Recon",
+        "description": "Standard mode; weighs every risk evenly.",
         "weights": {
             "w_slope": C.W_SLOPE,
             "w_energy": C.W_ENERGY,
             "w_shadow": C.W_SHADOW,
             "w_thermal": C.W_THERMAL,
+            "w_roughness": C.W_ROUGHNESS,
         },
         "constraints": {
             "max_shadow_h": 40.0,
@@ -30,13 +35,14 @@ MISSION_PROFILES: dict[str, dict] = {
         "color": "#3B82F6",
     },
     "energy_saver": {
-        "name": "Enerji Tasarrufu",
-        "description": "Daha uzun rotalari kabul edip bataryayi korumaya odaklanir.",
+        "name": "Energy Saver",
+        "description": "Accepts a longer route to protect the battery.",
         "weights": {
             "w_slope": 0.250,
             "w_energy": 0.450,
             "w_shadow": 0.150,
             "w_thermal": 0.150,
+            "w_roughness": C.W_ROUGHNESS,
         },
         "constraints": {
             "max_shadow_h": 30.0,
@@ -47,13 +53,14 @@ MISSION_PROFILES: dict[str, dict] = {
         "color": "#22C55E",
     },
     "fast_recon": {
-        "name": "Hizli Kesif",
-        "description": "Daha agresif, daha kisa rota tercih eden profil.",
+        "name": "Fast Recon",
+        "description": "More aggressive; prefers the shorter route.",
         "weights": {
             "w_slope": 0.500,
             "w_energy": 0.150,
             "w_shadow": 0.100,
             "w_thermal": 0.250,
+            "w_roughness": C.W_ROUGHNESS,
         },
         "constraints": {
             "max_shadow_h": 50.0,
@@ -64,13 +71,14 @@ MISSION_PROFILES: dict[str, dict] = {
         "color": "#EF4444",
     },
     "shadow_traverse": {
-        "name": "Golge Gecis",
-        "description": "Golgeli bolgeden gecmek zorunlu — termal guvenlik kritik.",
+        "name": "Shadow Traverse",
+        "description": "Crossing shadow is unavoidable; thermal safety is critical.",
         "weights": {
             "w_slope": 0.200,
             "w_energy": 0.150,
             "w_shadow": 0.300,
             "w_thermal": 0.350,
+            "w_roughness": C.W_ROUGHNESS,
         },
         "constraints": {
             "max_shadow_h": 45.0,
@@ -83,12 +91,109 @@ MISSION_PROFILES: dict[str, dict] = {
 }
 
 
+# Which constraint keys the PLANNER can enforce during the search, and
+# which can only be checked against a simulated route afterwards. Declared
+# so /api/profiles can say so instead of publishing four numbers that look
+# equally binding. Three of the four steered nothing at all and appeared
+# nowhere in the codebase outside this file. (Round 4 review, M-4.)
+ENFORCED_CONSTRAINTS: tuple[str, ...] = ("max_slope_deg",)
+VERIFIED_CONSTRAINTS: tuple[str, ...] = (
+    "max_shadow_h",
+    "max_energy_wh",
+    "min_soc",
+)
+
+
+def check_profile_constraints(
+    profile: dict, summary: dict | None
+) -> dict[str, dict]:
+    """Verdict per declared constraint, against a simulated route.
+
+    ``max_slope_deg`` is enforced inside the search, so its verdict is
+    structural. The other three are path-dependent -- they need a battery
+    trace -- so they are checked here, after the fact, and reported with
+    ``checked: False`` when no simulation was run rather than silently
+    omitted.
+    """
+    constraints = profile.get("constraints", {})
+    verdicts: dict[str, dict] = {
+        "max_slope_deg": {
+            "limit": constraints.get("max_slope_deg"),
+            "enforced_in_search": True,
+            "checked": True,
+            "actual": None,
+            "satisfied": True,
+        }
+    }
+
+    def entry(limit, actual, satisfied):
+        return {
+            "limit": limit,
+            "enforced_in_search": False,
+            "checked": summary is not None and actual is not None,
+            "actual": actual,
+            "satisfied": satisfied,
+        }
+
+    shadow_limit = constraints.get("max_shadow_h")
+    shadow_actual = None if summary is None else summary.get("max_continuous_shadow_h")
+    verdicts["max_shadow_h"] = entry(
+        shadow_limit,
+        shadow_actual,
+        None
+        if shadow_actual is None or shadow_limit is None
+        else bool(shadow_actual <= shadow_limit),
+    )
+
+    energy_limit = constraints.get("max_energy_wh")
+    energy_actual = (
+        None if summary is None else summary.get("total_energy_consumed_wh")
+    )
+    verdicts["max_energy_wh"] = entry(
+        energy_limit,
+        energy_actual,
+        None
+        if energy_actual is None or energy_limit is None
+        else bool(energy_actual <= energy_limit),
+    )
+
+    soc_limit = constraints.get("min_soc")
+    soc_actual_pct = None if summary is None else summary.get("min_battery_pct")
+    soc_actual = None if soc_actual_pct is None else soc_actual_pct / 100.0
+    verdicts["min_soc"] = entry(
+        soc_limit,
+        None if soc_actual is None else round(soc_actual, 4),
+        None
+        if soc_actual is None or soc_limit is None
+        else bool(soc_actual >= soc_limit),
+    )
+    return verdicts
+
+
 def get_profile(profile_id: str) -> dict | None:
     return MISSION_PROFILES.get(profile_id)
 
 
 def list_profiles() -> dict[str, dict]:
-    return MISSION_PROFILES
+    """Mission profiles, with each constraint labelled by how it is applied.
+
+    A profile used to publish four constraints of which the planner applied
+    one, with nothing in the payload distinguishing them. (Round 4, M-4.)
+    """
+    return {
+        profile_id: {
+            **profile,
+            "constraint_handling": {
+                key: (
+                    "enforced_in_search"
+                    if key in ENFORCED_CONSTRAINTS
+                    else "verified_after_simulation"
+                )
+                for key in profile.get("constraints", {})
+            },
+        }
+        for profile_id, profile in MISSION_PROFILES.items()
+    }
 
 
 def load_scenario(scenario_id: str) -> dict | None:
@@ -108,8 +213,15 @@ def list_scenarios() -> list[str]:
     ]
 
 
-def compare_results(results: list[dict]) -> dict:
-    """Return a lightweight comparison summary for multiple paths."""
+def compare_results(results: list[dict], rover: dict | None = None) -> dict:
+    """Return a lightweight comparison summary for multiple paths.
+
+    *rover* supplies the slope limit the safety key normalises against. It
+    was hardcoded to 25.0 -- lpr_1's limit -- so a comparison run for
+    nasa_viper or cnsa_yutu_2 (both 20 deg) scored their slopes against a
+    ceiling neither rover has. (Round 3 review, L-11.)
+    """
+    slope_limit = float((rover or C.get_rover())["slope_max_deg"])
     valid = [result for result in results if not result.get("error")]
     if not valid:
         return {
@@ -120,15 +232,29 @@ def compare_results(results: list[dict]) -> dict:
         }
 
     shortest = min(valid, key=lambda result: result["metrics"]["total_distance_m"])
+    # total_shadow_hours is deliberately absent from the safety key: like
+    # total_energy_wh below, _compute_path_metrics hardcodes it to 0.0 in
+    # fast mode, so including it added a constant to every candidate --
+    # no ranking effect, but it implied shadow exposure was weighed.
+    # Both terms are dimensionless in [0, 1]: max_thermal_risk is already an
+    # MRU penalty, and the slope term is normalised by the rover's own limit.
+    # Equal weight is a deliberate, stated choice, not an accident of units.
     safest = min(
         valid,
         key=lambda result: (
-            result["metrics"]["total_shadow_hours"]
-            + result["metrics"]["max_thermal_risk"]
-            + result["metrics"]["max_slope_deg"] / 25.0
+            result["metrics"]["max_thermal_risk"]
+            + result["metrics"]["max_slope_deg"] / slope_limit
         ),
     )
-    efficient = min(valid, key=lambda result: result["metrics"]["total_energy_wh"])
+    # Efficiency ranks on total_weighted_cost, the multi-criteria cost the
+    # planner actually minimised. It previously ranked on total_energy_wh,
+    # which _compute_path_metrics hardcodes to 0.0 for every path ("not
+    # tracked in fast mode") -- so min() returned whichever profile came
+    # first in the list and the response asserted it "uses the least
+    # energy". A fabricated energy claim from a constant-zero metric is
+    # exactly what the layer_validity discipline exists to prevent.
+    # (Round 2 review, H-2.)
+    efficient = min(valid, key=lambda result: result["metrics"]["total_weighted_cost"])
 
     return {
         "shortest_profile": shortest.get("profile_id"),
@@ -136,6 +262,8 @@ def compare_results(results: list[dict]) -> dict:
         "most_efficient_profile": efficient.get("profile_id"),
         "recommendation": (
             f"{safest.get('profile_id')} minimizes the weighted safety envelope; "
-            f"{efficient.get('profile_id')} uses the least energy."
+            f"{efficient.get('profile_id')} has the lowest weighted traverse cost. "
+            "Energy and shadow totals are not tracked in fast mode, so neither "
+            "ranking is an energy claim."
         ),
     }

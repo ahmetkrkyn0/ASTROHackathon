@@ -1,29 +1,351 @@
+/* ── LUNAPATH DESIGN SYSTEM ─────────────────────────────────────────────────
+   The one palette, taken value-for-value from the Mission Workstation design
+   canvas. NASA/JPL mission control, not a cyberpunk HUD: flat opaque surfaces,
+   1px hairlines, one restrained lavender accent, and colour that only ever
+   means one thing.
+
+   Three rules the canvas enforces and this file has to keep:
+     - No glassmorphism. Surfaces are opaque; depth comes from the hairline
+       between two flat greys, never from blur or a drop shadow.
+     - 2px radius. Engineering software, not a consumer app.
+     - Mono is for measured data only -- coordinates, IDs, timestamps,
+       telemetry -- never for labels or prose.
+
+   Legacy names (--surface-*, --glass*, --terminator, --umbra, --primary) are
+   kept as aliases onto the new values so every rule written against them
+   retones with the palette instead of being edited one at a time. */
+/* ── Type ───────────────────────────────────────────────────────────────────
+   Self-hosted, because a demo cannot depend on reaching fonts.googleapis.com.
+   On a dead or captive network the Google-hosted version failed silently and
+   the whole interface fell back to system-ui, which is the one moment the
+   typography has to hold.
+
+   All three are variable fonts, one file per subset rather than one per
+   weight: `font-weight: 300 800` is a range the file actually covers, so a
+   rule asking for 300 or 800 now gets a drawn cut instead of a weight the
+   browser fakes. latin-ext carries the Turkish letters and is fetched only
+   when a glyph needs it.
+
+   Downloaded from Google Fonts (Archivo v25, Archivo Narrow v35, Azeret Mono
+   v21) with `fonts/README.md` recording how. */
+
+/* Archivo -- latin */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/archivo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Archivo -- latin-ext */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/archivo-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Archivo Narrow -- latin */
+@font-face {
+  font-family: 'Archivo Narrow';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/archivo-narrow-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Archivo Narrow -- latin-ext */
+@font-face {
+  font-family: 'Archivo Narrow';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/archivo-narrow-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Azeret Mono -- latin */
+@font-face {
+  font-family: 'Azeret Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/azeret-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Azeret Mono -- latin-ext */
+@font-face {
+  font-family: 'Azeret Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('/fonts/azeret-mono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 :root {
-  --surface-dim: #13131b;
-  --surface-lowest: #0d0d16;
-  --surface-low: #191923;
-  --surface-container: #1f1f28;
-  --surface-high: #292932;
-  --surface-highest: #34343d;
-  --outline: #464651;
-  --outline-soft: rgba(145, 143, 157, 0.2);
-  --text: #e4e1ed;
-  --text-muted: #c7c5d3;
-  --primary: #c2c1ff;
-  --primary-container: #a0a0ff;
-  --secondary: #adc6ff;
-  --safe: #00e676;
-  --warning: #ffea00;
-  --danger: #ff6d00;
-  --critical: #ff1744;
-  --font-body: 'Manrope', 'Segoe UI', sans-serif;
-  --font-display: 'Outfit', 'Segoe UI', sans-serif;
-  --font-data: 'IBM Plex Mono', 'Cascadia Code', monospace;
+  /* Ground. Four steps, all opaque: page, rail/panel, card, card inset. */
+  --void: #05070d;
+  --bg-surface: #080b12;
+  --bg-card: #0c1018;
+  --bg-inset: #0a0e16;
+  --bg-raised: #0e131d;
+
+  /* Lines carry the structure the shadows used to. */
+  --line: #161b27;
+  --line-card: #1d2432;
+  --line-inner: #1a202c;
+  /* 3.30:1 against --bg-card. WCAG 1.4.11 asks 3:1 of any border that is the
+     only thing identifying a control, and at #262f40 this was 1.42. The
+     purely decorative lines above are exempt and keep their weight; this one
+     draws buttons and inputs. */
+  --line-button: #58658a;
+  --line-accent: #322b57;
+  --line-accent-hover: #4a4276;
+
+  /* Text ramp: primary, secondary, tertiary, muted, dim, dimmest. */
+  --text: #e7eaf1;
+  --text-2: #c8cddb;
+  --text-3: #98a1b4;
+  --text-muted: #8b94a6;
+  --text-muted-2: #7b8497;
+  /* The bottom of the ramp is set by WCAG AA, not by taste. Measured against
+     --bg-card (#0c1018), the old values were --text-dim 4.22:1, --text-dim-2
+     3.35:1 and --text-dimmest 2.54:1 -- all under the 4.5:1 AA needs for text,
+     and none of them qualifies for the large-text exception -- that starts at
+     18.66px, and nothing in this ramp is drawn near it. --text-dim-2 alone
+     appears 46 times, including the chart axis labels.
+
+     New values, same hue and the same three-step separation, lifted until each
+     clears 4.5:1 on every ground: 5.35, 4.95 and 4.61 at worst. Nothing below
+     --text-dimmest exists, and --text-dimmest is the floor rather than a
+     decorative grey. */
+  --text-dim: #808a9d;
+  --text-dim-2: #7b8497;
+  /* #737d90 cleared 4.5:1 on every ground except --bg-raised, where it landed
+     at 4.48 -- the floor of the ramp failing on the lightest surface it can
+     be drawn on. Same hue and saturation, two steps up, so the ramp keeps its
+     shape and the bottom rung now clears AA everywhere: 4.61 at worst. */
+  --text-dimmest: #757f92;
+
+  /* Accents. One colour, one meaning -- section 7 of the design doc. */
+  /* Both of these were at 100% saturation, which the dark-mode guidance
+     advises against: on a near-black ground a fully saturated accent is the
+     most tiring thing on the screen. Same hue and lightness, saturation
+     brought inside the band the other accents already occupy (58-85%).
+     Contrast is unchanged or slightly better. */
+  --lavender: #baaff5;
+  --lavender-bright: #cfc7ff;
+  --mint: #5fe3b0;
+  --mint-text: #93dcc4;
+  --cyan: #4fd8f0;
+  --cyan-text: #8fe6f5;
+  --coral: #ed856e;
+  --coral-text: #ffa48d;
+
+  /* Risk ramp: safe, caution, high, critical. Readings, not decoration.
+
+     Re-derived from a constrained search over 800,000 candidates, because the
+     old green/yellow/orange/red ramp was not readable. Measured separation of
+     its weakest pair, across normal vision and the three dichromacies, was
+     15.4 on a 0-100 scale -- under 25 is "the same colour". `low` and `crit`,
+     the one distinction this product exists to draw, fell from 95.5 to 24.8
+     under deuteranopia, which affects about 6% of men.
+
+     What changed and why:
+       - `low` left the green band for blue (H211). Green sits beside red
+         under protan/deutan simulation; blue does not. This alone lifts
+         low/crit from 24.8 to 69.8.
+       - `crit` moved off the orange-red boundary toward true red (H5).
+       - The warm trio was spread as far as a four-step traffic-light ramp
+         allows.
+
+     Weakest pair is now 27.8 (was 15.4). All four clear WCAG AA on --bg-card
+     (5.15 to 12.58), and `low` stays 45.2 from --cyan so a safe segment is
+     not mistaken for the shadow layer it is drawn over.
+
+     27.8 is better, not sufficient: a four-step ramp on one colour channel has
+     a mathematical ceiling (42.6 measured, under this metaphor). That is why
+     the map route also carries a dash pattern -- colour is never the only
+     channel. See riskToDash in colormap.ts. */
+  --risk-low: #4a8fd8;
+  --risk-med: #e3d548;
+  --risk-high: #d69770;
+  --risk-crit: #ed4b3d;
+
+  --radius: 2px;
+
+  /* The only two shadows in the system, both taken from the canvas. Elevation
+     is for layers that genuinely float over the map -- a popover and a drawer.
+     Everything else separates with a hairline. There are no coloured shadows:
+     a glow is decoration pretending to be depth. */
+  --shadow-pop: 0 12px 28px rgba(0, 0, 0, 0.55);
+  --shadow-float: 0 20px 46px rgba(0, 0, 0, 0.6);
+
+  /* ── Type scale ────────────────────────────────────────────────────────
+     Seven steps, and nothing outside them. The cockpit had grown twenty
+     distinct font sizes across 306 declarations -- 8, 9, 9.5, 10, 10.5, 11,
+     11.5, 12 ... -- with two thirds of them packed between 9px and 11px. That
+     is not a scale, and it is why some readings were unreadable while others
+     shouted: half-pixel steps are invisible as hierarchy but very visible as
+     inconsistency.
+
+     12px is the FLOOR. Nothing in the interface is smaller, including the
+     uppercase micro-labels, which are the hardest thing on the screen to read
+     -- caps have no ascenders or descenders to help the eye, and 0.2em
+     tracking pulls them further apart.
+
+     The floor was 11px, with --fs-small at 12px one step above it. Those two
+     carried 213 of the 307 declarations in the file -- 69% of the interface
+     -- and a 1px gap is not a step: it is invisible as hierarchy and visible
+     only as inconsistency, which is the same disease the twenty-size cockpit
+     had, in miniature. So micro joins small at 12px. The token stays, because
+     it still says which text is a micro-label, and because 119 call sites
+     asking for --fs-micro are 119 places that would otherwise have to be
+     edited to say --fs-small; what it no longer does is claim a size step
+     that the eye cannot see.
+
+     A real step below 12px is not available: 11px was already the floor for
+     tracked caps, and going down rather than up is the wrong direction. */
+  --fs-micro: 12px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-strong: 15px;
+  --fs-value: 16px;
+  --fs-title: 18px;
+  --fs-display: 24px;
+  /* The landing headline only. It is the one place a display size is the
+     content rather than a label for it. */
+  --fs-hero: 30px;
+
+  /* ── Tracking ──────────────────────────────────────────────────────────
+     Five steps, matching the type scale's discipline. There were twenty-two
+     values here, which is the same disease as twenty font sizes: 0.13em and
+     0.14em are not two decisions, they are one decision made twice.
+
+     Tracking is INVERSELY related to size, and that is why these came down
+     when the sizes went up. The old 0.18-0.22em on uppercase labels was
+     compensating for 9px type; at 11px the same tracking is just wide, and it
+     is what pushed "MISSION SETUP" and "MISSION CONTEXT" onto two lines in a
+     fixed-width rail. */
+  --track-tight: 0.02em;
+  --track-normal: 0.04em;
+  --track-label: 0.06em;
+  --track-caps: 0.08em;
+  /* The landing eyebrow only, where the line is short and the width is the
+     point. */
+  --track-hero: 0.24em;
+
+  /* Three roles, three faces, and each one earns its place.
+
+     Archivo is a grotesque built for dense, high-performance settings; it
+     replaces Inter, which is the default face of generated interfaces and had
+     no argument for it beyond being reached for. Archivo Narrow is not a
+     stylistic flourish -- the rails are a fixed 250px and labels kept breaking
+     to two lines, so the condensed cut buys real horizontal room. Azeret Mono
+     is for MEASURED VALUES ONLY: coordinates, telemetry, identifiers,
+     timestamps. Never for a label. A monospace face on small labels is
+     decoration pretending to be engineering, and it was applied to 86 rules
+     here before this. */
+  --font-body: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-label: 'Archivo Narrow', 'Archivo', system-ui, sans-serif;
+  --font-data: 'Azeret Mono', ui-monospace, 'Cascadia Code', monospace;
+
+  /* ── Aliases ──────────────────────────────────────────────────────────── */
+  --surface-dim: var(--void);
+  --surface-lowest: var(--bg-surface);
+  --surface-low: var(--bg-card);
+  --surface-container: var(--bg-raised);
+  --surface-high: #141924;
+  --surface-highest: #1c2230;
+  --outline: var(--line-button);
+  --outline-soft: var(--line-card);
+  --hairline: var(--line);
+  --primary: var(--lavender);
+  --primary-container: var(--lavender-bright);
+  --secondary: #8fa0c0;
+  --safe: var(--risk-low);
+  --warning: var(--risk-med);
+  --danger: var(--risk-high);
+  --critical: var(--risk-crit);
+
+  /* The lit/shadowed axis the old deck encoded. Kept as an axis, retuned onto
+     the canvas: sun reads warm, permanent shadow reads cold cyan. */
+  --terminator: var(--risk-med);
+  --terminator-dim: rgba(227, 213, 72, 0.14);
+  --umbra: var(--cyan);
+  --umbra-dim: rgba(79, 216, 240, 0.14);
+
+  /* Panels floating over the map. Near-opaque, and deliberately NOT blurred:
+     the canvas darkens what is behind a modal, it never frosts it. */
+  --glass: rgba(8, 11, 18, 0.92);
+  --glass-strong: rgba(8, 11, 18, 0.96);
 }
 
 * {
   box-sizing: border-box;
 }
+
+/* Content for assistive technology only: present in the accessibility tree,
+   absent from the visual design. `display: none` would remove it from both. */
+.lp-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Focus visibility (WCAG 2.4.7) ────────────────────────────────────────
+   One rule for the whole application. There were five :focus declarations in
+   7,138 lines of CSS, so most of the 42 buttons fell back to the browser's
+   default ring -- which on this near-black ground is close to invisible.
+
+   :focus-visible, not :focus, so a pointer click does not paint a ring the
+   mouse user never asked for; the keyboard user gets one everywhere. The
+   offset keeps the ring off the control's own 1px border, and the components
+   that already define their own focus treatment still win on specificity. */
+:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+/* -- What a control looks like ---------------------------------------------
+   A button has to read as a button before it is hovered.
+
+   Several did not. .lp-systems-toggle, .lp-dim-btn, .lp-rover-tab, .lp-hud-btn
+   and .toast-dismiss all rested as bare --text-muted or --text-dim-2 on no
+   background, with either no border or one measuring about 1.2:1 against the
+   surface -- under the 3:1 WCAG 1.4.11 asks of a border that is the only thing
+   identifying a control.
+
+   Against their neighbours the problem is sharper than a threshold: those
+   labels sat at 5.2-6.2:1 while the ordinary prose beside them is 12:1, so on
+   several panels the one element that could be pressed was the one drawn most
+   faintly. Everything they said about being interactive, they said on hover --
+   a channel that does not exist on touch, and does not exist before the
+   pointer arrives.
+
+   A resting control now carries three signals instead of none: a faint fill,
+   a --line-button edge -- the token the palette already documents as the one
+   that clears 3:1 because it "draws buttons and inputs", measured at 3.04:1
+   over the new fill -- and a label at --text-2, the same weight as the text
+   around it. Hover is spent on getting brighter rather than on appearing at
+   all. Filled buttons are unaffected; they were never ambiguous. And
+   cursor: pointer is necessary but never sufficient -- it is invisible until
+   the pointer is already there. */
 
 html,
 body,
@@ -32,15 +354,151 @@ body,
   height: 100%;
 }
 
+/* The root element inherits nothing, so without this it computes to the
+   browser's default serif -- invisible in practice, but it means the document
+   has no typeface until <body> supplies one. */
+html {
+  font-family: var(--font-body);
+}
+
+/* <code> falls back to the browser's monospace otherwise, which is a third
+   mono face nobody chose. */
+code,
+kbd,
+samp {
+  font-family: var(--font-data);
+}
+
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at top, rgba(160, 160, 255, 0.08), transparent 30%),
-    linear-gradient(180deg, #151520 0%, #0f1017 100%);
+  /* Flat void rather than a gradient: the backdrop video supplies the
+     luminance now, and a gradient underneath it only showed through as a
+     colour cast on the vignette. */
+  background: var(--void);
   color: var(--text);
   font-family: var(--font-body);
   line-height: 1.5;
   overflow: hidden;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────────
+   Hidden everywhere, not disabled. The platform scrollbar is a wide light
+   gutter that lands on top of flat dark panels and reads as a seam in the
+   layout rather than a control; nothing else in this interface is drawn by
+   the OS. Scrolling itself is untouched -- wheel, trackpad, drag, keyboard
+   and programmatic scrollTo all still work, the track just isn't painted.
+
+   Both properties are needed: `scrollbar-width` covers Firefox and the
+   ::-webkit- pseudo-element covers Chrome, Edge and Safari. The panels that
+   already hid their own (.rail-scroll, .telemetry-scroll, ...) are now saying
+   the same thing twice, which is harmless -- but a panel that *styled* one
+   had to go, because a class beats `*` on specificity and would have kept
+   painting its scrollbar. .chat-log was the only such case. */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* ── Backdrop ───────────────────────────────────────────────────────────────
+   Fixed behind everything, and inert: the console owns every interaction.
+
+   z-index 130 clears the landing screen (120) so the clip is visible from the
+   first frame of the session; the landing's own content sits above it again
+   at 131. Everywhere else the shell (1) is the only thing above 0, so no
+   panel needs its own stacking context. */
+.space-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--void);
+}
+
+.space-backdrop--ambient {
+  z-index: 130;
+}
+
+.space-backdrop--feature {
+  z-index: 130;
+}
+
+.space-backdrop-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: var(--backdrop-opacity, 1);
+  transform: scale(var(--backdrop-scale, 1));
+  transform-origin: center;
+  /* Long enough to read as a deliberate change of scene rather than a flicker,
+     and matched to the landing screen's own 0.75s exit. */
+  transition: opacity 0.75s ease, transform 1.2s ease;
+}
+
+/* Barely inside 1:1. The landing page's own moon is gone, so the clip's disc
+   is the hero and wants to be whole -- the fraction of a percent is only
+   there so the slow settle to `feature` has somewhere to travel, and reads
+   as the scene pushing in when you enter. */
+.space-backdrop--ambient .space-backdrop-media {
+  --backdrop-scale: 1.06;
+}
+
+.space-backdrop-vignette {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.75s ease;
+}
+
+/* During the transition beat the clip is the subject, so the vignette that
+   exists to protect UI legibility gets out of the way. */
+.space-backdrop--feature .space-backdrop-vignette {
+  opacity: 0.45;
+}
+
+/* The landing page reads left-to-right: a column of type on the left, the
+   moon on the right. A flat vertical vignette dims both equally and crushes
+   the disc, so here the scrim leans left -- heavy enough to hold the
+   headline, gone by the time it reaches the subject. Higher specificity than
+   the Tailwind utility on the element, which is what lets it take over. */
+.space-backdrop--ambient .space-backdrop-vignette {
+  background-image:
+    linear-gradient(
+      100deg,
+      rgba(5, 7, 13, 0.94) 0%,
+      rgba(5, 7, 13, 0.82) 26%,
+      rgba(5, 7, 13, 0.32) 52%,
+      rgba(5, 7, 13, 0.08) 72%,
+      rgba(5, 7, 13, 0.28) 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(5, 7, 13, 0.55) 0%,
+      transparent 22%,
+      transparent 74%,
+      rgba(5, 7, 13, 0.7) 100%
+    );
+}
+
+/* The sun, just under the horizon. Kept far dimmer than it wants to be --
+   it is atmosphere, and the amber that carries actual meaning is the rule
+   under the topbar and the primary action. */
+.space-backdrop-terminator {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 38vh;
+  background: radial-gradient(
+    120% 100% at 50% 100%,
+    rgba(227, 213, 72, 0.14),
+    transparent 70%
+  );
 }
 
 button,
@@ -50,14 +508,15 @@ select {
 }
 
 .app-shell {
+  position: relative;
+  z-index: 1;
   height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at top left, rgba(160, 160, 255, 0.06), transparent 24%),
-    radial-gradient(circle at top right, rgba(173, 198, 255, 0.05), transparent 22%),
-    linear-gradient(180deg, rgba(10, 10, 18, 0.96) 0%, rgba(19, 19, 27, 0.98) 100%);
+  /* Transparent: the backdrop is the background now. The old opaque gradient
+     stack is what the video would have been hidden behind. */
+  background: transparent;
   transition: opacity 0.6s ease, transform 0.6s ease, filter 0.6s ease;
   overflow: hidden;
 }
@@ -77,44 +536,50 @@ select {
   filter: blur(0);
 }
 
+/* Above the backdrop clip (130) so the pitch stays readable, but transparent
+   so the clip is what you see behind it -- the sequence starts here. */
 .landing-screen {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 131;
   overflow: hidden;
-  background: #03040a;
+  background: transparent;
   transition: opacity 0.75s ease, transform 0.75s ease, filter 0.75s ease;
 }
 
+/* Pushes into the clip on the way out and hands off to the cinematic beat,
+   which is already running the same footage. */
 .landing-screen.is-exiting {
   opacity: 0;
   transform: scale(1.03);
   filter: blur(10px);
 }
 
-.landing-star-bg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.landing-canvas {
+/* The canvas scrim. Without it the moon runs straight under the headline and
+   the type loses its ground; the gradient holds the left third near-solid,
+   opens over the disc, and closes again at the right edge so the terminator
+   still reads. */
+.landing-screen::before {
+  content: '';
   position: absolute;
   inset: 0;
   z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    rgba(5, 7, 13, 0.97) 0%,
+    rgba(5, 7, 13, 0.88) 34%,
+    rgba(5, 7, 13, 0.3) 66%,
+    rgba(5, 7, 13, 0.55) 100%
+  );
 }
 
 .landing-content {
   position: relative;
   z-index: 2;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
   height: 100%;
-  padding: 34px 42px;
   pointer-events: none;
 }
 
@@ -122,143 +587,146 @@ select {
   pointer-events: auto;
 }
 
-.landing-brand {
+/* ── Status header ── */
+.landing-topline {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 40px;
+  border-bottom: 1px solid rgba(199, 205, 219, 0.06);
 }
 
-.landing-main {
-  flex: 1;
+.landing-brand {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 28px;
-  max-width: min(38rem, 50vw);
-  min-height: 0;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .landing-brand-mark,
 .loading-brand {
-  color: #bcc8ff;
+  color: var(--text);
   font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 0.4em;
+  font-size: var(--fs-value);
+  font-weight: 600;
+  letter-spacing: var(--track-hero);
   text-transform: uppercase;
 }
 
 .landing-brand-sub {
-  color: rgba(205, 211, 255, 0.52);
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  color: var(--text-dim-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+}
+
+.landing-status {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  color: var(--text-dim);
+  /* Prose, so the label face. The coordinate inside it is still a measurement
+     and keeps the data face on its own span. */
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
+}
+
+.landing-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.landing-link-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--mint);
+}
+
+/* ── Pitch ── */
+.landing-main {
+  display: flex;
+  align-items: center;
+  padding: 0 40px;
+  min-height: 0;
 }
 
 .landing-copy {
-  flex-shrink: 1;
+  max-width: 620px;
   min-height: 0;
 }
 
 .landing-kicker,
-.landing-hint,
 .loading-copy,
 .loading-percent {
-  color: rgba(209, 214, 255, 0.62);
-  font-family: var(--font-data);
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  color: var(--lavender);
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
 }
 
 .landing-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
+  margin: 0 0 26px;
 }
 
-.landing-kicker::before {
-  content: '';
-  width: 52px;
-  height: 1px;
-  background: rgba(188, 200, 255, 0.36);
-}
-
+/* Light and set tight, not heavy and set huge. The old h1 ran to 5.7rem at
+   weight 700, which reads as a marketing hero; the canvas asks for a 50px
+   300-weight line, which reads as a document title on an instrument. */
 .landing-copy h1 {
-  margin: 18px 0 14px;
+  margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(2.9rem, 5vw, 5.7rem);
-  font-weight: 700;
-  line-height: 0.98;
-  letter-spacing: -0.04em;
-  max-width: 11ch;
+  font-size: clamp(2rem, 3.2vw, 50px);
+  font-weight: 300;
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+  text-wrap: pretty;
 }
 
 .landing-description {
-  max-width: 31rem;
-  color: rgba(228, 225, 237, 0.82);
-  font-size: clamp(1.02rem, 1.35vw, 1.16rem);
-  line-height: 1.72;
-}
-
-.landing-feature-list {
-  margin-top: 18px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.landing-feature {
-  padding: 9px 12px;
-  background: rgba(10, 11, 20, 0.62);
-  border: 1px solid rgba(173, 198, 255, 0.2);
-  border-radius: 999px;
-  color: rgba(225, 229, 255, 0.86);
-  font-size: 0.92rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  backdrop-filter: blur(16px);
+  margin: 26px 0 0;
+  max-width: 520px;
+  color: var(--text-3);
+  font-size: var(--fs-value);
+  font-weight: 300;
+  line-height: 1.65;
+  text-wrap: pretty;
 }
 
 .landing-actions {
   display: flex;
-  flex-direction: column;
-  gap: 14px;
-  align-items: flex-start;
-  flex-shrink: 0;
+  align-items: center;
+  gap: 18px;
+  margin-top: 40px;
+  flex-wrap: wrap;
 }
 
+/* The one solid-lavender surface in the product. It is the only thing on the
+   landing screen you are meant to press, so it is the only thing that fills. */
 .landing-explore-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 50px;
-  padding: 0 22px;
-  background:
-    linear-gradient(135deg, rgba(173, 198, 255, 0.1), rgba(160, 160, 255, 0.16)),
-    rgba(8, 8, 18, 0.72);
-  border: 1px solid rgba(173, 198, 255, 0.34);
-  border-radius: 14px;
-  color: #d7deff;
+  padding: 13px 26px;
+  background: var(--lavender);
+  border: 0;
+  border-radius: var(--radius);
+  color: #0a0c14;
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  transition:
-    transform 0.24s ease,
-    background 0.24s ease,
-    box-shadow 0.24s ease,
-    border-color 0.24s ease;
-  backdrop-filter: blur(18px);
+  font-size: var(--fs-strong);
+  font-weight: 600;
+  letter-spacing: var(--track-normal);
+  transition: background 140ms ease;
 }
 
 .landing-explore-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  border-color: rgba(209, 214, 255, 0.62);
-  box-shadow: 0 18px 38px rgba(106, 122, 255, 0.18);
+  background: var(--lavender-bright);
+}
+
+.landing-explore-button:active:not(:disabled) {
+  transform: scale(0.985);
 }
 
 .landing-explore-button:disabled {
@@ -266,30 +734,142 @@ select {
   cursor: default;
 }
 
-.loading-screen {
+/* ── Capability footer ── */
+.landing-footline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 40px;
+  border-top: 1px solid rgba(199, 205, 219, 0.06);
+  flex-wrap: wrap;
+}
+
+/* Three parallel capabilities, spaced as a list rather than glued together
+   with middle dots. A '·' between items is punctuation doing a layout job. */
+.landing-capabilities {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  color: var(--text-muted);
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
+}
+
+/* One orchestrated entrance rather than effects scattered over the page: the
+   header settles, then the pitch rises under it. */
+@keyframes landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.landing-topline,
+.landing-copy > *,
+.landing-footline {
+  animation: landing-rise 0.72s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.landing-topline {
+  animation-delay: 0.05s;
+}
+
+.landing-copy > .landing-kicker {
+  animation-delay: 0.24s;
+}
+
+.landing-copy > h1 {
+  animation-delay: 0.34s;
+}
+
+.landing-copy > .landing-description {
+  animation-delay: 0.46s;
+}
+
+.landing-copy > .landing-actions {
+  animation-delay: 0.58s;
+}
+
+.landing-footline {
+  animation-delay: 0.7s;
+}
+
+/* The entrance is decoration; nobody should have to sit through it twice, and
+   for a viewer who asked for less motion it is just latency. */
+@media (prefers-reduced-motion: reduce) {
+  .landing-topline,
+  .landing-copy > *,
+  .landing-footline {
+    animation: none;
+  }
+}
+
+/* The transition beat. Above the backdrop (130) rather than opaque over it:
+   the clip is the screen here, and this is only the text on top of it. */
+.cinematic-screen {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  z-index: 131;
   display: grid;
-  place-items: center;
-  background: rgba(2, 3, 8, 0.94);
+  place-items: end center;
+  padding-bottom: 12vh;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition: opacity 0.45s ease, visibility 0.45s ease;
 }
 
-.loading-screen.is-active {
+.cinematic-screen.is-active {
   opacity: 1;
   visibility: visible;
-  pointer-events: all;
+  pointer-events: auto;
 }
 
-.loading-frame {
+.cinematic-frame {
   width: min(420px, calc(100vw - 40px));
   display: grid;
   gap: 18px;
+  padding: 22px 24px;
+  background: var(--glass-strong);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
 }
+
+.cinematic-cta {
+  min-height: 44px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(227, 213, 72, 0.45);
+  background: linear-gradient(135deg, rgba(227, 213, 72, 0.96), rgba(224, 142, 42, 0.92));
+  /* Dark ink on the amber fill. It was rgba(227, 213, 72, 0.08) -- the fill's
+     own colour at 8% -- which measured 1.03:1 against the button it sits on:
+     the label was invisible, not dim. #0a0c14 is the ink the other filled
+     surfaces use and measures 8.85:1 here. */
+  color: #0a0c14;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.cinematic-cta:disabled {
+  background: rgba(8, 11, 18, 0.6);
+  border-color: var(--hairline);
+  color: var(--text-muted);
+  cursor: progress;
+}
+
+.cinematic-cta:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(214, 151, 112, 0.98), rgba(236, 154, 52, 0.95));
+}
+
 
 .loading-bar-track {
   height: 3px;
@@ -299,8 +879,7 @@ select {
 
 .loading-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #8ca2ff 0%, #d9e1ff 100%);
-  box-shadow: 0 0 22px rgba(140, 162, 255, 0.52);
+  background: linear-gradient(90deg, var(--lavender) 0%, var(--text-2) 100%);
   transition: width 0.45s ease;
 }
 
@@ -312,14 +891,32 @@ select {
 }
 
 .topbar {
+  position: relative;
   height: 54px;
   padding: 0 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(70, 70, 81, 0.3);
-  background: rgba(10, 10, 26, 0.92);
-  backdrop-filter: blur(14px);
+  /* No grey rule here: the terminator below IS the divider. Two lines
+     stacked read as a mistake. */
+  background: var(--glass-strong);
+}
+
+/* The horizon the sun grazes -- the one thing on this deck allowed to be
+   bold. Full bleed, and the only place amber runs at strength besides the
+   primary action. */
+.topbar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--terminator) 12%,
+    var(--terminator) 88%,
+    transparent
+  );
 }
 
 .brand-lockup {
@@ -330,9 +927,9 @@ select {
 .brand-mark {
   color: var(--primary-container);
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
-  letter-spacing: 0.32em;
+  letter-spacing: var(--track-hero);
 }
 
 .topbar-status {
@@ -344,83 +941,80 @@ select {
 .status-line {
   color: var(--primary-container);
   font-family: var(--font-body);
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-normal);
 }
 
 .status-line-muted {
-  color: rgba(199, 197, 211, 0.72);
+  color: var(--text-muted);
 }
 
+/* Three tracks declared, but the two modes each use two of them: plan runs
+   left + map, analyze runs map + right. The base template stays three-wide so
+   there is one place the widths are written, and the modifiers below drop
+   whichever track has no rail to put in it -- a template with more tracks than
+   children leaves the surplus as empty surface beside the map. */
 .content-grid {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr) 304px;
+  /* The right rail was 340px and its contents did not fit: the payload row's
+     "Arrives with 88.2%" was clipped at the edge, the risk bar had no room to
+     read as a distribution, and every milestone wrapped. It carries six
+     sections of analysis against the left rail's controls, so it is the wider
+     of the two now. */
+  grid-template-columns: 300px minmax(0, 1fr) 584px;
   overflow: hidden;
-  transition: grid-template-columns 0.3s ease;
 }
 
-.content-grid.left-collapsed {
-  grid-template-columns: 40px minmax(0, 1fr) 304px;
+/* Plan: 300px, up from 264. The rail holds two full-width picker buttons
+   whose labels carry coordinates ("START 259, 252"), a four-row sequence
+   list, and a 2x2 spec grid -- all of which were wrapping at 264. */
+/* PLAN: the same 584px the analysis rail takes in ANALYZE. Two stages of one
+   console reading 300 on one side and 584 on the other made the map jump width
+   on every mode switch, which is the kind of movement that reads as a bug. */
+.content-grid.no-right-rail {
+  grid-template-columns: 530px minmax(0, 1fr);
 }
 
-.content-grid.right-collapsed {
-  grid-template-columns: 252px minmax(0, 1fr) 40px;
-}
-
-.content-grid.left-collapsed.right-collapsed {
-  grid-template-columns: 40px minmax(0, 1fr) 40px;
+/* Analyze: 340px, up from 288. This rail now carries the whole analysis on
+   its own -- route metrics, the profile comparison and the cost readout --
+   with no left rail sharing the reporting. */
+/* ANALYZE: the rail runs up to the Mission Report button above it.
+   584 = the top bar's 24px right padding plus the fixed width of its right
+   cluster (report, systems, status, data link). That cluster is content-sized
+   and right-aligned, so its left edge sits the same distance from the window
+   edge at every viewport width -- which is why a fixed column can line up with
+   it and stay lined up. The report button now sits directly over the analysis
+   it opens. */
+.content-grid.no-left-rail {
+  grid-template-columns: minmax(0, 1fr) 584px;
 }
 
 .left-rail,
 .right-rail {
   min-height: 0;
-  background: rgba(19, 19, 27, 0.92);
-  backdrop-filter: blur(18px);
+  background: var(--bg-surface);
 }
 
 .left-rail {
-  border-right: 1px solid rgba(70, 70, 81, 0.26);
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease;
-  overflow: hidden;
+  /* Scroll the rail as one column. Was overflow:hidden, which clipped every
+     stacked feature past the fold once the registry put more than one panel
+     here; the panels no longer scroll individually (see .lp-panel-content). */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .right-rail {
-  border-left: 1px solid rgba(70, 70, 81, 0.26);
+  border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease;
-  overflow: hidden;
-}
-
-.left-rail.is-collapsed,
-.right-rail.is-collapsed {
-  overflow: visible;
-}
-
-.rail-toggle {
-  width: 100%;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid rgba(70, 70, 81, 0.2);
-  color: var(--text-muted);
-  font-size: 18px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.18s ease, color 0.18s ease;
-}
-
-.rail-toggle:hover {
-  background: rgba(160, 160, 255, 0.08);
-  color: var(--primary-container);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .rail-scroll,
@@ -448,11 +1042,12 @@ select {
 .rail-section,
 .battery-card,
 .risk-card,
-.waypoint-card {
-  background: linear-gradient(180deg, rgba(31, 31, 40, 0.92), rgba(17, 18, 27, 0.98));
-  border: 1px solid rgba(70, 70, 81, 0.24);
-  border-radius: 16px;
-  box-shadow: 0 16px 30px rgba(2, 3, 8, 0.18);
+.waypoint-card,
+.payload-card {
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
 }
 
 .rail-section {
@@ -471,13 +1066,13 @@ select {
   display: grid;
   place-items: center;
   background:
-    linear-gradient(135deg, rgba(160, 160, 255, 0.2), rgba(160, 160, 255, 0.04)),
+    linear-gradient(135deg, rgba(186, 175, 245, 0.2), rgba(186, 175, 245, 0.04)),
     var(--surface-lowest);
-  border: 1px solid rgba(160, 160, 255, 0.18);
+  border: 1px solid rgba(186, 175, 245, 0.18);
   color: var(--primary-container);
   font-family: var(--font-data);
-  font-size: 12px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-body);
+  letter-spacing: var(--track-caps);
 }
 
 .panel-kicker,
@@ -487,32 +1082,27 @@ select {
 .footer-copy,
 .footer-live,
 .map-data-label,
-.scale-copy {
-  font-family: var(--font-data);
-  text-transform: uppercase;
-}
-
 .panel-kicker {
   margin: 0 0 4px;
-  color: rgba(199, 197, 211, 0.58);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  color: var(--text-muted-2);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .panel-title {
   margin: 0;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: var(--track-normal);
 }
 
 .panel-description,
 .section-note,
 .card-meta {
-  color: rgba(214, 212, 224, 0.72);
-  font-size: 12px;
+  color: rgba(199, 205, 219, 0.72);
+  font-size: var(--fs-body);
   line-height: 1.6;
 }
 
@@ -522,9 +1112,9 @@ select {
 
 .eyebrow {
   margin: 0 0 12px;
-  color: rgba(199, 197, 211, 0.5);
-  font-size: 10px;
-  letter-spacing: 0.13em;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .eyebrow.tight {
@@ -541,33 +1131,33 @@ select {
   min-height: 30px;
   padding: 0 12px;
   margin: 0 0 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(145, 143, 157, 0.22);
-  background: rgba(13, 13, 22, 0.72);
+  border-radius: var(--radius);
+  border: 1px solid rgba(139, 148, 166, 0.22);
+  background: rgba(8, 11, 18, 0.72);
   color: rgba(228, 225, 237, 0.8);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
 .status-pill--idle {
-  color: rgba(199, 197, 211, 0.76);
+  color: var(--text-muted);
 }
 
 .status-pill--ready,
 .status-pill--safe {
-  border-color: rgba(0, 230, 118, 0.24);
+  border-color: rgba(74, 143, 216, 0.24);
   color: var(--safe);
 }
 
 .status-pill--critical {
-  border-color: rgba(255, 23, 68, 0.26);
+  border-color: rgba(237, 75, 61, 0.26);
   color: var(--critical);
 }
 
 .status-pill--neutral {
-  border-color: rgba(173, 198, 255, 0.24);
+  border-color: rgba(143, 160, 192, 0.24);
   color: var(--secondary);
 }
 
@@ -590,22 +1180,22 @@ select {
   flex-direction: column;
   gap: 8px;
   background: var(--surface-lowest);
-  border: 1px solid rgba(70, 70, 81, 0.34);
-  border-radius: 14px;
-  color: rgba(199, 197, 211, 0.82);
+  border: 1px solid rgba(29, 36, 50, 0.34);
+  border-radius: var(--radius);
+  color: var(--text-muted);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
 }
 
 .rover-card:hover {
-  border-color: rgba(173, 198, 255, 0.28);
+  border-color: rgba(143, 160, 192, 0.28);
   transform: translateY(-1px);
 }
 
 .rover-card.is-active {
-  background: rgba(160, 160, 255, 0.1);
-  border-color: rgba(160, 160, 255, 0.36);
+  background: var(--umbra-dim);
+  border-color: rgba(90, 210, 255, 0.4);
 }
 
 .rover-card-head,
@@ -618,25 +1208,27 @@ select {
 
 .rover-card-head strong {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 .rover-card-head span,
 .rover-card-specs span {
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
 }
 
 .rover-card-head span {
-  color: rgba(173, 198, 255, 0.74);
+  /* Was rgba(143, 160, 192, 0.74) at 11px, which lands at 4.43:1 -- under AA,
+     and 11px does not qualify for the large-text exception. The ramp already
+     has a value for this job, and .rover-card-specs span beside it uses it. */
+  color: var(--text-muted-2);
 }
 
 .rover-card-specs span {
-  color: rgba(199, 197, 211, 0.58);
+  color: var(--text-muted-2);
 }
 
 .rover-summary-grid {
@@ -652,7 +1244,7 @@ select {
   background: transparent;
   border: none;
   border-left: 3px solid transparent;
-  color: rgba(199, 197, 211, 0.76);
+  color: var(--text-muted);
   text-align: left;
   cursor: pointer;
   transition: background 0.18s ease, color 0.18s ease;
@@ -663,22 +1255,21 @@ select {
 }
 
 .profile-button.is-active {
-  background: rgba(160, 160, 255, 0.1);
+  background: rgba(186, 175, 245, 0.1);
   color: var(--primary-container);
 }
 
 .profile-name {
-  font-size: 12px;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: var(--track-normal);
 }
 
 .profile-id {
-  color: rgba(199, 197, 211, 0.54);
+  color: var(--text-dimmest);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -693,28 +1284,28 @@ select {
 .primary-btn,
 .map-switch button {
   min-height: 42px;
-  border-radius: 12px;
-  letter-spacing: 0.08em;
+  border-radius: var(--radius);
+  letter-spacing: var(--track-label);
 }
 
 .coord-chip {
   padding: 0 12px;
   background: var(--surface-lowest);
-  border: 1px solid rgba(70, 70, 81, 0.34);
-  color: rgba(199, 197, 211, 0.82);
+  border: 1px solid rgba(29, 36, 50, 0.34);
+  color: var(--text-muted);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 700;
   cursor: pointer;
 }
 
 .coord-chip.is-start {
-  border-color: rgba(0, 230, 118, 0.4);
+  border-color: rgba(74, 143, 216, 0.4);
   color: var(--safe);
 }
 
 .coord-chip.is-goal {
-  border-color: rgba(255, 23, 68, 0.4);
+  border-color: rgba(237, 75, 61, 0.4);
   color: var(--critical);
 }
 
@@ -727,23 +1318,23 @@ select {
 .coord-card {
   padding: 10px 12px;
   background: var(--surface-lowest);
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 
 .coord-label {
   display: block;
   margin-bottom: 5px;
-  color: rgba(199, 197, 211, 0.48);
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .coord-value {
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-tight);
 }
 
 .slider-stack {
@@ -767,14 +1358,13 @@ select {
 
 .slider-name,
 .slider-value {
-  font-family: var(--font-data);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-label);
 }
 
 .slider-name {
-  color: rgba(199, 197, 211, 0.6);
+  color: var(--text-muted-2);
 }
 
 .slider-value {
@@ -791,16 +1381,17 @@ select {
 .alert-card {
   padding: 12px;
   background: rgba(147, 0, 10, 0.18);
-  border: 1px solid rgba(255, 109, 0, 0.22);
-  color: #ffcbc2;
-  font-size: 12px;
+  border: 1px solid rgba(214, 151, 112, 0.22);
+  color: var(--coral-text);
+  font-size: var(--fs-body);
   line-height: 1.5;
 }
 
 .toast-stack {
   position: fixed;
   right: 22px;
-  bottom: 22px;
+  /* Clears the assistant launcher, which owns this corner. */
+  bottom: 78px;
   z-index: 150;
   width: min(360px, calc(100vw - 32px));
   display: flex;
@@ -816,20 +1407,19 @@ select {
   justify-content: space-between;
   gap: 14px;
   padding: 14px 14px 14px 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 109, 0, 0.2);
+  border-radius: var(--radius);
+  border: 1px solid rgba(214, 151, 112, 0.2);
   background: rgba(14, 15, 24, 0.94);
-  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow-float);
   pointer-events: auto;
 }
 
 .toast-card--warning {
-  border-color: rgba(255, 109, 0, 0.28);
+  border-color: rgba(214, 151, 112, 0.28);
 }
 
 .toast-card--error {
-  border-color: rgba(255, 23, 68, 0.28);
+  border-color: rgba(237, 75, 61, 0.28);
 }
 
 .toast-copy {
@@ -840,37 +1430,37 @@ select {
 }
 
 .toast-title {
-  color: #fff1ee;
+  color: var(--coral-text);
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--fs-value);
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 .toast-message {
   margin: 0;
   color: rgba(240, 233, 239, 0.88);
-  font-size: 13px;
+  font-size: var(--fs-strong);
   line-height: 1.55;
 }
 
 .toast-detail {
-  color: rgba(199, 197, 211, 0.68);
+  color: var(--text-muted-2);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.05em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
   line-height: 1.45;
 }
 
 .toast-dismiss {
-  padding: 0;
+  padding: 3px 8px;
   background: transparent;
-  border: none;
-  color: rgba(199, 197, 211, 0.74);
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
   cursor: pointer;
 }
 
@@ -890,16 +1480,23 @@ select {
 
 .ghost-btn {
   background: var(--surface-high);
-  border: 1px solid rgba(145, 143, 157, 0.2);
-  color: rgba(199, 197, 211, 0.86);
+  border: 1px solid rgba(139, 148, 166, 0.2);
+  color: var(--text-3);
   font-weight: 600;
 }
 
+/* The one action that spends energy, in the colour that means energy. */
 .primary-btn {
-  background: linear-gradient(135deg, rgba(160, 160, 255, 0.95), rgba(123, 123, 231, 0.9));
-  border: 1px solid rgba(160, 160, 255, 0.4);
-  color: #110d3d;
+  background: linear-gradient(135deg, rgba(227, 213, 72, 0.96), rgba(224, 142, 42, 0.92));
+  border: 1px solid rgba(227, 213, 72, 0.45);
+  /* Dark ink, for the reason given on .cinematic-cta: the label used to be
+     the fill's own colour at 8% alpha and measured 1.03:1. */
+  color: #0a0c14;
   font-weight: 700;
+}
+
+.primary-btn:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(214, 151, 112, 0.98), rgba(236, 154, 52, 0.95));
 }
 
 .primary-btn:disabled {
@@ -912,17 +1509,23 @@ select {
   min-height: 0;
   min-width: 0;
   display: flex;
+  /* Column, so BottomDock is the strip UNDER the map that slots.tsx calls
+     it. In a row it would sit beside .map-stage and take width from the
+     map; the playback bar never showed this because it positions itself
+     absolutely and leaves the flow entirely. */
+  flex-direction: column;
   overflow: hidden;
-  background:
-    radial-gradient(circle at center, rgba(255, 255, 255, 0.03), transparent 60%),
-    linear-gradient(180deg, #090910 0%, #05060b 100%);
+  /* Left open so the backdrop reads through the margins around the canvas --
+     the console frames a viewport rather than covering one. The canvas itself
+     paints its own ground, so the terrain is unaffected. */
+  background: rgba(5, 7, 13, 0.35);
 }
 
 .center-stage::before {
   content: '';
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(rgba(70, 70, 81, 0.42) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(29, 36, 50, 0.42) 1px, transparent 1px);
   background-size: 38px 38px;
   opacity: 0.12;
   pointer-events: none;
@@ -933,29 +1536,42 @@ select {
   z-index: 1;
   flex: 1;
   min-height: 0;
-  padding: 20px 22px 24px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-}
-
-.map-canvas-shell {
-  width: min(100%, calc(100vh - 196px));
-  max-width: 100%;
-  max-height: calc(100% - 28px);
-  aspect-ratio: 1 / 1;
+  padding: 8px 12px 14px;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+
+.map-canvas-shell {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+
+.map-canvas {
+  width: min(100%, calc(100vh - 130px));
+  height: min(100%, calc(100vh - 130px));
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  border: 1px solid rgba(79, 216, 240, 0.2);
 }
 
 .map-overlay {
   position: absolute;
   z-index: 2;
-  background: rgba(13, 13, 22, 0.72);
-  border: 1px solid rgba(70, 70, 81, 0.4);
-  border-radius: 16px;
-  backdrop-filter: blur(18px);
+  background: rgba(8, 11, 18, 0.72);
+  border: 1px solid rgba(29, 36, 50, 0.4);
+  border-radius: var(--radius);
 }
 
 .map-overlay-top-left {
@@ -975,7 +1591,7 @@ select {
 .route-control-inline {
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid rgba(70, 70, 81, 0.3);
+  border-top: 1px solid rgba(29, 36, 50, 0.3);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -983,7 +1599,7 @@ select {
 
 .route-control-inline .section-note {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 
 .route-control-inline .coord-chip-grid {
@@ -992,7 +1608,7 @@ select {
 
 .route-control-inline .coord-chip {
   min-height: 36px;
-  font-size: 10px;
+  font-size: var(--fs-micro);
 }
 
 .route-control-actions {
@@ -1005,7 +1621,7 @@ select {
 .route-control-actions .ghost-btn,
 .route-control-actions .primary-btn {
   min-height: 36px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   padding: 0 12px;
 }
 
@@ -1025,18 +1641,6 @@ select {
   gap: 10px;
 }
 
-.map-overlay-bottom-left {
-  left: 24px;
-  bottom: 24px;
-  padding: 10px 12px;
-}
-
-.map-overlay-bottom-center {
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-}
-
 .map-data-grid {
   display: grid;
   grid-template-columns: auto auto;
@@ -1044,16 +1648,17 @@ select {
 }
 
 .map-data-label {
-  color: rgba(199, 197, 211, 0.48);
-  font-size: 10px;
-  letter-spacing: 0.18em;
+  color: var(--text-dim-2);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .map-data-value {
   color: var(--text);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: var(--track-normal);
 }
 
 .map-status-tag {
@@ -1062,8 +1667,8 @@ select {
   gap: 8px;
   color: var(--primary-container);
   font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1072,10 +1677,9 @@ select {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
-  background: rgba(13, 13, 22, 0.72);
-  border: 1px solid rgba(70, 70, 81, 0.4);
-  border-radius: 18px;
-  backdrop-filter: blur(18px);
+  background: rgba(8, 11, 18, 0.72);
+  border: 1px solid rgba(29, 36, 50, 0.4);
+  border-radius: var(--radius);
 }
 
 .map-switch button {
@@ -1083,75 +1687,36 @@ select {
   padding: 0 12px;
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(199, 197, 211, 0.72);
+  color: var(--text-muted);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: var(--fs-small);
   font-weight: 700;
 }
 
+/* Choosing a layer or a dimension is reading, not spending -- cyan. */
 .map-switch button.is-active {
-  background: var(--primary-container);
-  color: #0f0f39;
+  background: var(--umbra);
+  /* --umbra is --cyan, and the label was rgba(79, 216, 240, 0.10) -- the same
+     cyan at 10% over itself, which measures 1.00:1. The active tab's text was
+     the background. Dark ink reads 11.54:1 on it. */
+  color: #0a0c14;
   font-weight: 700;
 }
 
 .map-mode-card {
   padding: 12px 14px;
-  background: rgba(13, 13, 22, 0.72);
-  border: 1px solid rgba(70, 70, 81, 0.4);
-  border-radius: 16px;
-  backdrop-filter: blur(18px);
+  background: rgba(8, 11, 18, 0.72);
+  border: 1px solid rgba(29, 36, 50, 0.4);
+  border-radius: var(--radius);
 }
 
 .map-mode-card strong {
   display: block;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 13px;
-  letter-spacing: 0.02em;
-}
-
-.scale-line {
-  width: 120px;
-  height: 10px;
-  border-left: 1px solid var(--primary-container);
-  border-right: 1px solid var(--primary-container);
-  border-bottom: 1px solid var(--primary-container);
-}
-
-.scale-copy {
-  display: inline-block;
-  margin-top: 8px;
-  color: var(--primary-container);
-  font-size: 9px;
-  letter-spacing: 0.16em;
-}
-
-.legend-ribbon {
-  padding: 10px 16px;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-.legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-muted);
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  box-shadow: 0 0 12px currentColor;
+  font-size: var(--fs-strong);
+  letter-spacing: var(--track-tight);
 }
 
 .telemetry-header {
@@ -1160,19 +1725,18 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid rgba(70, 70, 81, 0.22);
+  border-bottom: 1px solid rgba(29, 36, 50, 0.22);
 }
 
 .signal-dot {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
-  background: rgba(145, 143, 157, 0.42);
+  border-radius: 50%;
+  background: rgba(139, 148, 166, 0.42);
 }
 
 .signal-dot.is-live {
   background: var(--safe);
-  box-shadow: 0 0 12px rgba(0, 230, 118, 0.72);
 }
 
 .telemetry-scroll {
@@ -1195,21 +1759,21 @@ select {
   gap: 6px;
   background: var(--surface-low);
   border-left: 3px solid currentColor;
-  border-radius: 14px;
+  border-radius: var(--radius);
 }
 
 .telemetry-label {
-  color: rgba(199, 197, 211, 0.48);
-  font-size: 9px;
-  letter-spacing: 0.18em;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
 }
 
 .telemetry-value {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: currentColor;
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-tight);
 }
 
 .battery-card,
@@ -1233,10 +1797,9 @@ select {
 }
 
 .card-meta {
-  font-family: var(--font-data);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
   white-space: nowrap;
 }
 
@@ -1256,7 +1819,7 @@ select {
 
 .battery-track {
   fill: transparent;
-  stroke: rgba(70, 70, 81, 0.42);
+  stroke: rgba(29, 36, 50, 0.42);
   stroke-width: 6;
 }
 
@@ -1279,17 +1842,16 @@ select {
 
 .battery-copy strong {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: var(--fs-hero);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 .battery-copy span {
-  color: rgba(199, 197, 211, 0.48);
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  color: var(--text-dimmest);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .risk-head {
@@ -1310,9 +1872,9 @@ select {
 }
 
 .risk-state {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
@@ -1322,7 +1884,7 @@ select {
   display: flex;
   overflow: hidden;
   background: var(--surface-lowest);
-  border-radius: 999px;
+  border-radius: var(--radius);
 }
 
 .risk-count-grid {
@@ -1335,29 +1897,27 @@ select {
 .risk-count-card {
   padding: 8px;
   background: var(--surface-lowest);
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 
 .risk-count-card span {
   display: block;
-  color: rgba(199, 197, 211, 0.48);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .risk-count-card strong {
   display: block;
   margin-top: 6px;
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 700;
 }
 
 .waypoint-meta {
-  color: rgba(199, 197, 211, 0.52);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .milestone-stats {
@@ -1370,16 +1930,15 @@ select {
 .milestone-stat {
   padding: 10px;
   background: var(--surface-lowest);
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 
 .milestone-stat span {
   display: block;
-  color: rgba(199, 197, 211, 0.48);
-  font-family: var(--font-data);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  color: var(--text-dimmest);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .milestone-stat strong {
@@ -1387,7 +1946,7 @@ select {
   margin-top: 6px;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: var(--fs-value);
   font-weight: 600;
 }
 
@@ -1405,7 +1964,7 @@ select {
   justify-content: space-between;
   gap: 12px;
   background: var(--surface-low);
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 
 .waypoint-main {
@@ -1416,42 +1975,37 @@ select {
 }
 
 .waypoint-index {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
 }
 
 .waypoint-detail {
-  color: rgba(199, 197, 211, 0.66);
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  color: var(--text-muted-2);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .waypoint-status {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
 @media (max-width: 1180px) {
   .content-grid {
-    grid-template-columns: 230px minmax(0, 1fr) 276px;
+    grid-template-columns: 264px minmax(0, 1fr) 300px;
   }
 
-  .content-grid.left-collapsed {
-    grid-template-columns: 40px minmax(0, 1fr) 276px;
+  .content-grid.no-right-rail {
+    grid-template-columns: 264px minmax(0, 1fr);
   }
 
-  .content-grid.right-collapsed {
-    grid-template-columns: 230px minmax(0, 1fr) 40px;
-  }
-
-  .content-grid.left-collapsed.right-collapsed {
-    grid-template-columns: 40px minmax(0, 1fr) 40px;
+  .content-grid.no-left-rail {
+    grid-template-columns: minmax(0, 1fr) 300px;
   }
 }
 
@@ -1464,19 +2018,20 @@ select {
     max-width: 100%;
   }
 
+  /* One column, whichever rails are present. The modifiers carry a class and
+     so outrank a bare `.content-grid` at the same media width -- listing them
+     here is what stops a 300px track surviving into the stacked layout. */
   .content-grid,
-  .content-grid.left-collapsed,
-  .content-grid.right-collapsed,
-  .content-grid.left-collapsed.right-collapsed {
+  .content-grid.no-left-rail,
+  .content-grid.no-right-rail {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 1fr) auto auto;
   }
 
-  .left-rail,
-  .left-rail.is-collapsed {
+  .left-rail {
     order: 2;
     border-right: none;
-    border-top: 1px solid rgba(70, 70, 81, 0.26);
+    border-top: 1px solid rgba(29, 36, 50, 0.26);
   }
 
   .center-stage {
@@ -1484,20 +2039,10 @@ select {
     min-height: 50vh;
   }
 
-  .right-rail,
-  .right-rail.is-collapsed {
+  .right-rail {
     order: 3;
     border-left: none;
-    border-top: 1px solid rgba(70, 70, 81, 0.26);
-  }
-
-  .rail-toggle {
-    display: none;
-  }
-
-  .left-rail.is-collapsed,
-  .right-rail.is-collapsed {
-    overflow: auto;
+    border-top: 1px solid rgba(29, 36, 50, 0.26);
   }
 
   .map-stage {
@@ -1510,8 +2055,7 @@ select {
   }
 
   .map-overlay-top-left,
-  .map-overlay-top-center,
-  .map-overlay-bottom-left {
+  .map-overlay-top-center {
     left: 12px;
   }
 
@@ -1533,19 +2077,6 @@ select {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .map-overlay-bottom-left {
-    bottom: 12px;
-  }
-
-  .map-overlay-bottom-center {
-    bottom: 12px;
-    max-width: calc(100% - 24px);
-  }
-
-  .legend-ribbon {
-    overflow-x: auto;
-  }
-
   .map-canvas-shell {
     width: 100%;
     max-height: none;
@@ -1553,44 +2084,46 @@ select {
 }
 
 @media (max-width: 640px) {
-  .landing-content {
-    padding: 18px 16px;
+  .landing-topline,
+  .landing-footline {
+    padding: 16px 18px;
+  }
+
+  .landing-main {
+    padding: 0 18px;
+  }
+
+  .landing-status {
+    display: none;
   }
 
   .landing-brand-mark,
   .loading-brand {
-    font-size: 17px;
-    letter-spacing: 0.24em;
+    font-size: var(--fs-title);
+    letter-spacing: var(--track-hero);
   }
 
   .landing-brand-sub,
   .landing-kicker,
-  .landing-hint,
   .loading-copy,
   .loading-percent {
-    font-size: 9px;
-    letter-spacing: 0.14em;
+    font-size: var(--fs-micro);
+    letter-spacing: var(--track-caps);
   }
 
   .landing-copy h1 {
-    margin-top: 14px;
-    font-size: clamp(2rem, 6vw, 3rem);
-    max-width: 14ch;
+    font-size: clamp(1.7rem, 6vw, 2.4rem);
   }
 
   .landing-description {
+    margin-top: 18px;
     max-width: 100%;
-    font-size: 0.92rem;
+    font-size: var(--fs-strong);
     line-height: 1.6;
   }
 
-  .landing-feature-list {
-    gap: 8px;
-  }
-
-  .landing-feature {
-    font-size: 0.82rem;
-    padding: 7px 10px;
+  .landing-actions {
+    margin-top: 26px;
   }
 
   .landing-explore-button {
@@ -1613,8 +2146,8 @@ select {
   }
 
   .brand-mark {
-    font-size: 16px;
-    letter-spacing: 0.22em;
+    font-size: var(--fs-value);
+    letter-spacing: var(--track-caps);
   }
 
   .rover-card-head,
@@ -1653,7 +2186,4233 @@ select {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .legend-ribbon {
-    gap: 14px;
+}
+
+/* ── 3-D terrain view ─────────────────────────────────────────────────────── */
+
+/* Unwired for now (goktug/ai-scene uses TerrainCanvas3D as the active 3D
+   view) but kept styled in case TerrainView3D is re-enabled.
+
+   The 2-D canvas is a fixed 500x500 element, so the shell's
+   `align-items: center` can size it from its own intrinsic dimensions. A
+   WebGL canvas has none: as a centred flex item it resolves height against
+   an auto line box, not the shell, and comes out a short strip with a wrong
+   camera aspect. align-self: stretch opts this child back into the shell's
+   full square. */
+.terrain3d-shell {
+  position: relative;
+  align-self: stretch;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--void);
+  border: 1px solid rgba(29, 36, 50, 0.4);
+}
+
+.terrain3d-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.terrain3d-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The canvas fills the same square shell MapCanvas uses, so switching
+   dimension does not reflow the page around it. */
+.terrain3d-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--void);
+}
+
+.terrain3d-root canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.terrain3d-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(199, 205, 219, 0.72);
+  font-size: var(--fs-strong);
+  letter-spacing: var(--track-normal);
+  pointer-events: none;
+}
+
+/* Unwired for now (goktug/ai-scene uses TerrainCanvas3D as the active 3D
+   view) but kept styled in case TerrainView3D is re-enabled. */
+.terrain3d-controls {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(340px, calc(100% - 28px));
+  padding: 12px 14px;
+  background: rgba(8, 11, 18, 0.72);
+  border: 1px solid rgba(29, 36, 50, 0.4);
+  border-radius: var(--radius);
+}
+
+.terrain3d-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+}
+
+.terrain3d-controls input[type='range'] {
+  width: 100%;
+  accent-color: var(--primary-container);
+}
+
+/* Sits beside the existing view-mode switch and inherits its button styling. */
+.map-switch--dimension {
+  margin-top: 8px;
+}
+
+.map-overlay-bottom-right {
+  right: 24px;
+  bottom: 24px;
+  /* The bottom band is the status strip's now, but this still shares a corner
+     with the map's own controls; without this it loses the paint order and the
+     photo-drape checkbox underneath becomes unclickable. */
+  z-index: 3;
+}
+
+.terrain3d-time {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  min-width: 190px;
+}
+
+.terrain3d-time input[type='range'] {
+  width: 100%;
+  accent-color: var(--cyan);
+}
+
+.terrain3d-photo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-body);
+  color: rgba(199, 205, 219, 0.9);
+  cursor: pointer;
+}
+
+.terrain3d-photo input {
+  accent-color: var(--cyan);
+  cursor: pointer;
+}
+
+.terrain3d-note {
+  font-size: var(--fs-small);
+  line-height: 1.35;
+  color: rgba(199, 205, 219, 0.6);
+}
+
+/* ── LiDAR payload budget ───────────────────────────────────────────────────
+   Cyan, not amber: this is a reading, and the amber is reserved for the two
+   places that mean "sunlit" -- the horizon rule and the primary action. */
+.payload-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.payload-note,
+.payload-empty {
+  margin: 0;
+  /* --text-dim-2 rather than --text-muted at opacity 0.72. The ramp is
+     already tuned against these grounds, and dimming one of its values again
+     lands somewhere the ramp does not go: 3.73:1, under AA. Saying "one step
+     quieter" with the step below is what the ramp is for. */
+  color: var(--text-dim-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  line-height: 1.45;
+}
+
+.payload-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.payload-inputs label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+}
+
+.payload-inputs input {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 7px 9px;
+  background: rgba(5, 7, 13, 0.6);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: var(--fs-strong);
+  letter-spacing: var(--track-tight);
+}
+
+.payload-inputs input:focus-visible {
+  outline: 2px solid var(--umbra);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.payload-unit {
+  grid-column: 2;
+  grid-row: 1;
+  color: var(--umbra);
+  font-family: var(--font-data);
+  opacity: 0.8;
+}
+
+.payload-readout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.payload-readout > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.payload-readout strong {
+  color: var(--umbra);
+  font-family: var(--font-data);
+  font-size: var(--fs-value);
+  font-weight: 600;
+  letter-spacing: var(--track-tight);
+}
+
+/* ── LUNAPATH MISSION CONTROL WORKSTATION DESIGN SYSTEM ────────────── */
+
+/* The workstation names, now aliases onto the one palette at the top of this
+   file. They were a second, slightly-off copy of it -- neon cyan, translucent
+   cards, a lavender half a step from the canvas -- which is exactly how a
+   design system drifts. */
+:root {
+  --accent-lavender: var(--lavender);
+  --accent-cyan: var(--cyan);
+  --accent-mint: var(--mint);
+  --accent-coral: var(--coral);
+  --bg-workstation: var(--void);
+  --bg-panel-trans: var(--bg-surface);
+  --border-line: var(--line);
+  --border-focus: var(--line-accent-hover);
+}
+
+/* TopBar */
+/* ── Mission bar ──────────────────────────────────────────────────────────
+   52px, one hairline, two clusters. Left: who and which mode. Right: what the
+   mission is doing and whether the link is up. Nothing is boxed -- the bar is
+   a line of type, not a row of badges. */
+.lp-topbar {
+  height: 52px;
+  flex: none;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 18px;
+  z-index: 50;
+  position: relative;
+  user-select: none;
+}
+
+.lp-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  min-width: 0;
+}
+
+.lp-brand {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: var(--fs-strong);
+  font-weight: 600;
+  letter-spacing: var(--track-hero);
+}
+
+/* The segmented control. The active half is the only filled surface in the
+   bar, which is what makes the current mode readable at a glance. */
+.lp-mode-switch {
+  display: flex;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.lp-mode-btn {
+  background: transparent;
+  border: 0;
+  padding: 6px 14px;
+  color: var(--text-3);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  font-weight: 400;
+  letter-spacing: var(--track-caps);
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.lp-mode-btn:hover:not(:disabled):not(.is-active) {
+  color: var(--text-2);
+}
+
+.lp-mode-btn.is-active {
+  background: var(--lavender);
+  color: #0a0c14;
+  font-weight: 600;
+}
+
+.lp-mode-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.lp-route-required {
+  color: var(--text-dim-2);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  white-space: nowrap;
+}
+
+.lp-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+}
+
+/* Mission Report's anchor. `display: contents` so the empty div is not a flex
+   item -- otherwise .lp-topbar-right's 24px gap would be spent on a zero-width
+   box whenever there is no route and the report renders nothing. With it, the
+   portalled button becomes the flex item directly. */
+.lp-topbar-report-slot {
+  display: contents;
+}
+
+.lp-topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-dim-2);
+  white-space: nowrap;
+}
+
+/* Cyan once a route exists, mint before: the status says which of the two
+   things the mission currently is, and the colour agrees with it. */
+.lp-mission-status.is-nominal {
+  color: var(--mint-text);
+}
+
+.lp-mission-status.is-solving {
+  color: var(--lavender);
+}
+
+.lp-link-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--mint);
+}
+
+.lp-link-dot.is-offline {
+  background: var(--risk-med);
+}
+
+.lp-link-live {
+  color: var(--mint-text);
+}
+
+.lp-link-down {
+  color: var(--risk-med);
+}
+
+/* Diagnostics live one click away, named rather than iconised: it opens a
+   drawer, so it is a destination, not a layout switch. */
+.lp-systems-toggle {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 5px 9px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.lp-systems-toggle:hover {
+  color: var(--text);
+  border-color: var(--line-button);
+  background: rgba(199, 205, 219, 0.06);
+}
+
+.lp-systems-toggle.is-active {
+  color: var(--lavender-bright);
+  border-color: var(--line-accent);
+}
+
+/* Shared with the rail panels, not just the bar. */
+.lp-meta-label {
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  letter-spacing: var(--track-normal);
+}
+
+.lp-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-pulse-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--mint);
+  flex: none;
+}
+
+.lp-status-pill.is-offline .lp-pulse-dot {
+  background: var(--risk-med);
+}
+
+/* Map Controls Dock (Layer + 2D/3D) */
+.lp-map-controls-dock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  z-index: 25;
+}
+
+.lp-dim-toggle {
+  display: flex;
+  background: rgba(8, 11, 18, 0.88);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 2px;
+}
+
+.lp-dim-btn {
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.lp-dim-btn.is-active {
+  background: rgba(186, 175, 245, 0.2);
+  color: var(--text);
+  border: 1px solid rgba(186, 175, 245, 0.4);
+}
+
+.lp-layer-menu-wrapper {
+  position: relative;
+}
+
+.lp-layer-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(8, 11, 18, 0.88);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 160ms ease;
+}
+
+.lp-layer-trigger:hover,
+.lp-layer-trigger.is-open {
+  border-color: var(--border-focus);
+}
+
+.lp-layer-label-hint {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+  letter-spacing: var(--track-caps);
+}
+
+.lp-layer-current-name {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.lp-dropdown-chevron {
+  color: var(--accent-lavender);
+  font-size: var(--fs-body);
+  margin-left: 2px;
+}
+
+.lp-layer-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 260px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  padding: 8px;
+  z-index: 100;
+}
+
+.lp-layer-group {
+  margin-bottom: 8px;
+}
+
+.lp-layer-group:last-child {
+  margin-bottom: 0;
+}
+
+.lp-layer-group-header {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  color: var(--accent-lavender);
+  letter-spacing: var(--track-normal);
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(199, 205, 219, 0.05);
+  margin-bottom: 4px;
+}
+
+.lp-layer-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.lp-layer-item:hover {
+  background: rgba(199, 205, 219, 0.06);
+}
+
+.lp-layer-item.is-selected {
+  background: rgba(186, 175, 245, 0.14);
+}
+
+.lp-layer-item-name {
+  display: block;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The option's name. It had no colour rule at all, so it inherited the
+   button's user-agent default -- pure black -- and rendered at 1.07:1 on this
+   panel: the least readable text in the application, and it was the primary
+   label of every row. Its own description underneath was legible, so the
+   hierarchy read inverted.
+
+   `--text-2` rather than `--text`: the selected row below takes the brighter
+   one, and the difference is how the menu shows which layer is active. */
+.lp-layer-item-title {
+  display: block;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.lp-layer-item.is-selected .lp-layer-item-title {
+  color: var(--text);
+}
+
+/* Same omission, same cause. */
+.lp-layer-check {
+  color: var(--lavender);
+  font-size: var(--fs-body);
+}
+
+.lp-layer-item-desc {
+  display: block;
+  font-size: var(--fs-micro);
+  /* --text-muted, not --text-dim-2: the row's hover wash lifts the background
+     and pushed the dimmer token to 4.23:1, under AA, exactly when the pointer
+     is on the row being read. */
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.lp-check-mark {
+  color: var(--accent-lavender);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+/* Route Solving Overlay */
+.lp-solving-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lp-scan-sweep {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+  animation: lp-scan-motion 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.lp-solving-card {
+  pointer-events: auto;
+  background: rgba(8, 11, 18, 0.94);
+  border: 1px solid rgba(79, 216, 240, 0.4);
+  box-shadow: var(--shadow-float);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  max-width: 440px;
+  text-align: left;
+}
+
+.lp-solving-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.lp-radar-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(79, 216, 240, 0.2);
+  border-top-color: var(--accent-cyan);
+  animation: lp-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.lp-solving-kicker {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  color: var(--accent-cyan);
+}
+
+.lp-solving-title {
+  margin: 2px 0 0;
+  font-size: var(--fs-value);
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: var(--track-normal);
+}
+
+.lp-solving-detail {
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+
+.lp-solving-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lp-solving-tag {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  padding: 3px 8px;
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  color: var(--text-2);
+}
+
+.lp-solving-tag--active {
+  background: rgba(79, 216, 240, 0.12);
+  border-color: rgba(79, 216, 240, 0.35);
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+/* Generic Panel Layouts */
+.lp-panel-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  /* Natural height, not height:100%. The rail stacks this beside rail-section
+     siblings (registry.ts), and height:100% + the flex column's shrink made
+     this panel collapse to ~32px while a tall sibling took the rest -- the
+     whole mission-setup panel then lived in a clipped sliver. The rail itself
+     scrolls now (see .left-rail/.right-rail), so each panel just takes the
+     room its content needs. */
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.lp-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lp-section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lp-section-explainer {
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--text-dim-2);
+  margin: 0;
+}
+
+/* Selected Rover Card */
+/* Photograph and readout side by side. At a 300px rail this was a stack with a
+   64px thumbnail on top; at 584 the picture can be the size the hangar showed
+   it and the four numbers still get half the card. */
+.lp-selected-rover-card {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.lp-rover-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lp-rover-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+/* Replaces the 32px triangle-in-a-box. Wide rather than square: these are
+   landscape photographs of a rover on terrain, and cropping one to a 32px
+   square threw away the vehicle to keep some regolith. */
+.lp-rover-photo {
+  flex: none;
+  /* Was 64x46 against a 300px rail. The rail is 584 now, so the photograph gets
+     to be one rather than an icon-sized crop of one. */
+  width: 208px;
+  height: auto;
+  align-self: stretch;
+  min-height: 132px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: var(--void);
+}
+
+.lp-rover-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lp-rover-class {
+  color: var(--text-dim-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+}
+
+.lp-rover-card-name {
+  margin: 0;
+  font-size: var(--fs-strong);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.lp-rover-model-code {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+/* One column, not two. The photograph takes 208 of the card's ~490px, which
+   left the 2x2 cells 127px each -- enough to fit "Battery 5420 Wh" and not
+   enough to read it as a table. Stacked, every value lands on the same right
+   edge, which is the whole use of a spec list. */
+.lp-rover-metric-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.lp-rover-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* The glyph is the same one the hangar's spec table uses for this reading, so
+   battery means the same picture on both screens. */
+.lp-metric-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
+  white-space: nowrap;
+}
+
+.lp-metric-name .lp-icon {
+  font-size: 15px;
+  color: var(--text-dimmest);
+}
+
+.lp-metric-val {
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.lp-rover-metric,
+.lp-telemetry-mono-cell {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
+.lp-metric-name,
+.lp-spec-label,
+.lp-mono-label {
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  font-weight: 400;
+  color: var(--text-muted-2);
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.lp-metric-val,
+.lp-spec-val,
+.lp-mono-val {
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 400;
+  color: var(--text);
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Mission Profile Presets */
+.lp-profile-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Profile cards ──
+   A 2x2 rather than a 1x4: four cards in a row across half the dock made every
+   description three words wide and eight lines tall. */
+.lp-profile-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lp-profile-card {
+  --profile-color: var(--accent-lavender);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 11px;
+  background: rgba(16, 22, 36, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.lp-profile-card-icon {
+  font-size: 17px;
+  color: var(--profile-color);
+}
+
+.lp-profile-card-name {
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.lp-profile-card-desc {
+  color: var(--text-dim-2);
+  font-size: var(--fs-small);
+  line-height: 1.45;
+}
+
+.lp-profile-card:hover {
+  border-color: rgba(199, 205, 219, 0.3);
+  background: rgba(16, 22, 36, 0.95);
+}
+
+.lp-profile-card.is-active {
+  border-color: var(--profile-color);
+  background: color-mix(in srgb, var(--profile-color) 10%, transparent);
+}
+
+/* A strip under the profile cards rather than four boxes. These belong to the
+   profile above them -- card-inside-card is exactly what the box policy exists
+   to stop, and at four bordered tiles they outweighed the thing they annotate. */
+.lp-profile-constraints {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 18px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(199, 205, 219, 0.08);
+}
+
+.lp-profile-constraint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.lp-profile-constraint .lp-constraint-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lp-profile-constraint .lp-constraint-value {
+  flex: 0 0 auto;
+  font-size: var(--fs-body);
+}
+
+.lp-profile-constraint .lp-constraint-badge {
+  flex: 0 0 auto;
+}
+
+.lp-constraint-label {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+  letter-spacing: var(--track-normal);
+}
+
+.lp-constraint-value {
+  font-family: var(--font-data);
+  font-size: var(--fs-strong);
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.lp-constraint-badge {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-normal);
+  padding: 2px 5px;
+  border-radius: var(--radius);
+  width: fit-content;
+  cursor: help;
+}
+
+/* Enforced during the A* search: the returned route cannot break it. */
+.lp-constraint-badge.is-enforced {
+  color: var(--accent-mint);
+  background: rgba(95, 227, 176, 0.12);
+  border: 1px solid rgba(95, 227, 176, 0.3);
+}
+
+/* Verified only after simulation: a returned plan can exceed it. */
+.lp-constraint-badge.is-verified {
+  color: var(--risk-med);
+  background: rgba(227, 213, 72, 0.1);
+  border: 1px solid rgba(227, 213, 72, 0.28);
+}
+
+/* Priority Sliders */
+.lp-priority-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lp-slider-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-slider-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.lp-slider-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.85fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.lp-slider-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+/* ── Inline Material Symbols ──
+   Sized from the parent's font-size and painted in currentColor, which is what
+   lets the same glyph sit in a dim spec label and a bright weight row without
+   either one being restyled. */
+.lp-icon {
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+}
+
+.lp-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 2px;
+  background: none;
+  border: 0;
+  color: var(--text-dimmest);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 0;
+  transition: color 140ms ease;
+}
+
+.lp-info-btn:hover,
+.lp-info-btn.is-open {
+  color: var(--lavender);
+}
+
+/* Deliberately not a floating tooltip. It takes a row of its own and pushes the
+   slider down, so it can never cover the control it describes, and it behaves
+   the same under a finger as under a mouse -- which a `title` never did. */
+.lp-info-pop {
+  margin: 7px 0 3px;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  border: 1px solid rgba(199, 205, 219, 0.12);
+  border-left: 2px solid var(--lavender);
+  border-radius: var(--radius);
+  color: var(--text-3);
+  font-size: var(--fs-small);
+  line-height: 1.55;
+}
+
+/* A box that looks like a box. This value was printed text before
+   (.lp-slider-number, still used by the analysis inspector), which gave nobody
+   a reason to try clicking it -- so the exact weight a profile specifies could
+   be reached only by dragging a slider onto it. */
+.lp-weight-input {
+  flex: 0 0 auto;
+  width: 74px;
+  padding: 3px 7px;
+  background: var(--void);
+  border: 1px solid rgba(199, 205, 219, 0.18);
+  border-radius: var(--radius);
+  color: var(--accent-lavender);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  text-align: right;
+  transition: border-color 140ms ease;
+}
+
+.lp-weight-input:hover {
+  border-color: rgba(199, 205, 219, 0.34);
+}
+
+.lp-weight-input:focus {
+  outline: none;
+  border-color: var(--lavender);
+}
+
+.lp-slider-number {
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  color: var(--accent-lavender);
+  font-weight: 600;
+}
+
+.lp-range-input {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  background: rgba(199, 205, 219, 0.1);
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.lp-range-input::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-lavender);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.lp-range-input::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+/* Mission Sequence */
+.lp-sequence-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-sequence-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+}
+
+/* Was 01-04. The numerals only said "these are in order", which the vertical
+   stack already says; the glyph says WHICH step, so the row can be scanned
+   without reading its label. */
+.lp-seq-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  color: var(--text-dimmest);
+  font-size: 16px;
+}
+
+.lp-sequence-item.is-complete .lp-seq-num {
+  color: var(--mint);
+}
+
+.lp-sequence-item.is-active .lp-seq-num {
+  color: var(--accent-lavender);
+}
+
+.lp-seq-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-2);
+}
+
+/* The two map pickers, full width and stacked, under the sequence they act on. */
+.lp-pick-actions {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-top: 4px;
+}
+
+/* Button, row, col. The button takes what is left, so the two fields keep the
+   same width whether the label says "Select Start" or "START 174, 149". */
+.lp-pick-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.lp-pick-row .lp-pick-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lp-coord-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 0 9px;
+  background: var(--void);
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  transition: border-color 140ms ease;
+}
+
+.lp-coord-field span {
+  color: var(--text-dimmest);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+
+.lp-coord-field input {
+  width: 52px;
+  padding: 8px 0;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  text-align: right;
+}
+
+.lp-coord-field input:focus {
+  outline: none;
+}
+
+.lp-coord-field:focus-within {
+  border-color: var(--lavender);
+}
+
+.lp-coord-field:hover:not(:has(input:disabled)) {
+  border-color: rgba(199, 205, 219, 0.3);
+}
+
+.lp-coord-field:has(input:disabled) {
+  opacity: 0.45;
+}
+
+.lp-pick-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 11px 12px;
+  background: rgba(16, 22, 36, 0.7);
+  border: 1px solid var(--line-button);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+/* The glyph carries the colour the map is about to use: the start marker is
+   mint and the goal marker is coral, so the button that places each one says
+   which before you have placed anything. */
+.lp-pick-btn .lp-icon {
+  font-size: 17px;
+  color: var(--text-dim-2);
+  transition: color 140ms ease;
+}
+
+.lp-pick-btn:hover:not(:disabled) {
+  background: rgba(16, 22, 36, 0.95);
+  border-color: rgba(199, 205, 219, 0.3);
+  color: var(--text);
+}
+
+.lp-pick-btn:first-child .lp-icon {
+  color: var(--mint);
+}
+
+.lp-pick-btn:last-child .lp-icon {
+  color: var(--risk-high);
+}
+
+.lp-pick-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lp-pick-btn:disabled .lp-icon {
+  color: var(--text-dimmest);
+}
+
+.lp-pick-btn:hover:not(:disabled) {
+  border-color: var(--line-accent-hover);
+  color: var(--lavender-bright);
+}
+
+.lp-pick-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+/* A picker that is armed says so in the accent that means "act". */
+.lp-pick-btn.is-picking {
+  border-color: var(--lavender);
+  color: var(--lavender-bright);
+}
+
+/* Once placed, the button reads as the marker it set. */
+.lp-pick-btn.is-set-start {
+  border-color: rgba(95, 227, 176, 0.4);
+  color: var(--mint-text);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+}
+
+.lp-pick-btn.is-set-goal {
+  border-color: rgba(237, 133, 110, 0.4);
+  color: var(--coral-text);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+}
+
+.lp-seq-status {
+  flex: none;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  padding: 0;
+  background: none;
+  color: var(--text-dim-2);
+}
+
+.lp-seq-status.is-ready {
+  background: rgba(95, 227, 176, 0.12);
+  color: var(--accent-mint);
+  font-weight: 600;
+}
+
+.lp-seq-status.is-pending {
+  color: var(--risk-med);
+}
+
+/* Modal Drawer for Rover Selector */
+.lp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 7, 13, 0.75);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lp-modal-drawer {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  width: 90%;
+  max-width: 780px;
+  padding: 24px;
+  box-shadow: var(--shadow-float);
+}
+
+.lp-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+
+.lp-modal-title {
+  margin: 2px 0 0;
+  font-size: var(--fs-display);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.lp-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim-2);
+  font-size: var(--fs-title);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.lp-modal-close:hover {
+  color: var(--text);
+}
+
+.lp-modal-subtitle {
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+  margin: 0 0 20px;
+}
+
+.lp-rover-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+.lp-rover-select-card {
+  background: rgba(13, 19, 32, 0.6);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 16px;
+  cursor: pointer;
+  transition: all 160ms ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-rover-select-card:hover {
+  background: rgba(18, 25, 42, 0.85);
+  border-color: var(--border-focus);
+}
+
+.lp-rover-select-card.is-selected {
+  background: rgba(26, 33, 56, 0.9);
+  border-color: var(--accent-lavender);
+}
+
+.lp-rover-card-badge-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.lp-agency-badge {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--accent-lavender);
+  background: rgba(186, 175, 245, 0.12);
+  padding: 2px 6px;
+  border-radius: var(--radius);
+}
+
+.lp-active-pill {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--accent-mint);
+  font-weight: 700;
+  background: rgba(95, 227, 176, 0.15);
+  padding: 2px 6px;
+  border-radius: var(--radius);
+}
+
+.lp-rover-card-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.lp-rover-name {
+  margin: 0;
+  font-size: var(--fs-value);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.lp-rover-id-code {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-rover-desc {
+  font-size: var(--fs-small);
+  line-height: 1.4;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+  flex-grow: 1;
+}
+
+.lp-rover-specs-table {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+  background: rgba(5, 7, 13, 0.6);
+  padding: 8px;
+  border-radius: var(--radius);
+}
+
+.lp-spec-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-select-btn {
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: rgba(186, 175, 245, 0.12);
+  border: 1px solid rgba(186, 175, 245, 0.25);
+  color: var(--accent-lavender);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.lp-select-btn:hover {
+  background: var(--accent-lavender);
+  color: var(--void);
+}
+
+.lp-select-btn.is-current {
+  background: rgba(95, 227, 176, 0.15);
+  border-color: rgba(95, 227, 176, 0.35);
+  color: var(--accent-mint);
+}
+
+
+.lp-panel-desc-text {
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+
+.lp-telemetry-mono-grid {
+  display: grid;
+  gap: 7px;
+}
+
+
+/* Analysis Mode Left Rail (Snapshot) */
+.lp-status-pill.is-locked {
+  background: rgba(186, 175, 245, 0.12);
+  color: var(--accent-lavender);
+  font-weight: 700;
+  font-size: var(--fs-micro);
+  padding: 2px 6px;
+  border-radius: var(--radius);
+}
+
+.lp-replan-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  background: rgba(186, 175, 245, 0.14);
+  border: 1px solid rgba(186, 175, 245, 0.35);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.lp-replan-btn:hover {
+  background: rgba(186, 175, 245, 0.25);
+}
+
+.lp-snapshot-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.lp-snapshot-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.lp-code-tag {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--accent-lavender);
+}
+
+.lp-snapshot-specs {
+  display: flex;
+  gap: 8px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-snapshot-points {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lp-point-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.lp-point-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.lp-dot-mint {
+  background: var(--accent-mint);
+}
+
+.lp-dot-coral {
+  background: var(--accent-coral);
+}
+
+.lp-point-info {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  align-items: baseline;
+}
+
+.lp-point-type {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-point-coord {
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.lp-readonly-weights {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.lp-readonly-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-small);
+}
+
+.lp-readonly-name {
+  color: var(--text-muted);
+}
+
+.lp-readonly-val {
+  font-family: var(--font-data);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+/* Tier 1 / 2 / 3 Analysis Hierarchy */
+.lp-tier-1-section {
+  background: rgba(14, 20, 34, 0.7);
+  border: 1px solid rgba(186, 175, 245, 0.25);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.lp-overall-risk-badge {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  border: 1px solid;
+  letter-spacing: var(--track-label);
+}
+
+/* Two, not three. At three across a 400px rail each cell had ~110px, which
+   broke "Route speed" onto two lines and "0.19 m/s" onto a third -- six
+   headline numbers none of which could be read at a glance. */
+.lp-decision-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lp-decision-kpi {
+  background: rgba(5, 7, 13, 0.6);
+  border: 1px solid rgba(199, 205, 219, 0.04);
+  border-radius: var(--radius);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-kpi-label {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+  letter-spacing: var(--track-normal);
+}
+
+.lp-kpi-val {
+  font-family: var(--font-data);
+  font-size: var(--fs-value);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.lp-kpi-sub {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-eng-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.lp-eng-stat-cell {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-risk-bar-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.lp-risk-segmented-bar {
+  display: flex;
+  height: 10px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: rgba(199, 205, 219, 0.05);
+}
+
+.lp-risk-legend-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-risk-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lp-legend-swatch {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.lp-payload-calculator {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.lp-payload-input-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.lp-payload-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+  position: relative;
+}
+
+.lp-payload-field input {
+  background: rgba(5, 7, 13, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 6px 24px 6px 8px;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+}
+
+.lp-unit-tag {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-payload-result-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-line);
+}
+
+/* Each result stacks its label over its value. Both are `white-space: nowrap`,
+   and side by side in a third of the rail the third cell ran off the edge --
+   "Arrives with 88.2%" was clipped to "Arrives with 88." for as long as this
+   panel has existed. */
+.lp-payload-result-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lp-payload-result-row .lp-mono-val {
+  text-align: left;
+}
+
+/* Tier 3 Milestones */
+.lp-milestones-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.lp-milestone-entry {
+  display: flex;
+  gap: 10px;
+  position: relative;
+}
+
+.lp-milestone-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 12px;
+  padding-top: 4px;
+}
+
+.lp-milestone-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.lp-milestone-stem {
+  width: 1px;
+  background: rgba(199, 205, 219, 0.1);
+  flex-grow: 1;
+  margin-top: 4px;
+}
+
+.lp-milestone-body {
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  flex-grow: 1;
+}
+
+.lp-milestone-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+
+.lp-milestone-title {
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  color: var(--text);
+}
+
+.lp-milestone-coord {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-milestone-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+}
+
+/* The readings do not wrap. With the risk badge pushed right by margin-left,
+   the two shrinkable spans took the squeeze and broke "Slope:" from "5.3" --
+   a label on one line and its own value on the next. */
+.lp-milestone-sub > span {
+  white-space: nowrap;
+}
+
+/* ── Playback transport, inline in the status strip ── */
+.lp-playback-dock {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lp-playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.lp-play-btn {
+  background: none;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-label);
+  padding: 5px 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.lp-play-btn:hover {
+  border-color: var(--line-accent-hover);
+  color: var(--lavender-bright);
+}
+
+/* Label and value sit on one line here; the strip has 44px, not two rows. */
+.lp-playback-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex: none;
+}
+
+/* The scrubber is how a 190-waypoint traverse is actually read, and at a fixed
+   190px each step was one pixel wide -- you could not stop on a waypoint, only
+   near one. It takes the room the strip has spare now instead. */
+.lp-playback-slider-block {
+  display: flex;
+  align-items: center;
+  flex: 1 1 260px;
+  /* 216, not 240: at 240 the readouts were squeezed to 262px and "SLOPE 10.9°"
+     ran 13px past the strip's edge, where overflow:hidden ate the degree sign.
+     This is the widest the scrubber goes without clipping its neighbour. */
+  min-width: 216px;
+}
+
+.lp-playback-range {
+  width: 100%;
+  height: 20px;
+  appearance: none;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+.lp-playback-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: #232a3a;
+}
+
+.lp-playback-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--lavender);
+  cursor: pointer;
+}
+
+.lp-playback-range::-moz-range-track {
+  height: 2px;
+  background: #232a3a;
+}
+
+.lp-playback-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--lavender);
+  cursor: pointer;
+}
+
+.lp-playback-readouts {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex: none;
+  flex: none;
+}
+
+.lp-playback-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.lp-stat-name {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
+  letter-spacing: var(--track-caps);
+}
+
+.lp-stat-val {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+/* Below this the transport loses the scrubber before it loses the readouts:
+   the numbers are the point, dragging is the convenience. */
+@media (max-width: 1200px) {
+  .lp-playback-slider-block {
+    display: none;
+  }
+}
+
+/* Common Animations */
+@keyframes lp-pulse {
+  0% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+@keyframes lp-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes lp-scan-motion {
+  0% { top: 0%; opacity: 0.8; }
+  50% { opacity: 1; }
+  100% { top: 100%; opacity: 0.4; }
+}
+
+@keyframes lpSlideInLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes lpPulseBorderStart {
+  0%, 100% {
+    border-color: var(--mint);
+    box-shadow: 0 0 0 0 rgba(95, 227, 176, 0.4);
+  }
+  50% {
+    border-color: var(--mint);
+    box-shadow: 0 0 0 4px rgba(95, 227, 176, 0.15);
+  }
+}
+
+@keyframes lpPulseBorderGoal {
+  0%, 100% {
+    border-color: var(--coral);
+    box-shadow: 0 0 0 0 rgba(237, 133, 110, 0.4);
+  }
+  50% {
+    border-color: var(--coral);
+    box-shadow: 0 0 0 4px rgba(237, 133, 110, 0.15);
+  }
+}
+
+/* ── TopBar Layout Toggles ── */
+/* ── Systems & Evidence Drawer ── */
+.lp-systems-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 6, 14, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  z-index: 200;
+}
+
+.lp-systems-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.lp-systems-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(820px, 94vw);
+  background: var(--glass-strong);
+  border-left: 1px solid rgba(79, 216, 240, 0.2);
+  box-shadow: var(--shadow-float);
+  transform: translateX(100%);
+  /* visibility, not just the transform: an off-screen drawer that is only
+     translated away keeps its buttons in the tab order, so Tab walks the
+     cockpit straight into panels nobody can see -- and focusable content
+     inside aria-hidden is the a11y bug that pairs with it. `hidden` drops the
+     subtree from both the tab order and the a11y tree, and transitioning it
+     lets it flip visible the instant the drawer opens while staying visible
+     for the whole slide out. */
+  visibility: hidden;
+  transition:
+    transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0.28s;
+  z-index: 201;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 22px 28px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.lp-systems-drawer.is-open {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.lp-systems-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.lp-systems-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-systems-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-display);
+  font-weight: 800;
+  color: var(--text);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.lp-systems-close {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid rgba(199, 205, 219, 0.12);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: var(--fs-strong);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lp-systems-close:hover {
+  background: rgba(199, 205, 219, 0.1);
+  color: var(--text);
+}
+
+.lp-systems-subtitle {
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin: 12px 0 20px;
+  max-width: 640px;
+}
+
+.lp-systems-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  align-content: start;
+}
+
+/* The evidence panels bring their own rail-section / lp-panel-content card
+   styling; the cell just lets them size to content in the grid instead of
+   being stretched to a shared row height. */
+.lp-systems-cell {
+  align-self: start;
+  min-width: 0;
+}
+
+.lp-systems-cell .lp-panel-content {
+  padding: 0;
+}
+
+@media (max-width: 720px) {
+  .lp-systems-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Quick Rover Tabs ── */
+.lp-rover-segmented-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  background: rgba(8, 12, 22, 0.7);
+  padding: 3px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-line);
+  margin-bottom: 12px;
+}
+
+.lp-rover-tab {
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  padding: 6px 2px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.lp-rover-tab:hover {
+  color: var(--text);
+  background: rgba(199, 205, 219, 0.05);
+}
+
+.lp-rover-tab.is-active {
+  color: var(--text);
+  background: rgba(186, 175, 245, 0.16);
+  border-color: rgba(186, 175, 245, 0.4);
+}
+
+/* ── Sequence & Action Buttons in Planning Panel ── */
+.lp-seq-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.lp-seq-sub {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+  margin-top: 1px;
+}
+
+
+.lp-panel-action-row {
+  display: grid;
+  /* Two recovery controls on one row, the primary action on its own below.
+     Three side by side did not fit a 250px rail -- "Generate Route" was
+     clipped by "Clear" -- and the split is the better hierarchy anyway: Undo
+     and Clear undo things, Generate Route is the task. */
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* Panel hints: the reason a control is unavailable, and the warning that the
+   drawn route no longer matches the sliders. Both were previously carried by
+   a `title` attribute or by nothing at all. */
+.lp-panel-plan-row {
+  margin-top: 8px;
+}
+
+.lp-panel-plan-row .lp-panel-plan-btn {
+  width: 100%;
+}
+
+.lp-panel-hint {
+  margin: 8px 0 0;
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.lp-panel-hint.is-stale {
+  color: var(--risk-med);
+}
+
+.lp-panel-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: none;
+  border: 1px solid var(--line-button);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  padding: 10px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lp-panel-clear-btn:hover:not(:disabled) {
+  color: var(--coral);
+  border-color: rgba(237, 133, 110, 0.4);
+  background: rgba(237, 133, 110, 0.08);
+}
+
+.lp-panel-clear-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* The way back to the hangar, under the rover card it changes. Ghost, like
+   Undo and Clear: it leaves the cockpit, which is not the thing to press
+   here. Full width because it acts on the card above it rather than sitting
+   in a row of peers, and lavender on hover -- the accent means navigation
+   here, where the two buttons above it mean discard. */
+.lp-change-vehicle-btn {
+  width: 100%;
+  margin-top: 10px;
+  background: none;
+  border: 1px solid var(--line-button);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  padding: 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.lp-change-vehicle-btn:hover {
+  color: var(--primary-container);
+  border-color: rgba(186, 175, 245, 0.4);
+  background: rgba(186, 175, 245, 0.08);
+}
+
+.lp-panel-plan-btn {
+  background: var(--lavender);
+  border: 0;
+  color: #0a0c14;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: var(--track-normal);
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 140ms ease, opacity 140ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.lp-panel-plan-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-pop);
+}
+
+.lp-panel-plan-btn:disabled {
+  background: rgba(199, 205, 219, 0.05);
+  border-color: rgba(199, 205, 219, 0.08);
+  color: var(--text-dim-2);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* ── Minimizable Telemetry HUD Overlay on Canvas ── */
+.lp-hud-card {
+  min-width: 232px;
+  max-width: 262px;
+  padding: 12px 14px;
+  border-left: 2px solid var(--cyan);
+}
+
+.lp-hud-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(199, 205, 219, 0.08);
+}
+
+.lp-hud-title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Was --text-muted at micro: the panel's own name was the dimmest thing in it,
+   fainter than the numbers it introduces and fainter than the terrain behind
+   the card. It is the only label on the map, so it gets the cyan the rest of
+   the console uses for a live readout. */
+.lp-hud-title {
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  color: var(--cyan);
+  text-transform: uppercase;
+}
+
+.lp-hud-title-group .lp-icon {
+  font-size: 15px;
+  color: var(--cyan);
+}
+
+.lp-hud-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.lp-hud-btn {
+  background: rgba(199, 205, 219, 0.05);
+  border: 1px solid var(--line-button);
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lp-hud-btn:hover {
+  background: rgba(199, 205, 219, 0.1);
+  color: var(--text);
+}
+
+.lp-hud-minimized {
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(8, 11, 18, 0.85);
+  border: 1px solid rgba(29, 36, 50, 0.4);
+  border-radius: var(--radius);
+  cursor: pointer;
+  box-shadow: var(--shadow-pop);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.lp-hud-minimized:hover {
+  border-color: rgba(186, 175, 245, 0.4);
+  transform: translateY(1px);
+}
+
+.lp-hud-min-dot {
+  font-size: var(--fs-small);
+}
+
+.lp-hud-min-coords,
+.lp-hud-min-alt {
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.lp-hud-min-sep {
+  color: var(--text-dimmest);
+}
+
+.lp-hud-min-expand-icon {
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+}
+
+
+.lp-hud-dock-btn {
+  background: rgba(199, 205, 219, 0.04);
+  border: 1px solid rgba(199, 205, 219, 0.12);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.lp-hud-dock-btn:hover {
+  background: rgba(199, 205, 219, 0.08);
+  color: var(--text);
+}
+
+.lp-hud-dock-btn.is-active {
+  background: rgba(186, 175, 245, 0.15);
+  border-color: rgba(186, 175, 245, 0.35);
+  color: var(--text);
+}
+
+.lp-dock-icon {
+  font-size: var(--fs-micro);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   STAGE 01: DEDICATED ROVER FLEET HANGAR STYLES
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* The hangar is its own screen: fixed over the backdrop and above the shell,
+   which is still laid out behind it while hidden. */
+.fleet-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 131;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* The mission's own landing site rather than a stock starfield: the NAC frame
+     of Site 11. It sits on the fixed container, not on the content, so it holds
+     still while the hangar scrolls down to the weights. */
+  background: url('/textures/nac-site11-2048.jpg') center / cover no-repeat, var(--void);
+}
+
+.fleet-screen-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  font-family: var(--font-data);
+  font-size: var(--fs-strong);
+  color: var(--text-muted);
+  background: var(--void);
+  text-align: center;
+}
+
+.lp-fleet-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 28px 40px 48px;
+  /* The readability layer over that photograph. A landing site is a location,
+     not a surface to read specifications off, so the content sits on a
+     near-opaque ground -- which is also what keeps the flat-grey card hairlines
+     of the design system visible against it. */
+  background: linear-gradient(
+    180deg,
+    rgba(5, 7, 13, 0.82) 0%,
+    rgba(5, 7, 13, 0.9) 45%,
+    rgba(5, 7, 13, 0.96) 100%
+  );
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.lp-fleet-header {
+  margin-bottom: 24px;
+}
+
+.lp-fleet-header-content {
+  max-width: 900px;
+}
+
+.lp-fleet-headline {
+  font-family: var(--font-display);
+  font-size: var(--fs-hero);
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+}
+
+.lp-fleet-subhead {
+  font-family: var(--font-body);
+  font-size: var(--fs-strong);
+  line-height: 1.6;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ── One rover at a time ──
+   Four cards side by side gave each a quarter of the screen and none of them
+   room to be looked at. One card at full size is the rover you are actually
+   deciding about; the arrows and the thumbnail strip below carry the other
+   three, so nothing is hidden, it is just not all shouting at once. */
+.lp-fleet-carousel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.lp-fleet-carousel .lp-fleet-card {
+  /* Takes the row. The arrows are `flex: 0 0 auto` and the card shrinks, which
+     is what keeps them on screen on a narrow window -- a fixed-width card used
+     to push them past both edges, where .fleet-screen's overflow-x clipped them
+     and left the carousel with no visible control at all. The cap only stops
+     the photograph from stretching absurdly on an ultrawide display. */
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 1500px;
+}
+
+.lp-carousel-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  background: var(--bg-card);
+  border: 1px solid rgba(199, 205, 219, 0.14);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.lp-carousel-arrow svg {
+  width: 22px;
+  height: 22px;
+}
+
+.lp-carousel-arrow:hover:not(:disabled) {
+  color: var(--text);
+  border-color: rgba(199, 205, 219, 0.3);
+}
+
+.lp-carousel-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* ── The rest of the fleet ──
+   What showing one rover costs you is the sense that there are four; this is
+   what pays it back, and it doubles as the way to reach one directly instead of
+   stepping past the others. */
+.lp-fleet-thumbs {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.lp-fleet-thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 136px;
+  padding: 6px;
+  background: var(--bg-card);
+  border: 1px solid rgba(199, 205, 219, 0.1);
+  border-radius: var(--radius);
+  color: var(--text-dim-2);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.lp-fleet-thumb img {
+  width: 100%;
+  height: 62px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  opacity: 0.55;
+  transition: opacity 140ms ease;
+}
+
+.lp-fleet-thumb-name {
+  overflow: hidden;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-fleet-thumb:hover {
+  color: var(--text-2);
+  border-color: rgba(199, 205, 219, 0.26);
+}
+
+.lp-fleet-thumb:hover img {
+  opacity: 0.85;
+}
+
+/* The one on screen. */
+.lp-fleet-thumb.is-current {
+  color: var(--text);
+  border-color: var(--lavender);
+}
+
+.lp-fleet-thumb.is-current img {
+  opacity: 1;
+}
+
+/* The one assigned to the mission. A different fact from "the one on screen",
+   so it gets its own mark rather than competing for the same border. */
+.lp-fleet-thumb.is-assigned .lp-fleet-thumb-name::after {
+  content: ' \2713';
+  color: var(--mint);
+}
+
+@media (max-width: 900px) {
+  .lp-fleet-carousel {
+    gap: 8px;
+  }
+
+  .lp-carousel-arrow {
+    width: 34px;
+    height: 34px;
+  }
+
+}
+
+/* ── Rover Showcase Card ── */
+.lp-fleet-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(79, 216, 240, 0.16);
+  border-radius: var(--radius);
+  overflow: hidden;
+  /* Two columns rather than a stack. Stacked, a card this wide gave the
+     photograph the full width and pushed every number below the fold; side by
+     side, the rover and the numbers that describe it are read at once. */
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  box-shadow: var(--shadow-float);
+  /* No cursor: pointer and no hover lift. The whole card used to be the click
+     target, which was defensible at a quarter of the screen and is not at this
+     width -- a card the size of the viewport that reacts to a click anywhere on
+     it invites the accidental one. "Select Rover" is the target, and it looks
+     like one. */
+  transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+
+.lp-fleet-card:hover {
+  border-color: rgba(79, 216, 240, 0.3);
+}
+
+.lp-fleet-card.is-selected {
+  border: 2px solid var(--cyan);
+  background: linear-gradient(180deg, var(--bg-raised) 0%, var(--bg-card) 100%);
+  box-shadow: var(--shadow-float);
+}
+
+/* Photo Banner */
+.lp-card-photo-box {
+  position: relative;
+  grid-column: 1;
+  grid-row: 1 / -1;
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  overflow: hidden;
+  background: var(--void);
+}
+
+.lp-fleet-card > .lp-card-body {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.lp-fleet-card > .lp-card-action-bar {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.lp-card-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s ease;
+}
+
+.lp-fleet-card:hover .lp-card-photo {
+  transform: scale(1.04);
+}
+
+.lp-card-photo-gradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(12, 16, 24, 0.2) 0%, rgba(12, 16, 24, 0.1) 40%, var(--bg-card) 100%);
+}
+
+.lp-fleet-card.is-selected .lp-card-photo-gradient {
+  background: linear-gradient(180deg, rgba(10, 20, 48, 0.2) 0%, rgba(10, 20, 48, 0.1) 40%, var(--bg-raised) 100%);
+}
+
+.lp-card-photo-badges {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 2;
+}
+
+.lp-card-agency {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-normal);
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  background: rgba(5, 7, 13, 0.85);
+  border: 1px solid currentColor;
+}
+
+.lp-card-active-pill {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--mint);
+  background: rgba(95, 227, 176, 0.2);
+  border: 1px solid var(--mint);
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lp-card-photo-footer {
+  position: absolute;
+  bottom: 8px;
+  left: 14px;
+  right: 14px;
+  z-index: 2;
+}
+
+.lp-card-highlight {
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-2);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+/* Card Body */
+.lp-card-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.lp-card-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.lp-card-name {
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.lp-card-code {
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--cyan-text);
+}
+
+.lp-card-description {
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+  min-height: 54px;
+}
+
+/* Specifications Table */
+.lp-card-specs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  background: rgba(5, 7, 13, 0.6);
+  padding: 10px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(199, 205, 219, 0.06);
+  margin-bottom: 12px;
+}
+
+.lp-card-spec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-card-spec-k {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-dim-2);
+  letter-spacing: var(--track-normal);
+}
+
+.lp-card-spec-v {
+  font-family: var(--font-data);
+  font-size: var(--fs-strong);
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Payload Box */
+.lp-card-payload-box {
+  background: rgba(79, 216, 240, 0.06);
+  border: 1px solid rgba(79, 216, 240, 0.15);
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  margin-top: auto;
+}
+
+.lp-card-payload-title {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--cyan);
+  letter-spacing: var(--track-label);
+  display: block;
+  margin-bottom: 3px;
+}
+
+.lp-card-payload-text {
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--text-2);
+  margin: 0;
+}
+
+/* Action Bar */
+.lp-card-action-bar {
+  padding: 12px 16px 16px;
+  border-top: 1px solid rgba(199, 205, 219, 0.06);
+}
+
+.lp-card-select-btn {
+  width: 100%;
+  background: rgba(199, 205, 219, 0.06);
+  border: 1px solid rgba(199, 205, 219, 0.12);
+  color: var(--text-2);
+  font-family: var(--font-display);
+  font-size: var(--fs-strong);
+  font-weight: 600;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lp-card-select-btn:hover {
+  background: rgba(79, 216, 240, 0.2);
+  border-color: rgba(79, 216, 240, 0.4);
+  color: var(--text);
+}
+
+.lp-card-select-btn.is-selected {
+  background: rgba(95, 227, 176, 0.2);
+  border-color: var(--mint);
+  color: var(--mint);
+  font-weight: 700;
+}
+
+/* ── Bottom Configuration & Deployment Dock ── */
+.lp-fleet-bottom-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: var(--bg-card);
+  border: 1px solid rgba(79, 216, 240, 0.22);
+  border-radius: var(--radius);
+  padding: 20px 28px 24px;
+  box-shadow: var(--shadow-float);
+}
+
+/* ── Dock header ──
+   The bottom half of this screen is a second decision, not a footer under the
+   first one, so it is titled like a section instead of opening on a bare label
+   and a hint glued to it. */
+.lp-dock-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(199, 205, 219, 0.08);
+}
+
+.lp-dock-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.lp-dock-title .lp-icon {
+  color: var(--cyan);
+}
+
+.lp-dock-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+}
+
+.lp-dock-tagline {
+  flex: 0 0 auto;
+  color: var(--text-dimmest);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+
+.lp-dock-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+/* ── Numbered steps ──
+   Two things are set here and they are done in order: the profile writes the
+   weights, so a profile chosen after a hand-tuned weight silently overwrites
+   it. Numbering says which comes first. */
+.lp-dock-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lp-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(199, 205, 219, 0.28);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.lp-step-name {
+  color: var(--text);
+  font-size: var(--fs-strong);
+  font-weight: 600;
+}
+
+.lp-step-hint {
+  margin: 6px 0 12px;
+  color: var(--text-dim-2);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+
+.lp-dock-priorities-col {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Presets beside the weights rather than above them: this block came from a
+   250px rail where it could only stack, and stacked here it pushed the deploy
+   button off the first screen. */
+.lp-priorities {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 30px;
+  align-items: start;
+}
+
+.lp-priorities-weights {
+  min-width: 0;
+}
+
+/* Two by two rather than four across. Four in a row left the weights column
+   one line tall beside a presets column carrying chips, a caption and four
+   constraints, and the dock read as a block of controls with a hole under it.
+   That 2x2 is gone again: halving the row left each slider a ~50px stub between
+   a wrapped label and its value, which is not a control you can aim. Full-width
+   rows, and the profile column carries the extra height instead. */
+.lp-priorities .lp-priority-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lp-priorities .lp-section-explainer {
+  margin: 0 0 12px;
+}
+
+.lp-dock-action-col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  flex: 0 0 auto;
+  width: 300px;
+}
+
+.lp-dock-ready {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-dock-ready-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  color: var(--text-dim-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
+}
+
+/* The dot is the state. Grey until a rover is picked, mint once one is -- the
+   button below goes from disabled to live at the same moment. */
+.lp-dock-ready-state .lp-pulse-dot {
+  background: var(--text-dimmest);
+}
+
+.lp-dock-ready-state.is-ready {
+  color: var(--mint);
+}
+
+.lp-dock-ready-state.is-ready .lp-pulse-dot {
+  background: var(--mint);
+}
+
+.lp-dock-rover-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lp-dock-rover-facts {
+  color: var(--text-dim-2);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+}
+
+.lp-dock-rover-name.is-empty {
+  color: var(--text-dim-2);
+  font-weight: 500;
+}
+
+/* What the button will actually do, under the button. "Deploy" alone does not
+   say that a route gets solved on the other side of it. */
+.lp-dock-deploy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  color: var(--text-dimmest);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+
+.lp-dock-deploy-note .lp-icon {
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+/* Three columns need the width for three columns. Below this the deploy block
+   drops under the two steps and takes the full width, and below 820 the steps
+   stack too rather than each becoming one word wide. Placed after the rules it
+   overrides: a media query carries no extra specificity. */
+@media (max-width: 1240px) {
+  .lp-dock-body {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .lp-dock-action-col {
+    width: auto;
+  }
+}
+
+@media (max-width: 820px) {
+  .lp-priorities {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+  }
+
+  .lp-profile-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lp-slider-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  /* With the row halved the slider needs a line of its own rather than a
+     40px stub between the label and the number. */
+  .lp-slider-row .lp-range-input {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .lp-dock-header {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+.lp-dock-rover-name {
+  font-family: var(--font-display);
+  font-size: var(--fs-value);
+  font-weight: 700;
+  color: var(--mint);
+}
+
+/* The hangar's one filled surface, drawn exactly like the landing screen's:
+   solid lavender, dark ink, no border. Both buttons do the same job -- the
+   single thing on the screen you are meant to press -- so they say it the
+   same way.
+
+   It used to be a cyan-to-lavender gradient carrying --text, which failed on
+   three counts. The gradient was depth by fill, which the palette's own
+   header rules out. --cyan is a semantic colour here, spent on measured
+   readings, and a button is not a reading. And #e7eaf1 body text ran 1.40:1
+   over the cyan end and 1.65:1 over the lavender end -- the label was the
+   least readable thing in the hangar despite being its loudest element. The
+   dark ink reverses that to 9.8:1, and 12.3:1 on hover.
+
+   The lift-on-hover and the drop shadow go with it: nothing else in this
+   interface moves toward the cursor, and depth here is a hairline between
+   two flat greys, never a shadow. Hover retones instead, on the same
+   140ms background transition the landing button uses. The arrow keeps its
+   own nudge -- that one is the affordance, not decoration. */
+.lp-deploy-btn {
+  background: var(--lavender);
+  border: 0;
+  color: #0a0c14;
+  font-family: var(--font-display);
+  font-size: var(--fs-value);
+  font-weight: 700;
+  letter-spacing: var(--track-tight);
+  padding: 13px 26px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: background 140ms ease;
+  white-space: nowrap;
+}
+
+.lp-deploy-btn:hover:not(:disabled) {
+  background: var(--lavender-bright);
+}
+
+.lp-deploy-btn:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.lp-deploy-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.lp-deploy-arrow {
+  font-size: var(--fs-title);
+  transition: transform 0.2s ease;
+}
+
+.lp-deploy-btn:hover:not(:disabled) .lp-deploy-arrow {
+  transform: translateX(4px);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   AEROSPACE BRIGHTNESS & CONTRAST ENHANCEMENTS
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.app-shell {
+  background: var(--void);
+}
+
+/* A section is a label, a hairline and aligned data -- not a bordered card.
+   Nesting a card inside a card inside a rail is the pattern section 24 of the
+   design doc names outright. */
+.lp-panel-section {
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: 16px 16px 18px;
+}
+
+.lp-panel-section:first-child {
+  border-top: 0;
+}
+
+/* The one card the rail is allowed: the vehicle you are flying. */
+.lp-selected-rover-card {
+  background: var(--bg-card);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+/* ── Status strip ─────────────────────────────────────────────────────────
+   44px, in flow under the cockpit, on the same hairline the rails use. The
+   scale and the risk legend used to float over the terrain they describe,
+   and the playback transport floated over the route it scrubs; all three
+   read the map, so none of them belongs on top of it. */
+.lp-status-bar {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  /* The scale and the risk key moved onto the map, where the things they
+     describe are. What is left is the transport, so the strip aligns to the
+     end rather than splitting a single child across the width. */
+  justify-content: flex-end;
+  gap: 18px;
+  padding: 0 16px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  /* Below this there is no room for two columns: the photograph would be a
+     sliver and the specifications a column of wrapped single words. This block
+     has to sit after the .lp-fleet-card rules it overrides -- a media query
+     adds no specificity, so up in the carousel section the base rules won and
+     the card stayed two-column all the way down to 390px. */
+  .lp-fleet-card {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+  }
+
+  .lp-card-photo-box {
+    grid-column: 1;
+    grid-row: 1;
+    height: 200px;
+    min-height: 0;
+  }
+
+  .lp-fleet-card > .lp-card-body {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .lp-fleet-card > .lp-card-action-bar {
+    grid-column: 1;
+    grid-row: 3;
+  }
+}
+
+/* ── Placing a point ──
+   A plain `crosshair` said "you are placing something" and never which of the
+   two, so the only way to tell Start from Goal mid-placement was to look away
+   from the terrain and back at the rail. These carry the marker's own colour:
+   mint is what the Start marker is drawn in, coral is the Goal. The hotspot is
+   the centre of the ring (13 13), which is the cell that gets the point, and
+   the dark under-stroke keeps the cursor readable over bright regolith.
+
+   `crosshair` stays as the fallback: a browser that refuses the data URI gets
+   the old behaviour rather than an arrow. */
+.lp-map-pick-start {
+  cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2226%22%20height%3D%2226%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2305070d%22%20stroke-width%3D%223.4%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%235fe3b0%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E") 13 13, crosshair;
+}
+
+.lp-map-pick-goal {
+  cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2226%22%20height%3D%2226%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2305070d%22%20stroke-width%3D%223.4%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%23ed856e%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M13%202v6M13%2018v6M2%2013h6M18%2013h6%22%2F%3E%3Ccircle%20cx%3D%2213%22%20cy%3D%2213%22%20r%3D%224.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E") 13 13, crosshair;
+}
+
+
+/* ── Route identity ──
+   The heading of the analysis: which rover, which traverse, and the two points
+   it runs between. Start and goal were pills floating on the map HUD, over the
+   terrain and repeating the left rail; here they sit at the top of the panel
+   that explains them, with the lat/lon a site is actually quoted by. */
+.lp-route-id-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: var(--fs-small);
+  color: var(--text-dim-2);
+}
+
+.lp-route-id-line strong {
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.lp-route-endpoints {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+}
+
+.lp-route-endpoint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  position: relative;
+}
+
+/* A filled disc for where the rover starts, a ring for where it is headed --
+   the same two marks the canvas draws on the terrain. */
+.lp-endpoint-marker {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-top: 2px;
+  border-radius: 50%;
+}
+
+.lp-endpoint-marker.is-start {
+  background: var(--mint);
+}
+
+.lp-endpoint-marker.is-goal {
+  background: transparent;
+  border: 3px solid var(--coral);
+}
+
+/* The dashed leg between them, drawn from the start row only. */
+.lp-route-endpoint:first-child::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 19px;
+  width: 1px;
+  height: calc(100% - 4px);
+  border-left: 1px dashed rgba(199, 205, 219, 0.28);
+}
+
+.lp-endpoint-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lp-endpoint-title {
+  color: var(--mint);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  letter-spacing: var(--track-normal);
+}
+
+.lp-route-endpoint:last-child .lp-endpoint-title {
+  color: var(--coral);
+}
+
+.lp-endpoint-title em {
+  color: var(--text-dim-2);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.lp-endpoint-coord {
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+}
+
+/* ── The verdict ──
+   Was a 12px bordered chip sharing a header row with the section label. It is
+   the planner's single most important output, so it is the size of one. */
+.lp-verdict-block {
+  padding: 14px;
+  margin-bottom: 16px;
+  background: rgba(16, 22, 36, 0.7);
+  border: 1px solid var(--border-line);
+  border-left: 3px solid var(--verdict-color);
+  border-radius: var(--radius);
+}
+
+.lp-verdict-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.lp-verdict-naming {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.lp-verdict-value {
+  color: var(--verdict-color);
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+/* Five steps, so the word has a position and not just a colour: LOW fills two
+   and CRITICAL fills all five, which is what turns "MEDIUM" from a label into
+   a reading. */
+.lp-verdict-meter {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.lp-verdict-seg {
+  width: 22px;
+  height: 13px;
+  border-radius: 2px;
+  background: rgba(199, 205, 219, 0.1);
+}
+
+.lp-verdict-meaning {
+  margin: 10px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+
+/* ── Milestones ── */
+.lp-milestone-sep {
+  color: var(--text-dimmest);
+}
+
+.lp-milestone-risk {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+}
+
+
+/* ── The strip in ANALYZE ──
+   Moving the strip under the map cost it the rails' width, and pulling the
+   analysis rail out to the Mission Report button cost it 584 more: at 1680 it
+   has 1096px for a scale, a four-item risk key, the transport and three
+   readouts, and everything clipped -- "Caution" lost its last two letters and
+   the slope readout vanished entirely.
+
+   The risk key is what goes. It is the only thing on the strip repeated
+   elsewhere: the rail's RISK DISTRIBUTION carries the same four colours with
+   their share of the route beside them, which is the legend plus the data. In
+   PLAN there is no rail and no transport, so the strip keeps it. */
+.lp-status-bar.is-analyze .lp-risk-legend {
+  display: none;
+}
+
+
+/* ── Boot screen ──
+   Above the landing screen (131) and the hangar, because until the layers are
+   in there is nothing behind it worth reaching. Opaque rather than a wash: the
+   backdrop clip is running underneath from the first frame, and a translucent
+   boot screen would show a moon drifting behind a progress bar, which reads as
+   the app having already started. */
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: var(--void);
+  transition: opacity 0.52s ease, visibility 0.52s ease;
+}
+
+/* ── The starfield ──
+   Drawn rather than photographed: three layers of tiny radial gradients tile
+   at different sizes, so the field never repeats visibly and stays a crisp
+   point of light at any resolution instead of a JPEG's grey smudge. It costs
+   no request and no decode on a boot screen whose whole job is to be up
+   before anything else is.
+
+   A wash of lavender at the top left keeps it from being a flat black field
+   with specks on it -- the same colour the console uses for its one accent. */
+.splash-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1.4px 1.4px at 24% 18%, rgba(231, 234, 241, 0.9), transparent 100%),
+    radial-gradient(1.2px 1.2px at 68% 12%, rgba(231, 234, 241, 0.75), transparent 100%),
+    radial-gradient(1.6px 1.6px at 41% 63%, rgba(231, 234, 241, 0.8), transparent 100%),
+    radial-gradient(1.1px 1.1px at 83% 47%, rgba(186, 175, 245, 0.8), transparent 100%),
+    radial-gradient(1.3px 1.3px at 12% 76%, rgba(231, 234, 241, 0.7), transparent 100%),
+    radial-gradient(1px 1px at 57% 88%, rgba(231, 234, 241, 0.65), transparent 100%),
+    radial-gradient(1.5px 1.5px at 92% 79%, rgba(79, 216, 240, 0.7), transparent 100%),
+    radial-gradient(1.1px 1.1px at 34% 34%, rgba(231, 234, 241, 0.6), transparent 100%);
+  background-size: 320px 320px, 220px 220px, 470px 470px, 190px 190px,
+    380px 380px, 260px 260px, 540px 540px, 150px 150px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* The one soft light in the scene, behind the mark. */
+.splash-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 50% 42%,
+    rgba(186, 175, 245, 0.13) 0%,
+    rgba(5, 7, 13, 0) 58%
+  );
+  pointer-events: none;
+}
+
+.splash-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* The boot screen is simply there on the first paint; a curtain has to arrive,
+   or the stage behind it would cut. */
+@keyframes splash-draw {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.splash-screen.is-entering {
+  animation: splash-draw 0.3s ease both;
+}
+
+/* The curtain's own clock: 1.5s to match TRANSITION_MS, which is the only
+   thing on this screen there is anything honest to time. */
+@keyframes splash-timed-bar {
+  from {
+    width: 4%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+.loading-bar-fill.is-timed {
+  width: 100%;
+  animation: splash-timed-bar 1.5s cubic-bezier(0.33, 0.9, 0.5, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-screen.is-entering {
+    animation: none;
+  }
+
+  .loading-bar-fill.is-timed {
+    animation: none;
+  }
+}
+
+.splash-screen.is-leaving {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.splash-content {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  width: min(420px, 100%);
+}
+
+.splash-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.splash-mark {
+  margin-bottom: 14px;
+}
+
+.splash-identity .loading-brand {
+  font-size: var(--fs-hero);
+}
+
+.splash-tagline {
+  color: var(--text-dim-2);
+  font-family: var(--font-label);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-normal);
+}
+
+.splash-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+/* A failed boot stops being a progress bar and becomes a state. */
+.loading-bar-fill.is-failed {
+  background: var(--coral);
+}
+
+.splash-error {
+  margin: 0;
+  color: var(--coral);
+  font-family: var(--font-data);
+  font-size: var(--fs-small);
+  line-height: 1.55;
+}
+
+/* The wordmark settles first, the bar under it -- the same one-orchestrated-
+   entrance rule the landing screen follows, and skipped entirely for a viewer
+   who asked for less motion. */
+@keyframes splash-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.splash-identity,
+.splash-progress {
+  animation: splash-rise 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.splash-progress {
+  animation-delay: 0.16s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-identity,
+  .splash-progress {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   3-D LiDAR simulation, rock perception and the mission clock.
+   Merged in from berke/lidar-simulation. Every selector below is
+   new to this file; nothing above is overridden.
+   ============================================================ */
+
+.terrain3d-root.is-picking canvas {
+  cursor: crosshair;
+}
+
+.terrain3d-rockbox-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.terrain3d-rockbox {
+  position: absolute;
+  display: none;
+  border: 1.5px solid rgba(255, 82, 82, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 8px rgba(255, 82, 82, 0.35);
+  border-radius: 2px;
+}
+
+.terrain3d-rockbox-label {
+  position: absolute;
+  left: 0;
+  top: -20px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: rgba(120, 20, 20, 0.85);
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+
+/* The mission clock block: what time it is on the rover's own timeline, how
+   fast that timeline is running, and the rover's actual ground speed. It
+   sits between the scrubber and the telemetry readouts because it explains
+   both of them. */
+.lp-playback-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex: none;
+  padding: 0 12px;
+  border-left: 1px solid var(--line-card);
+  border-right: 1px solid var(--line-card);
+}
+
+.lp-playback-scale {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.lp-scale-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-dimmest);
+  font-family: var(--font-data);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.lp-scale-btn:hover {
+  color: var(--text-2);
+  border-color: var(--line-card);
+}
+
+.lp-scale-btn.is-active {
+  color: var(--lavender-bright);
+  border-color: var(--line-accent-hover);
+}
+
+/* The clock survives longer than the per-waypoint telemetry: without it the
+   drive is an animation at an unknown rate, which is the thing this bar
+   exists to stop being true. */
+@media (max-width: 1440px) {
+  .lp-playback-readouts .lp-playback-stat:last-child {
+    display: none;
+  }
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+   3D ROVER COCKPIT & CAMERA SWITCHER STYLING
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.terrain3d-camera-switch {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  gap: 6px;
+  background: rgba(7, 13, 30, 0.88);
+  padding: 4px;
+  border-radius: 24px;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 15px rgba(56, 189, 248, 0.15);
+  backdrop-filter: blur(14px);
+}
+
+.terrain3d-cam-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.terrain3d-cam-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.terrain3d-cam-btn.is-active {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(46, 229, 157, 0.2));
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+}
+
+.terrain3d-lidar {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 24;
+  width: min(330px, calc(100% - 32px));
+  padding: 12px;
+  border: 1px solid rgba(95, 244, 255, 0.28);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(8, 20, 30, 0.94), rgba(6, 11, 25, 0.9)),
+    repeating-linear-gradient(0deg, transparent 0 4px, rgba(95, 244, 255, 0.025) 5px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5), inset 0 0 24px rgba(34, 211, 238, 0.035);
+  color: #dffbff;
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.terrain3d-lidar.is-off {
+  width: 248px;
+  border-color: rgba(148, 163, 184, 0.2);
+  opacity: 0.78;
+}
+
+.terrain3d-lidar-head,
+.terrain3d-lidar-title,
+.terrain3d-lidar-footer {
+  display: flex;
+  align-items: center;
+}
+
+.terrain3d-lidar-head {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.terrain3d-lidar-title {
+  min-width: 0;
+  gap: 10px;
+}
+
+.terrain3d-lidar-title strong,
+.terrain3d-lidar-title small {
+  display: block;
+}
+
+.terrain3d-lidar-title strong {
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.terrain3d-lidar-title small {
+  margin-top: 2px;
+  color: rgba(165, 243, 252, 0.58);
+  font-family: var(--font-data);
+  font-size: 8px;
+  letter-spacing: 0.09em;
+}
+
+.terrain3d-radar-icon {
+  position: relative;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(95, 244, 255, 0.48);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #8bfbff 0 1px, transparent 2px),
+    repeating-radial-gradient(circle, transparent 0 5px, rgba(95, 244, 255, 0.19) 6px 6.5px);
+}
+
+.terrain3d-radar-icon::before,
+.terrain3d-radar-icon::after {
+  position: absolute;
+  content: '';
+  background: rgba(95, 244, 255, 0.18);
+}
+
+.terrain3d-radar-icon::before { inset: 14px 2px auto; height: 1px; }
+.terrain3d-radar-icon::after { inset: 2px auto 2px 14px; width: 1px; }
+
+.terrain3d-radar-icon span {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(95, 244, 255, 0.74), transparent 23%);
+  /* The sensor really does turn at 5 Hz, and this was set to 0.2s to match it
+     exactly. Five revolutions a second is not a sweep any eye can follow --
+     the wedge smears into a flat ring and the icon stops reading as a moving
+     thing at all. The header states the true rate in words ("5 HZ"), which is
+     where a number belongs; the icon's job is only to say the sensor is
+     turning, so it turns slowly enough to be seen doing it. */
+  animation: terrain3d-radar-sweep 2s linear infinite;
+}
+
+@keyframes terrain3d-radar-sweep {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terrain3d-radar-icon span {
+    animation: none;
+  }
+}
+
+.terrain3d-lidar-toggle {
+  min-width: 48px;
+  padding: 5px 8px;
+  border: 1px solid rgba(46, 229, 157, 0.5);
+  border-radius: 999px;
+  background: rgba(46, 229, 157, 0.12);
+  box-shadow: 0 0 13px rgba(46, 229, 157, 0.12);
+  color: #70f4bd;
+  font-family: var(--font-data);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.terrain3d-lidar.is-off .terrain3d-lidar-toggle {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.08);
+  box-shadow: none;
+  color: #94a3b8;
+}
+
+.terrain3d-lidar-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  margin-top: 11px;
+  overflow: hidden;
+  border: 1px solid rgba(95, 244, 255, 0.11);
+  border-radius: 7px;
+  background: rgba(95, 244, 255, 0.09);
+}
+
+.terrain3d-lidar-grid div {
+  min-width: 0;
+  padding: 7px 6px;
+  background: rgba(5, 13, 24, 0.82);
+}
+
+.terrain3d-lidar-grid span,
+.terrain3d-lidar-grid strong {
+  display: block;
+  white-space: nowrap;
+}
+
+.terrain3d-lidar-grid span {
+  color: rgba(165, 243, 252, 0.47);
+  font-family: var(--font-data);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+}
+
+.terrain3d-lidar-grid strong {
+  margin-top: 3px;
+  color: #d9fbff;
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.terrain3d-lidar .is-danger {
+  color: #ff9b66;
+  text-shadow: 0 0 10px rgba(255, 112, 67, 0.38);
+}
+
+.terrain3d-lidar-footer {
+  gap: 10px;
+  margin-top: 9px;
+  color: rgba(203, 213, 225, 0.58);
+  font-size: 8px;
+  letter-spacing: 0.025em;
+}
+
+.terrain3d-lidar-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.terrain3d-lidar-footer i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.terrain3d-lidar-ramp-label {
+  gap: 5px;
+}
+
+/* Same jet stops the point cloud itself is coloured with (jetColor() in
+   lidarSimulation.ts) -- this swatch is the ramp's legend, not a decoration,
+   so it has to stay in sync with that function by eye if it ever changes. */
+.terrain3d-lidar-ramp {
+  width: 34px;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(
+    90deg,
+    #0000ff 0%,
+    #00ffff 25%,
+    #00ff00 50%,
+    #ffff00 75%,
+    #ff0000 100%
+  );
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.25);
+}
+
+.terrain3d-lidar-footer b {
+  margin-left: auto;
+  color: rgba(223, 251, 255, 0.78);
+  font-family: var(--font-data);
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .terrain3d-lidar {
+    bottom: 10px;
+    left: 10px;
+    width: min(300px, calc(100% - 20px));
+  }
+
+  .terrain3d-camera-switch {
+    top: 8px;
+  }
+
+  .terrain3d-cam-btn {
+    padding-inline: 9px;
   }
 }

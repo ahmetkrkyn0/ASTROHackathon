@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, List
 
 # PROJ enforces celestial-body matching by default; override for Moon→WGS84.
@@ -20,15 +21,78 @@ from pyproj import Transformer
 if TYPE_CHECKING:
     from .simulation import RoverState
 
-# ── Grid geometry constants ───────────────────────────────────────────────────
-# Origin: top-left corner of the 500x500 window in Polar Stereo metres.
-# Derived from window selection in process_lunar_data.py:
-#   centre pixel (250, 250) maps to (176000, 48000) m.
-ORIGIN_X_M: float = 176000.0 - 250 * 80.0   # = 156000.0
-ORIGIN_Y_M: float = 48000.0  - 250 * 80.0   # = 28000.0
-RESOLUTION_M: float = 80.0
-GRID_ROWS: int = 500
-GRID_COLS: int = 500
+# ── Grid geometry fallback ────────────────────────────────────────────────────
+# These are the LAST RESORT, used only when a caller passes no metadata.
+# Every production path carries a real origin from metadata.json, and
+# _resolve_grid_geometry prefers it.
+#
+# They used to be hardcoded to a window that no longer exists: a comment
+# derived them from "centre pixel (250, 250) maps to (176000, 48000) m" at
+# 80 m/px, while the shipped grid at the time was origin (-15500, -4000) at
+# 5 m/px. The numbers were wrong AND the comment presented the derivation as
+# current, so anyone reading it to understand the grid was reading about a
+# different site. They are now READ from the shipped metadata at import
+# time, so they cannot drift from the grids again, with the literals below
+# as the fallback's own fallback. (Round 3 review, L-7.)
+#
+# That drift is exactly why these are read, not trusted: the shipped window
+# has since moved again, from Site01 (-15500, -4000) to the current Site11
+# working window (-40000, 15500). The literals track the current window so a metadata-less caller
+# lands on the right site, but nothing in production depends on them.
+#
+# The y term is subtracted per row because rows increase southward, so the
+# origin (row 0) is the window's NORTH edge -- the convention grid_frame
+# defines and process_lunar_data writes. (Round 2 review, L-1.)
+_FALLBACK_ORIGIN_X_M: float = -40000.0
+_FALLBACK_ORIGIN_Y_M: float = 15500.0
+_FALLBACK_RESOLUTION_M: float = 5.0
+_FALLBACK_ROWS: int = 500
+_FALLBACK_COLS: int = 500
+
+
+def _shipped_geometry() -> tuple[float, float, float, int, int]:
+    """Grid geometry from the shipped metadata.json, or the literals above.
+
+    Read once at import. A missing or malformed file is not an error here --
+    it only means the no-metadata fallback uses the literals instead.
+    """
+    import json
+
+    candidate = (
+        Path(__file__).resolve().parent.parent.parent
+        / "lunapath"
+        / "data"
+        / "processed"
+        / "metadata.json"
+    )
+    try:
+        meta = json.loads(candidate.read_text(encoding="utf-8"))
+        origin = meta["origin"]
+        shape = meta["shape"]
+        return (
+            float(origin["x"]),
+            float(origin["y"]),
+            float(meta["resolution_m"]),
+            int(shape[0]),
+            int(shape[1]),
+        )
+    except Exception:
+        return (
+            _FALLBACK_ORIGIN_X_M,
+            _FALLBACK_ORIGIN_Y_M,
+            _FALLBACK_RESOLUTION_M,
+            _FALLBACK_ROWS,
+            _FALLBACK_COLS,
+        )
+
+
+(
+    ORIGIN_X_M,
+    ORIGIN_Y_M,
+    RESOLUTION_M,
+    GRID_ROWS,
+    GRID_COLS,
+) = _shipped_geometry()
 
 # ── Lunar South Polar Stereographic → WGS84 ──────────────────────────────────
 _PROJ_MOON_SP: str = (
@@ -86,7 +150,11 @@ def pixel_to_lonlat(
     """
     origin_x, origin_y, resolution_m, _, _ = _resolve_grid_geometry(metadata)
     x_m = origin_x + col * resolution_m
-    y_m = origin_y + row * resolution_m
+    # origin_y is the top edge of the window and rows increase southward, so
+    # the row term is subtracted -- the same convention as
+    # process_lunar_data.window_center_latlon and corridor._pixel_to_metres.
+    # (Faz 2 review, C2. Faz 1 had flagged this line as a known-unfixed bug.)
+    y_m = origin_y - row * resolution_m
     lon, lat = _fwd.transform(x_m, y_m)
     if lat > _LAT_SOUTH_THRESHOLD:
         raise ValueError(
@@ -114,7 +182,8 @@ def lonlat_to_pixel(
     origin_x, origin_y, resolution_m, rows, cols = _resolve_grid_geometry(metadata)
     x_m, y_m = _inv.transform(lon, lat)
     col_f = (x_m - origin_x) / resolution_m
-    row_f = (y_m - origin_y) / resolution_m
+    # Inverse of pixel_to_lonlat's y_m = origin_y - row * resolution_m.
+    row_f = (origin_y - y_m) / resolution_m
     row_i = int(round(row_f))
     col_i = int(round(col_f))
     if not (0 <= row_i < rows and 0 <= col_i < cols):
@@ -214,6 +283,9 @@ def build_plan_response(
     elevation_grid: Any | None = None,
     rover_id: str | None = None,
     rover_name: str | None = None,
+    corridor: dict[str, Any] | None = None,
+    route_statistics: dict[str, Any] | None = None,
+    execution: dict[str, Any] | None = None,
 ) -> dict:
     """Assemble the final API response for a single plan request.
 
@@ -241,6 +313,14 @@ def build_plan_response(
         "astar_metrics": astar_result.get("metrics", {}),
         "summary": summary,
         "geojson": states_to_geojson(states, metadata),
+        "corridor": corridor,
+        "route_statistics": route_statistics,
+        # How much of the planned route the rover can actually execute.
+        # `astar_metrics` describes what the PLANNER found; `summary` and
+        # `geojson` describe what the SIMULATION could drive, and when a
+        # traverse strands those are different journeys. Nothing said so
+        # except a `stranded` flag three levels down. (Round 4 review, M-3.)
+        "execution": execution,
     }
     if rover_id is not None:
         response["rover"] = {

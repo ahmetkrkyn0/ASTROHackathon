@@ -1,0 +1,99 @@
+/* Formal safety margins (D3). Layout only -- the figure, the meters and the
+   labelled rule all come from the instrument vocabulary, which is what makes
+   this panel and the four beside it read as one console. */
+
+.lp-margins { display: flex; flex-direction: column; gap: 10px; }
+
+.lp-margins-tight-id { font-weight: 500; color: var(--text-2); }
+
+/* The axis, drawn once above the twelve rows that share it. */
+.lp-margins-axis {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  /* Aligned to where the meters start: icon (15) + gap (7). */
+  padding-left: 22px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dimmest);
+}
+
+.lp-margins-axis span:first-child { text-align: left; }
+.lp-margins-axis span:last-child { text-align: right; }
+.lp-margins-axis-zero { color: var(--text-dim-2); }
+
+.lp-margins-list { list-style: none; margin: 0; padding: 0; }
+
+.lp-margin-row {
+  display: grid;
+  /* Four columns, because the name and the value were both landing in the
+     third one -- the name auto-placed there and the value was put there
+     explicitly -- so every requirement rendered as a single letter and an
+     ellipsis. */
+  grid-template-columns: 15px 48px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 7px;
+  row-gap: 3px;
+  padding: 6px 0 7px;
+  border-bottom: 1px solid var(--line-inner);
+  font-size: var(--fs-small);
+}
+
+.lp-margin-row:last-child { border-bottom: none; }
+
+.lp-margin-icon { font-size: 13px; color: var(--text-dim); }
+
+.lp-margin-id {
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.lp-margin-name {
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Its own column at the end of the first line, right-aligned over the meter
+   that explains it. */
+.lp-margin-value {
+  grid-column: 4;
+  grid-row: 1;
+  justify-self: end;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lp-margin-meter { grid-column: 2 / -1; }
+
+.lp-margin-row.is-satisfied .lp-margin-icon { color: var(--mint); }
+.lp-margin-row.is-violated .lp-margin-icon { color: var(--coral); }
+.lp-margin-row.is-violated .lp-margin-value { color: var(--coral-text); }
+.lp-margin-row.is-violated .lp-margin-name { color: var(--text-2); }
+.lp-margin-row.is-boundary .lp-margin-icon,
+.lp-margin-row.is-boundary .lp-margin-value { color: var(--cyan-text); }
+
+/* Untested and undecided are quiet: neither is a pass and neither is a
+   failure, and their axis is empty because no margin was measured. */
+.lp-margin-row.is-not-applicable,
+.lp-margin-row.is-pending { opacity: 0.55; }
+
+.lp-margins-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+}
+
+.lp-margins-foot span { display: flex; align-items: center; gap: 5px; }
+.lp-margins-foot svg { flex: none; font-size: 12px; }
+
+.lp-margins-untested { color: var(--text-dim); }
+.lp-margins-report { color: var(--text-dimmest); }

@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Download the NAIF SPICE kernels LunaPath needs.
+
+Kernels total a few hundred MB and are deliberately NOT committed.
+Run once:  python lunapath/src/fetch_kernels.py
+"""
+
+from __future__ import annotations
+
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "backend"))
+from app.ephemeris import ascii_safe_path  # noqa: E402
+
+NAIF = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels"
+
+KERNELS: tuple[tuple[str, str], ...] = (
+    (f"{NAIF}/lsk/naif0012.tls", "naif0012.tls"),
+    (f"{NAIF}/spk/planets/de440s.bsp", "de440s.bsp"),
+    (f"{NAIF}/pck/moon_pa_de440_200625.bpc", "moon_pa_de440_200625.bpc"),
+    (f"{NAIF}/fk/satellites/moon_de440_250416.tf", "moon_de440_250416.tf"),
+)
+
+META_KERNEL_TEMPLATE = """\\begindata
+PATH_VALUES  = ( '{kernel_dir}' )
+PATH_SYMBOLS = ( 'K' )
+KERNELS_TO_LOAD = (
+{entries}
+)
+\\begintext
+"""
+
+
+def main() -> None:
+    kernel_dir = Path(__file__).resolve().parent.parent.parent / "kernels"
+    kernel_dir.mkdir(parents=True, exist_ok=True)
+
+    for url, name in KERNELS:
+        target = kernel_dir / name
+        if target.exists():
+            print(f"  skip (exists): {name}")
+            continue
+        print(f"  downloading: {name} ...", flush=True)
+        try:
+            urllib.request.urlretrieve(url, target)
+            print(f"  done: {name} ({target.stat().st_size / 1e6:.1f} MB)")
+        except urllib.error.HTTPError as e:
+            if target.exists():
+                target.unlink()
+            print(
+                f"  failed to download {name}: HTTP {e.code}\n"
+                f"  NAIF path/filename may have changed. Consider checking:\n"
+                f"    {url}"
+            )
+            raise
+
+    entries = "\n".join(f"    '$K/{name}'" for _, name in KERNELS)
+    # PATH_VALUES has to survive the trip into CSPICE, which reads it as a
+    # narrow byte string -- see app.ephemeris.ascii_safe_path. A checkout
+    # under a non-ASCII path would otherwise write a meta-kernel that SPICE
+    # can open but whose KERNELS_TO_LOAD entries it cannot resolve, which
+    # reports as SPICE(NOSUCHFILE) against files that are plainly there.
+    meta = META_KERNEL_TEMPLATE.format(
+        kernel_dir=ascii_safe_path(kernel_dir).replace("\\", "/"), entries=entries
+    )
+    meta_path = kernel_dir / "lunapath.tm"
+    meta_path.write_text(meta, encoding="utf-8")
+    print(f"\n  meta-kernel written: {meta_path}")
+
+
+if __name__ == "__main__":
+    main()

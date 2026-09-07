@@ -1,0 +1,278 @@
+{
+  "grid": {
+    "rows": 500,
+    "cols": 500,
+    "resolution_m": 5.0,
+    "span_m": [
+      2500.0,
+      2500.0
+    ],
+    "cells": 250000
+  },
+  "georeference": {
+    "origin": {
+      "x": -40000.0,
+      "y": 15500.0
+    },
+    "crs": "PROJCS[\"unnamed\",GEOGCS[\"unnamed ellipse\",DATUM[\"unknown\",SPHEROID[\"unnamed\",1737400,0]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]]],PROJECTION[\"Polar_Stereographic\"],PARAMETER[\"latitude_of_origin\",-90],PARAMETER[\"central_meridian\",0],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1],AXIS[\"Easting\",NORTH],AXIS[\"Northing\",NORTH]]",
+    "window_offset": {
+      "row": 1500,
+      "col": 1000
+    },
+    "row_axis": "north-to-south",
+    "col_axis": "west-to-east"
+  },
+  "elevation": {
+    "min_m": 668.3148193359375,
+    "max_m": 1815.9869384765625,
+    "relief_m": 1147.672119140625,
+    "vertical_exaggeration_suggested": 1.0
+  },
+  "binary_format": {
+    "dtype": "float32",
+    "endian": "little",
+    "order": "row-major",
+    "nodata": "NaN",
+    "bytes_per_layer": 1000000,
+    "decode": "new Float32Array(await (await fetch(url)).arrayBuffer())"
+  },
+  "rover": {
+    "id": "lpr_1",
+    "name": "LPR-1 (Default)"
+  },
+  "weights": {
+    "w_slope": 0.409,
+    "w_energy": 0.259,
+    "w_shadow": 0.142,
+    "w_thermal": 0.19,
+    "w_roughness": 0.15
+  },
+  "layers": {
+    "elevation": {
+      "units": "m",
+      "description": "Surface height above the sphere datum; the displacement field.",
+      "validity": "MEASURED",
+      "min": 668.3148193359375,
+      "max": 1815.9869384765625,
+      "nodata": 0,
+      "binary_url": "/api/layers/elevation?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/elevation"
+    },
+    "slope": {
+      "units": "deg",
+      "description": "Terrain slope magnitude.",
+      "validity": "DERIVED",
+      "min": 0.0524744858094175,
+      "max": 59.77615777269757,
+      "nodata": 0,
+      "binary_url": "/api/layers/slope?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/slope"
+    },
+    "aspect": {
+      "units": "deg",
+      "description": "Downhill azimuth, degrees clockwise from grid north.",
+      "validity": "DERIVED",
+      "min": 0.0,
+      "max": 359.9953124618027,
+      "nodata": 0,
+      "binary_url": "/api/layers/aspect?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/aspect"
+    },
+    "thermal": {
+      "units": "degC",
+      "description": "Annual peak surface temperature.",
+      "validity": "DERIVED",
+      "min": -183.14999389648438,
+      "max": 45.353858947753906,
+      "nodata": 0,
+      "binary_url": "/api/layers/thermal?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/thermal"
+    },
+    "thermal_min": {
+      "units": "degC",
+      "description": "Cold-end equilibrium surface temperature.",
+      "validity": "DERIVED",
+      "min": -183.14999389648438,
+      "max": 2.384742498397827,
+      "nodata": 0,
+      "binary_url": "/api/layers/thermal_min?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/thermal_min"
+    },
+    "shadow_ratio": {
+      "units": "fraction",
+      "description": "Fraction of the sampled window the cell spends shadowed.",
+      "validity": "DERIVED",
+      "min": 0.0,
+      "max": 1.0,
+      "nodata": 0,
+      "binary_url": "/api/layers/shadow_ratio?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/shadow_ratio"
+    },
+    "cost": {
+      "units": "dimensionless",
+      "description": "Weighted multi-criteria traverse cost; NaN where impassable.",
+      "validity": "DERIVED",
+      "min": 0.21391925057371494,
+      "max": 1.1245182544695653,
+      "nodata": 59555,
+      "binary_url": "/api/layers/cost?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/cost"
+    },
+    "traversable": {
+      "units": "boolean",
+      "description": "1.0 passable, 0.0 not.",
+      "validity": "DERIVED",
+      "min": 0.0,
+      "max": 1.0,
+      "nodata": 0,
+      "binary_url": "/api/layers/traversable?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/traversable"
+    },
+    "earth_visibility": {
+      "units": "fraction",
+      "description": "Fraction of the sampled span in which the Earth is above the local horizon: where a direct-to-Earth radio link is geometrically possible.",
+      "validity": "DERIVED",
+      "min": 0.0,
+      "max": 1.0,
+      "nodata": 0,
+      "binary_url": "/api/layers/earth_visibility?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/earth_visibility"
+    },
+    "p_traversable": {
+      "units": "fraction",
+      "description": "Fraction of NASA's DEM clones in which the cell passes this rover's slope and cold-end gates: 1 certainly passable, 0 certainly not.",
+      "validity": "DERIVED",
+      "min": 0.0,
+      "max": 1.0,
+      "nodata": 0,
+      "binary_url": "/api/layers/p_traversable?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/p_traversable"
+    },
+    "slope_sigma": {
+      "units": "deg",
+      "description": "Standard deviation of the slope across the DEM-clone ensemble.",
+      "validity": "DERIVED",
+      "min": 0.39015689492225647,
+      "max": 5.793921947479248,
+      "nodata": 0,
+      "binary_url": "/api/layers/slope_sigma?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/slope_sigma"
+    },
+    "elevation_sigma": {
+      "units": "m",
+      "description": "NASA PGDA's total elevation uncertainty (toterr) for the DEM: the adjustment's error model, not a measurement.",
+      "validity": "MODEL",
+      "min": 0.07178567349910736,
+      "max": 4.11468505859375,
+      "nodata": 0,
+      "binary_url": "/api/layers/elevation_sigma?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/elevation_sigma"
+    },
+    "slope_sigma_nasa": {
+      "units": "deg",
+      "description": "NASA PGDA's slope uncertainty (slperr) for the DEM.",
+      "validity": "MODEL",
+      "min": 0.7160710096359253,
+      "max": 15.506237030029297,
+      "nodata": 0,
+      "binary_url": "/api/layers/slope_sigma_nasa?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/slope_sigma_nasa"
+    },
+    "roughness": {
+      "units": "m",
+      "description": "NASA LOLA LDRM roughness (PGDA product 90): spread of LOLA spot height residuals around a plane fit within a 100 m window, posted at 50 m/px; every 5 m cell carries its 50 m pixel's value -- a hectometre-scale block statistic, not the cell's own roughness.",
+      "validity": "MEASURED",
+      "min": 0.11939021944999695,
+      "max": 4.6029887199401855,
+      "nodata": 0,
+      "binary_url": "/api/layers/roughness?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/roughness"
+    },
+    "psr": {
+      "units": "boolean",
+      "description": "NASA PGDA PSR map (LPSR, 20 m/px): 1.0 inside a permanently shadowed region, 0.0 outside. A measured product and a check of shadow_ratio, not a planning input.",
+      "validity": "MEASURED",
+      "min": 0.0,
+      "max": 1.0,
+      "nodata": 0,
+      "binary_url": "/api/layers/psr?format=f32&rover_id=lpr_1",
+      "json_url": "/api/layers/psr"
+    }
+  },
+  "dem_uncertainty": {
+    "model": "nasa_pgda_clones",
+    "site": "Site11",
+    "product_url": "https://pgda.gsfc.nasa.gov/products/78",
+    "reference": "Barker, Mazarico et al., High-Resolution LOLA Topography for Lunar South Pole Sites (PGDA product 78); Barker et al. 2021, PSS 203, 105119",
+    "clone_kind": "full surface DEM (surface + error realisation); error = clone - surface",
+    "fetched_utc": "2026-09-06T22:36:34Z",
+    "n_clones": 20,
+    "clone_indices": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "window_offset": {
+      "row": 1500,
+      "col": 1000
+    },
+    "near_range_m": 1000.0,
+    "sigma": {
+      "toterr_url": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site11/Site11_final_adj_5mpp_toterr.tif",
+      "slperr_url": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site11/Site11_final_adj_5mpp_slperr.tif",
+      "toterr_m": {
+        "median": 0.4412,
+        "mean": 0.4688,
+        "p95": 0.8137,
+        "max": 4.1147
+      },
+      "slperr_deg": {
+        "median": 1.7369,
+        "mean": 1.9236,
+        "p95": 3.2911,
+        "max": 15.5062
+      }
+    },
+    "error_across_clones": {
+      "mean_m": -0.013,
+      "rms_m": 0.5075,
+      "rms_toterr_m": 0.5082
+    },
+    "rover_id": "lpr_1",
+    "slope_max_deg": 25.0,
+    "thermal_field_held_fixed": true,
+    "far_field_held_fixed": true,
+    "earth_visibility_cloned": false,
+    "layers": [
+      "p_traversable",
+      "slope_sigma",
+      "elevation_sigma",
+      "slope_sigma_nasa"
+    ],
+    "clone_horizons": {
+      "n_clones": 20,
+      "stride": 4,
+      "near_range_m": 1000.0,
+      "neglected_horizon_shift_deg_max": 0.0253,
+      "surf_check_max_abs_deg": 0.0
+    },
+    "standard": "NASA-STD-7009 results uncertainty: input pedigree above"
+  }
+}

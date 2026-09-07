@@ -1,0 +1,213 @@
+{
+  "_comment": [
+    "The verdict's parity fixture, read by BOTH report.test.ts and",
+    "backend/test_report_verdict.py. The decision lives twice -- once in",
+    "report.ts for the report screen, once in backend/app/report.py for the",
+    "assistant -- and an operator told GO on screen and NO-GO by the assistant",
+    "has learned only not to trust either. This file is what stops that.",
+    "",
+    "`absent` lists keys to REMOVE from the merged summary. It exists because",
+    "JavaScript's `undefined < 30` is false while Python's `None < 30` raises,",
+    "so 'the field is missing' is a case in its own right and cannot be",
+    "expressed by writing null: JS coerces null to 0 and would compare true.",
+    "",
+    "`codes`, not prose. The two copies phrase their reasons differently on",
+    "purpose: the frontend interpolates numbers, the backend carries none",
+    "because ai_grounding blocks any digit it did not register."
+  ],
+  "base": {
+    "total_distance_km": 1,
+    "total_elapsed_hours": 2,
+    "final_battery_pct": 80,
+    "min_battery_pct": 80,
+    "max_slope_deg": 10,
+    "max_segment_slope_deg": 9,
+    "total_energy_consumed_wh": 400,
+    "total_shadow_exposure": 0.3,
+    "critical_steps_count": 0,
+    "high_or_above_steps_count": 0,
+    "waypoint_count": 3,
+    "total_recharges": 0,
+    "stranded": false,
+    "stranded_at_step": null,
+    "max_continuous_shadow_h": 1,
+    "shadow_limit_h": 50,
+    "shadow_limit_exceeded": false,
+    "peak_power_exceeded_steps": 0
+  },
+  "cases": [
+    {
+      "name": "a route that violates nothing",
+      "summary": {},
+      "execution": null,
+      "absent": [],
+      "verdict": "GO",
+      "codes": ["NO_VIOLATION"]
+    },
+    {
+      "name": "stranded",
+      "summary": { "stranded": true, "stranded_at_step": 12 },
+      "execution": null,
+      "absent": [],
+      "verdict": "NO-GO",
+      "codes": ["STRANDED"]
+    },
+    {
+      "name": "stranded with no step recorded",
+      "summary": { "stranded": true, "stranded_at_step": null },
+      "execution": null,
+      "absent": [],
+      "verdict": "NO-GO",
+      "codes": ["STRANDED"]
+    },
+    {
+      "name": "a truncated execution",
+      "summary": {},
+      "execution": {
+        "stranded": false,
+        "planned_nodes": 90,
+        "executable_nodes": 40,
+        "truncated": true,
+        "reason": "battery"
+      },
+      "absent": [],
+      "verdict": "NO-GO",
+      "codes": ["EXECUTION_TRUNCATED"]
+    },
+    {
+      "name": "an execution block that did not truncate",
+      "summary": {},
+      "execution": {
+        "stranded": false,
+        "planned_nodes": 90,
+        "executable_nodes": 90,
+        "truncated": false,
+        "reason": null
+      },
+      "absent": [],
+      "verdict": "GO",
+      "codes": ["NO_VIOLATION"]
+    },
+    {
+      "name": "a breached shadow limit",
+      "summary": { "shadow_limit_exceeded": true, "max_continuous_shadow_h": 61 },
+      "execution": null,
+      "absent": [],
+      "verdict": "NO-GO",
+      "codes": ["SHADOW_LIMIT_EXCEEDED"]
+    },
+    {
+      "name": "a rover with no shadow limit does not block",
+      "summary": { "shadow_limit_exceeded": null, "shadow_limit_h": null },
+      "execution": null,
+      "absent": [],
+      "verdict": "GO",
+      "codes": ["NO_VIOLATION"]
+    },
+    {
+      "name": "a CRITICAL step",
+      "summary": { "critical_steps_count": 1 },
+      "execution": null,
+      "absent": [],
+      "verdict": "NO-GO",
+      "codes": ["CRITICAL_STEPS"]
+    },
+    {
+      "name": "a HIGH step degrades rather than blocks",
+      "summary": { "high_or_above_steps_count": 4 },
+      "execution": null,
+      "absent": [],
+      "verdict": "GO-WITH-RISK",
+      "codes": ["HIGH_RISK_STEPS"]
+    },
+    {
+      "name": "a low battery trough degrades rather than blocks",
+      "summary": { "min_battery_pct": 22 },
+      "execution": null,
+      "absent": [],
+      "verdict": "GO-WITH-RISK",
+      "codes": ["BATTERY_WATCH"]
+    },
+    {
+      "name": "the battery watch threshold is exclusive",
+      "summary": { "min_battery_pct": 30 },
+      "execution": null,
+      "absent": [],
+      "verdict": "GO",
+      "codes": ["NO_VIOLATION"]
+    },
+    {
+      "name": "an absent battery figure is not a finding",
+      "summary": {},
+      "execution": null,
+      "absent": ["min_battery_pct"],
+      "verdict": "GO",
+      "codes": ["NO_VIOLATION"]
+    },
+    {
+      "name": "an absent count is not a finding",
+      "summary": {},
+      "execution": null,
+      "absent": ["critical_steps_count", "high_or_above_steps_count", "total_recharges", "peak_power_exceeded_steps"],
+      "verdict": "GO",
+      "codes": ["NO_VIOLATION"]
+    },
+    {
+      "name": "a breached peak power budget",
+      "summary": { "peak_power_exceeded_steps": 3 },
+      "execution": null,
+      "absent": [],
+      "verdict": "GO-WITH-RISK",
+      "codes": ["PEAK_POWER_EXCEEDED"]
+    },
+    {
+      "name": "a route that needs recharging",
+      "summary": { "total_recharges": 2 },
+      "execution": null,
+      "absent": [],
+      "verdict": "GO-WITH-RISK",
+      "codes": ["RECHARGES_REQUIRED"]
+    },
+    {
+      "name": "every finding at once, blocking before warning",
+      "summary": {
+        "stranded": true,
+        "stranded_at_step": 12,
+        "shadow_limit_exceeded": true,
+        "max_continuous_shadow_h": 61,
+        "critical_steps_count": 2,
+        "high_or_above_steps_count": 5,
+        "min_battery_pct": 8,
+        "peak_power_exceeded_steps": 3,
+        "total_recharges": 2
+      },
+      "execution": {
+        "stranded": true,
+        "planned_nodes": 90,
+        "executable_nodes": 40,
+        "truncated": true,
+        "reason": "battery"
+      },
+      "absent": [],
+      "verdict": "NO-GO",
+      "codes": [
+        "STRANDED",
+        "EXECUTION_TRUNCATED",
+        "SHADOW_LIMIT_EXCEEDED",
+        "CRITICAL_STEPS",
+        "HIGH_RISK_STEPS",
+        "BATTERY_WATCH",
+        "PEAK_POWER_EXCEEDED",
+        "RECHARGES_REQUIRED"
+      ]
+    },
+    {
+      "name": "a warning alongside a blocker is still reported",
+      "summary": { "stranded": true, "total_recharges": 2 },
+      "execution": null,
+      "absent": [],
+      "verdict": "NO-GO",
+      "codes": ["STRANDED", "RECHARGES_REQUIRED"]
+    }
+  ]
+}

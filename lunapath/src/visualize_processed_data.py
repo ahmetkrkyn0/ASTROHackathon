@@ -56,9 +56,9 @@ def shaded_moon_dem_rgba(
     elevation_m: np.ndarray,
     resolution_m: float,
     *,
-    azimuth_deg: float = 292.0,
-    altitude_deg: float = 6.5,
-    vertical_exaggeration: float = 2.2,
+    azimuth_deg: float = 315.0,
+    altitude_deg: float = 2.0,
+    vertical_exaggeration: float = 1.0,
 ) -> np.ndarray:
     """DEM'i alçak güneş hillshade + regolit renk haritasıyla RGBA'ya çevirir.
 
@@ -120,7 +120,7 @@ def _metre_extent(meta: dict) -> list[float]:
     return [0, cols * res, rows * res, 0]
 
 
-def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
+def build_dashboard(grids: dict[str, np.ndarray], meta: dict, show: bool = False) -> None:
     """7-grid + bilgi paneli + DEM Ay yüzeyi (gerçekçi tonlar) dashboard."""
 
     res = meta["resolution_m"]
@@ -292,7 +292,7 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
         ("Merkez Y", f"{origin_y:,.0f} m"),
         ("Cozunurluk", f"{res:.0f} m/px"),
         ("Grid", f"{rows} x {cols}"),
-        ("Alan", f"{total_km:.0f} x {total_km:.0f} km"),
+        ("Alan", f"{total_km:.1f} x {total_km:.1f} km"),
         ("Yuk. min", f"{np.nanmin(elev):+.1f} m"),
         ("Yuk. max", f"{np.nanmax(elev):+.1f} m"),
         ("Egim min", f"{np.nanmin(slope):.2f} deg"),
@@ -380,15 +380,23 @@ def build_dashboard(grids: dict[str, np.ndarray], meta: dict) -> None:
     print(f"Ay yüzeyi DEM görseli kaydedildi: {moon_path}")
     plt.close(fig_moon)
 
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="LunaPath Cevre Analiz Paneli")
+    parser.add_argument("--show", action="store_true", help="Gorselleri ekranda interaktif pencere olarak acar.")
+    args = parser.parse_args()
+
     grids, meta = load_all()
     print(f"Yuklu grid sayisi: {len(grids)}")
     for name, arr in grids.items():
         print(f"  {name:<25s} {str(arr.shape):<14s} dtype={arr.dtype}")
-    build_dashboard(grids, meta)
+    build_dashboard(grids, meta, show=args.show)
 
 
 if __name__ == "__main__":

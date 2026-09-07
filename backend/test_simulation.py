@@ -11,6 +11,7 @@ import sys
 import os
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -19,14 +20,13 @@ from app.simulation import (
     DRIVE_POWER_W,
     HEATER_POWER_W,
     IDLE_POWER_W,
-    NOMINAL_SPEED_MS,
     PIXEL_SIZE_M,
     RoverState,
-    _slope_multiplier,
     simulate_path,
     summarize_simulation,
 )
 from app.constants import get_rover
+from app.cost_engine import edge_travel_time_s  # C3: flat ground still slips a little
 
 GRID_SHAPE = (50, 50)
 
@@ -51,23 +51,88 @@ def _astar_result(path):
     return {"path_pixels": path, "metrics": {}, "error": None}
 
 
-# ── _slope_multiplier ──────────────────────────────────────────────────────────
+def _snake_path(steps):
+    """A path of exactly *steps* waypoints, snaking row by row.
 
-def test_slope_multiplier_boundaries():
-    check(abs(_slope_multiplier(0.0) - 1.0) < 1e-9, "0deg = 1.0")
-    check(abs(_slope_multiplier(10.0) - 1.6) < 1e-9, "10deg = 1.6")
-    check(abs(_slope_multiplier(15.0) - 1.9) < 1e-9, "15deg = 1.9")
-    check(abs(_slope_multiplier(25.0) - 2.5) < 1e-9, "25deg = 2.5")
-    check(abs(_slope_multiplier(30.0) - 2.5) < 1e-9, "30deg = 2.5 (cap)")
+    simulate_path now uses the cost engine's travel-time model instead of
+    the old linear speed factor, which is roughly 40 percent faster on a
+    steep cell and therefore 40 percent cheaper per step. A single 50-step
+    row no longer drains the battery to its reserve, so the drain tests
+    walk far enough to actually get there. (Round 3 review, M-9.)
+    """
+    path = []
+    row = 0
+    while len(path) < steps:
+        cols = range(GRID_SHAPE[1]) if row % 2 == 0 else reversed(range(GRID_SHAPE[1]))
+        for col in cols:
+            path.append([row, col])
+            if len(path) == steps:
+                return path
+        row += 1
+    return path
 
 
-def test_slope_multiplier_midpoint():
-    # Midpoint of 0-10 range: 5deg = 1.3
-    check(abs(_slope_multiplier(5.0) - 1.3) < 1e-9, "5deg = 1.3 (midpoint)")
-    # Midpoint of 10-15: 12.5deg = 1.75
-    check(abs(_slope_multiplier(12.5) - 1.75) < 1e-9, "12.5deg = 1.75 (midpoint)")
-    # Midpoint of 15-25: 20deg = 2.2
-    check(abs(_slope_multiplier(20.0) - 2.2) < 1e-9, "20deg = 2.2 (midpoint)")
+# ── slope energy model ─────────────────────────────────────────────────────────
+# The piecewise _slope_multiplier table these tests used to pin is gone: it
+# was a SECOND energy model, disagreeing with the cost engine the planner
+# uses and carrying no mu_coeff, so every rover was simulated with LPR-1's
+# slope response. simulate_path now calls cost_engine directly, and these
+# assert the properties that actually matter. (Round 3 review, M-9.)
+
+def test_slope_energy_is_monotone_and_rover_specific():
+    from app.cost_engine import gross_energy_per_metre_wh
+    from app.constants import get_rover as _gr
+
+    lpr = _gr("lpr_1")
+    values = [gross_energy_per_metre_wh(t, 0.0, lpr) for t in (0.0, 5.0, 10.0, 20.0)]
+    check(all(b > a for a, b in zip(values, values[1:])), "energy rises with slope")
+
+    # mu_coeff differs by a factor of 2.7 between these two profiles, so the
+    # slope RESPONSE must differ too. The old shared table made them equal.
+    luvmi = _gr("luvmi_m")
+    lpr_ratio = gross_energy_per_metre_wh(20.0, 0.0, lpr) / gross_energy_per_metre_wh(
+        0.0, 0.0, lpr
+    )
+    luvmi_ratio = gross_energy_per_metre_wh(
+        20.0, 0.0, luvmi
+    ) / gross_energy_per_metre_wh(0.0, 0.0, luvmi)
+    check(
+        abs(lpr_ratio - luvmi_ratio) > 0.2,
+        f"slope response is rover-specific ({lpr_ratio:.2f} vs {luvmi_ratio:.2f})",
+    )
+
+
+def test_simulation_time_matches_the_cost_engine():
+    from app.cost_engine import edge_travel_time_s
+    from app.constants import get_rover as _gr
+
+    rover = _gr("lpr_1")
+    grids = _uniform_grids(slope=20.0)
+    states = simulate_path(
+        {"path_pixels": [[1, 1], [1, 2]], "error": None},
+        grids["cost"],
+        grids["slope"],
+        grids["thermal"],
+        grids["shadow"],
+        rover=rover,
+        pixel_size_m=10.0,
+    )
+    expected_h = edge_travel_time_s(20.0, 10.0, rover) / 3600.0
+    check(
+        abs(states[-1].elapsed_hours - expected_h) < 1e-9,
+        "simulated step time == cost_engine edge_travel_time_s",
+    )
+
+
+def _uniform_grids(slope: float, shadow: float = 0.0, thermal: float = -50.0):
+    shape = (4, 4)
+    return {
+        "cost": np.full(shape, 0.5),
+        "slope": np.full(shape, slope),
+        "thermal": np.full(shape, thermal),
+        "shadow": np.full(shape, shadow),
+    }
+
 
 
 # ── simulate_path — error cases ────────────────────────────────────────────────
@@ -126,14 +191,23 @@ def test_cardinal_step():
     check(abs(s1.distance_m - PIXEL_SIZE_M) < 1e-6, "cardinal step_dist = 80 m")
 
     # At 0° slope: speed_factor=1.0, actual_speed=0.2 m/s
-    expected_time_h = PIXEL_SIZE_M / NOMINAL_SPEED_MS / 3600.0
+    expected_time_h = edge_travel_time_s(0.0, PIXEL_SIZE_M, get_rover()) / 3600.0
     check(abs(s1.elapsed_hours - expected_time_h) < 1e-9, "elapsed_hours matches")
 
     # slope_mult at 0° = 1.0, shadow=0
     expected_energy = (DRIVE_POWER_W * 1.0 + IDLE_POWER_W) * expected_time_h
     check(abs(s1.step_energy_wh - expected_energy) < 1e-6, "step_energy_wh correct")
-    expected_battery = BATTERY_CAPACITY_WH - expected_energy
-    check(abs(s1.battery_wh - expected_battery) < 1e-6, "battery_wh depletes correctly")
+    # The battery sees the DRAW MINUS the array's income while driving -- the
+    # same signed drain the 4-D planner integrates (cost_engine.
+    # move_battery_drain_wh) -- capped at capacity. In full sunlight LPR-1's
+    # 410 W array outproduces a flat drive, so a full battery stays full. (B5,
+    # doc 11 item 3: one energy model for planner, simulator and Monte Carlo.)
+    expected_solar = float(get_rover()["p_solar_w"]) * expected_time_h
+    check(abs(s1.step_solar_wh - expected_solar) < 1e-6, "step_solar_wh is the array income")
+    expected_battery = min(
+        BATTERY_CAPACITY_WH, BATTERY_CAPACITY_WH - expected_energy + expected_solar
+    )
+    check(abs(s1.battery_wh - expected_battery) < 1e-6, "battery_wh follows the net drain")
 
 
 # ── simulate_path — diagonal step ─────────────────────────────────────────────
@@ -155,7 +229,7 @@ def test_shadow_heater_contribution():
     path = [[0, 0], [0, 1]]
     states = simulate_path(_astar_result(path), *grids)
     s1 = states[1]
-    step_time_h = PIXEL_SIZE_M / NOMINAL_SPEED_MS / 3600.0
+    step_time_h = edge_travel_time_s(0.0, PIXEL_SIZE_M, get_rover()) / 3600.0
     expected_energy = (
         DRIVE_POWER_W * 1.0
         + HEATER_POWER_W * shadow
@@ -171,13 +245,59 @@ def test_custom_rover_changes_energy_and_speed():
     states = simulate_path(_astar_result(path), *grids, rover=rover)
     s1 = states[1]
 
-    expected_time_h = PIXEL_SIZE_M / float(rover["v_max_ms"]) / 3600.0
+    expected_time_h = edge_travel_time_s(0.0, PIXEL_SIZE_M, rover) / 3600.0
     expected_energy = (float(rover["p_base_w"]) + float(rover["p_idle_w"])) * expected_time_h
-    expected_battery = float(rover["e_cap_wh"]) - expected_energy
+    expected_solar = float(rover["p_solar_w"]) * expected_time_h
+    expected_battery = min(
+        float(rover["e_cap_wh"]),
+        float(rover["e_cap_wh"]) - expected_energy + expected_solar,
+    )
 
     check(abs(s1.elapsed_hours - expected_time_h) < 1e-9, "custom rover speed affects elapsed time")
     check(abs(s1.step_energy_wh - expected_energy) < 1e-6, "custom rover power affects energy use")
     check(abs(s1.battery_wh - expected_battery) < 1e-6, "custom rover battery capacity is used")
+
+
+# ── simulate_path — one energy model with the planner (B5, doc 11 item 3) ────
+
+
+def test_drive_drain_matches_the_planners_signed_drain():
+    """The battery change over a driven step is exactly
+    cost_engine.move_battery_drain_wh -- the quantity the 4-D planner
+    integrates -- so /api/plan and /api/plan-4d agree about the battery."""
+    from app.cost_engine import move_battery_drain_wh
+
+    rover = get_rover()
+    grids = _flat_grids(slope=10.0, shadow=0.6)
+    path = [[0, 0], [0, 1]]
+    states = simulate_path(_astar_result(path), *grids, rover=rover)
+    s0, s1 = states
+    # The grids are float32, so compare against the value the simulator read.
+    expected = move_battery_drain_wh(10.0, PIXEL_SIZE_M, float(grids[3][0, 1]), rover)
+    assert expected > 0.0  # a shaded climb drains
+    assert s0.battery_wh - s1.battery_wh == pytest.approx(expected, abs=1e-6)
+    assert s1.step_energy_wh - s1.step_solar_wh == pytest.approx(expected, abs=1e-6)
+
+
+def test_a_drive_in_full_shadow_drains_the_gross_draw():
+    grids = _flat_grids(slope=5.0, shadow=1.0)
+    states = simulate_path(_astar_result([[0, 0], [0, 1]]), *grids)
+    s0, s1 = states
+    assert s1.step_solar_wh == 0.0
+    assert s0.battery_wh - s1.battery_wh == pytest.approx(s1.step_energy_wh, abs=1e-9)
+
+
+def test_summary_reports_the_solar_income():
+    grids = _flat_grids(slope=3.0, shadow=0.4)
+    states = simulate_path(_astar_result(_snake_path(6)), *grids)
+    summary = summarize_simulation(states)
+    # The summary rounds to two decimals.
+    assert summary["total_solar_energy_wh"] == pytest.approx(
+        sum(s.step_solar_wh for s in states), abs=0.006
+    )
+    assert summary["total_solar_energy_wh"] > 0.0
+    assert "step_solar_wh" in states[1].to_dict()
+    assert summarize_simulation([])["total_solar_energy_wh"] == 0.0
 
 
 # ── simulate_path — battery floor ─────────────────────────────────────────────
@@ -194,8 +314,16 @@ def test_battery_does_not_go_negative():
 
 
 def test_battery_recharges_to_full_when_depleted():
-    grids = _flat_grids(slope=24.0, shadow=1.0)
-    path = [[0, i] for i in range(GRID_SHAPE[1])]
+    # shadow=0.5: recharging now requires usable sunlight and costs the time
+    # it takes. Under the old model the rover refilled instantly even in full
+    # shadow, which was an unbounded free-energy source. (Backend review #13.)
+    # Half shadow rather than full sun: with the array credited while
+    # driving (B5), a 24-degree climb in full sunlight nets only ~15 Wh per
+    # step for LPR-1 and 140 steps never reach the reserve; at half shadow the
+    # net drain is ~44 Wh per step and the stop still charges (205 W in
+    # against 52.5 W of housekeeping).
+    grids = _flat_grids(slope=24.0, shadow=0.5)
+    path = _snake_path(140)
     states = simulate_path(_astar_result(path), *grids)
 
     recharge_steps = [
@@ -291,7 +419,7 @@ def test_summarize_shadow_exposure():
     states = simulate_path(_astar_result(path), *grids)
     s = summarize_simulation(states)
     # 2 moving steps, each full shadow
-    step_time_h = PIXEL_SIZE_M / NOMINAL_SPEED_MS / 3600.0
+    step_time_h = edge_travel_time_s(0.0, PIXEL_SIZE_M, get_rover()) / 3600.0
     expected = 2 * shadow * step_time_h
     # summarize rounds to 4 decimal places, so allow 1e-4 tolerance
     check(abs(s["total_shadow_exposure"] - round(expected, 4)) < 1e-6,
@@ -299,9 +427,10 @@ def test_summarize_shadow_exposure():
 
 
 def test_summarize_risk_counts():
-    # Force battery depletion to trigger HIGH/CRITICAL
+    # Force battery depletion to trigger HIGH/CRITICAL. Full shadow drains
+    # hardest AND now blocks recharging, so this covers the stranded case.
     grids = _flat_grids(slope=24.9, shadow=1.0)
-    path = [[0, i] for i in range(GRID_SHAPE[1])]
+    path = _snake_path(140)
     states = simulate_path(_astar_result(path), *grids)
     s = summarize_simulation(states)
     check(s["critical_steps_count"] + s["high_or_above_steps_count"] >= 0,
@@ -309,13 +438,31 @@ def test_summarize_risk_counts():
     # With heavy drain, expect at least some high-risk steps
     check(s["high_or_above_steps_count"] > 0,
           "heavy drain produces high-risk steps")
-    check(s["total_recharges"] > 0, "heavy drain produces recharge events")
+    # A rover with no sunlight cannot recover: recharges must be zero, and it
+    # ends stranded rather than conjuring energy. (Backend review #13.)
+    check(s["total_recharges"] == 0, "no recharge is possible in full shadow")
+    # The rover now stops at its SOC reserve rather than at a flat zero, and
+    # the traverse is truncated there instead of continuing on a battery it
+    # does not have. (Round 3 review, M-10.)
+    check(s["stranded"] is True, "a rover with no sunlight ends stranded")
+    check(s["stranded_at_step"] is not None, "the stranding step is reported")
+    check(s["waypoint_count"] < len(path), "the traverse stops where it strands")
+
+    # With some sunlight the same heavy drain DOES recover, and the recharge
+    # costs time. (Half shadow, for the reason given in
+    # test_battery_recharges_to_full_when_depleted.)
+    lit = summarize_simulation(
+        simulate_path(_astar_result(path), *_flat_grids(slope=24.9, shadow=0.5))
+    )
+    check(lit["total_recharges"] > 0, "heavy drain in sunlight produces recharges")
+    check(lit["total_elapsed_hours"] > s["total_elapsed_hours"],
+          "recharging advances the clock")
 
 
 if __name__ == "__main__":
     tests = [
-        test_slope_multiplier_boundaries,
-        test_slope_multiplier_midpoint,
+        test_slope_energy_is_monotone_and_rover_specific,
+        test_simulation_time_matches_the_cost_engine,
         test_simulate_raises_on_error,
         test_simulate_raises_on_empty_path,
         test_single_node_path,

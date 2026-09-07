@@ -1,0 +1,194 @@
+/* C6 operating envelope, in the Systems & Evidence drawer.
+ *
+ * A bin matrix, not a map: 12 Sun-elevation rows by 24 slope columns. The one
+ * thing this stylesheet must get right is that an unsampled bin does not read
+ * as a result.
+ */
+
+.te-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.te-badge {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  border: 1px solid currentColor;
+}
+
+.te-badge-model { color: var(--lavender); }
+.te-badge-uncal { color: var(--risk-med); }
+
+.te-lede {
+  margin: 0 0 10px;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.te-chart {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.te-axis-y {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+  text-align: center;
+}
+
+.te-grid-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.te-grid {
+  display: grid;
+  gap: 1px;
+  background: rgba(199, 205, 219, 0.06);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 1px;
+  overflow: hidden;
+}
+
+.te-cell {
+  aspect-ratio: 1;
+  min-width: 0;
+}
+
+/* Three verdicts, three colours. Cold is blue and hot is orange because those
+   are the directions of the two limits, not their severity: a hot limit is not
+   worse than a cold one, it is the other side of the same envelope. */
+.te-unlimited    { background: rgb(110, 186, 150); }
+.te-cold_limited { background: rgb(92, 152, 226); }
+.te-hot_limited  { background: rgb(226, 128, 76); }
+
+/* Not sampled. Left as the grid's own background with no fill of its own --
+   the heat1d trace never reached this geometry, so there is nothing to say and
+   any colour would say something. Deliberately NOT a fourth shade on the same
+   scale: that would put "no data" on the same axis as "cold", and 29% of this
+   matrix is in this state. */
+.te-unsampled { background: transparent; }
+
+/* A bin the response did not mention at all. Distinct from unsampled: that is
+   the backend answering "nothing here", this is the backend not answering.
+   Hatched so a truncated response cannot hide as blank space. */
+.te-absent {
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 2px,
+    rgba(226, 128, 76, 0.35) 2px,
+    rgba(226, 128, 76, 0.35) 3px
+  );
+}
+
+.te-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-dim-2);
+}
+
+.te-axis-x {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+  text-align: center;
+  line-height: 1.35;
+}
+
+.te-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  margin: 0 0 10px;
+}
+
+.te-legend div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.te-legend dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-micro);
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.te-legend dd {
+  margin: 0;
+  font-size: var(--fs-body);
+}
+
+.te-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+/* The unsampled swatch needs an outline or it is invisible in the legend --
+   which would be the one place a blank is genuinely unhelpful. */
+.te-swatch.te-unsampled {
+  border: 1px solid var(--border-line);
+}
+
+.te-mono {
+  font-family: var(--font-data);
+  color: var(--text);
+}
+
+.te-note {
+  margin: 0 0 8px;
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.te-note.is-error {
+  color: var(--accent-coral);
+}
+
+.te-claim {
+  border-left: 1px solid rgba(199, 205, 219, 0.14);
+  padding-left: 10px;
+}
+
+.te-remedy {
+  display: block;
+  margin: 4px 0 8px;
+  padding: 3px 6px;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  background: rgba(8, 11, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}

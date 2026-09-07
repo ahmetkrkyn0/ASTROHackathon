@@ -1,0 +1,255 @@
+{
+  "row": 250,
+  "col": 250,
+  "lon": -69.809408,
+  "lat": -88.638503,
+  "altitude_m": 1473.3857421875,
+  "thermal_c": 6.2908830642700195,
+  "thermal_min_c": -41.04867935180664,
+  "resolution_m": 5.0,
+  "span_km": 2.5,
+  "cost_breakdown": {
+    "slope": 0.36207929238824726,
+    "energy": 0.259,
+    "shadow": 0.02901857879327361,
+    "thermal": 0.18979332079282157,
+    "roughness": 0.11370332507314417,
+    "total": 0.9535945170474868
+  },
+  "layer_validity": {
+    "elevation": "MEASURED",
+    "slope": "DERIVED",
+    "aspect": "DERIVED",
+    "shadow_ratio": "DERIVED",
+    "thermal": "DERIVED",
+    "thermal_min": "DERIVED",
+    "traversable": "DERIVED",
+    "cost": "DERIVED",
+    "earth_visibility": "DERIVED",
+    "roughness": "MEASURED",
+    "psr": "MEASURED"
+  },
+  "roughness_m": 0.8045191764831543,
+  "f_roughness": 0.7580221671542945,
+  "in_psr": false,
+  "safe_haven": {
+    "is_safe_haven": false,
+    "max_dark_hours_without_dte_h": 412.0,
+    "earth_below_hours": 710.0,
+    "time_to_safe_haven_h": 7.4737,
+    "h_max_shadow_h": 50.0
+  },
+  "safe_haven_model": {
+    "model": "spice_horizon",
+    "rule": "safe haven: while the Earth is below the horizon, continuous shadow <= h_max_shadow_h, and lit at least once in the window (VIPER; Shirley & Balaban 2022)",
+    "start_utc": "2027-05-30T00:00:00Z",
+    "span_hours": 708.7,
+    "step_hours": 2.0,
+    "n_steps": 355,
+    "rover_id": "lpr_1",
+    "h_max_shadow_h": 50.0,
+    "safe_haven_cells": 5887,
+    "traversable_cells": 190445,
+    "safe_haven_fraction": 0.030911811809183756,
+    "earth_below_fraction": 0.934912281690141,
+    "horizon_cache": "<repo>/lunapath/data/processed/horizon_map.npy",
+    "time_to_haven_finite_fraction": 0.887495077318911
+  },
+  "survival": {
+    "p_safe": 0.0,
+    "p_safe_next": null,
+    "best_action": 255,
+    "best_action_name": "none",
+    "next_block": null,
+    "next_pixel": null,
+    "block": [
+      62,
+      62
+    ],
+    "coarsen": 4,
+    "soc_frac": 1.0,
+    "t_hours": 0.0,
+    "safe_set": "leg",
+    "step_hours": 0.316091,
+    "horizon_hours": 24.0229
+  },
+  "survival_model": {
+    "model": "reach_avoid_value_iteration_v1",
+    "validity": "MODEL",
+    "step_hours": 0.316091,
+    "slices_per_bin": 1,
+    "n_bins": 76,
+    "horizon_hours": 24.0229,
+    "n_soc_bins": 16,
+    "soc_bin_wh": 338.75,
+    "grid": [
+      125,
+      125
+    ],
+    "n_states": 19000000,
+    "nbytes": 96250000,
+    "safe_set": "leg",
+    "safe_cells": 198,
+    "failure_model": {
+      "rate_per_km": 0.2,
+      "recovery_h": 10.0,
+      "source": "assumption: Lamarre, Malhotra, Kelly -- Recovery Policies for Safe Exploration of Lunar PSRs (Acta Astronautica 2023, arXiv 2307.16786) experiment 3 and Safe Mission-Level Path Planning (IEEE AERO 2024, arXiv 2401.08558) Table II: Poisson faults at 1 per 5 000 m driven, 36 000 s to recover; no rover profile in this catalogue publishes either number",
+      "outcomes": "no fault / fault in the first half (hold at the origin) / fault in the second half (hold at the destination)"
+    },
+    "compute_s": 116.318,
+    "provenance": {
+      "shadow_model": {
+        "model": "spice_horizon",
+        "time_varying": true,
+        "start_utc": "2027-05-30T00:00:00"
+      },
+      "shadow_extension": {
+        "model": "spice_horizon",
+        "time_varying": true,
+        "start_utc": "2027-05-30T20:13:47",
+        "n_slices": 12
+      },
+      "haven_model": {
+        "model": "spice_horizon",
+        "h_max_shadow_h": 50.0,
+        "coarse_safe_haven_cells": 197
+      },
+      "start_utc": "2027-05-30T00:00:00",
+      "plan_horizon_hours": 24.0229,
+      "coarsen": 4,
+      "rover_id": "lpr_1"
+    },
+    "shadow_model": {
+      "model": "spice_horizon",
+      "time_varying": true,
+      "start_utc": "2027-05-30T00:00:00"
+    },
+    "haven_model": {
+      "model": "spice_horizon",
+      "h_max_shadow_h": 50.0,
+      "coarse_safe_haven_cells": 197
+    }
+  },
+  "thermal_dwell": {
+    "max_dwell_h": 1.5745582580566406,
+    "open_ended": false,
+    "side": "hot",
+    "component": "battery",
+    "initial_inner_c": 17.5,
+    "heater_model": "none",
+    "heater_source": null,
+    "lookahead_h": 24.0,
+    "slice_hours": 0.5,
+    "inner_equilibrium_c": {
+      "peak": -33.709,
+      "cold_end": 18.951
+    },
+    "surface_c": {
+      "sunlit_peak": 6.2908830642700195,
+      "cold_end": -41.049,
+      "base_shadow_ratio": 0.5297619104385376,
+      "series_min": -22.422,
+      "series_max": 6.291,
+      "shadow_fraction": 0.0
+    },
+    "envelope": {
+      "lo_c": 0.0,
+      "hi_c": 35.0,
+      "lo_component": "battery",
+      "hi_component": "battery"
+    },
+    "envelope_verdict": {
+      "peak": "cold",
+      "cold_end": "inside"
+    },
+    "thermal_lag_validity": "UNCALIBRATED",
+    "initial_outside_envelope": false,
+    "dwell_model": {
+      "model": "inner_temperature_first_order_lag_v1",
+      "validity": "MODEL",
+      "thermal_lag_validity": "UNCALIBRATED",
+      "n_slices": 48,
+      "slices_per_bin": 1,
+      "slice_hours": 0.5,
+      "tau_s": 7200.0,
+      "initial_inner_c": 17.5,
+      "initial_outside_envelope": false,
+      "heater_model": "none",
+      "heater_source": null,
+      "envelope": {
+        "lo_c": 0.0,
+        "hi_c": 35.0,
+        "lo_component": "battery",
+        "hi_component": "battery"
+      },
+      "compute_ms": 1.864
+    },
+    "shadow_model": {
+      "model": "spice_horizon",
+      "time_varying": true,
+      "start_utc": "2027-05-30T00:00:00"
+    },
+    "start_utc": "2027-05-30T00:00:00",
+    "t_hours": 0.0,
+    "row": 250,
+    "col": 250,
+    "tolerable_entrenched": {
+      "thermal": {
+        "max_dwell_h": 1.5745582580566406,
+        "open_ended": false,
+        "side": "hot",
+        "component": "battery",
+        "tolerable_h": 1.5745582580566406,
+        "remaining_h": 1.5745582580566406,
+        "used_fraction": 0.0,
+        "level": "ok"
+      },
+      "haven": {
+        "tolerable_h": 0.0,
+        "hours_until_earthset": 0.0,
+        "time_to_safe_haven_h": 7.4737,
+        "is_safe_haven": false,
+        "h_max_shadow_h": 50.0,
+        "note": "hours of Earth link left minus the driving hours to the nearest safe haven",
+        "source": "A1 time_to_safe_haven_h and A4 comm window at this cell",
+        "remaining_h": 0.0,
+        "used_fraction": null,
+        "level": "fail",
+        "open_ended": false
+      },
+      "overall": {
+        "tolerable_h": 0.0,
+        "remaining_h": 0.0,
+        "used_fraction": null,
+        "level": "fail",
+        "open_ended": false,
+        "limiting": "haven"
+      }
+    }
+  },
+  "thermal_dwell_model": {
+    "model": "inner_temperature_first_order_lag_v1",
+    "validity": "MODEL",
+    "thermal_lag_validity": "UNCALIBRATED",
+    "n_slices": 48,
+    "slices_per_bin": 1,
+    "slice_hours": 0.5,
+    "tau_s": 7200.0,
+    "initial_inner_c": 17.5,
+    "initial_outside_envelope": false,
+    "heater_model": "none",
+    "heater_source": null,
+    "envelope": {
+      "lo_c": 0.0,
+      "hi_c": 35.0,
+      "lo_component": "battery",
+      "hi_component": "battery"
+    },
+    "compute_ms": 1.864,
+    "shadow_model": {
+      "model": "spice_horizon",
+      "time_varying": true,
+      "start_utc": "2027-05-30T00:00:00"
+    }
+  }
+}

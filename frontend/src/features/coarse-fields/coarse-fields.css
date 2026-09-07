@@ -1,0 +1,203 @@
+/* B1 survival + C6 thermal dwell, in the Systems & Evidence drawer.
+ *
+ * Same rail idiom as safe-haven beside it. What is new here is the legend: a
+ * categorical field needs one, and it needs counts.
+ */
+
+/* Both labels up front rather than as a footnote. Every number in this panel
+   is a model output, and the dwell's time constant has never been measured
+   against hardware. */
+.cf-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.cf-badge {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  border: 1px solid currentColor;
+}
+
+.cf-badge-model { color: var(--lavender); }
+/* Louder than MODEL on purpose: a modelled quantity with a calibrated
+   parameter and one without are not the same claim. */
+.cf-badge-uncal { color: var(--risk-med); }
+
+.cf-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.cf-toggle input:disabled + span {
+  color: var(--text-dim-2);
+  cursor: default;
+}
+
+.cf-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.cf-field-btn {
+  background: rgba(8, 11, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 4px 9px;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-normal);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.cf-field-btn:hover {
+  border-color: var(--border-focus);
+  color: var(--text-2);
+}
+
+.cf-field-btn.is-active {
+  border-color: rgba(186, 175, 245, 0.55);
+  background: rgba(186, 175, 245, 0.14);
+  color: var(--text);
+}
+
+.cf-blurb {
+  margin: 0 0 4px;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.cf-limit {
+  margin: 0 0 10px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(199, 205, 219, 0.14);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--text-dim-2);
+}
+
+/* The categorical legend. One row per category, with the count -- a colour
+   covering three blocks out of fifteen thousand must not read like a region. */
+.cf-legend {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.cf-legend div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+}
+
+.cf-legend dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+}
+
+.cf-legend dd {
+  margin: 0;
+  text-align: right;
+  font-size: var(--fs-body);
+}
+
+/* A category with no cells stays in the legend, dimmed. Removing it would make
+   the legend change shape between fields and hide the fact that the policy
+   never chose that action here. */
+.cf-legend div.is-empty dt,
+.cf-legend div.is-empty dd {
+  color: var(--text-dim-2);
+}
+
+.cf-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.cf-cat-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+  color: var(--text-dim-2);
+}
+
+.cf-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 0 0 10px;
+}
+
+.cf-facts div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cf-facts dt {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.cf-facts dd {
+  margin: 0;
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+
+.cf-mono {
+  font-family: var(--font-data);
+  color: var(--text);
+}
+
+/* Nearly a third of traversable blocks can reach nothing. It is the finding of
+   this panel and is coloured so it does not read as one statistic among four. */
+.cf-mono.is-alarm {
+  color: var(--risk-med);
+}
+
+.cf-sub {
+  display: block;
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+.cf-note {
+  margin: 0 0 8px;
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.cf-note.is-error {
+  color: var(--accent-coral);
+}

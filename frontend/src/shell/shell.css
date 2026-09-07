@@ -1,0 +1,143 @@
+/* ── Shell integration ────────────────────────────────────────────────────── */
+/* The few rules that are nobody's feature and nobody's base style: where two
+   independently-owned things share screen space and one has to move.
+
+   Keep this file small. A rule belongs here only if removing the feature would
+   make it meaningless AND the feature cannot express it inside its own stylesheet. */
+
+/* An open assistant owns the bottom-right corner. Rather than stacking a toast
+   on top of the conversation, the stack moves clear of the window's 404px
+   footprint and back down beside the launcher.
+
+   Driven by the assistant's own open state, read structurally: `.chat-window`
+   is a direct child of `.app-shell` rendered by GlobalOverlaySlot, and the
+   toast stack is a later sibling of it. That is a contract in two directions
+   and both are load-bearing --
+
+   1. `.chat-window` and `.is-open` are published class names of the assistant
+      feature. Renaming either inside features/assistant/assistant.css breaks
+      toast placement silently, with no type error to catch it.
+   2. GlobalOverlaySlot must stay ahead of `.toast-stack` in App.tsx. The
+      general sibling combinator only looks forward.
+
+   A sibling combinator rather than `:has()` on purpose: vite's build target
+   here is the default `modules` baseline (chrome87, safari14, firefox78), and
+   `:has()` lands in chrome105 / safari15.4 / firefox121. `~` has worked
+   everywhere for twenty years, needs no state in App.tsx, and no JavaScript
+   runs to maintain it. */
+.chat-window.is-open ~ .toast-stack {
+  right: 442px;
+  bottom: 22px;
+  /* Bounded by the gap that actually exists: the window and its margin take
+     442px on the right and the left rail 230px on the other side. A looser
+     bound lets the toast slide under the left rail between 981 and 1024px. */
+  width: min(360px, calc(100vw - 700px));
+}
+
+@media (max-width: 980px) {
+  /* With the assistant filling the screen there is no clear space to move a
+     toast into. Below the header keeps it off the minimize control, the
+     conversation body and the composer. */
+  .chat-window.is-open ~ .toast-stack {
+    top: 92px;
+    right: 16px;
+    bottom: auto;
+    left: 16px;
+    width: auto;
+  }
+}
+
+/* ── Analyze rail tabs ───────────────────────────────────────────────────────
+   Eleven panels live in this column, and a two-screen scroll is not a column
+   anyone reads to the bottom of. The bar is sticky so the tabs never leave
+   while a long panel scrolls under them.
+
+   An underline rather than the filled block the PLAN/ANALYZE switch uses:
+   that is a two-way toggle for the whole cockpit and earns the weight; this is
+   four-way navigation inside one column, and four filled blocks stacked at the
+   top of a rail would out-shout the panels they lead to. */
+
+.lp-rail-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--line-card);
+}
+
+.lp-rail-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.lp-rail-tab svg { font-size: 15px; }
+
+.lp-rail-tab:hover:not(:disabled) { color: var(--text-2); background: var(--bg-inset); }
+
+.lp-rail-tab:disabled { opacity: 0.3; cursor: default; }
+
+.lp-rail-tab.is-active { color: var(--text); }
+
+/* The indicator sits on the bar's own bottom rule rather than beside it. */
+.lp-rail-tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--lavender);
+}
+
+.lp-rail-tab:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: -2px;
+}
+
+/* The count of violated requirements, on a tab that may not be open. The
+   failure mode of tabs is hiding something that needed attention, so anything
+   that can be missed behind one has to be announced by it. Risk colour is
+   correct here: this is a safety count. */
+.lp-rail-tab-badge {
+  position: absolute;
+  top: 4px;
+  right: calc(50% - 20px);
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--coral);
+  color: #0a0c14;
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.lp-rail-tab.has-finding { color: var(--coral-text); }
+
+.lp-rail-panels {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Clears the assistant launcher, which floats over the bottom-right corner
+     of the shell. The rail was short enough not to reach it before the tabs
+     brought eleven panels into this column; now the last line of a panel ends
+     up underneath the button. */
+  padding-bottom: 56px;
+}
