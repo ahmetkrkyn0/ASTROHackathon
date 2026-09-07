@@ -70,3 +70,16 @@ lunapath/data/benchmarks/
 # (scripts/build_thermal_envelope_cache.py); rebuilt together, never committed.
 lunapath/data/processed/thermal_envelope_heat1d.npz
 lunapath/data/processed/thermal_envelope_meta.json
+
+# Large binaries that are fetched or generated, never authored. Committing
+# these puts ~105 MB into every future clone for files a script rebuilds:
+#   scripts/setup_caches.py          the processed planning grids
+#   frontend/public/cesium/          copied from the CesiumJS package by build
+# The data package zip is a delivery artefact and is cut for one window; the
+# one in the tree is for window_offset {2400, 2500} and does not match local
+# data at {1500, 1000}.
+*.zip
+*.glb
+frontend/public/cesium/
+lunapath/data/processed/sp-site01-connecting-ridge-5km/
+lunapath/data/processed/*.bak
