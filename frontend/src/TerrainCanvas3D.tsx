@@ -188,6 +188,165 @@ function hasAlignedNacTexture(manifest: TerrainManifest): boolean {
   )
 }
 
+/**
+ * A lightweight, unlit cursor placed on the DEM while an endpoint picker is
+ * armed. It is deliberately a scene object rather than a DOM overlay: the
+ * operator can read the exact grid cell on sloped ground before committing a
+ * Start or Goal click.
+ */
+function createTerrainSelectionCursor(resolutionM: number): {
+  group: THREE.Group
+  setMode: (mode: Exclude<ClickMode, 'idle'>) => void
+  dispose: () => void
+} {
+  const group = new THREE.Group()
+  group.name = 'terrain-endpoint-selection-cursor'
+  group.visible = false
+  group.renderOrder = 20
+
+  const radius = Math.max(resolutionM * 0.72, 2.8)
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0x35e7c1,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  const lineMaterial = new THREE.LineBasicMaterial({
+    color: 0x35e7c1,
+    transparent: true,
+    opacity: 1,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.72, radius, 40), ringMaterial)
+  ring.rotation.x = -Math.PI / 2
+  ring.position.y = 0.08
+
+  const crossGeometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-radius * 1.24, 0.1, 0), new THREE.Vector3(-radius * 0.42, 0.1, 0),
+    new THREE.Vector3(radius * 0.42, 0.1, 0), new THREE.Vector3(radius * 1.24, 0.1, 0),
+    new THREE.Vector3(0, 0.1, -radius * 1.24), new THREE.Vector3(0, 0.1, -radius * 0.42),
+    new THREE.Vector3(0, 0.1, radius * 0.42), new THREE.Vector3(0, 0.1, radius * 1.24),
+    new THREE.Vector3(0, 0.12, 0), new THREE.Vector3(0, radius * 0.9, 0),
+  ])
+  const cross = new THREE.LineSegments(crossGeometry, lineMaterial)
+  const tip = new THREE.Mesh(
+    new THREE.ConeGeometry(radius * 0.16, radius * 0.42, 16),
+    ringMaterial,
+  )
+  tip.position.y = radius * 1.08
+  group.add(ring, cross, tip)
+
+  const setMode = (mode: Exclude<ClickMode, 'idle'>) => {
+    const color = mode === 'start' ? 0x35e7c1 : 0xffa550
+    ringMaterial.color.setHex(color)
+    lineMaterial.color.setHex(color)
+  }
+
+  return {
+    group,
+    setMode,
+    dispose: () => {
+      ring.geometry.dispose()
+      ringMaterial.dispose()
+      crossGeometry.dispose()
+      lineMaterial.dispose()
+      tip.geometry.dispose()
+    },
+  }
+}
+
+/**
+ * Intersect a camera ray with the DEM height field directly. This is both
+ * materially cheaper than raycasting the 500 x 500 render mesh on each mouse
+ * move and, unlike a flat y=0 proxy, remains accurate on a sloping ridge.
+ */
+function intersectTerrainHeightfield(
+  ray: THREE.Ray,
+  terrain: TerrainField,
+  result: THREE.Vector3,
+): boolean {
+  const width = terrain.cols * terrain.resolutionM
+  const depth = terrain.rows * terrain.resolutionM
+  const minX = -width / 2
+  const maxX = width / 2
+  const minZ = -depth / 2
+  const maxZ = depth / 2
+  let enterT = 0
+  let exitT = Number.POSITIVE_INFINITY
+
+  const clipAxis = (origin: number, direction: number, low: number, high: number): boolean => {
+    if (Math.abs(direction) < 1e-9) return origin >= low && origin <= high
+    const a = (low - origin) / direction
+    const b = (high - origin) / direction
+    enterT = Math.max(enterT, Math.min(a, b))
+    exitT = Math.min(exitT, Math.max(a, b))
+    return enterT <= exitT
+  }
+
+  if (!clipAxis(ray.origin.x, ray.direction.x, minX, maxX)) return false
+  if (!clipAxis(ray.origin.z, ray.direction.z, minZ, maxZ)) return false
+  // A terrain click must be looking down onto the map. The base plane gives a
+  // finite end point even for a perfectly vertical camera ray.
+  if (ray.direction.y >= -1e-9) return false
+  const basePlaneT = -ray.origin.y / ray.direction.y
+  if (basePlaneT < 0) return false
+  exitT = Math.min(exitT, basePlaneT)
+  if (enterT > exitT) return false
+
+  const signedHeight = (distance: number): number | null => {
+    const point = ray.at(distance, result)
+    const terrainY = sampleTerrainHeight(terrain, point.x, point.z)
+    return terrainY === null ? null : point.y - terrainY
+  }
+
+  const horizontalDistance = Math.hypot(ray.direction.x, ray.direction.z) * (exitT - enterT)
+  // Sample at <= half a DEM cell. This catches steep local relief while doing
+  // only scalar height lookups rather than hundreds of thousands of triangle
+  // intersection tests.
+  const steps = THREE.MathUtils.clamp(
+    Math.ceil(horizontalDistance / Math.max(terrain.resolutionM * 0.5, 0.25)),
+    1,
+    4096,
+  )
+  let previousT = enterT
+  let previousHeight = signedHeight(previousT)
+  if (previousHeight === null) return false
+
+  for (let i = 1; i <= steps; i++) {
+    const currentT = enterT + (exitT - enterT) * (i / steps)
+    const currentHeight = signedHeight(currentT)
+    if (currentHeight === null) return false
+    if (previousHeight === 0 || currentHeight === 0 || previousHeight * currentHeight < 0) {
+      let lowT = previousT
+      let highT = currentT
+      let lowHeight = previousHeight
+      for (let iteration = 0; iteration < 14; iteration++) {
+        const midT = (lowT + highT) / 2
+        const midHeight = signedHeight(midT)
+        if (midHeight === null) return false
+        if (Math.abs(midHeight) < 0.002) {
+          lowT = highT = midT
+          break
+        }
+        if (lowHeight * midHeight > 0) {
+          lowT = midT
+          lowHeight = midHeight
+        } else {
+          highT = midT
+        }
+      }
+      ray.at((lowT + highT) / 2, result)
+      return true
+    }
+    previousT = currentT
+    previousHeight = currentHeight
+  }
+  return false
+}
+
 async function fetchF32(url: string): Promise<Float32Array> {
   const response = await fetch(url)
   if (!response.ok) throw new Error(`${url} -> ${response.status}`)
@@ -1062,6 +1221,14 @@ export default function TerrainCanvas3D({
   // gravel is a distance-graded LOD around the sensor and has to follow it,
   // so it is rebuilt on real movement rather than on every throttle tick.
   const lastPebbleOriginRef = useRef<{ x: number; z: number } | null>(null)
+  /** Last cell shown by the live endpoint cursor. Pointer-up reuses it so
+   * the visible marker and the committed Start/Goal cannot disagree. */
+  const selectionPreviewRef = useRef<{
+    row: number
+    col: number
+    clientX: number
+    clientY: number
+  } | null>(null)
 
   // The raw NAC crop still carries its own 2010 grazing-light shadow
   // micro-texture (see PHOTO_TEXTURE_URL's own comment on why it is drawn
@@ -1087,6 +1254,8 @@ export default function TerrainCanvas3D({
     regolithTexture: THREE.CanvasTexture
     photoAvailable: boolean
     routeGroup: THREE.Group
+    selectionCursor: ReturnType<typeof createTerrainSelectionCursor>
+    endpointMarkers: Record<Exclude<ClickMode, 'idle'>, ReturnType<typeof createTerrainSelectionCursor>>
     rockGroup: THREE.Group
     /** One InstancedMesh per gravel variant; see buildPebbleVariants. */
     pebbleMeshes: THREE.InstancedMesh[]
@@ -1580,6 +1749,18 @@ export default function TerrainCanvas3D({
       mesh.rotation.x = -Math.PI / 2 // +Z becomes height; row 0 falls to -Z (north)
       scene.add(mesh)
 
+      const selectionCursor = createTerrainSelectionCursor(res)
+      scene.add(selectionCursor.group)
+      const endpointMarkers = {
+        start: createTerrainSelectionCursor(res),
+        goal: createTerrainSelectionCursor(res),
+      }
+      endpointMarkers.start.group.name = 'terrain-start-selection-marker'
+      endpointMarkers.goal.group.name = 'terrain-goal-selection-marker'
+      endpointMarkers.start.setMode('start')
+      endpointMarkers.goal.setMode('goal')
+      scene.add(endpointMarkers.start.group, endpointMarkers.goal.group)
+
       // The illumination series is optional: without NAIF kernels or the
       // horizon cube the backend says so rather than faking it, and the scene
       // still renders under a fixed light.
@@ -1637,6 +1818,8 @@ export default function TerrainCanvas3D({
         regolithTexture,
         photoAvailable,
         routeGroup,
+        selectionCursor,
+        endpointMarkers,
         rockGroup,
         pebbleMeshes,
         rockMaterial,
@@ -1658,6 +1841,9 @@ export default function TerrainCanvas3D({
         dispose: () => {
           geometry.dispose()
           material.dispose()
+          selectionCursor.dispose()
+          endpointMarkers.start.dispose()
+          endpointMarkers.goal.dispose()
           skyAbort.abort()
           sky.dispose()
           earth.sprite.material.map?.dispose()
@@ -2664,6 +2850,18 @@ export default function TerrainCanvas3D({
     // rover.mast/rover.lidarHead are created, just below createRoverModel().
   }, [lidarEnabled, cameraMode, status])
 
+  // Start/Goal are useful while composing a mission, then the generated route
+  // has its own endpoint markers. Keep the placement cursors only for the
+  // former so a planned route does not show two competing marker systems.
+  useEffect(() => {
+    const state = sceneRef.current
+    if (!state || status !== 'ready') return
+    const routeIsGenerated = Boolean(waypoints && waypoints.length >= 2)
+    for (const marker of Object.values(state.endpointMarkers)) {
+      marker.group.visible = Boolean(marker.group.userData.placed) && !routeIsGenerated
+    }
+  }, [status, waypoints])
+
   // ── Planned route, drawn in the same metric frame as the mesh. ─────────────
   useEffect(() => {
     const state = sceneRef.current
@@ -2954,6 +3152,88 @@ export default function TerrainCanvas3D({
     }
   }, [cameraMode, status])
 
+  // Live terrain cursor for Start/Goal selection. It intersects the actual
+  // DEM height field, then snaps to the same cell the click handler commits,
+  // without raycasting the 500 x 500 render mesh on every mouse-move.
+  useEffect(() => {
+    const container = containerRef.current
+    const state = sceneRef.current
+    if (!container || !state || status !== 'ready' || !onCellClick || !clickMode || clickMode === 'idle') return
+    const { camera, manifest, heights, mesh, selectionCursor } = state
+    if (!camera || !heights) return
+
+    const { rows, cols, resolution_m: resolutionM } = manifest.grid
+    const width = cols * resolutionM
+    const depth = rows * resolutionM
+    const stepX = width / (cols - 1)
+    const stepZ = depth / (rows - 1)
+    const terrain: TerrainField = {
+      rows, cols, resolutionM,
+      minElevationM: manifest.elevation.min_m,
+      heights,
+      verticalScale: mesh.scale.z,
+    }
+    const raycaster = new THREE.Raycaster()
+    const groundPoint = new THREE.Vector3()
+    const terrainNormal = new THREE.Vector3()
+    const up = new THREE.Vector3(0, 1, 0)
+
+    const clearPreview = () => {
+      selectionPreviewRef.current = null
+      selectionCursor.group.visible = false
+    }
+
+    const onMove = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('button, input, label, .terrain3d-lidar, .terrain3d-camera-switch')) {
+        clearPreview()
+        return
+      }
+      const rect = container.getBoundingClientRect()
+      const ndc = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      raycaster.setFromCamera(ndc, camera)
+      if (!intersectTerrainHeightfield(raycaster.ray, terrain, groundPoint)) {
+        clearPreview()
+        return
+      }
+
+      const col = Math.round((groundPoint.x + width / 2) / stepX)
+      const row = Math.round((groundPoint.z + depth / 2) / stepZ)
+      if (row < 0 || row >= rows || col < 0 || col >= cols) {
+        clearPreview()
+        return
+      }
+      const x = col * stepX - width / 2
+      const z = row * stepZ - depth / 2
+      const y = sampleTerrainHeight(terrain, x, z)
+      if (y === null) {
+        clearPreview()
+        return
+      }
+
+      terrainNormal.copy(sampleTerrainNormal(terrain, x, z))
+      selectionCursor.setMode(clickMode)
+      selectionCursor.group.position.set(x, y + 0.16, z)
+      selectionCursor.group.quaternion.setFromUnitVectors(up, terrainNormal)
+      selectionCursor.group.visible = true
+      selectionPreviewRef.current = { row, col, clientX: event.clientX, clientY: event.clientY }
+    }
+
+    selectionCursor.setMode(clickMode)
+    selectionCursor.group.visible = false
+    container.style.cursor = 'crosshair'
+    container.addEventListener('pointermove', onMove)
+    container.addEventListener('pointerleave', clearPreview)
+    return () => {
+      clearPreview()
+      container.style.cursor = ''
+      container.removeEventListener('pointermove', onMove)
+      container.removeEventListener('pointerleave', clearPreview)
+    }
+  }, [cameraMode, clickMode, onCellClick, status])
+
   // ── Click-to-select start/goal ──────────────────────────────────────────────
   // Mirrors MapCanvas's own picker exactly (same onCellClick(row, col)
   // signature, same clickMode) so App.tsx wires this in without a second
@@ -2966,13 +3246,22 @@ export default function TerrainCanvas3D({
     if (!container || !state || status !== 'ready' || !onCellClick || !clickMode || clickMode === 'idle') {
       return
     }
-    const { camera, mesh, manifest } = state
+    const { camera, mesh, manifest, selectionCursor, endpointMarkers } = state
     if (!camera) return
 
     let downX = 0
     let downY = 0
     let tracking = false
     const raycaster = new THREE.Raycaster()
+
+    const placeEndpointMarker = (mode: Exclude<ClickMode, 'idle'>, point: THREE.Vector3, normal: THREE.Vector3) => {
+      const marker = endpointMarkers[mode]
+      marker.setMode(mode)
+      marker.group.position.copy(point).addScaledVector(normal, 0.16)
+      marker.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal)
+      marker.group.userData.placed = true
+      marker.group.visible = true
+    }
 
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return
@@ -2985,6 +3274,21 @@ export default function TerrainCanvas3D({
       if (!tracking) return
       tracking = false
       if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return
+
+      // Prefer the cell visibly marked under the pointer. The proximity check
+      // prevents a stale preview from being used if a click arrives before a
+      // matching pointermove event.
+      const preview = selectionPreviewRef.current
+      if (preview && Math.hypot(e.clientX - preview.clientX, e.clientY - preview.clientY) <= 8) {
+        const marker = endpointMarkers[clickMode]
+        marker.setMode(clickMode)
+        marker.group.position.copy(selectionCursor.group.position)
+        marker.group.quaternion.copy(selectionCursor.group.quaternion)
+        marker.group.userData.placed = true
+        marker.group.visible = true
+        onCellClick(preview.row, preview.col)
+        return
+      }
 
       const rect = container.getBoundingClientRect()
       const ndc = new THREE.Vector2(
@@ -3007,6 +3311,10 @@ export default function TerrainCanvas3D({
       const col = Math.round((hit.point.x + width / 2) / stepX)
       const row = Math.round((hit.point.z + depth / 2) / stepZ)
       if (row < 0 || row > rows - 1 || col < 0 || col > cols - 1) return
+      const normal = hit.face
+        ? hit.face.normal.clone().transformDirection(mesh.matrixWorld).normalize()
+        : new THREE.Vector3(0, 1, 0)
+      placeEndpointMarker(clickMode, hit.point, normal)
       onCellClick(row, col)
     }
 
