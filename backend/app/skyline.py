@@ -251,6 +251,7 @@ def expected_sun_angles(
     """
     from .ephemeris import (
         DEFAULT_META_KERNEL,
+        _SPICE_LOCK,
         _ensure_kernels,
         sun_azel_from_vector,
         sun_vector_body,
@@ -270,8 +271,12 @@ def expected_sun_angles(
     # furnsh before str2et: converting a UTC string needs the leapsecond
     # kernel loaded, so the order matters on a cold SPICE pool. sun_track
     # does the same for the same reason.
-    _ensure_kernels(spice, kernel)
-    et = spice.str2et(timestamp_utc)
+    # Same process-wide SPICE lock the ephemeris helpers take: this reaches
+    # into the shared kernel pool directly (furnsh + str2et), so it has to
+    # serialise with them or a concurrent request can corrupt the pool.
+    with _SPICE_LOCK:
+        _ensure_kernels(spice, kernel)
+        et = spice.str2et(timestamp_utc)
     sun_vec = sun_vector_body(et, kernel)
     true_az_deg, elevation_deg = sun_azel_from_vector(sun_vec, lat_deg, lon_deg)
 

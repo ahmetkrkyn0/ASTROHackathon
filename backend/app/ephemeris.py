@@ -15,6 +15,7 @@ range [0, 360).
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -182,6 +183,23 @@ def grid_azimuth_to_true_azimuth(
 # (Round 2 review, L-3.)
 _FURNISHED: set[str] = set()
 
+# CSPICE is not thread-safe. Its kernel pool, error handler and frame cache
+# are process-global C state with no internal locking, and FastAPI runs every
+# `def` (non-async) endpoint in a threadpool -- so two overlapping requests
+# that both touch ephemeris data (an /api/cell-telemetry while an
+# /api/illumination-series is still running, say) call into that shared state
+# concurrently. Observed symptoms, all from the same cause: a bogus
+# SPICE(FRAMEDATANOTFOUND) for MOON_PA_DE440 on a pool that demonstrably has
+# the PCK loaded and covering the epoch, SPICE(BADSUBSCRIPT) reading element
+# -99 of the pool's own `datlst`, and -- reproducibly, with eight threads --
+# a hard interpreter crash inside the C library with no Python traceback.
+#
+# One process-wide reentrant lock around every SPICE entry point serialises
+# them. Reentrant because the public helpers nest: sun_track holds it and
+# calls sun_vector_body, which takes it again. The critical sections are
+# microseconds of C, so contention costs nothing next to the crash it avoids.
+_SPICE_LOCK = threading.RLock()
+
 
 def _ensure_kernels(spice, meta_kernel: str) -> None:
     # The cache is only valid while the SPICE pool still holds what it
@@ -214,8 +232,9 @@ def utc_to_et(utc: str, meta_kernel: str = DEFAULT_META_KERNEL) -> float:
     """
     import spiceypy as spice
 
-    _ensure_kernels(spice, meta_kernel)
-    return float(spice.str2et(utc))
+    with _SPICE_LOCK:
+        _ensure_kernels(spice, meta_kernel)
+        return float(spice.str2et(utc))
 
 
 def body_vector_body(
@@ -237,10 +256,11 @@ def body_vector_body(
             "Install it and run lunapath/src/fetch_kernels.py first."
         ) from exc
 
-    _ensure_kernels(spice, meta_kernel)
-    position, _light_time = spice.spkpos(
-        str(body), et, _MOON_BODY_FRAME, "LT+S", "MOON"
-    )
+    with _SPICE_LOCK:
+        _ensure_kernels(spice, meta_kernel)
+        position, _light_time = spice.spkpos(
+            str(body), et, _MOON_BODY_FRAME, "LT+S", "MOON"
+        )
     return np.asarray(position, dtype=np.float64)
 
 
@@ -281,11 +301,14 @@ def sun_track(
             "Install it and run lunapath/src/fetch_kernels.py first."
         ) from exc
 
-    _ensure_kernels(spice, meta_kernel)
-    et0 = spice.str2et(utc_start)
-    et1 = spice.str2et(utc_end)
-    ets = np.linspace(et0, et1, int(n_samples))
-    return [
-        sun_azel_from_vector(sun_vector_body(float(et), meta_kernel), lat_deg, lon_deg)
-        for et in ets
-    ]
+    with _SPICE_LOCK:
+        _ensure_kernels(spice, meta_kernel)
+        et0 = spice.str2et(utc_start)
+        et1 = spice.str2et(utc_end)
+        ets = np.linspace(et0, et1, int(n_samples))
+        return [
+            sun_azel_from_vector(
+                sun_vector_body(float(et), meta_kernel), lat_deg, lon_deg
+            )
+            for et in ets
+        ]
