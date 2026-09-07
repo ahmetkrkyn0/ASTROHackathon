@@ -1,7 +1,40 @@
 import type { Plan4DResponse, SeriesManifest } from '../../net/types'
 import { cleanShadowReason } from './reason'
-import type { SeriesField } from './useTimeAxis'
+import type { PlanConstraints, SeriesField } from './useTimeAxis'
 import './time-axis.css'
+
+/**
+ * The three forward constraints A owns, with what each needs.
+ *
+ * `needs` names a capability id rather than a layer name: A1 and A2 are
+ * built from the horizon cube, not from a manifest layer, so "is it there"
+ * is a different question for each and the hook answers it.
+ */
+const CONSTRAINT_CONTROLS: Array<{
+  key: keyof PlanConstraints
+  label: string
+  title: string
+  needs: string
+}> = [
+  {
+    key: 'requireEarthVisibility',
+    label: 'Earth link',
+    title: 'Every drive step must arrive in a cell that can see Earth. Waiting is never restricted.',
+    needs: 'earth-visibility',
+  },
+  {
+    key: 'requireSafeHaven',
+    label: 'Haven deadline',
+    title: 'The rover must always be able to reach a safe haven before the Earth sets.',
+    needs: 'safe-haven',
+  },
+  {
+    key: 'requireIlluminationCorridor',
+    label: 'Stay lit',
+    title: 'The route must stay inside the continuously illuminated corridor.',
+    needs: 'illumination-corridor',
+  },
+]
 
 export function TimeAxisPanel({
   manifest,
@@ -18,6 +51,10 @@ export function TimeAxisPanel({
   runPlan4D,
   error,
   timeVarying,
+  constraints,
+  toggleConstraint,
+  constraintAvailable,
+  constraintReasons,
 }: {
   manifest: SeriesManifest | null
   field: SeriesField
@@ -33,6 +70,10 @@ export function TimeAxisPanel({
   runPlan4D: () => void
   error: string | null
   timeVarying: boolean
+  constraints: PlanConstraints
+  toggleConstraint: (key: keyof PlanConstraints) => void
+  constraintAvailable: Readonly<Record<string, boolean>>
+  constraintReasons: Readonly<Record<string, string | null>>
 }) {
   const sun = manifest?.sun[sliceIndex] ?? null
   const hours = manifest ? sliceIndex * manifest.slice_hours : 0
@@ -86,6 +127,68 @@ export function TimeAxisPanel({
           {planning ? 'Planning…' : 'Plan through time'}
         </button>
       </div>
+
+      {/*
+        The forward constraints, beside the button that sends them.
+
+        All three default off, and an off constraint adds no field to the
+        request at all -- not `false`, which would override a documented
+        backend default. One whose data is missing is disabled and says so,
+        because sending the flag anyway earns a 422 that reads like a bug.
+      */}
+      <div className="lp-time-constraints">
+        <span className="lp-time-constraints-label">Require</span>
+        {CONSTRAINT_CONTROLS.map(({ key, label, title, needs }) => {
+          const ready = constraintAvailable[needs] === true
+          return (
+            <button
+              key={key}
+              type="button"
+              className={`lp-time-constraint ${constraints[key] ? 'is-on' : ''}`}
+              onClick={() => toggleConstraint(key)}
+              disabled={!ready}
+              aria-pressed={constraints[key]}
+              title={title}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/*
+        Why a control is dark, in visible text rather than a tooltip.
+
+        This panel already learned that lesson once: RoutePriorities moved its
+        weight explanations out of `title` because a tooltip reaches neither
+        touch nor keyboard. A disabled button with a hidden reason is the same
+        mistake with higher stakes -- the operator cannot even hover it to find
+        out, and the honest answer here is usually "the backend degraded",
+        not "you are missing a file".
+
+        Deduplicated: `safe-haven` and `illumination-corridor` share one cause,
+        and printing it twice would read as two separate problems.
+      */}
+      {(() => {
+        const blocked = CONSTRAINT_CONTROLS.filter(
+          (control) => constraintReasons[control.needs] !== null,
+        )
+        if (blocked.length === 0) return null
+        const byReason = new Map<string, string[]>()
+        for (const control of blocked) {
+          const reason = constraintReasons[control.needs] as string
+          byReason.set(reason, [...(byReason.get(reason) ?? []), control.label])
+        }
+        return (
+          <div className="lp-time-constraint-notes">
+            {[...byReason.entries()].map(([reason, labels]) => (
+              <p key={reason} className="lp-time-constraint-note">
+                <strong>{labels.join(' · ')}</strong> {reason}
+              </p>
+            ))}
+          </div>
+        )
+      })()}
 
       {/* The honesty gate. A static cube gets said out loud, not animated.
           The reason comes from the response rather than being guessed at:

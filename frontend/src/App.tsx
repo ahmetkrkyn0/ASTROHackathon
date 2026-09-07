@@ -53,6 +53,8 @@ import { AssistantAskProvider } from './intent/AssistantAskProvider'
 import { MissionProvider } from './mission/MissionProvider'
 import { MissionRuntimeProvider } from './mission/MissionRuntimeProvider'
 import type { MissionActions, MissionRuntime, MissionValue } from './mission/types'
+import { SESSION_MISSION_TIME, type MissionTime } from './mission/missionTime'
+import { routeIdentityOf } from './mission/routeIdentity'
 import { OverlayProvider } from './overlay/OverlayProvider'
 import { FEATURES, selectFeatures } from './features/registry'
 import SystemsDrawer from './shell/SystemsDrawer'
@@ -801,6 +803,20 @@ export default function App() {
   // compile error, which is what keeps this object honest as the contract
   // grows. Eleven fields already existed under these names; this task adds
   // the four values the mission setup feature needs from its context.
+  // The one clock every time-dependent layer reads (spec 5.8): safe haven,
+  // Earth visibility, illumination, uncertainty, corridor, thermal dwell.
+  //
+  // Seeded with the session's own start instant rather than left empty. An
+  // empty clock is not the more honest option here, which is what it looked
+  // like at first: the backend's `unavailable` for a missing epoch is a
+  // statement about what we asked, not about what this deployment has, and
+  // leaving it unset only meant the panels sat dark in the one stage where
+  // a mission is configured -- time-axis, which used to own the epoch, does
+  // not mount in `plan` mode. Choosing an epoch is a planning decision, and
+  // each panel prints the one it used. Drawing a haven map with no epoch
+  // behind it would be the fabrication; naming the epoch is not.
+  const [missionTime, setMissionTime] = useState<MissionTime>(SESSION_MISSION_TIME)
+
   const missionValue: MissionValue = useMemo(
     () => ({
       gridMeta: elevationLayer
@@ -828,6 +844,18 @@ export default function App() {
       activeViewMode: viewMode,
       dimension,
       missionMode,
+      missionTime,
+      // Derived, not stored: an identity kept in state is an identity that
+      // can lag the inputs it describes, and a stale-marker that lags is
+      // worse than none. Advanced constraints are absent here because none
+      // of them is wired into a plan request yet; a contributor that turns
+      // one on passes it here at the same time.
+      routeIdentity: routeIdentityOf({
+        roverId: selectedRoverId,
+        start,
+        goal,
+        weights,
+      }),
     }),
     [
       dimension,
@@ -838,6 +866,7 @@ export default function App() {
       isSolving,
       layerError,
       missionMode,
+      missionTime,
       planResult,
       selectedRover,
       selectedRoverId,
@@ -874,6 +903,7 @@ export default function App() {
       setViewMode,
       setDimension,
       toggleHud,
+      setMissionTime,
     }),
     [
       handlePlan,

@@ -1,10 +1,43 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { planRoute4D } from '../../net/plan4d'
 import { fetchSeriesCube, fetchSeriesManifest, type SeriesCube } from '../../net/series'
 import { useMission } from '../../mission/MissionContext'
+import { cleanShadowReason } from './reason'
+import { SESSION_MISSION_TIME } from '../../mission/missionTime'
+import { useLayerAvailability } from '../../mission/useLayerAvailability'
+import {
+  applyPlanRequestContributors,
+  type PlanRequestContext,
+} from '../plan-request/contributors'
 import type { Plan4DResponse, SeriesManifest } from '../../net/types'
 
 export type SeriesField = 'shadow' | 'surface_temp_c'
+
+/**
+ * The forward constraints A owns, as the 4-D planner takes them.
+ *
+ * They live beside the button that uses them rather than in each layer's
+ * own panel. A toggle in the safe-haven card that silently changed what a
+ * button in a different panel sent would be worse than the cross-feature
+ * coupling it saved, and these are planner inputs, not layer settings.
+ *
+ * All three default OFF, and an off constraint contributes no field at all
+ * -- the request stays byte-identical to what the cockpit sent before any
+ * of this existed. `planRequest.nonregression.test.ts` pins that down.
+ */
+export interface PlanConstraints {
+  requireEarthVisibility: boolean
+  requireSafeHaven: boolean
+  requireIlluminationCorridor: boolean
+  /** So the shape satisfies the contributor context, which reads by name. */
+  [key: string]: boolean
+}
+
+const NO_CONSTRAINTS: PlanConstraints = {
+  requireEarthVisibility: false,
+  requireSafeHaven: false,
+  requireIlluminationCorridor: false,
+}
 
 const N_SLICES = 24
 /**
@@ -22,16 +55,18 @@ const SLICE_HOURS = 6
 // which is what a slider scrubbing at 10 fps can afford to keep resident.
 const DOWNSAMPLE = 2
 
-/**
- * The epoch the whole panel is anchored to, taken once when the module loads.
+/*
+ * The epoch this panel anchors to is the mission clock's, not its own.
  *
- * Illumination is a function of time, so without a start epoch the backend
- * holds the shadow field constant and says so: shadow_model.model comes back
- * "static" with reason "no start epoch given". Both the series and the 4-D
- * plan need it, and they need the SAME one, or the route would be solved
- * against a different sky than the one being drawn.
+ * It used to be a module-level `new Date()` here. Five other products --
+ * safe haven, Earth visibility, uncertainty, corridor, thermal dwell -- vary
+ * over the same axis, and each holding its own instant would put two layers
+ * on one map showing two different moments, which looks exactly like two
+ * layers showing one. `SESSION_MISSION_TIME` is now that single instant and
+ * this panel reads it like everything else (spec 5.8). Without an epoch the
+ * backend holds the shadow field constant and says so -- shadow_model.model
+ * comes back "static" -- which the honesty gate below already checks for.
  */
-const START_UTC = new Date().toISOString()
 
 /**
  * Slice budget for the 4-D plan.
@@ -46,7 +81,11 @@ const START_UTC = new Date().toISOString()
 const PLAN_SLICES = 256
 
 export function useTimeAxis() {
-  const { start, goal, roverId, weights } = useMission()
+  const { start, goal, roverId, weights, missionTime } = useMission()
+
+  // The shared clock. `SESSION_MISSION_TIME` seeds it, so this is set from
+  // the first render; the fallback covers a caller that cleared it.
+  const startUtc = missionTime.startUtc ?? SESSION_MISSION_TIME.startUtc ?? ''
 
   const [manifest, setManifest] = useState<SeriesManifest | null>(null)
   const [cube, setCube] = useState<SeriesCube | null>(null)
@@ -83,7 +122,7 @@ export function useTimeAxis() {
 
     fetchSeriesManifest(
       {
-        startUtc: START_UTC,
+        startUtc,
         nSlices: N_SLICES,
         sliceHours: SLICE_HOURS,
         downsample: DOWNSAMPLE,
@@ -106,7 +145,10 @@ export function useTimeAxis() {
       })
 
     return () => controller.abort()
-  }, [field])
+    // startUtc as well as field: a cube fetched against one epoch describes
+    // a different sky than a manifest fetched against another, and the
+    // mission clock is now something else can move.
+  }, [field, startUtc])
 
   const stop = useCallback(() => {
     if (timerRef.current !== null) {
@@ -130,6 +172,66 @@ export function useTimeAxis() {
 
   const togglePlay = useCallback(() => setPlaying((current) => !current), [])
 
+  const [constraints, setConstraints] = useState<PlanConstraints>(NO_CONSTRAINTS)
+  const layers = useLayerAvailability(roverId, weights)
+
+  /*
+   * What the backend can actually enforce here.
+   *
+   * A4 needs the earth_visibility layer; without it plan-4d answers 422.
+   * A1 and A2 are computed from the horizon cube rather than a manifest
+   * layer, and the honest proxy for "the cube exists" is that the shadow
+   * series came back time-varying: a static series means no epoch reached
+   * SPICE, and neither deadline nor corridor can be built from it.
+   */
+  const shadowIsTimeVarying =
+    manifest !== null && manifest.shadow_model.model !== 'static'
+
+  /*
+   * Why a constraint cannot be enforced, in words, not just a disabled button.
+   *
+   * The two reasons are different and were previously collapsed into one
+   * tooltip that said "not available on this deployment" -- which for the
+   * static case is a misdiagnosis: the data is installed, the ephemeris just
+   * did not resolve for this epoch. A control that goes dark without saying
+   * why sends the operator looking for a missing file that is not missing.
+   *
+   * The static reason is the backend's own sentence, run through
+   * cleanShadowReason first: when SPICE fails it arrives as a whole CSPICE
+   * error banner, and a toolkit dump under a button is not an explanation.
+   */
+  const constraintReasons = useMemo<Record<string, string | null>>(() => {
+    const staticReason = !shadowIsTimeVarying
+      ? manifest === null
+        ? 'The illumination series has not loaded yet.'
+        : `The shadow series came back static, so there is no time axis to enforce this against.${
+            cleanShadowReason(manifest.shadow_model.reason)
+              ? ' ' + cleanShadowReason(manifest.shadow_model.reason)
+              : ''
+          }`
+      : null
+    return {
+      'earth-visibility': layers.has('earth_visibility')
+        ? null
+        : 'The earth_visibility layer is not loaded on this deployment.',
+      'safe-haven': staticReason,
+      'illumination-corridor': staticReason,
+    }
+  }, [layers, manifest, shadowIsTimeVarying])
+
+  // The boolean view the plan-request contributors take.
+  const constraintAvailable = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(constraintReasons).map(([key, reason]) => [key, reason === null]),
+      ),
+    [constraintReasons],
+  )
+
+  const toggleConstraint = useCallback((key: keyof PlanConstraints) => {
+    setConstraints((previous) => ({ ...previous, [key]: !previous[key] }))
+  }, [])
+
   const runPlan4D = useCallback(async () => {
     if (!start || !goal) {
       setError('Pick a start and a goal first.')
@@ -138,7 +240,7 @@ export function useTimeAxis() {
     setPlanning(true)
     setError(null)
     try {
-      const response = await planRoute4D({
+      const base = {
         start: { row: start[0], col: start[1] },
         goal: { row: goal[0], col: goal[1] },
         rover_id: roverId,
@@ -148,8 +250,19 @@ export function useTimeAxis() {
         // slice_hours is deliberately omitted: the backend derives it from
         // the grid, and a hand-picked value made the time axis count steps
         // instead of hours (Faz 3 review, C1).
-        start_utc: START_UTC,
-      })
+        start_utc: startUtc,
+      }
+      // Every advanced constraint enters here and nowhere else. With all of
+      // them off this returns `base` unchanged, which is the non-regression
+      // rule holding at the one call site that could break it.
+      const context: PlanRequestContext = {
+        endpoint: 'plan-4d',
+        constraints,
+        available: constraintAvailable,
+      }
+      const response = await planRoute4D(
+        applyPlanRequestContributors(base, context),
+      )
       setPlan4d(response)
     } catch (cause: unknown) {
       // The backend's 404 detail is the useful part -- it names how many
@@ -159,7 +272,7 @@ export function useTimeAxis() {
     } finally {
       setPlanning(false)
     }
-  }, [goal, roverId, start, weights])
+  }, [goal, roverId, start, weights, startUtc, constraints, constraintAvailable])
 
   // "static" means the cube did NOT vary with time. Playing it would be a
   // lie told at 8 fps (spec T7). Unknown until the manifest lands, so this
@@ -182,5 +295,9 @@ export function useTimeAxis() {
     runPlan4D,
     error,
     timeVarying,
+    constraints,
+    toggleConstraint,
+    constraintAvailable,
+    constraintReasons,
   }
 }

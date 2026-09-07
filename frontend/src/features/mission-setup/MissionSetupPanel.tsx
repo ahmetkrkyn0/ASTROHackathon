@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import type { PlanWeights, RoverEntry } from '../../api'
+import type { CoreWeightKey, PlanWeights, RoverEntry } from '../../api'
 import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
 import { getRoverMeta } from '../../components/Fleet/roverMeta'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
@@ -8,7 +8,7 @@ import { useMission, useMissionActions } from '../../mission/MissionContext'
  * The four weights, in the order the hangar sets them and this panel reports
  * them. Labels only: the controls live in RoutePriorities now.
  */
-const WEIGHT_READOUT: Array<{ key: keyof PlanWeights; label: string }> = [
+const WEIGHT_READOUT: Array<{ key: CoreWeightKey; label: string }> = [
   { key: 'w_slope', label: 'Slope Safety' },
   { key: 'w_energy', label: 'Energy Use' },
   { key: 'w_shadow', label: 'Shadow Exposure' },
@@ -129,7 +129,7 @@ export const MissionSetupPanel: React.FC = () => {
   const routeIsStale =
     hasRoute &&
     plannedWeightsRef.current !== null &&
-    (Object.keys(weights) as Array<keyof PlanWeights>).some(
+    (Object.keys(weights) as CoreWeightKey[]).some(
       (key) => weights[key] !== plannedWeightsRef.current?.[key],
     )
 

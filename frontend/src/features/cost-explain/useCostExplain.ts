@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchCellTelemetry } from '../../api'
 import { useFocusTelemetry, useMission } from '../../mission/MissionContext'
+import type { PlanWeights } from '../../api'
 import type { CellTelemetryResponse } from '../../net/types'
 
-export type CostKey = 'slope' | 'energy' | 'shadow' | 'thermal'
+export type CostKey = 'slope' | 'energy' | 'shadow' | 'thermal' | 'roughness'
 
 export interface CostRow {
   key: CostKey
@@ -22,16 +23,27 @@ const LABELS: Record<CostKey, string> = {
   // `shadow_ratio`. Two namespaces, not one (spec T2).
   shadow: 'Shadow',
   thermal: 'Thermal',
+  roughness: 'Roughness',
 }
 
-const WEIGHT_KEY: Record<CostKey, 'w_slope' | 'w_energy' | 'w_shadow' | 'w_thermal'> = {
+const WEIGHT_KEY: Record<CostKey, keyof PlanWeights> = {
   slope: 'w_slope',
   energy: 'w_energy',
   shadow: 'w_shadow',
   thermal: 'w_thermal',
+  roughness: 'w_roughness',
 }
 
-const KEYS: CostKey[] = ['slope', 'energy', 'shadow', 'thermal']
+/**
+ * Every criterion the backend might report, in display order.
+ *
+ * Which of them a given response actually carries is a property of the
+ * deployment, not of this list: `roughness` is a fifth key only where the
+ * measured LOLA layer is loaded, and is absent -- not null -- otherwise.
+ * Absent and null mean opposite things here, so they are not collapsed:
+ * null is an INFINITE contribution that closes the cell.
+ */
+const KEYS: CostKey[] = ['slope', 'energy', 'shadow', 'thermal', 'roughness']
 
 export function useCostExplain() {
   const { weights } = useMission()
@@ -75,9 +87,13 @@ export function useCostExplain() {
       }
     }
 
-    const impassableBy = KEYS.filter((key) => breakdown[key] === null).map(
-      (key) => LABELS[key],
-    )
+    // Present in this response, whatever their value. A criterion the
+    // deployment does not have is not a criterion that scored zero.
+    const presentKeys = KEYS.filter((key) => key in breakdown)
+
+    const impassableBy = presentKeys
+      .filter((key) => breakdown[key] === null)
+      .map((key) => LABELS[key])
 
     // A null TOTAL is the authoritative verdict, and it has two causes.
     // costmap.explain() returns null when any component is infinite, and
@@ -96,16 +112,18 @@ export function useCostExplain() {
     // column still shows each real number.
     const denominator = total !== null && total > 0 ? total : 0
 
-    const rows: CostRow[] = KEYS.map((key) => ({
-      key,
-      label: LABELS[key],
-      value: breakdown[key],
-      share:
-        denominator > 0 && breakdown[key] !== null
-          ? (breakdown[key] as number) / denominator
-          : 0,
-      weight: weights[WEIGHT_KEY[key]],
-    }))
+    const rows: CostRow[] = presentKeys.map((key) => {
+      const value = breakdown[key] ?? null
+      return {
+        key,
+        label: LABELS[key],
+        value,
+        share: denominator > 0 && value !== null ? value / denominator : 0,
+        // The optional fifth weight has no value until the operator sets
+        // one; the backend's per-rover default is what it actually applied.
+        weight: weights[WEIGHT_KEY[key]] ?? 0.15,
+      }
+    })
 
     return { rows, total, impassable, impassableBy, cell: hoverCell }
     // hoverCell is rebuilt from focus.row/focus.col on every render, so the

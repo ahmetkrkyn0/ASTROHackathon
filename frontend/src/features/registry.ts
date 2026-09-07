@@ -6,6 +6,13 @@ import { Assistant } from './assistant'
 import { CorridorFeature } from './corridor'
 import { CostExplain } from './cost-explain'
 import { LayerPicker } from './layer-picker'
+import { AnalysisLayers } from './analysis-layers'
+import { PsrValidationPanel } from './psr-validation'
+import { SafeHaven } from './safe-haven'
+import { EarthVisibility } from './earth-visibility'
+import { CoarseFields } from './coarse-fields'
+import { ThermalEnvelopePanel } from './thermal-envelope'
+import { IlluminationCorridor } from './illumination-corridor'
 import { LayerProvenance } from './layer-provenance'
 import { MissionReport } from './mission-report'
 import { MissionSetup } from './mission-setup'
@@ -128,6 +135,12 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // solving indicator covers the map while a route is being solved, so it
   // comes after the picker it may draw over.
   { id: 'layer-picker', slot: 'canvasOverlay', Component: LayerPicker },
+  // Additive overlays, beside the base-layer radio rather than inside it.
+  // A view mode replaces what the map is; these sit on top of whatever it
+  // already is, and several can be on at once -- which is also the only way
+  // to draw the PSR mask over our own shadow layer, the comparison the
+  // measured product exists to support.
+  { id: 'analysis-layers', slot: 'canvasOverlay', Component: AnalysisLayers },
   { id: 'solving-indicator', slot: 'canvasOverlay', Component: SolvingIndicator },
   // The first two features to come back from the parking lot, and the only
   // two that needed no retyping: neither draws an overlay and neither reads a
@@ -141,6 +154,55 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // takes the default cockpit from nine competing cards down to task+context.
   { id: 'ros-showcase', slot: 'leftRail', Component: RosShowcase, group: 'systems' },
   { id: 'layer-provenance', slot: 'leftRail', Component: LayerProvenance, group: 'systems' },
+  // Beside layer provenance, and read with it: one says where a layer came
+  // from, the other how far our own shadow model agrees with the measured
+  // product. The number it publishes is one it can fail, which is what
+  // makes the PSR overlay evidence rather than decoration.
+  {
+    id: 'psr-validation',
+    slot: 'leftRail',
+    Component: PsrValidationPanel,
+    group: 'systems',
+  },
+  // A1. In the drawer with the other evidence panels rather than in a rail:
+  // it owns a map overlay, but the survival rule behind it and the share of
+  // the window that can reach no haven are the parts worth reading, and
+  // neither belongs in the moment-to-moment work of placing a route.
+  { id: 'safe-haven', slot: 'leftRail', Component: SafeHaven, group: 'systems' },
+  // A4, next to A1 because they answer the same question from two sides:
+  // a haven is somewhere to wait out the dark, and the dark is defined by
+  // where the Earth is. Both read the one mission clock.
+  {
+    id: 'earth-visibility',
+    slot: 'leftRail',
+    Component: EarthVisibility,
+    group: 'systems',
+  },
+  // B1 and C6, together because they share a coarse grid and a legend
+  // slot, and because neither is a terrain layer: both are model output
+  // over a mission epoch and a rover state, and two of their four fields
+  // are categorical rather than scalar.
+  { id: 'coarse-fields', slot: 'leftRail', Component: CoarseFields, group: 'systems' },
+  // C6's other half, and not a map: the axes are Sun elevation and slope
+  // along the Sun's azimuth, so a bin is a geometry rather than a place.
+  // It sits beside the dwell field because the two answer the same
+  // question from opposite ends -- where survivable, and what kind of
+  // ground is survivable at all.
+  {
+    id: 'thermal-envelope',
+    slot: 'leftRail',
+    Component: ThermalEnvelopePanel,
+    group: 'systems',
+  },
+  // A2. NOT the `corridor` feature above -- that is the route corridor, a
+  // ribbon around a planned path. This is the lit-and-connected volume over
+  // time, and it is the layer half only: the planner is not gated on it.
+  {
+    id: 'illumination-corridor',
+    slot: 'leftRail',
+    Component: IlluminationCorridor,
+    group: 'systems',
+  },
   // Plan only: it asks what would force a new route from where the rover is,
   // which is a question about a route still being decided.
   { id: 'replan', slot: 'leftRail', Component: Replan, modes: ['plan'], group: 'systems' },

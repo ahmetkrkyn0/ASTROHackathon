@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { PlanWeights } from '../../api'
+import type { CoreWeightKey, PlanWeights } from '../../api'
 import { fetchMissionProfiles } from '../../net/profiles'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
 import type { MissionProfiles } from '../../net/types'
 
-const WEIGHT_KEYS: Array<keyof PlanWeights> = ['w_slope', 'w_energy', 'w_shadow', 'w_thermal']
+const WEIGHT_KEYS: CoreWeightKey[] = ['w_slope', 'w_energy', 'w_shadow', 'w_thermal']
 
 /**
  * Weights round-trip through range inputs at step 0.01 and the profile spec
@@ -55,9 +55,23 @@ export function useMissionProfiles() {
     return hit ? hit[0] : null
   }, [profiles, weights])
 
+  /**
+   * Copies the four weights by name rather than spreading the profile.
+   *
+   * The catalogue carries a fifth, `w_roughness`, as a static constant that
+   * `/api/profiles` returns whether or not the roughness layer is loaded
+   * (scenarios.py). A spread would put it into mission weights on every
+   * deployment, and from there into the plan request -- so merely selecting
+   * a preset would start sending a criterion the operator never chose and
+   * that may have no data behind it. The roughness weight has its own
+   * control, shown only where the layer exists.
+   */
   const applyProfile = (id: string) => {
     const profile = profiles?.[id]
-    if (profile) setWeights({ ...profile.weights })
+    if (!profile) return
+    const next = {} as PlanWeights
+    for (const key of WEIGHT_KEYS) next[key] = profile.weights[key]
+    setWeights(next)
   }
 
   return { profiles, activeId, applyProfile, loading, error }

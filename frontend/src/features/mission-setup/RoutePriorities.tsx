@@ -4,6 +4,7 @@ import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
 import { useMission, useMissionActions } from '../../mission/MissionContext'
 import type { ProfileConstraints } from '../../net/types'
 import { useMissionProfiles } from './useMissionProfiles'
+import { useLayerAvailability } from '../../mission/useLayerAvailability'
 
 /**
  * How the solver is told what to care about: a preset, its constraints, and
@@ -27,11 +28,22 @@ import { useMissionProfiles } from './useMissionProfiles'
    into a panel behind an info button instead. Each says what raising and
    lowering the number actually does, because "avoids steep inclines" tells you
    what the hazard is and nothing about what the control does. */
+type WeightKey = keyof PlanWeights
+
 const WEIGHT_CONTROLS: Array<{
-  key: keyof PlanWeights
+  key: WeightKey
   label: string
   icon: IconName
   desc: string
+  /* The backend layer this weight steers. A weight whose layer is not
+     loaded is not shown: it would move a slider that changes nothing, and
+     the response says as much (`roughness.applied: false`). Undefined means
+     the weight is always real, as the original four are. */
+  requiresLayer?: string
+  /* Where the slider sits before the operator has chosen a value. Only for
+     an optional weight, and it is the backend's own per-rover default --
+     what it will apply whether or not we send anything. */
+  fallback?: number
 }> = [
   {
     key: 'w_slope',
@@ -56,6 +68,14 @@ const WEIGHT_CONTROLS: Array<{
     label: 'Thermal Risk',
     icon: 'thermal',
     desc: 'How strongly the route avoids extreme cold. Raise it to keep the rover inside its survival temperature band; lower it to accept colder ground for a shorter path.',
+  },
+  {
+    key: 'w_roughness',
+    label: 'Surface Roughness',
+    icon: 'terrain',
+    desc: 'How strongly the route avoids broken ground, measured by NASA’s LOLA laser altimetry. Raise it to buy smoother driving with energy and time; lower it to take the direct line over rougher terrain. Only shown where the measured roughness layer is loaded.',
+    requiresLayer: 'roughness',
+    fallback: 0.15,
   },
 ]
 
@@ -88,20 +108,26 @@ const CONSTRAINT_CONTROLS: Array<{
 ]
 
 export const RoutePriorities: React.FC = () => {
-  const { weights } = useMission()
+  const { weights, roverId } = useMission()
   const { setWeights } = useMissionActions()
   const { profiles, activeId, applyProfile, loading: profilesLoading } = useMissionProfiles()
+  const layers = useLayerAvailability(roverId, weights)
+  /* Discovered from the manifest, not assumed: /api/terrain lists only the
+     layers this deployment actually loaded (spec 5.1). */
+  const visibleWeights = WEIGHT_CONTROLS.filter(
+    (control) => !control.requiresLayer || layers.has(control.requiresLayer),
+  )
   const activeProfile = activeId && profiles ? profiles[activeId] : null
 
   /* Which weight's explanation is showing. One at a time: four open panels
      would push the deploy button off the bottom of the dock. */
-  const [openInfo, setOpenInfo] = useState<keyof PlanWeights | null>(null)
+  const [openInfo, setOpenInfo] = useState<WeightKey | null>(null)
 
   /* What the user is part-way through typing. Binding the box straight to the
      weight fights them -- clearing it to type a fresh number parses as NaN, and
      "0." is not a number yet -- so the draft holds the raw string while the box
      is being edited and the mission only ever takes values that parse. */
-  const [draft, setDraft] = useState<Partial<Record<keyof PlanWeights, string>>>({})
+  const [draft, setDraft] = useState<Partial<Record<WeightKey, string>>>({})
 
   const slidersRef = useRef<HTMLDivElement | null>(null)
 
@@ -123,11 +149,11 @@ export const RoutePriorities: React.FC = () => {
     }
   }, [openInfo])
 
-  const handleWeightChange = (key: keyof PlanWeights, val: number) => {
+  const handleWeightChange = (key: WeightKey, val: number) => {
     setWeights({ ...weights, [key]: val })
   }
 
-  const handleTyped = (key: keyof PlanWeights, raw: string) => {
+  const handleTyped = (key: WeightKey, raw: string) => {
     setDraft((d) => ({ ...d, [key]: raw }))
     const n = parseFloat(raw)
     if (Number.isFinite(n)) handleWeightChange(key, clampWeight(n))
@@ -135,7 +161,7 @@ export const RoutePriorities: React.FC = () => {
 
   /* Leaving the box swaps what was typed for what the mission actually holds,
      which is where an out-of-range entry visibly becomes the clamped value. */
-  const handleTypedBlur = (key: keyof PlanWeights) => {
+  const handleTypedBlur = (key: WeightKey) => {
     setDraft((d) => {
       const next = { ...d }
       delete next[key]
@@ -232,8 +258,11 @@ export const RoutePriorities: React.FC = () => {
         </p>
 
         <div className="lp-priority-sliders" ref={slidersRef}>
-          {WEIGHT_CONTROLS.map(({ key, label, icon, desc }) => {
-            const val = weights[key]
+          {visibleWeights.map(({ key, label, icon, desc, fallback }) => {
+            /* An optional weight has no value until the operator sets one;
+               the slider then rests on the backend's own default, which is
+               what it will apply either way. */
+            const val = weights[key] ?? fallback ?? 0
             const isOpen = openInfo === key
             const infoId = `lp-weight-info-${key}`
             return (

@@ -1,6 +1,8 @@
 import type { Dispatch, SetStateAction } from 'react'
 import type { ClickMode, MapViewMode } from '../MapCanvas'
 import type { PlanResponse, PlanWeights, RoverEntry } from '../api'
+import type { MissionTime } from './missionTime'
+import type { RouteIdentity } from './routeIdentity'
 
 /**
  * A fine-grid cell index, as the cockpit has always carried one.
@@ -153,6 +155,26 @@ export interface MissionValue {
    * stage at all.
    */
   missionMode: MissionMode
+  /**
+   * The one clock the time-dependent layers read -- spec 5.8.
+   *
+   * Six backend series vary over this axis (illumination, Earth visibility,
+   * uncertainty, corridor, thermal dwell, survival). Published here so they
+   * share it: a feature holding its own epoch is a second clock, and two
+   * layers drawn from two different moments look exactly like two layers
+   * drawn from one.
+   */
+  missionTime: MissionTime
+  /**
+   * Which route the post-analysis results on screen were computed against --
+   * spec 5.4.
+   *
+   * Null before a route exists. A panel holding an analysis compares the
+   * identity it recorded against this one and marks itself stale when they
+   * differ; it does not re-derive that comparison from rover, endpoints and
+   * weights, because two panels doing so would eventually disagree.
+   */
+  routeIdentity: RouteIdentity
 }
 
 /**
@@ -265,4 +287,13 @@ export interface MissionActions {
   setViewMode: (mode: ViewModeId) => void
   setDimension: (dimension: MapDimension) => void
   toggleHud: () => void
+  /**
+   * Move the shared mission clock -- spec 5.8.
+   *
+   * The setter is published so a time control can own the UI without
+   * owning the value: the epoch has to be one thing that every
+   * time-dependent layer reads, and a feature holding its own would be a
+   * second clock nobody can see.
+   */
+  setMissionTime: Dispatch<SetStateAction<MissionTime>>
 }
