@@ -699,18 +699,6 @@ export const MissionReportModal: React.FC<Props> = ({
                   </dl>
                 </Section>
 
-                {/* The evidence the rail deliberately does not carry: the
-                    twelve requirements as written, and each cost block's claim
-                    boundary in the backend's own words. A report is where a
-                    sentence that long is actually read. */}
-                <Section label={t.sections.safety} icon="shield">
-                  <SafetyEvidence plan={plan} t={t} />
-                </Section>
-
-                <Section label={t.sections.costModel} icon="evidence">
-                  <CostModelEvidence plan={plan} t={t} />
-                </Section>
-
                 <Section label={t.sections.milestones} icon="flag">
                   <div className="lp-report-table-wrap">
                     <table className="lp-report-table">
@@ -748,6 +736,19 @@ export const MissionReportModal: React.FC<Props> = ({
                   </div>
                 </Section>
               </div>
+
+              {/* Full width, outside the two-column row: a twelve-row table of
+                  FRETISH sentences and eighty-word claim paragraphs are not
+                  half-column content. Putting them in that row also stretched
+                  the planner evidence card to match the tallest thing beside
+                  it, which is where the empty space under it came from. */}
+              <Section label={t.sections.safety} icon="shield">
+                <SafetyEvidence plan={plan} t={t} />
+              </Section>
+
+              <Section label={t.sections.costModel} icon="evidence">
+                <CostModelEvidence plan={plan} t={t} />
+              </Section>
             </>
           )}
         </div>
