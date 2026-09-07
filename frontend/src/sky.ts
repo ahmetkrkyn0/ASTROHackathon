@@ -358,11 +358,11 @@ function buildStars(points: THREE.Points, glow: THREE.Points, data: Float32Array
     // stay a pixel apart. The floor is what the sixth-magnitude majority is
     // drawn at, and it sets how populated the sky looks: too low and the
     // constellations lose the stars that join them up.
-    const intensity = 0.46 + 0.54 * Math.pow(unit, 1.3)
+    const intensity = 0.30 + 0.70 * Math.pow(unit, 1.6)
     colours[i * 3] = colour.r * intensity
     colours[i * 3 + 1] = colour.g * intensity
     colours[i * 3 + 2] = colour.b * intensity
-    sizes[i] = 2.6 + Math.pow(unit, 2.0) * 16.0
+    sizes[i] = 1.6 + Math.pow(unit, 2.0) * 7.0
 
     if (vmag <= GLOW_MAG_LIMIT) {
       glowPositions[glowCount * 3] = vector.x
@@ -371,11 +371,11 @@ function buildStars(points: THREE.Points, glow: THREE.Points, data: Float32Array
       // Faint on purpose. The halo is meant to be read as brightness around
       // the star, not seen as a disc in its own right, so it climbs steeply
       // with magnitude and stays low even at the top.
-      const halo = 0.10 + 0.34 * Math.pow(unit, 2.4)
+      const halo = 0.05 + 0.16 * Math.pow(unit, 2.4)
       glowColours[glowCount * 3] = colour.r * halo
       glowColours[glowCount * 3 + 1] = colour.g * halo
       glowColours[glowCount * 3 + 2] = colour.b * halo
-      glowSizes[glowCount] = 12.0 + Math.pow(unit, 2.0) * 34.0
+      glowSizes[glowCount] = 6.0 + Math.pow(unit, 2.0) * 16.0
       glowCount++
     }
   }
@@ -402,7 +402,7 @@ function buildStars(points: THREE.Points, glow: THREE.Points, data: Float32Array
  * Its colour is pale and slightly warm. The old version's electric blue was
  * backwards: integrated starlight reddens through the dust it passes.
  */
-function buildMilkyWay(points: THREE.Points, count = 42000): void {
+function buildMilkyWay(points: THREE.Points, count = 20000): void {
   // Galactic frame, built from the two directions that define it.
   const gz = equatorialToVector(GAL_POLE_RA_DEG, GAL_POLE_DEC_DEG)
   const gx = equatorialToVector(GAL_CENTRE_RA_DEG, GAL_CENTRE_DEC_DEG)
@@ -444,12 +444,12 @@ function buildMilkyWay(points: THREE.Points, count = 42000): void {
     positions[placed * 3 + 1] = vector.y
     positions[placed * 3 + 2] = vector.z
 
-    // Individually almost invisible; the band is what 42000 of them add up to.
-    const intensity = 0.07 + Math.random() * 0.20
+    // A quiet background band, leaving terrain and the Earth as focal points.
+    const intensity = 0.055 + Math.random() * 0.13
     colours[placed * 3] = warm.r * intensity
     colours[placed * 3 + 1] = warm.g * intensity
     colours[placed * 3 + 2] = warm.b * intensity
-    sizes[placed] = 1.1 + Math.random() * 1.5
+    sizes[placed] = 0.8 + Math.random() * 0.9
     placed++
   }
 

@@ -24,6 +24,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { createSky } from './sky'
+import { createLunarHorizon } from './lunarHorizon'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
@@ -191,8 +192,9 @@ async function fetchF32(url: string): Promise<Float32Array> {
 
 // ── 3D Deep Space Environment Generators ──────────────────────────────────────
 
-function createEarth(span: number): { group: THREE.Group; sprite: THREE.Sprite } {
+function createEarth(): { group: THREE.Group; dispose: () => void } {
   const group = new THREE.Group()
+  let disposed = false
 
   // The asset is a PHOTOGRAPH of the Earth as a disc on a black starfield, and
   // it is 1024 square -- not the 2:1 an equirectangular sphere map has to be.
@@ -204,9 +206,8 @@ function createEarth(span: number): { group: THREE.Group; sprite: THREE.Sprite }
   // So it does not go on a sphere. A photo of a lit disc, atmospheric limb
   // already baked in, IS the image of a distant planet -- it only needs to be
   // held up facing the viewer, which is exactly what a Sprite does, and what
-  // the sun flare beside it already does. The sphere's slow spin goes with it:
-  // the Earth hangs all but motionless over the lunar south pole, so nobody
-  // could have seen it turn even if the texture had been right.
+  // the sun flare beside it already does. This is a static presentation
+  // image; neither its phase nor its direction is an ephemeris measurement.
   const canvas = document.createElement('canvas')
   canvas.width = 1024
   canvas.height = 1024
@@ -215,13 +216,17 @@ function createEarth(span: number): { group: THREE.Group; sprite: THREE.Sprite }
   texture.colorSpace = THREE.SRGBColorSpace
 
   new THREE.TextureLoader().load('/textures/earth_disc.jpg', (loaded) => {
+    if (disposed) {
+      loaded.dispose()
+      return
+    }
     ctx.drawImage(loaded.image as CanvasImageSource, 0, 0, 1024, 1024)
     // Cut the square photo down to its own disc. A JPEG carries no alpha, so
     // without this the sprite is a black tile with a planet in the middle of
     // it. The fade band sits just outside the limb, where the frame has
     // already fallen off to space, so the corners and the photo's own stars
     // go (the scene draws its own) without biting into the atmosphere glow.
-    const alpha = ctx.createRadialGradient(512, 512, 462, 512, 512, 500)
+    const alpha = ctx.createRadialGradient(512, 512, 448, 512, 512, 474)
     alpha.addColorStop(0, 'rgba(0, 0, 0, 1)')
     alpha.addColorStop(1, 'rgba(0, 0, 0, 0)')
     ctx.globalCompositeOperation = 'destination-in'
@@ -230,25 +235,26 @@ function createEarth(span: number): { group: THREE.Group; sprite: THREE.Sprite }
     ctx.globalCompositeOperation = 'source-over'
     loaded.dispose()
     texture.needsUpdate = true
-  })
+  }, undefined, () => { group.visible = false })
 
   const sprite = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }),
+    new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, depthTest: true }),
   )
-  // Measured off the file: the planet's limb sits at r=428 of 512, so it
-  // fills 84% of the frame it was photographed in and the sprite has to be
-  // scaled up by that much to leave the Earth the size in the sky the old
-  // sphere (radius span * 0.18) drew it. The alpha cut above is placed off
-  // the same measurement -- brightness is 10/255 at r=462 and 3/255 by 500,
-  // so the band it fades across is already space.
-  const diameter = (span * 0.36) / 0.836
+  // Keep a restrained 4-degree presentation disc independent of DEM size.
+  // The photo's limb fills 83.6% of its frame. Position is deliberately
+  // illustrative, with enough clearance above the decorative crater rims.
+  const distance = 65000
+  const diameter = 2 * distance * Math.tan(THREE.MathUtils.degToRad(2)) / 0.836
   sprite.scale.set(diameter, diameter, 1)
   group.add(sprite)
 
-  // High in the upper-right sky, above the lunar horizon.
-  group.position.set(span * 1.5, span * 1.05, -span * 2.4)
+  group.position.set(1.5, 0.72, -2.4).normalize().multiplyScalar(distance)
 
-  return { group, sprite }
+  return { group, dispose: () => {
+    disposed = true
+    texture.dispose()
+    sprite.material.dispose()
+  } }
 }
 
 function createSunFlareSprite(): THREE.Sprite {
@@ -1077,6 +1083,9 @@ export default function TerrainCanvas3D({
 
   const sceneRef = useRef<{
     mesh: THREE.Mesh
+    horizon: ReturnType<typeof createLunarHorizon>
+    earthGroup: THREE.Group
+    earthPlaced: boolean
     material: THREE.MeshStandardMaterial
     sun: THREE.DirectionalLight
     manifest: TerrainManifest
@@ -1131,7 +1140,9 @@ export default function TerrainCanvas3D({
     // background; the scene does not wait on it.
     const skyAbort = new AbortController()
     const sky = createSky(renderer.getPixelRatio(), skyAbort.signal)
-    scene.add(sky.group)
+    const distantSky = new THREE.Group()
+    distantSky.add(sky.group)
+    scene.add(distantSky)
     sky.ready.catch((error: unknown) => {
       if (skyAbort.signal.aborted) return
       // A sky that fails to load costs the scene its backdrop and nothing
@@ -1611,11 +1622,19 @@ export default function TerrainCanvas3D({
       } catch {
         series = null
       }
+      if (disposed) {
+        geometry.dispose()
+        material.dispose()
+        return
+      }
       const span = Math.max(rows, cols) * res
 
+      const horizon = createLunarHorizon({ rows, cols, resolutionM: res, minM, heights })
+      scene.add(horizon.group)
+
       // The Earth in deep space hovering above the lunar horizon
-      const earth = createEarth(span)
-      scene.add(earth.group)
+      const earth = createEarth()
+      distantSky.add(earth.group)
 
       // Blazing distant solar flare sprite
       const sunFlare = createSunFlareSprite()
@@ -1643,6 +1662,9 @@ export default function TerrainCanvas3D({
 
       sceneRef.current = {
         mesh,
+        horizon,
+        earthGroup: earth.group,
+        earthPlaced: false,
         material,
         sun,
         manifest,
@@ -1680,8 +1702,8 @@ export default function TerrainCanvas3D({
           material.dispose()
           skyAbort.abort()
           sky.dispose()
-          earth.sprite.material.map?.dispose()
-          earth.sprite.material.dispose()
+          earth.dispose()
+          horizon.dispose()
           rockGroup.children.forEach((rock) => {
             if (rock instanceof THREE.Mesh) rock.geometry.dispose()
           })
@@ -1849,6 +1871,8 @@ export default function TerrainCanvas3D({
       // fought FPS mode's own camera.lookAt() every frame and snapped the
       // "surface" view back to staring down at the orbit target.
       if (controls.enabled) controls.update()
+      // Celestial directions stay fixed as the camera moves across the DEM.
+      distantSky.position.copy(camera.position)
       const state = sceneRef.current
       // Orbit mode draws the rover oversized so a 1.5 m vehicle is findable
       // across a 2.5 km overview. Held at a fixed 10x that also meant the
@@ -2200,7 +2224,19 @@ export default function TerrainCanvas3D({
       cameraMode === 'fps'
         ? 1.0
         : (exaggeration ?? state.manifest.elevation.vertical_exaggeration_suggested)
+    state.horizon.group.scale.y = state.mesh.scale.z
+    state.horizon.boundary.visible = cameraMode === 'orbit'
   }, [exaggeration, cameraMode, status])
+
+  useEffect(() => {
+    const state = sceneRef.current
+    if (!state || status !== 'ready') return
+    // Analysis colours stop at the measured DEM; the backdrop carries no data.
+    state.horizon.group.visible = viewMode === 'surface'
+    // A fixed-epoch photograph has baked lighting. Keep its overview bounded
+    // instead of surrounding it with terrain lit at a different epoch.
+    state.horizon.mesh.visible = !effectivePhoto
+  }, [viewMode, effectivePhoto, status])
 
   // Rover position + heading, decoupled from rock/LiDAR regeneration below.
   // Route playback (PlaybackBar) advances activeWaypoint every ~50 ms; the
@@ -2834,6 +2870,18 @@ export default function TerrainCanvas3D({
     // an uphill face.
     const yaw = Math.atan2(-gradientX, gradientZ)
 
+    if (!state.earthPlaced) {
+      // Compose the illustrative Earth once for the initial surface bearing.
+      // It then stays at that celestial direction through all camera changes.
+      const bearing = (Number.isFinite(yaw) ? yaw : 0) + 0.17
+      const altitude = THREE.MathUtils.degToRad(8.5)
+      state.earthGroup.position.set(
+        Math.sin(bearing) * Math.cos(altitude), Math.sin(altitude),
+        -Math.cos(bearing) * Math.cos(altitude),
+      ).multiplyScalar(65000)
+      state.earthPlaced = true
+    }
+
     const LOOKAHEAD_M = 60 // matches the LiDAR's own max range
     const targetWorldX = rx + Math.sin(yaw) * LOOKAHEAD_M
     const targetWorldZ = rz - Math.cos(yaw) * LOOKAHEAD_M
@@ -3142,6 +3190,12 @@ export default function TerrainCanvas3D({
             <Icon name="map" className="cam-icon" />
             <span>Orbit</span>
           </button>
+        </div>
+      )}
+      {status === 'ready' && (
+        <div className="terrain3d-environment-note">
+          {viewMode === 'surface' && !effectivePhoto ? 'Surroundings & Earth placement illustrative · ' : 'Earth placement illustrative · '}
+          {viewMode === 'surface' && cameraMode === 'orbit' ? 'Dashed line: analysis boundary' : 'Analysis limited to mapped terrain'}
         </div>
       )}
     </div>
