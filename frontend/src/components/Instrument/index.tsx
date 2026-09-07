@@ -60,6 +60,7 @@ export function Readout({
  */
 export function Meter({
   fraction,
+  from,
   origin = 0,
   tone = 'data',
   ticks = 4,
@@ -70,6 +71,13 @@ export function Meter({
 }: {
   /** Signed, -1..1. Negative only means anything when origin is 0.5. */
   fraction: number
+  /**
+   * Where the fill starts, 0..1 across the track. Without it a bar always
+   * grows from the origin, which is right for a magnitude and wrong for an
+   * interval: a confidence interval of width 0.004 sitting at 99.6% would be
+   * drawn as a sliver at zero.
+   */
+  from?: number
   origin?: 0 | 0.5
   tone?: Tone
   ticks?: number
@@ -99,7 +107,7 @@ export function Meter({
               ? negative
                 ? { right: '50%', width: `${width}%` }
                 : { left: '50%', width: `${width}%` }
-              : { left: 0, width: `${width}%` }
+              : { left: `${(from ?? 0) * 100}%`, width: `${width}%` }
           }
         />
         {marker !== undefined ? (

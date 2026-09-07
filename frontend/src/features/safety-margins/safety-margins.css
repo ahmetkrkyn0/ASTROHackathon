@@ -11,7 +11,8 @@
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding-left: 106px;
+  /* Aligned to where the meters start: icon (15) + gap (7). */
+  padding-left: 22px;
   font-family: var(--font-data);
   font-size: var(--fs-micro);
   color: var(--text-dimmest);
@@ -25,7 +26,11 @@
 
 .lp-margin-row {
   display: grid;
-  grid-template-columns: 15px 48px minmax(0, 1fr);
+  /* Four columns, because the name and the value were both landing in the
+     third one -- the name auto-placed there and the value was put there
+     explicitly -- so every requirement rendered as a single letter and an
+     ellipsis. */
+  grid-template-columns: 15px 48px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 7px;
   row-gap: 3px;
@@ -51,10 +56,10 @@
   white-space: nowrap;
 }
 
-/* The value sits on the row's own line, right-aligned against the meter that
-   explains it. */
+/* Its own column at the end of the first line, right-aligned over the meter
+   that explains it. */
 .lp-margin-value {
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 1;
   justify-self: end;
   font-family: var(--font-data);

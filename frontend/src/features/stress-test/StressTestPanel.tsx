@@ -48,8 +48,12 @@ function RateBar({ rate, label, headline }: { rate: Rate; label: string; headlin
           tone={tone}
           sub={`${rate.count} runs · 95% CI ${(lo * 100).toFixed(1)}–${(hi * 100).toFixed(1)}%`}
         />
+        {/* The interval drawn WHERE IT IS, not as a width from zero: an
+            interval of 99.6-100% is a mark at the right-hand end, and starting
+            it at the origin made a completion of 100% look like a sliver at 0. */}
         <Meter
-          fraction={hi - lo < 0.004 ? 0.004 : hi - lo}
+          from={lo}
+          fraction={Math.max(hi - lo, 0.01)}
           tone={tone}
           ticks={4}
           marker={rate.rate}

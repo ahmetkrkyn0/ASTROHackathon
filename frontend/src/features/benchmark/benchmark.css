@@ -76,7 +76,31 @@
 
 .lp-bm-match svg { color: var(--mint); }
 
-.lp-bm-claim {
+.lp-bm-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-inner);
+  border-left: 2px solid var(--lavender);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.lp-bm-note-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+}
+
+.lp-bm-note-label svg { font-size: 13px; color: var(--lavender); }
+
+.lp-bm-note p {
   margin: 0;
   font-size: var(--fs-micro);
   line-height: 1.55;

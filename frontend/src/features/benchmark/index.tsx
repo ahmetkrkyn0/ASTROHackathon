@@ -73,7 +73,16 @@ export function Benchmark() {
           </span>
         </p>
 
-        <p className="lp-bm-claim">{MOONPLANBENCH_CLAIM}</p>
+        {/* Framed and labelled, like every other claim boundary in this
+            product. It is the panel's point rather than a footnote, but a
+            ninety-word paragraph with no frame reads as one. */}
+        <div className="lp-bm-note">
+          <span className="lp-bm-note-label">
+            <Icon name="shield" />
+            Claim boundary
+          </span>
+          <p>{MOONPLANBENCH_CLAIM}</p>
+        </div>
 
         <p className="lp-bm-source">
           <Icon name="evidence" />
