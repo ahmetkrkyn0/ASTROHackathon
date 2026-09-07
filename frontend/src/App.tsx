@@ -34,6 +34,7 @@ import {
   stepForHours,
 } from './mission/playbackClock'
 import { applyLocalDetour } from './mission/localDetourExecution'
+import { localNavigationSnapshotKey } from './localPerception'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -236,6 +237,11 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [timeScale, setTimeScale] = useState(1)
   const localReplanInFlightRef = useRef(false)
+  // TerrainCanvas performs the primary LiDAR snapshot de-duplication. Keep
+  // this second guard at the API boundary as well: a remount or delayed
+  // callback must never turn one stopped-rover observation into a second
+  // remote replan after the first one has already completed.
+  const lastRemoteReplanKeyRef = useRef<string | null>(null)
 
   const routeForPlayback = executionWaypoints ?? planResult?.waypoints ?? null
   const totalPlaybackHours = routeForPlayback?.[routeForPlayback.length - 1]?.elapsed_hours ?? 0
@@ -679,6 +685,11 @@ export default function App() {
       })
       return
     }
+    const replanKey = localNavigationSnapshotKey(local)
+    if (replanKey === lastRemoteReplanKeyRef.current) return
+    // Mark before awaiting so a render or a delayed callback cannot enqueue
+    // an equivalent request between now and the in-flight guard below.
+    lastRemoteReplanKeyRef.current = replanKey
     localReplanInFlightRef.current = true
     setIsPlaying(false)
     setIsSolving(true)

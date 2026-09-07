@@ -33,8 +33,8 @@ import { Icon } from './components/Fleet/SpecIcons'
 import {
   buildLidarScanFromBackend,
   fetchBackendLidarScan,
+  generateFixedBoulderCluster,
   generatePebbleField,
-  generateRockField,
   LIDAR_CONFIG,
   ROCK_FIELD,
   sampleTerrainHeight,
@@ -42,7 +42,11 @@ import {
   seededRandom,
   simulateLidarScan,
 } from './lidarSimulation'
-import { buildLocalOccupancyGrid, observeObstaclesFromLidar } from './localPerception'
+import {
+  buildLocalOccupancyGrid,
+  localNavigationSnapshotKey,
+  observeObstaclesFromLidar,
+} from './localPerception'
 import { planLocalDetour, type LocalPlanDecision } from './localPlanner'
 import type {
   LidarScanResult,
@@ -353,28 +357,9 @@ function createRegolithTexture(): THREE.CanvasTexture {
   return texture
 }
 
-/** Soft round sprite for locator markers -- a flat square SpriteMaterial dot
- * reads as a pixelated smear at any scale; this alpha-fades to the edge so
- * clusters blend instead of tiling visibly. */
-function createSoftDotTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
-  const ctx = canvas.getContext('2d')!
-  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-  grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)')
-  grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.65)')
-  grad.addColorStop(1, 'rgba(255, 255, 255, 0)')
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 64, 64)
-  return new THREE.CanvasTexture(canvas)
-}
-
 /** Point-cloud dot: a solid disc with only a 1-2 px antialiased rim, not a
  * soft glow. A LiDAR return is a discrete measurement -- CloudCompare, RViz
- * and PDAL all draw it as a crisp, fully-opaque dot, and the wide soft
- * falloff createSoftDotTexture uses reads as a faint, sparse haze at typical
- * point counts instead of the dense, confident cloud a real one shows. */
+ * and PDAL all draw it as a crisp, fully-opaque dot. */
 function createSolidDotTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = 32
@@ -1066,14 +1051,11 @@ export default function TerrainCanvas3D({
   // A stopped rover keeps scanning. Deduplicate the same obstacle snapshot so
   // a 5 Hz LiDAR cannot issue a replan storm while the request is in flight.
   const lastLocalStopKeyRef = useRef<string | null>(null)
-  // The rock field is seeded once per ROUTE (keyed on the waypoints array
-  // reference itself, which App.tsx replaces with a new array only when a
-  // route is actually (re)planned) rather than on the rover's live
-  // position -- see the rock/LiDAR effect below for why anchoring it to
-  // "where the rover currently is" always reads as the rocks travelling
-  // with it, no matter how wide the radius or how coarse the recentring.
-  const lastRockFieldWaypointsRef = useRef<Waypoint[] | null | undefined>(undefined)
-  /** The mesh.scale.z the current rock field was placed against. */
+  // The boulder garden belongs to one world-space patch. Its anchor is set
+  // once from the initial scene pose and deliberately survives route changes,
+  // replans and rover playback; rocks are terrain, not a route effect.
+  const fixedRockAnchorRef = useRef<{ x: number; z: number } | null>(null)
+  /** The mesh.scale.z the fixed cluster was last seated against. */
   const lastRockFieldScaleRef = useRef<number | null>(null)
   // Where the gravel layer was last built. Unlike the navigation rocks --
   // anchored to the route so they stay put while the rover drives past --
@@ -1108,8 +1090,6 @@ export default function TerrainCanvas3D({
     rockGroup: THREE.Group
     /** One InstancedMesh per gravel variant; see buildPebbleVariants. */
     pebbleMeshes: THREE.InstancedMesh[]
-    rockMarkerGroup: THREE.Group
-    rockMarkerMaterial: THREE.SpriteMaterial
     rockMaterial: THREE.MeshStandardMaterial
     rockTexture: THREE.Texture
     roverGroup: THREE.Group
@@ -1234,21 +1214,7 @@ export default function TerrainCanvas3D({
       return mesh
     })
 
-    const softDotTexture = createSoftDotTexture()
     const solidDotTexture = createSolidDotTexture()
-
-    // Metre-scale rocks are correctly tiny across a 2.5 km overview. These
-    // non-colliding markers make their locations inspectable in orbit mode;
-    // the actual meshes and LiDAR intersections remain at physical scale.
-    const rockMarkerMaterial = new THREE.SpriteMaterial({
-      map: softDotTexture,
-      color: 0xff9b52,
-      transparent: true,
-      opacity: 0.75,
-      depthTest: false,
-    })
-    const rockMarkerGroup = new THREE.Group()
-    scene.add(rockMarkerGroup)
 
     const regolithTexture = createRegolithTexture()
 
@@ -1673,8 +1639,6 @@ export default function TerrainCanvas3D({
         routeGroup,
         rockGroup,
         pebbleMeshes,
-        rockMarkerGroup,
-        rockMarkerMaterial,
         rockMaterial,
         rockTexture,
         roverGroup: rover.group,
@@ -1708,9 +1672,7 @@ export default function TerrainCanvas3D({
           roverEnvironment.dispose()
           rockMaterial.dispose()
           rockTexture.dispose()
-          rockMarkerMaterial.dispose()
           regolithTexture.dispose()
-          softDotTexture.dispose()
           solidDotTexture.dispose()
           rockTemplatesRef.current.forEach((geometry) => geometry.dispose())
           rockTemplatesRef.current = []
@@ -2414,69 +2376,36 @@ export default function TerrainCanvas3D({
         heights,
         verticalScale: state.mesh.scale.z,
       }
-      // Re-seeding a field CENTRED ON THE ROVER every time it moves far
-      // enough still reads as "the rocks are travelling with the rover" no
-      // matter how wide the radius, because the field's centre is still
-      // tied to a position that keeps changing -- the only way for it to
-      // actually be a fixed part of the world is to anchor it to something
-      // that does NOT change during a drive: the route itself. Keyed on the
-      // waypoints array reference (App.tsx hands down a new array only when
-      // a route is genuinely (re)planned), this builds one field sized to
-      // the route's own bounding box exactly once, and touches it again
-      // only when the route changes -- never while just driving it.
       // Rocks are placed at sampleTerrainHeight(), which already multiplies by
-      // the field's verticalScale -- and that is mesh.scale.z: 1.0 in FPS mode,
-      // the vertical exaggeration in orbit. Rebuilding only when the route
-      // changed meant switching to orbit raised the terrain out from under a
-      // field still sitting at its unexaggerated heights, and every rock sank
-      // beneath the surface it was resting on. The scale a field was built for
-      // is therefore part of what makes that field stale, exactly as its route
-      // is. Rebuilding rather than just lifting each rock is deliberate: the
-      // bedding normal from sampleTerrainNormal() is stretched by the same
-      // scale, so a rock moved without being re-seated would sit at the wrong
-      // angle on every slope.
+      // the field's verticalScale. Re-seat the fixed cluster only when this
+      // scale changes, so its ground contact and slope orientation stay true
+      // in both FPS and orbit view without letting replans move it.
       const verticalScale = terrain.verticalScale
       const shouldRebuildRocks =
-        lastRockFieldWaypointsRef.current !== (waypoints ?? null) ||
+        fixedRockAnchorRef.current === null ||
         lastRockFieldScaleRef.current !== verticalScale
 
-      let fieldCenterX = roverX
-      let fieldCenterZ = roverZ
-      let fieldRadiusM = 150 // no route yet: a modest field around the default view
-      if (waypoints && waypoints.length > 0) {
-        let minX = Infinity
-        let maxX = -Infinity
-        let minZ = Infinity
-        let maxZ = -Infinity
-        for (const wp of waypoints) {
-          const wx = wp.col * stepX - width / 2
-          const wz = wp.row * stepZ - depth / 2
-          if (wx < minX) minX = wx
-          if (wx > maxX) maxX = wx
-          if (wz < minZ) minZ = wz
-          if (wz > maxZ) maxZ = wz
-        }
-        fieldCenterX = (minX + maxX) / 2
-        fieldCenterZ = (minZ + maxZ) / 2
-        // Capped at 500 m so a very long route does not balloon the rock
-        // count (and per-Mesh draw call count) without bound.
-        fieldRadiusM = Math.min(500, Math.hypot(maxX - minX, maxZ - minZ) / 2 + 60)
-      }
-
       if (shouldRebuildRocks) {
-        lastRockFieldWaypointsRef.current = waypoints ?? null
         lastRockFieldScaleRef.current = verticalScale
+        if (!fixedRockAnchorRef.current) {
+          // Starts ahead and to one side of the initial rover pose, outside
+          // its safety footprint but within LiDAR range. It never moves after
+          // this one placement decision.
+          fixedRockAnchorRef.current = { x: roverX, z: roverZ }
+        }
         for (const child of [...state.rockGroup.children]) {
           state.rockGroup.remove(child)
           if (child instanceof THREE.Mesh) child.geometry.dispose()
         }
-        state.rockMarkerGroup.clear()
 
         const rockTemplates = rockTemplatesRef.current
-        // Rocks are scene truth for the LiDAR simulation only. They are
-        // deliberately generated after the global route exists and never
-        // cross the API boundary into the global planner.
-        const rockDescriptors = generateRockField(fieldCenterX, fieldCenterZ, fieldRadiusM)
+        // Rocks are scene truth for the LiDAR simulation only. The fixed
+        // cluster is never sent to the global planner; it reaches avoidance
+        // exclusively through local LiDAR returns.
+        const rockDescriptors = generateFixedBoulderCluster(
+          fixedRockAnchorRef.current.x,
+          fixedRockAnchorRef.current.z,
+        )
         const rockUp = new THREE.Vector3(0, 1, 0)
         for (const descriptor of rockDescriptors) {
           const groundY = sampleTerrainHeight(terrain, descriptor.x, descriptor.z)
@@ -2507,12 +2436,6 @@ export default function TerrainCanvas3D({
           rock.rotateZ(descriptor.tiltZ)
           rock.userData.lidarRockId = descriptor.id
           state.rockGroup.add(rock)
-
-          const marker = new THREE.Sprite(state.rockMarkerMaterial)
-          marker.position.set(descriptor.x, groundY + descriptor.radiusY + 3, descriptor.z)
-          marker.scale.set(4, 4, 1)
-          marker.userData.rockId = descriptor.id
-          state.rockMarkerGroup.add(marker)
         }
 
         // Position, heading, orbit-mode scale and lidarOrigin are the other
@@ -2691,7 +2614,15 @@ export default function TerrainCanvas3D({
         }))
         const currentRow = THREE.MathUtils.clamp(Math.round((roverZ + depth / 2) / stepZ), 0, rows - 1)
         const currentCol = THREE.MathUtils.clamp(Math.round((roverX + width / 2) / stepX), 0, cols - 1)
-        const stopKey = JSON.stringify({ row: currentRow, col: currentCol, decision, obstacleCells, localWaypoints })
+        // Do not use observed_at_s here. It changes on every scan even when
+        // the rover, obstacle footprint and local decision are unchanged,
+        // which previously caused a completed replan to be issued again.
+        const stopKey = localNavigationSnapshotKey({
+          current: { row: currentRow, col: currentCol },
+          decision,
+          local_waypoints: localWaypoints,
+          observed_obstacles: obstacleCells,
+        })
         if (obstacleCells.length > 0 && stopKey !== lastLocalStopKeyRef.current) {
           lastLocalStopKeyRef.current = stopKey
           onLocalNavigation({
@@ -2728,10 +2659,6 @@ export default function TerrainCanvas3D({
     state.lidarPoints.visible = lidarEnabled
     state.terrainNet.visible = lidarEnabled
     state.lidarSweep.visible = lidarEnabled && cameraMode === 'fps'
-    // Rock markers are this scan's orbit-scale stand-in (see their own
-    // comment at creation) -- turning the sensor off should hide every
-    // trace of "detected rocks", not just the point cloud.
-    state.rockMarkerGroup.visible = lidarEnabled && cameraMode === 'orbit'
     state.rockBoxContainer.style.display = lidarEnabled ? '' : 'none'
     // The physical sensor mast/dome model is never shown -- see where
     // rover.mast/rover.lidarHead are created, just below createRoverModel().

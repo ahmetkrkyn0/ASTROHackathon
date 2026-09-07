@@ -1,5 +1,5 @@
 import type { LidarScanResult } from './lidarSimulation'
-import type { LocalPoint, ObservedObstacle } from './localPlanner'
+import type { LocalPlanDecision, LocalPoint, ObservedObstacle } from './localPlanner'
 
 export type OccupancyCell = 'unknown' | 'free' | 'occupied'
 
@@ -11,6 +11,23 @@ export interface LocalOccupancyGrid {
   cells: OccupancyCell[]
 }
 
+/** The grid-level form sent to the replan API after a LiDAR observation. */
+export interface ObservedObstaclePixel {
+  row: number
+  col: number
+  radius_m: number
+  confidence: number
+  observed_at_s: number
+  source: 'lidar'
+}
+
+export interface LocalNavigationSnapshot {
+  current: { row: number; col: number }
+  decision: LocalPlanDecision
+  local_waypoints: ReadonlyArray<{ row: number; col: number }>
+  observed_obstacles: ReadonlyArray<ObservedObstaclePixel>
+}
+
 interface ObstacleCluster {
   x_m: number
   z_m: number
@@ -20,6 +37,37 @@ interface ObstacleCluster {
 
 const MIN_RADIUS_M = 0.3
 const MAX_RADIUS_M = 2.5
+
+/**
+ * A stable identity for one physical local-navigation situation.
+ *
+ * LiDAR stamps every scan with a new ``observed_at_s``. That timestamp is
+ * valuable evidence in the payload, but must not be part of the action key:
+ * otherwise a stopped rover asks for the same replan again on every scan.
+ */
+export function localNavigationSnapshotKey(snapshot: LocalNavigationSnapshot): string {
+  const obstacles = snapshot.observed_obstacles
+    .map((obstacle) => ({
+      row: obstacle.row,
+      col: obstacle.col,
+      // Keep sub-cell footprints stable without allowing tiny floating-point
+      // noise in a raycast to manufacture a new navigation event.
+      radius_m: Number(obstacle.radius_m.toFixed(2)),
+      confidence: Number(obstacle.confidence.toFixed(2)),
+    }))
+    .sort((left, right) => (
+      left.row - right.row
+      || left.col - right.col
+      || left.radius_m - right.radius_m
+      || left.confidence - right.confidence
+    ))
+  return JSON.stringify({
+    current: snapshot.current,
+    decision: snapshot.decision,
+    local_waypoints: snapshot.local_waypoints,
+    observed_obstacles: obstacles,
+  })
+}
 
 /**
  * Converts only LiDAR-classified first returns into obstacle hypotheses.

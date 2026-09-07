@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildLocalOccupancyGrid, observeObstaclesFromLidar } from './localPerception'
+import {
+  buildLocalOccupancyGrid,
+  localNavigationSnapshotKey,
+  observeObstaclesFromLidar,
+} from './localPerception'
 import type { LidarScanResult } from './lidarSimulation'
 
 function scan(points: number[]): LidarScanResult {
@@ -27,5 +31,38 @@ describe('local LiDAR perception', () => {
     const grid = buildLocalOccupancyGrid({ x_m: 0, z_m: 0 }, [obstacle], 6, 0.5)
     expect(grid.cells.filter((cell) => cell === 'occupied').length).toBeGreaterThan(0)
     expect(grid.cells.filter((cell) => cell === 'free').length).toBeGreaterThan(0)
+  })
+
+  it('keeps one stopped-rover navigation event stable across repeated LiDAR timestamps', () => {
+    const base = {
+      current: { row: 246, col: 246 },
+      decision: 'STOP_AND_REPLAN' as const,
+      local_waypoints: [],
+      observed_obstacles: [{
+        row: 246,
+        col: 250,
+        radius_m: 1.250001,
+        confidence: 0.900001,
+        observed_at_s: 3,
+        source: 'lidar' as const,
+      }],
+    }
+    expect(localNavigationSnapshotKey(base)).toBe(localNavigationSnapshotKey({
+      ...base,
+      observed_obstacles: [{ ...base.observed_obstacles[0], observed_at_s: 99 }],
+    }))
+  })
+
+  it('creates a new navigation event when the rover reaches a new grid cell', () => {
+    const snapshot = {
+      current: { row: 246, col: 246 },
+      decision: 'STOP_AND_REPLAN' as const,
+      local_waypoints: [],
+      observed_obstacles: [{ row: 246, col: 250, radius_m: 1.2, confidence: 0.9, observed_at_s: 3, source: 'lidar' as const }],
+    }
+    expect(localNavigationSnapshotKey(snapshot)).not.toBe(localNavigationSnapshotKey({
+      ...snapshot,
+      current: { row: 247, col: 246 },
+    }))
   })
 })
