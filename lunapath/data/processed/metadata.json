@@ -1,5 +1,4 @@
 {
-  "source_dem": "Site11_final_adj_5mpp_surf.tif",
   "origin": {
     "x": -32500.0,
     "y": 11000.0
@@ -36,10 +35,10 @@
     "elevation": "MEASURED",
     "slope": "DERIVED",
     "aspect": "DERIVED",
-    "shadow_ratio": "SYNTHETIC",
-    "thermal": "SYNTHETIC",
-    "thermal_min": "SYNTHETIC",
-    "traversable": "SYNTHETIC",
-    "cost": "SYNTHETIC"
+    "shadow_ratio": "DERIVED",
+    "thermal": "DERIVED",
+    "thermal_min": "DERIVED",
+    "traversable": "DERIVED",
+    "cost": "DERIVED"
   }
 }
