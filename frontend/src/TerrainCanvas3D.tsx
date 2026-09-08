@@ -1334,6 +1334,19 @@ export default function TerrainCanvas3D({
    */
   const lastRockFieldVisualCountRef = useRef(0)
   /**
+   * The latest onLocalNavigation, held so the scan effect below does not have
+   * to depend on it.
+   *
+   * App.tsx memoises that handler on playbackHours and routePlaybackStep,
+   * which the playback clock changes continuously -- so the callback identity
+   * changed on nearly every tick, re-running the scan effect and aborting its
+   * in-flight request. The backend scan takes ~4.7 s; nothing survived that
+   * long, so /api/lidar-scan was cancelled over and over and the perception
+   * panel stayed blank with no error to show for it.
+   */
+  const onLocalNavigationRef = useRef(onLocalNavigation)
+  onLocalNavigationRef.current = onLocalNavigation
+  /**
    * The live route ribbon's shader and its arc-length table. The render loop
    * animates uTime/uProgress through this rather than through React state --
    * a uniform write per frame must not cost a re-render.
@@ -3050,7 +3063,8 @@ export default function TerrainCanvas3D({
         occupiedCells: occupancy.cells.filter((cell) => cell === 'occupied').length,
         decision,
       })
-      if (decision !== 'FOLLOW' && onLocalNavigation) {
+      const onLocalNavigationLatest = onLocalNavigationRef.current
+      if (decision !== 'FOLLOW' && onLocalNavigationLatest) {
         const confirmed = observations.filter((obstacle) => obstacle.confidence >= 0.65)
         const obstacleCells = confirmed.map((obstacle) => ({
           row: THREE.MathUtils.clamp(Math.round((obstacle.z_m + depth / 2) / stepZ), 0, rows - 1),
@@ -3077,7 +3091,7 @@ export default function TerrainCanvas3D({
         })
         if (obstacleCells.length > 0 && stopKey !== lastLocalStopKeyRef.current) {
           lastLocalStopKeyRef.current = stopKey
-          onLocalNavigation({
+          onLocalNavigationLatest({
             current: { row: currentRow, col: currentCol },
             decision,
             local_waypoints: localWaypoints,
@@ -3098,7 +3112,10 @@ export default function TerrainCanvas3D({
     // rockTemplatesReady forces exactly one extra run once the NASA rock
     // shapes arrive, so the field does not stay on icosahedra all session
     // just because nothing else happened to change afterwards.
-  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints, rockTemplatesReady, rockVisualTemplatesReady, isPlaying, onLocalNavigation])
+    // onLocalNavigation is deliberately NOT a dependency -- it is reached
+    // through a ref (see onLocalNavigationRef) precisely so its per-tick
+    // identity change cannot abort an in-flight scan.
+  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints, rockTemplatesReady, rockVisualTemplatesReady, isPlaying])
 
   useEffect(() => {
     const state = sceneRef.current
