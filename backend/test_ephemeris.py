@@ -307,3 +307,98 @@ def test_body_vector_body_takes_any_naif_target(monkeypatch):
     finally:
         ephemeris._FURNISHED.clear()
     assert calls[0][0] == "EARTH BARYCENTER"
+
+
+# ── CSPICE is not thread-safe, and this process shares one copy of it ───────
+# FastAPI runs sync endpoints in a threadpool, so two requests reach
+# app.ephemeris concurrently as a matter of course. CSPICE keeps its kernel
+# database and its chkin_/chkout_ traceback stack in process globals, and two
+# threads inside spkpos pop that stack against each other:
+#
+#     SPICE(BADSUBSCRIPT): Subscript out of range on file line 1189,
+#     procedure "trcpkg". Attempt to access element 0 of variable "stack".
+#     spkpos_c->SPKPOS->SPKEZP->FRINFO
+#
+# That is not catchable -- CSPICE's default error action ends the process, so
+# a server does not degrade, it vanishes mid-request. Reproduced before the
+# lock with 12 threads x 40 iterations; 3 600 calls across 20 threads pass
+# with it.
+#
+# These tests assert the property that actually matters: the lock is HELD
+# while CSPICE runs, not merely that some lock object exists. A second thread
+# tries to take it from inside the fake spice call -- succeeding there would
+# mean a real second thread could have been inside CSPICE at the same moment.
+
+
+def _lock_is_held_by_another_thread(ephemeris) -> bool:
+    """True when this thread cannot be joined inside the lock by another."""
+    import threading
+
+    taken: list[bool] = []
+
+    def _try_acquire() -> None:
+        got = ephemeris.spice_lock().acquire(timeout=0.25)
+        taken.append(got)
+        if got:
+            ephemeris.spice_lock().release()
+
+    probe = threading.Thread(target=_try_acquire)
+    probe.start()
+    probe.join(timeout=5.0)
+    return taken == [False]
+
+
+def test_body_vector_body_holds_the_spice_lock_while_cspice_runs(monkeypatch):
+    import spiceypy
+
+    from app import ephemeris
+
+    held: list[bool] = []
+
+    def _fake_spkpos(_target, _et, _frame, _abcorr, _observer):
+        held.append(_lock_is_held_by_another_thread(ephemeris))
+        return ([1.0, 2.0, 3.0], 0.0)
+
+    monkeypatch.setattr(spiceypy, "furnsh", lambda _path: None)
+    monkeypatch.setattr(spiceypy, "ktotal", lambda _category: 1)
+    monkeypatch.setattr(spiceypy, "spkpos", _fake_spkpos)
+    ephemeris._FURNISHED.clear()
+    try:
+        ephemeris.body_vector_body("SUN", 1.0)
+    finally:
+        ephemeris._FURNISHED.clear()
+    assert held == [True]
+
+
+def test_utc_to_et_holds_the_spice_lock_while_cspice_runs(monkeypatch):
+    import spiceypy
+
+    from app import ephemeris
+
+    held: list[bool] = []
+
+    def _fake_str2et(_utc):
+        held.append(_lock_is_held_by_another_thread(ephemeris))
+        return 12345.0
+
+    monkeypatch.setattr(spiceypy, "furnsh", lambda _path: None)
+    monkeypatch.setattr(spiceypy, "ktotal", lambda _category: 1)
+    monkeypatch.setattr(spiceypy, "str2et", _fake_str2et)
+    ephemeris._FURNISHED.clear()
+    try:
+        ephemeris.utc_to_et("2027-05-30T00:00:00")
+    finally:
+        ephemeris._FURNISHED.clear()
+    assert held == [True]
+
+
+def test_the_spice_lock_is_reentrant(monkeypatch):
+    """sun_track holds the lock and then calls sun_vector_body, which takes
+    it again. A plain Lock would deadlock on the first Sun track ever asked
+    for, so the type is part of the contract, not an implementation detail."""
+    from app import ephemeris
+
+    lock = ephemeris.spice_lock()
+    with lock:
+        assert lock.acquire(blocking=False) is True
+        lock.release()

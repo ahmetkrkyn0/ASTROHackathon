@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { PLAN_REQUEST_CONTRIBUTORS } from './contributors'
-import { getConstraint, readPlanConstraints, setConstraint } from './store'
+import { getConstraint, readConstraintKeys, readPlanConstraints, setConstraint } from './store'
 
 /** The store is a module singleton, so each case states its own world. */
 beforeEach(() => {
@@ -82,6 +82,62 @@ describe('the registry', () => {
     for (const contributor of PLAN_REQUEST_CONTRIBUTORS) {
       if (contributor.control.kind !== 'number') continue
       expect(getConstraint(contributor.id).value).toBe(contributor.control.initial)
+    }
+  })
+})
+
+/**
+ * The by-constraintKey view the 4-D builder reads.
+ *
+ * The 4-D constraints used to live in a `useState` inside the time-axis hook
+ * while the 2-D ones lived in this store, so `risk` was settable in one place
+ * and read in the other and the alpha never crossed -- the audit's B2-1. One
+ * store now serves both, addressed by `id` for the 2-D fields it builds
+ * itself and by `constraintKey` for the 4-D builder that folds them.
+ */
+describe('the 4-D constraint view', () => {
+  it('produces no key at all for a constraint that is off', () => {
+    expect(readConstraintKeys()).toEqual({})
+  })
+
+  it('produces no key for a constraint switched off after holding a value', () => {
+    setConstraint('risk', { enabled: true, value: 0.97 })
+    expect(readConstraintKeys()).toEqual({ riskAlpha: 0.97 })
+    setConstraint('risk', { enabled: false, value: 0.97 })
+    // Not `riskAlpha: false`, not `riskAlpha: undefined` -- absent. The 4-D
+    // builder reads a missing key as off, so anything else re-enables it.
+    expect(readConstraintKeys()).toEqual({})
+  })
+
+  it('states a toggle as literally true', () => {
+    // constraintStateFrom opens a toggle on `raw === true` and nothing else.
+    setConstraint('thermal-dwell', { enabled: true })
+    expect(readConstraintKeys()).toEqual({ requireThermalDwell: true })
+  })
+
+  it('carries a number and a string, which a boolean record could not', () => {
+    setConstraint('survival-chance', { enabled: true, value: 0.05 })
+    setConstraint('lit-rule', { enabled: true, value: 'majority' })
+    expect(readConstraintKeys()).toMatchObject({
+      maxFailureProbability: 0.05,
+      litRule: 'majority',
+    })
+  })
+
+  it('falls back to the control initial for a switch never dragged', () => {
+    // Switching a slider on without touching it must send the number the
+    // panel is displaying, not an undefined the backend would reject.
+    setConstraint('survival-chance', { enabled: true })
+    expect(readConstraintKeys().maxFailureProbability).toBe(0.05)
+  })
+
+  it('keys every contributor by its own constraintKey', () => {
+    for (const contributor of PLAN_REQUEST_CONTRIBUTORS) {
+      setConstraint(contributor.id, { enabled: true })
+    }
+    const keys = readConstraintKeys()
+    for (const contributor of PLAN_REQUEST_CONTRIBUTORS) {
+      expect(keys).toHaveProperty(contributor.constraintKey)
     }
   })
 })

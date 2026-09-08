@@ -88,6 +88,17 @@ export interface PlanRequestContributor {
    */
   readonly constraintKey: string
   /**
+   * The capability id in `PlanRequestContext.available` this needs, when it
+   * needs one. `risk` does not: CVaR re-prices the cost grid the planner
+   * already has and asks the backend for no extra cache.
+   *
+   * Declared on the contributor rather than known only inside its `enabled`
+   * closure so a panel can say WHY a control is dark. The time-axis strip
+   * used to carry its own hand-written key-to-capability table for exactly
+   * this, which is the duplication that let the registry and the panel drift.
+   */
+  readonly dataId?: string
+  /**
    * Whether this has anything to say for this request. False means the request
    * must not change in any way.
    */
@@ -131,6 +142,7 @@ function environmentalConstraint(spec: {
     hint: spec.hint,
     control: { kind: 'toggle' },
     constraintKey: spec.constraintKey,
+    dataId: spec.dataId,
     enabled,
     fields: (state, context) => (enabled(state, context) ? { [spec.field]: true } : null),
   }
@@ -194,6 +206,7 @@ export const roughnessWeightContributor: PlanRequestContributor = {
   hint: 'Prices NASA LOLA roughness as a fifth cost criterion. Only sent once the slider has been moved.',
   control: { kind: 'number', min: 0, max: 2, step: 0.01, initial: 0.15 },
   constraintKey: 'wRoughness',
+  dataId: 'roughness',
   enabled: (state, context) => {
     if (!context) return false
     if (context.available['roughness'] !== true) return false
@@ -237,6 +250,165 @@ export const riskContributor: PlanRequestContributor = {
 }
 
 /**
+ * B1 -- report the reach-avoid survival field without enforcing a limit.
+ *
+ * Reuses the environmental-flag factory rather than repeating its guards:
+ * this is the same shape -- a 4-D-only toggle contributing one `true` under a
+ * capability gate -- and the shape is what the factory is for.
+ */
+export const survivalReportContributor = environmentalConstraint({
+  id: 'survival-report',
+  label: 'Report survival',
+  hint: 'Builds the recovery-policy field and reports the route\'s execution failure probability. Reports only: no move is refused, so the route does not change.',
+  constraintKey: 'reportSurvival',
+  dataId: 'survival',
+  field: 'report_survival',
+})
+
+/**
+ * B1 -- the chance constraint itself.
+ *
+ * Separate contributor from the report toggle because one control carries one
+ * field, and because they are genuinely different requests: reporting leaves
+ * the route alone, beta refuses moves and can make the mission infeasible.
+ *
+ * The slider stops at 0.5 although `Plan4DRequest` allows anything under 1.0.
+ * A limit that tolerates worse than even odds of failure is not a limit, and
+ * spending most of a slider's travel on values no operator would choose makes
+ * the useful end unusable. The contract's own bound is stated in the hint
+ * rather than implied by the control.
+ */
+export const survivalChanceContributor: PlanRequestContributor = {
+  id: 'survival-chance',
+  label: 'Failure probability limit',
+  hint: 'Refuses any move after which the plan, with recovery as its fallback, would be more likely than this to end in failure. The backend accepts up to 1.0; beyond 0.5 it stops being a limit. An infeasible limit is a 404, not an error.',
+  control: { kind: 'number', min: 0.001, max: 0.5, step: 0.001, initial: 0.05 },
+  constraintKey: 'maxFailureProbability',
+  dataId: 'survival',
+  enabled: (state, context) => {
+    if (!context || context.endpoint !== 'plan-4d') return false
+    if (context.available['survival'] !== true) return false
+    const value = context.constraints[survivalChanceContributor.constraintKey] ?? state.value
+    // The contract is `gt=0.0, lt=1.0`. Out of range is a 422, and sending
+    // one would turn a slider into a failed plan.
+    return typeof value === 'number' && value > 0 && value < 1
+  },
+  fields: (state, context) => {
+    if (!survivalChanceContributor.enabled(state, context)) return null
+    const value = (context!.constraints[survivalChanceContributor.constraintKey] ??
+      state.value) as number
+    return { max_failure_probability: value }
+  },
+}
+
+/** C6 -- the thermal operating envelope as a constraint. */
+export const thermalDwellContributor = environmentalConstraint({
+  id: 'thermal-dwell',
+  label: 'Require thermal envelope',
+  hint: 'Refuses any wait or move after which the rover\'s inner temperature would sit outside its battery and electronics envelope. A MODEL, uncalibrated -- not a thermal qualification.',
+  constraintKey: 'requireThermalDwell',
+  dataId: 'thermal-dwell',
+  field: 'require_thermal_dwell',
+})
+
+/**
+ * A choice whose initial value IS the backend's default.
+ *
+ * Both of the enums below start on the value `Plan4DRequest` already applies,
+ * so sending it would assert a number the operator never chose -- the rule
+ * `roughnessWeightContributor` follows for its 0.15, one type over. There is
+ * a second, sharper reason here: the route identity is derived from the
+ * request body, so a key that changes nothing about the route still marks
+ * every post-route analysis stale. An enum sitting on its default therefore
+ * contributes nothing, and these controls read as "depart from the default".
+ *
+ * `dependsOn` gates on another contributor's key rather than on capability:
+ * `lit_rule` only means something once the corridor rule is being enforced,
+ * and `heater_model` only once the envelope is.
+ */
+function enumDeparture(spec: {
+  id: string
+  label: string
+  hint: string
+  constraintKey: string
+  dataId: string
+  field: string
+  dependsOn: string
+  options: ReadonlyArray<{ value: string; label: string }>
+  initial: string
+}): PlanRequestContributor {
+  const enabled = (state: ConstraintState, context?: PlanRequestContext): boolean => {
+    if (!context || context.endpoint !== 'plan-4d') return false
+    if (context.available[spec.dataId] !== true) return false
+    if (context.constraints[spec.dependsOn] !== true) return false
+    const value = context.constraints[spec.constraintKey] ?? state.value
+    if (typeof value !== 'string' || value === spec.initial) return false
+    return spec.options.some((option) => option.value === value)
+  }
+  return {
+    id: spec.id,
+    label: spec.label,
+    hint: spec.hint,
+    control: { kind: 'choice', options: spec.options, initial: spec.initial },
+    constraintKey: spec.constraintKey,
+    dataId: spec.dataId,
+    enabled,
+    fields: (state, context) =>
+      enabled(state, context)
+        ? { [spec.field]: (context!.constraints[spec.constraintKey] ?? state.value) as string }
+        : null,
+  }
+}
+
+/**
+ * A2 -- what makes a coarse block "lit".
+ *
+ * `all` is conservative (every fine cell lit) and is the backend's default;
+ * `majority` uses the planner's own dark threshold. The two are different
+ * guarantees, not two strengths of one, which is why both are named on screen
+ * rather than offered as a slider.
+ */
+export const litRuleContributor = enumDeparture({
+  id: 'lit-rule',
+  label: 'Lit rule',
+  hint: 'What counts as a lit block: every fine cell lit (conservative, the default), or the block mean under the planner\'s dark threshold.',
+  constraintKey: 'litRule',
+  dataId: 'illumination-corridor',
+  field: 'lit_rule',
+  dependsOn: 'requireIlluminationCorridor',
+  options: [
+    { value: 'all', label: 'All cells lit (default)' },
+    { value: 'majority', label: 'Majority lit' },
+  ],
+  initial: 'all',
+})
+
+/**
+ * C6 -- how the heater enters the temperature model.
+ *
+ * `thermostat_assumed` is an ASSUMPTION and must be labelled as one wherever
+ * it is shown: no rover publishes a watts-to-kelvin link, so the claim that
+ * the survival heater holds the inner temperature at the envelope floor is
+ * the frontend's operator choosing a hypothesis, not a measurement. The
+ * backend returns `heater_source` with every response that used it; that
+ * string is what the result panel shows.
+ */
+export const heaterModelContributor = enumDeparture({
+  id: 'heater-model',
+  label: 'Heater model',
+  hint: 'Default counts the heater in the energy model only. "Thermostat assumed" is an ASSUMPTION: that the survival heater holds the inner temperature at the envelope floor. No rover publishes the figure that would justify it.',
+  constraintKey: 'heaterModel',
+  dataId: 'thermal-dwell',
+  field: 'heater_model',
+  dependsOn: 'requireThermalDwell',
+  options: [
+    { value: 'none', label: 'None (default)' },
+    { value: 'thermostat_assumed', label: 'Thermostat assumed (ASSUMPTION)' },
+  ],
+  initial: 'none',
+})
+
+/**
  * The list. Append-only: add at the end, never reorder, never edit a
  * neighbour's line.
  */
@@ -246,6 +418,11 @@ export const PLAN_REQUEST_CONTRIBUTORS: readonly PlanRequestContributor[] = [
   illuminationCorridorContributor,
   roughnessWeightContributor,
   riskContributor,
+  survivalReportContributor,
+  survivalChanceContributor,
+  thermalDwellContributor,
+  litRuleContributor,
+  heaterModelContributor,
 ]
 
 /**
@@ -275,6 +452,23 @@ export const STORE_CONTRIBUTORS: readonly PlanRequestContributor[] =
   })
 
 /**
+ * The rest: the ones only `POST /api/plan-4d` honours.
+ *
+ * The complement of STORE_CONTRIBUTORS rather than a second hand-written
+ * list, for the same reason that one is derived -- and for a sharper one
+ * here. The 4-D panel used to carry its own literal array of three toggles,
+ * so a contributor appended to the registry appeared in the 2-D panel and
+ * was invisible in the 4-D one. Four of the audit's five blocking findings
+ * were that single fact: the switches existed in the registry, or were
+ * planned for it, and no surface rendered them.
+ *
+ * Derived, the two lists partition the registry by construction, and a
+ * contributor cannot be added to neither.
+ */
+export const FOUR_D_CONTRIBUTORS: readonly PlanRequestContributor[] =
+  PLAN_REQUEST_CONTRIBUTORS.filter((contributor) => !STORE_CONTRIBUTORS.includes(contributor))
+
+/**
  * The state a contributor sees when the request is described by a context
  * rather than by the store -- the 4-D builder's path.
  *
@@ -289,6 +483,23 @@ function constraintStateFrom(
   const raw = context.constraints[contributor.constraintKey]
   if (contributor.control.kind === 'number') {
     return { enabled: typeof raw === 'number' && Number.isFinite(raw), value: raw }
+  }
+  if (contributor.control.kind === 'choice') {
+    // A choice holds a string, so it can never satisfy the `raw === true`
+    // below -- which is exactly what happened: the control kind existed in
+    // the union from the start, no contributor used it, and the one branch
+    // that would have run it was never written. A `choice` contributor added
+    // without this would look correct, render correctly, and contribute
+    // nothing, which is the failure this whole file exists to prevent.
+    //
+    // Membership in the contributor's own options, not merely "is a string":
+    // every choice here maps to a backend Literal, and a value outside it is
+    // a 422. An unrecognised string is treated as off rather than sent.
+    const options = contributor.control.options
+    return {
+      enabled: typeof raw === 'string' && options.some((option) => option.value === raw),
+      value: raw,
+    }
   }
   return { enabled: raw === true, value: raw }
 }
