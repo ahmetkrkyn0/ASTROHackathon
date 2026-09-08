@@ -10,7 +10,7 @@ definition (Shirley & Balaban 2022; Ennico-Smith et al. 2023):
     power while stationary.
 
 The 50 h is VIPER's minimum-power endurance; LunaPath carries it per rover
-as ``h_max_shadow_h`` (LPR-1 50 h, NASA VIPER 96 h, LUVMI-M 4 h, Yutu-2
+as ``h_max_shadow_h`` (LPR-1 50 h, NASA VIPER 50 h, LUVMI-M 4 h, Yutu-2
 2 h), so the same rule produces a different map for each profile.
 
 Three pieces, each a pure function of arrays until the very end:

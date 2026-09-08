@@ -491,8 +491,8 @@ def test_each_criterion_picks_the_extremum_from_the_catalogue(criterion, winner)
     assert winner in resolved.text
 
 
-def test_a_tie_names_every_rover_that_holds_it():
-    """lpr_1 and nasa_viper are both 450 kg; neither is the lighter one."""
+def test_the_lighter_rover_wins_a_mass_comparison():
+    """VIPER's published 447 kg roving mass is below LPR-1's 450 kg."""
     payload = guide_evidence(
         {"topic": "rover", "rover_ids": ["lpr_1", "nasa_viper"], "criterion": "mass"},
         rover_catalog(),
@@ -500,8 +500,8 @@ def test_a_tie_names_every_rover_that_holds_it():
     resolved = next(
         fact for fact in guide_facts(payload) if fact.key.startswith("rover.criterion.")
     )
-    assert "LPR-1" in resolved.text and "NASA VIPER" in resolved.text
-    assert "eşit" in resolved.text
+    assert "NASA VIPER" in resolved.text
+    assert "LPR-1" not in resolved.text
 
 
 def test_no_criterion_means_no_winner():

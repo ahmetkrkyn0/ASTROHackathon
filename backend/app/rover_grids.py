@@ -3,8 +3,8 @@
 Pure core logic: no rclpy, no fastapi. Both shells (the FastAPI backend and
 the ROS 2 action server) plan against a *rover-adapted* view of the base
 grids, not the raw grids loaded at startup -- different rovers have
-different ``slope_max_deg`` (e.g. ``nasa_viper``/``cnsa_yutu_2`` are 20 deg,
-``lpr_1`` is 25 deg), so the ``traversable`` mask and ``cost`` grid baked
+different ``slope_max_deg`` (e.g. ``nasa_viper`` is 15 deg and
+``cnsa_yutu_2`` is 20 deg, while ``lpr_1`` is 25 deg), so the ``traversable`` mask and ``cost`` grid baked
 into the base grids at load time are only correct for the grid's default
 rover. This module recomputes both when the requested rover or resolved
 weights differ from that default. (Faz 4 final-review finding H1: this used
@@ -51,7 +51,7 @@ def grids_for_rover(
     # rover's slope_max_deg. When the label disagreed with the mask (a P1 run
     # under a different rover, a hand-edited metadata.json), the planner was
     # handed a mask that called 93,762 cells passable for nasa_viper that its
-    # 20 deg limit forbids, and routed over them. slope_max_deg is a safety
+    # 15 deg limit forbids, and routed over them. slope_max_deg is a safety
     # limit, so it is recomputed from the grids every time -- measured at
     # ~0.05 s on the 500x500 production grid, far below the cost of being
     # wrong. (Backend review, #2.)
