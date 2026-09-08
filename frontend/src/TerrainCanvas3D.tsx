@@ -27,7 +27,6 @@ import { createSky } from './sky'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { SimplifyModifier } from 'three/examples/jsm/modifiers/SimplifyModifier.js'
 import type { ClickMode, MapViewMode } from './MapCanvas'
 import type { Waypoint } from './api'
 import { Icon } from './components/Fleet/SpecIcons'
@@ -588,49 +587,42 @@ const NASA_ROCK_TEMPLATE_URLS = [
   '/models/nasa_rocks/rock-15556.json',
 ]
 
-// The original GLBs supplied for this scene. Each is decimated once at load
-// time for drawing, while the pre-existing light proxy meshes remain the
-// LiDAR collision geometry so one scan never raycasts millions of triangles.
+// Pre-simplified versions of the supplied GLBs. Optimising these files before
+// they reach the browser avoids blocking the loading screen while the JS
+// thread tries to decimate hundreds of thousands of vertices at runtime.
 const NASA_ROCK_GLB_URLS = [
-  '/models/nasa_rocks/apollo_lunar_sample_1201311.glb',
-  '/models/nasa_rocks/apollo_lunar_sample_143211404.glb',
-  '/models/nasa_rocks/apollo_lunar_sample_701750.glb',
-  '/models/nasa_rocks/apollo_lunar_sample_702950.glb',
+  '/models/nasa_rocks_optimized/apollo_lunar_sample_1201311.glb',
+  '/models/nasa_rocks_optimized/apollo_lunar_sample_143211404.glb',
+  '/models/nasa_rocks_optimized/apollo_lunar_sample_701750.glb',
+  '/models/nasa_rocks_optimized/apollo_lunar_sample_702950.glb',
 ]
 
-const ROCK_VISUAL_VERTEX_BUDGET = 1800
+/** Textured scans are hero assets; the rest retain the fast low-poly proxy. */
+const SCANNED_ROCK_RENDER_LIMIT = 12
 
 function normaliseRockVisualGeometry(geometry: THREE.BufferGeometry, transform: THREE.Matrix4): THREE.BufferGeometry | null {
-  const transformed = geometry.clone()
-  transformed.applyMatrix4(transform)
-  const welded = mergeVertices(transformed, 1e-5)
-  transformed.dispose()
-  const vertexCount = welded.getAttribute('position')?.count ?? 0
-  const simplified = vertexCount > ROCK_VISUAL_VERTEX_BUDGET
-    ? new SimplifyModifier().modify(welded, vertexCount - ROCK_VISUAL_VERTEX_BUDGET)
-    : welded
-  if (simplified !== welded) welded.dispose()
-  simplified.computeBoundingBox()
-  const bounds = simplified.boundingBox
+  const normalised = geometry.clone()
+  normalised.applyMatrix4(transform)
+  normalised.computeBoundingBox()
+  const bounds = normalised.boundingBox
   if (!bounds) {
-    simplified.dispose()
+    normalised.dispose()
     return null
   }
   const size = bounds.getSize(new THREE.Vector3())
   const largestAxis = Math.max(size.x, size.y, size.z)
   if (!(largestAxis > 1e-6)) {
-    simplified.dispose()
+    normalised.dispose()
     return null
   }
   const centre = bounds.getCenter(new THREE.Vector3())
-  simplified.translate(-centre.x, -centre.y, -centre.z)
+  normalised.translate(-centre.x, -centre.y, -centre.z)
   // A normalised maximum diameter of 2 means the descriptor's radiusX/Y/Z
   // continues to be metres, exactly like the previous procedural geometry.
   const scale = 2 / largestAxis
-  simplified.scale(scale, scale, scale)
-  simplified.computeVertexNormals()
-  simplified.computeBoundingSphere()
-  return simplified
+  normalised.scale(scale, scale, scale)
+  normalised.computeBoundingSphere()
+  return normalised
 }
 
 async function loadScannedRockVisualTemplate(url: string): Promise<ScannedRockVisualTemplate | null> {
@@ -1418,6 +1410,7 @@ export default function TerrainCanvas3D({
     if (!container) return
 
     let disposed = false
+    let visualRockLoadTimer: number | null = null
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0x020308)
 
@@ -1770,17 +1763,6 @@ export default function TerrainCanvas3D({
       setRockTemplatesReady(true)
     })
 
-    Promise.all(NASA_ROCK_GLB_URLS.map(loadScannedRockVisualTemplate)).then((results) => {
-      if (disposed) return
-      const templates = results.filter((template): template is ScannedRockVisualTemplate => template !== null)
-      if (templates.length === 0) {
-        console.warn('No textured Apollo rock GLBs loaded; keeping the low-poly NASA rock proxies visible')
-        return
-      }
-      rockVisualTemplatesRef.current = templates
-      setRockVisualTemplatesReady(true)
-    })
-
     const lidarPointGeometry = new THREE.BufferGeometry()
     const lidarPointMaterial = new THREE.PointsMaterial({
       map: solidDotTexture,
@@ -1995,7 +1977,7 @@ export default function TerrainCanvas3D({
           earth.sprite.material.map?.dispose()
           earth.sprite.material.dispose()
           rockGroup.children.forEach((rock) => {
-            if (rock instanceof THREE.Mesh) rock.geometry.dispose()
+            if (rock instanceof THREE.Mesh && !rock.userData.scannedApolloRock) rock.geometry.dispose()
           })
           pebbleMeshes.forEach((mesh) => {
             mesh.geometry.dispose()
@@ -2054,6 +2036,30 @@ export default function TerrainCanvas3D({
         photoAvailable,
         brightestSlice,
       })
+
+      // The terrain must become interactive before optional presentation
+      // assets start downloading or parsing. Loading one scan at a time also
+      // avoids a burst of GLB decoding and texture uploads competing with the
+      // terrain, sky and rover on the first frame.
+      visualRockLoadTimer = window.setTimeout(() => {
+        void (async () => {
+          const templates: ScannedRockVisualTemplate[] = []
+          for (const url of NASA_ROCK_GLB_URLS) {
+            if (disposed) return
+            const template = await loadScannedRockVisualTemplate(url)
+            if (template) templates.push(template)
+            // Yield between models so a slow device can keep painting.
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+          }
+          if (disposed) return
+          if (templates.length === 0) {
+            console.warn('No textured Apollo rock GLBs loaded; keeping the low-poly NASA rock proxies visible')
+            return
+          }
+          rockVisualTemplatesRef.current = templates
+          setRockVisualTemplatesReady(true)
+        })()
+      }, 1200)
     }
 
     build().catch((error: unknown) => {
@@ -2217,6 +2223,7 @@ export default function TerrainCanvas3D({
 
     return () => {
       disposed = true
+      if (visualRockLoadTimer !== null) window.clearTimeout(visualRockLoadTimer)
       cancelAnimationFrame(frame)
       observer.disconnect()
       controls.dispose()
@@ -2761,7 +2768,10 @@ export default function TerrainCanvas3D({
         }
         for (const child of [...state.rockGroup.children]) {
           state.rockGroup.remove(child)
-          if (child instanceof THREE.Mesh) child.geometry.dispose()
+          // Scanned visuals share their template geometry. The template owns
+          // it and releases it during scene cleanup; disposing it here would
+          // break the next rebuild after a vertical-exaggeration change.
+          if (child instanceof THREE.Mesh && !child.userData.scannedApolloRock) child.geometry.dispose()
         }
         state.lidarRockMeshes.length = 0
 
@@ -2774,8 +2784,9 @@ export default function TerrainCanvas3D({
           fixedRockAnchorRef.current.x,
           fixedRockAnchorRef.current.z,
         )
+        const visualStride = Math.max(1, Math.ceil(rockDescriptors.length / SCANNED_ROCK_RENDER_LIMIT))
         const rockUp = new THREE.Vector3(0, 1, 0)
-        for (const descriptor of rockDescriptors) {
+        for (const [rockIndex, descriptor] of rockDescriptors.entries()) {
           const groundY = sampleTerrainHeight(terrain, descriptor.x, descriptor.z)
           if (groundY === null) continue
           // The collision proxy stays compact enough for the 4,320-beam
@@ -2807,17 +2818,18 @@ export default function TerrainCanvas3D({
           proxy.rotateX(descriptor.tiltX)
           proxy.rotateZ(descriptor.tiltZ)
           proxy.userData.lidarRockId = descriptor.id
-          const visualTemplate = visualTemplates[Math.abs(descriptor.seed) % visualTemplates.length]
+          const visualTemplate = rockIndex % visualStride === 0
+            ? visualTemplates[Math.floor(rockIndex / visualStride) % visualTemplates.length]
+            : undefined
           if (visualTemplate) {
             proxy.visible = false
-            const visualGeometry = visualTemplate.geometry.clone()
-            visualGeometry.scale(descriptor.radiusX, descriptor.radiusY, descriptor.radiusZ)
-            visualGeometry.computeBoundingSphere()
-            const visual = new THREE.Mesh(visualGeometry, visualTemplate.material)
+            const visual = new THREE.Mesh(visualTemplate.geometry, visualTemplate.material)
             visual.position.copy(proxy.position)
             visual.quaternion.copy(proxy.quaternion)
+            visual.scale.set(descriptor.radiusX, descriptor.radiusY, descriptor.radiusZ)
             visual.userData.lidarRockId = descriptor.id
             visual.userData.scannedApolloRock = true
+            visual.userData.rockBaseScale = visual.scale.clone()
             state.rockGroup.add(visual)
           }
           state.rockGroup.add(proxy)
@@ -2937,7 +2949,9 @@ export default function TerrainCanvas3D({
       // Marker visibility is the lidarEnabled/cameraMode effect's job now
       // (below) -- it reacts immediately, where this effect is debounced.
       for (const child of state.rockGroup.children) {
-        child.scale.setScalar(orbitRockScale)
+        const baseScale = child.userData.rockBaseScale as THREE.Vector3 | undefined
+        if (baseScale) child.scale.copy(baseScale).multiplyScalar(orbitRockScale)
+        else child.scale.setScalar(orbitRockScale)
       }
 
       const pointGeometry = state.lidarPoints.geometry
