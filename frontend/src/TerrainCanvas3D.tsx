@@ -1322,6 +1322,18 @@ export default function TerrainCanvas3D({
   /** The mesh.scale.z the fixed cluster was last seated against. */
   const lastRockFieldScaleRef = useRef<number | null>(null)
   /**
+   * How many scanned Apollo visuals existed when the cluster was last built.
+   *
+   * The GLBs download on a 1.2 s delay -- deliberately, so they do not
+   * compete with the terrain for the first frame -- which is always AFTER
+   * the boulders are first placed. Without this the cluster stayed built
+   * against zero templates and every boulder kept its low-poly collision
+   * proxy as its visible mesh: the scans loaded, reported no error, and
+   * never reached the screen. The effect did re-run when they arrived; its
+   * body simply had no reason to rebuild.
+   */
+  const lastRockFieldVisualCountRef = useRef(0)
+  /**
    * The live route ribbon's shader and its arc-length table. The render loop
    * animates uTime/uProgress through this rather than through React state --
    * a uniform write per frame must not cost a re-render.
@@ -2081,7 +2093,20 @@ export default function TerrainCanvas3D({
     // unlike the corner telemetry panel, a fixed-rate update would visibly
     // lag behind orbit drags and FPS look-ahead. Scratch objects are
     // module-scope-per-mount to avoid per-frame allocation.
-    const MAX_ROCK_BOXES = 6
+    // Every boulder inside LiDAR range that is actually on screen gets a
+    // box. The old cap of 6 left most of a 61-rock cluster unmarked while
+    // the perception panel beside it reported dozens tracked -- a detector
+    // that visibly misses what it is looking straight at reads as broken.
+    //
+    // The cap that remains is a rendering budget, not a perception limit:
+    // these are DOM nodes repositioned every frame, and past a few dozen the
+    // cost shows. Sorted nearest-first, so if the budget ever binds it drops
+    // the far rocks, which are the ones a driver cares least about.
+    const MAX_ROCK_BOXES = 48
+    // Below this on-screen height a box is smaller than its own label, so
+    // the text is dropped and the marker stays a plain bracket. Keeps a
+    // dense field readable instead of a wall of overlapping tags.
+    const ROCK_LABEL_MIN_PX = 26
     const rockBoxTempBox = new THREE.Box3()
     const rockBoxWorldPos = new THREE.Vector3()
     const rockBoxNdc = new THREE.Vector3()
@@ -2099,6 +2124,14 @@ export default function TerrainCanvas3D({
       const candidates: Array<{ left: number; top: number; w: number; h: number; distance: number }> = []
       for (const child of state.rockGroup.children) {
         if (!(child instanceof THREE.Mesh) || !child.visible) continue
+        // A boulder is TWO meshes: the scanned Apollo visual and the low-poly
+        // LiDAR collision proxy sitting inside it. The proxy stays visible as
+        // an object -- only its material is invisible -- so `child.visible`
+        // does not separate them, and boxing both drew a second bracket
+        // around every rock, slightly offset because the two hulls differ.
+        // Box what the driver can actually see.
+        const childMaterial = Array.isArray(child.material) ? child.material[0] : child.material
+        if (childMaterial && childMaterial.visible === false) continue
         child.getWorldPosition(rockBoxWorldPos)
         const distance = rockBoxWorldPos.distanceTo(state.lidarOrigin)
         if (distance > LIDAR_CONFIG.maxRangeM) continue
@@ -2133,7 +2166,12 @@ export default function TerrainCanvas3D({
           if (py > maxY) maxY = py
         }
         if (behind || maxX < 0 || minX > width || maxY < 0 || minY > height) continue
-        if (maxX - minX < 4 || maxY - minY < 4) continue
+        // Skip only what is too small to draw a bracket around at all. This
+        // used to be 4px on BOTH axes, which quietly dropped anything seen
+        // edge-on or far enough away to be a couple of pixels wide -- rocks
+        // plainly visible on the ground, sitting inside the scan rings, with
+        // no marker on them.
+        if (maxX - minX < 3 && maxY - minY < 3) continue
 
         candidates.push({ left: minX, top: minY, w: maxX - minX, h: maxY - minY, distance })
       }
@@ -2166,8 +2204,13 @@ export default function TerrainCanvas3D({
         el.style.borderColor = color
         el.style.boxShadow = `0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 8px ${color}`
         const label = el.firstElementChild as HTMLSpanElement
-        label.textContent = `ROCK ${item.distance.toFixed(1)} m`
-        label.style.background = color
+        if (item.h >= ROCK_LABEL_MIN_PX) {
+          label.style.display = ''
+          label.textContent = `ROCK ${item.distance.toFixed(1)} m`
+          label.style.background = color
+        } else {
+          label.style.display = 'none'
+        }
       })
     }
 
@@ -2764,10 +2807,15 @@ export default function TerrainCanvas3D({
       const verticalScale = terrain.verticalScale
       const shouldRebuildRocks =
         fixedRockAnchorRef.current === null ||
-        lastRockFieldScaleRef.current !== verticalScale
+        lastRockFieldScaleRef.current !== verticalScale ||
+        // The scans finished downloading after the cluster was built:
+        // rebuild once so the boulders actually take their scanned geometry
+        // instead of keeping the placeholder proxies for the session.
+        lastRockFieldVisualCountRef.current !== rockVisualTemplatesRef.current.length
 
       if (shouldRebuildRocks) {
         lastRockFieldScaleRef.current = verticalScale
+        lastRockFieldVisualCountRef.current = rockVisualTemplatesRef.current.length
         if (!fixedRockAnchorRef.current) {
           // Starts ahead and to one side of the initial rover pose, outside
           // its safety footprint but within LiDAR range. It never moves after
