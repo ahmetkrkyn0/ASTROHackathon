@@ -1041,7 +1041,7 @@ REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement(
         id="LP-R01", name="shadow_endurance", cls="safety", scope=None, condition=None, timing="always",
         response="shadow_continuous_h <= h_max_shadow_h",
-        rationale="The rover's battery and heaters are sized for at most h_max_shadow_h of continuous darkness (VIPER: 96 h; LPR-1: 50 h). Longer unbroken shadow is loss of the vehicle.",
+        rationale="The rover's battery and heaters are sized for at most h_max_shadow_h of continuous darkness (VIPER: 50 h; LPR-1: 50 h). Longer unbroken shadow is loss of the vehicle.",
         signal="shadow_continuous_h", unit="h", kind="upper", rover_parameter="h_max_shadow_h",
         ft_ltl="G (shadow_continuous_h <= h_max_shadow_h)   [boolean form: G (F[0,h_max_shadow_h] lit)]",
         stl_text="always (shadow_continuous_h <= h_max_shadow_h)", normalizer="threshold", trace_kinds=("2d", "4d", "telemetry"),

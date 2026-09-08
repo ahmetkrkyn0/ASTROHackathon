@@ -5798,6 +5798,20 @@ select {
   flex: 0 1 auto;
 }
 
+/* The transport takes the rest of the strip.
+   Merge note: the codex branch fixed this same overflow by sizing a
+   .lp-status-right wrapper, but that wrapper no longer exists -- the strip's
+   features are direct children now, precisely so the key and the transport
+   could be placed at opposite ends instead of travelling as one flex item.
+   The fix still applies, just addressed to the dock itself: without a width
+   the dock takes its max-content size, and justify-content: flex-end then
+   pushes its first controls off the LEFT edge. Given the available width,
+   the flexible scrubber yields before any visible control is clipped. */
+.lp-status-bar .lp-playback-dock {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 @media (max-width: 900px) {
   /* Below this there is no room for two columns: the photograph would be a
      sliver and the specifications a column of wrapped single words. This block

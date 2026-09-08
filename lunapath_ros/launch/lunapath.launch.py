@@ -8,6 +8,7 @@ from launch import LaunchDescription
 from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def _find_backend_dir() -> str | None:
@@ -67,6 +68,13 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("processed_dir", default_value=""),
         DeclareLaunchArgument("odom_topic", default_value="odom"),
         DeclareLaunchArgument("pose_source", default_value="visual_odometry"),
+        DeclareLaunchArgument("local_plan_topic", default_value="local_plan"),
+        DeclareLaunchArgument("cmd_vel_topic", default_value="cmd_vel"),
+        DeclareLaunchArgument("lidar_points_topic", default_value="points"),
+        DeclareLaunchArgument("observed_obstacles_topic", default_value="observed_obstacles"),
+        # The local controller is deliberately opt-in: launch cannot make a
+        # hardware rover move merely because a local route message appeared.
+        DeclareLaunchArgument("enable_local_controller", default_value="false"),
     ]
 
     backend_dir = _find_backend_dir()
@@ -123,6 +131,79 @@ def generate_launch_description() -> LaunchDescription:
                     "odom_topic": LaunchConfiguration("odom_topic"),
                     "pose_source": LaunchConfiguration("pose_source"),
                 }
+            ],
+            output="screen",
+        ),
+        Node(
+            package="lunapath_ros",
+            executable="safety_monitor",
+            name="lunapath_safety_monitor",
+            parameters=[{"odom_topic": LaunchConfiguration("odom_topic")}],
+            output="screen",
+        ),
+        Node(
+            package="lunapath_ros",
+            executable="local_controller",
+            name="lunapath_local_controller",
+            parameters=[
+                {
+                    "enabled": ParameterValue(
+                        LaunchConfiguration("enable_local_controller"), value_type=bool
+                    ),
+                    "odom_topic": LaunchConfiguration("odom_topic"),
+                    "local_plan_topic": LaunchConfiguration("local_plan_topic"),
+                    "cmd_vel_topic": LaunchConfiguration("cmd_vel_topic"),
+                    "map_frame": frame_id,
+                }
+            ],
+            output="screen",
+        ),
+        Node(
+            package="lunapath_ros",
+            executable="lidar_perception",
+            name="lunapath_lidar_perception",
+            parameters=[
+                {
+                    "points_topic": LaunchConfiguration("lidar_points_topic"),
+                    "observed_obstacles_topic": LaunchConfiguration("observed_obstacles_topic"),
+                    "map_frame": frame_id,
+                }
+            ],
+            output="screen",
+        ),
+        Node(
+            package="lunapath_ros",
+            executable="local_planner",
+            name="lunapath_local_planner",
+            parameters=[
+                {
+                    "odom_topic": LaunchConfiguration("odom_topic"),
+                    "observed_obstacles_topic": LaunchConfiguration("observed_obstacles_topic"),
+                    "local_plan_topic": LaunchConfiguration("local_plan_topic"),
+                    "map_frame": frame_id,
+                }
+            ],
+            output="screen",
+        ),
+        Node(
+            package="lunapath_ros",
+            executable="replan_coordinator",
+            name="lunapath_replan_coordinator",
+            parameters=[
+                {
+                    "odom_topic": LaunchConfiguration("odom_topic"),
+                    "observed_obstacles_topic": LaunchConfiguration("observed_obstacles_topic"),
+                    "map_frame": frame_id,
+                }
+            ],
+            output="screen",
+        ),
+        Node(
+            package="lunapath_ros",
+            executable="execution_monitor",
+            name="lunapath_execution_monitor",
+            parameters=[
+                {"odom_topic": LaunchConfiguration("odom_topic"), "map_frame": frame_id}
             ],
             output="screen",
         ),

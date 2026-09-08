@@ -497,9 +497,17 @@ eden ROS 2 düğümleri olarak da koşar.
 | `grid_publisher` | Analiz katmanlarını ROS topic'i olarak yayımlar |
 | `pose_monitor` | `nav_msgs/Odometry` dinler, pozu koridora karşı denetler |
 | `safety_monitor_node` | Formal güvenlik monitörünü canlı koşturur |
+| `local_controller` | `LocalPlan` içindeki doğrulanmış yerel sapmayı, kapalı varsayılanla takip eder |
+| `lidar_perception` | `PointCloud2` verisini anonim `ObservedObstacles` kümelerine çevirir |
+| `local_planner` | LiDAR gözlemi, odometri ve global koridordan yerel sapma veya güvenli replan kararı üretir |
+| `replan_coordinator` | Replan tetikleyicisini güncel odometriyle yeni `PlanTraverse` isteğine bağlar |
+| `execution_monitor` | Ölçülen odometri/batarya yürütmesini aktif planın mesafe ve enerji özetiyle karşılaştırır |
 
 Özel mesajlar: `Corridor`, `MissionWeights`, `PlanMetrics`, `ReplanTrigger`,
-bir de `PlanTraverse` action'ı. Jazzy konteyneri:
+`ObservedObstacle`, `ObservedObstacles`, `LocalPlan` ve `PlanTraverse`
+action'ı; `ActiveMission` ve `ExecutionStatus` mesajları. `local_controller`,
+`enable_local_controller:=true` verilmedikçe hareket komutu üretmez. Jazzy
+konteyneri:
 [`docker/ros2-jazzy.Dockerfile`](docker/ros2-jazzy.Dockerfile). Kurulum
 kılavuzu: [`docs/ROS2_SETUP.md`](docs/ROS2_SETUP.md).
 

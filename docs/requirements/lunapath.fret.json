@@ -24,7 +24,7 @@
       "parent_reqid": null,
       "project": "LunaPath",
       "fulltext": "The rover shall always satisfy shadow_continuous_h <= h_max_shadow_h",
-      "rationale": "The rover's battery and heaters are sized for at most h_max_shadow_h of continuous darkness (VIPER: 96 h; LPR-1: 50 h). Longer unbroken shadow is loss of the vehicle.",
+      "rationale": "The rover's battery and heaters are sized for at most h_max_shadow_h of continuous darkness (VIPER: 50 h; LPR-1: 50 h). Longer unbroken shadow is loss of the vehicle.",
       "comments": "shadow_continuous_h is the running count of hours in shadow (shadow_ratio > 0.2, the simulator's threshold), reset when lit; 4-D traces use the planner's path_dark_hours.",
       "semantics": {
         "type": "nasa",
@@ -49,13 +49,13 @@
         "thresholds_by_rover": {
           "lpr_1": 50.0,
           "luvmi_m": 4.0,
-          "nasa_viper": 96.0,
+          "nasa_viper": 50.0,
           "cnsa_yutu_2": 2.0
         },
         "formula_by_rover": {
           "lpr_1": "always (shadow_continuous_h <= 50)",
           "luvmi_m": "always (shadow_continuous_h <= 4)",
-          "nasa_viper": "always (shadow_continuous_h <= 96)",
+          "nasa_viper": "always (shadow_continuous_h <= 50)",
           "cnsa_yutu_2": "always (shadow_continuous_h <= 2)"
         },
         "normalizer": "threshold",
@@ -310,13 +310,13 @@
         "thresholds_by_rover": {
           "lpr_1": 25.0,
           "luvmi_m": 25.0,
-          "nasa_viper": 20.0,
+          "nasa_viper": 15.0,
           "cnsa_yutu_2": 20.0
         },
         "formula_by_rover": {
           "lpr_1": "always (drive_slope_deg <= 25)",
           "luvmi_m": "always (drive_slope_deg <= 25)",
-          "nasa_viper": "always (drive_slope_deg <= 20)",
+          "nasa_viper": "always (drive_slope_deg <= 15)",
           "cnsa_yutu_2": "always (drive_slope_deg <= 20)"
         },
         "normalizer": "threshold",

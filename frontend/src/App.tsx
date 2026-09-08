@@ -24,10 +24,9 @@ import {
 import { Icon } from './components/Fleet/SpecIcons'
 import { useFullscreen } from './shell/useFullscreen'
 import MapCanvas, { type ClickMode, DOWNSAMPLE, type MapViewMode } from './MapCanvas'
-import { generateRockField, type RockDescriptor } from './lidarSimulation'
 import SpaceBackdrop from './SpaceBackdrop'
 import SplashScreen, { type BootStage } from './SplashScreen'
-import TerrainCanvas3D from './TerrainCanvas3D'
+import TerrainCanvas3D, { type LocalNavigationRequest } from './TerrainCanvas3D'
 import SceneTransport from './features/playback/SceneTransport'
 import {
   advancePlaybackHours,
@@ -36,6 +35,8 @@ import {
   resolvePlaybackState,
   stepForHours,
 } from './mission/playbackClock'
+import { applyLocalDetour } from './mission/localDetourExecution'
+import { localNavigationSnapshotKey } from './localPerception'
 import {
   checkHealth,
   fetchCellTelemetry,
@@ -50,6 +51,7 @@ import {
   type RoverEntry,
   type Waypoint,
 } from './api'
+import { requestReplan } from './net/replan'
 
 // New Mission Control Workstation Components
 import TopBar, { type MissionMode } from './components/TopBar/TopBar'
@@ -84,6 +86,10 @@ const DEFAULT_WEIGHTS: PlanWeights = {
 const DEFAULT_POINT: [number, number] = [250, 250]
 const TOAST_DURATION_MS = 5200
 type BootstrapState = 'loading' | 'ready' | 'error'
+
+function isPlanResponse(value: unknown): value is PlanResponse {
+  return typeof value === 'object' && value !== null && Array.isArray((value as PlanResponse).waypoints)
+}
 
 interface FocusTelemetry {
   row: number
@@ -193,18 +199,15 @@ export default function App() {
 
   // Computed route
   const [planResult, setPlanResult] = useState<PlanResponse | null>(null)
+  // The backend response is the immutable global plan. This optional trace is
+  // the locally executed LiDAR detour stitched into its playback timeline.
+  const [executionWaypoints, setExecutionWaypoints] = useState<Waypoint[] | null>(null)
   // Yalnizca setter: bu bayragi okuyan yer kalmadi, kokpit "planlama suruyor"
   // durumunu planningEngaged ve isSolving uzerinden gosteriyor. Bayrak yine de
   // ayarlaniyor cunku istek yasam dongusunu uc yerde isaretliyor.
   const [, setPlanning] = useState(false)
   const [planError, setPlanError] = useState<string | null>(null)
   const [focusTelemetry, setFocusTelemetry] = useState<FocusTelemetry>(DEFAULT_FOCUS_TELEMETRY)
-  // Computed once per plan, BEFORE calling planRoute, and handed to both the
-  // backend (as obstacle_cells, so A* actually routes around them) and
-  // TerrainCanvas3D (as the exact rocks to render) -- the same list either
-  // side of the request, so what got avoided and what gets drawn can never
-  // drift apart the way two independent generateRockField calls could.
-  const [obstacleRocks, setObstacleRocks] = useState<RockDescriptor[] | null>(null)
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
@@ -241,14 +244,21 @@ export default function App() {
   const [playbackHours, setPlaybackHours] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [timeScale, setTimeScale] = useState(1)
+  const localReplanInFlightRef = useRef(false)
+  // TerrainCanvas performs the primary LiDAR snapshot de-duplication. Keep
+  // this second guard at the API boundary as well: a remount or delayed
+  // callback must never turn one stopped-rover observation into a second
+  // remote replan after the first one has already completed.
+  const lastRemoteReplanKeyRef = useRef<string | null>(null)
 
-  const totalPlaybackHours = planResult?.waypoints[planResult.waypoints.length - 1]?.elapsed_hours ?? 0
+  const routeForPlayback = executionWaypoints ?? planResult?.waypoints ?? null
+  const totalPlaybackHours = routeForPlayback?.[routeForPlayback.length - 1]?.elapsed_hours ?? 0
 
   // Read inside the animation frame without making the loop depend on them:
   // re-creating the loop on every waypoint or scale change would reset its
   // frame timing and stutter the drive.
   const waypointsRef = useRef<Waypoint[] | null>(null)
-  waypointsRef.current = planResult?.waypoints ?? null
+  waypointsRef.current = routeForPlayback
   const timeScaleRef = useRef(timeScale)
   timeScaleRef.current = timeScale
   const roverSpeedRef = useRef(NOMINAL_ROVER_SPEED_MS)
@@ -288,8 +298,8 @@ export default function App() {
   // far between it and the next, whether this segment is a recharge stop,
   // and the ground speed the planner's own timeline implies.
   const playbackState = useMemo(
-    () => resolvePlaybackState(planResult?.waypoints, playbackHours, roverSpeedRef.current),
-    [planResult, playbackHours],
+    () => resolvePlaybackState(routeForPlayback, playbackHours, roverSpeedRef.current),
+    [routeForPlayback, playbackHours],
   )
   const activeWaypoint3D = playbackState.activeWaypoint
   const roverFraction3D = playbackState.roverFraction
@@ -523,6 +533,7 @@ export default function App() {
   const handleCellClick = useCallback(
     (row: number, col: number) => {
       setPlanResult(null)
+      setExecutionWaypoints(null)
       setPlanError(null)
       setIsPlaying(false)
       setPlaybackHours(0)
@@ -547,6 +558,7 @@ export default function App() {
   const handlePlaceEndpoint = useCallback(
     (which: 'start' | 'goal', cell: [number, number]) => {
       setPlanResult(null)
+      setExecutionWaypoints(null)
       setPlanError(null)
       setIsPlaying(false)
       setPlaybackHours(0)
@@ -566,6 +578,7 @@ export default function App() {
     // Undoing an endpoint invalidates any route drawn from it, exactly as
     // placing one does.
     setPlanResult(null)
+    setExecutionWaypoints(null)
     setPlanError(null)
     setIsPlaying(false)
     setPlaybackHours(0)
@@ -610,6 +623,7 @@ export default function App() {
       setSelectedRoverId(rover.id)
       setWeights(rover.default_weights)
       setPlanResult(null)
+      setExecutionWaypoints(null)
       setPlanError(null)
       setIsPlaying(false)
       setPlaybackHours(0)
@@ -626,42 +640,9 @@ export default function App() {
     setPlanning(true)
     setPlanError(null)
     setPlanResult(null)
+    setExecutionWaypoints(null)
     setIsPlaying(false)
     setPlaybackHours(0)
-
-    // Seed the rock field from start/goal alone, BEFORE the route exists --
-    // the only way for the backend to route around these cells is to know
-    // about them before it plans, not after. World<->grid conversion here
-    // is the same x = col*stepX - width/2 mapping TerrainCanvas3D uses for
-    // every other row/col <-> world placement in the scene.
-    let rocks: RockDescriptor[] = []
-    if (elevationLayer) {
-      const rows = elevationLayer.shape[0]
-      const cols = elevationLayer.shape[1]
-      const resolutionM = focusTelemetry.resolutionM
-      const width = cols * resolutionM
-      const depth = rows * resolutionM
-      const stepX = width / (cols - 1)
-      const stepZ = depth / (rows - 1)
-      const toWorld = (row: number, col: number) => ({
-        x: col * stepX - width / 2,
-        z: row * stepZ - depth / 2,
-      })
-      const startWorld = toWorld(start[0], start[1])
-      const goalWorld = toWorld(goal[0], goal[1])
-      const midX = (startWorld.x + goalWorld.x) / 2
-      const midZ = (startWorld.z + goalWorld.z) / 2
-      const halfDiagonal = Math.hypot(goalWorld.x - startWorld.x, goalWorld.z - startWorld.z) / 2
-      const radiusM = Math.min(500, halfDiagonal + 60)
-      rocks = generateRockField(midX, midZ, radiusM, { rows, cols, resolutionM })
-    }
-    setObstacleRocks(rocks.length > 0 ? rocks : null)
-
-    const obstacleCells = new Map<string, [number, number]>()
-    for (const rock of rocks) {
-      if (rock.row === undefined || rock.col === undefined) continue
-      obstacleCells.set(`${rock.row}:${rock.col}`, [rock.row, rock.col])
-    }
 
     try {
       const result = await planRoute(
@@ -669,7 +650,6 @@ export default function App() {
         goal,
         weights,
         selectedRoverId,
-        Array.from(obstacleCells.values()),
         // Read at issue time rather than closed over: the operator may have
         // moved a constraint since this handler was created, and the request
         // must carry what is set now.
@@ -678,6 +658,7 @@ export default function App() {
       // Display the radar scanning search animation briefly for authentic mission control feedback
       window.setTimeout(() => {
         setPlanResult(result)
+        setExecutionWaypoints(null)
         setIsSolving(false)
         setPlanning(false)
         setMissionMode('analyze')
@@ -691,7 +672,70 @@ export default function App() {
       setPlanning(false)
       setPlanError((error as Error).message)
     }
-  }, [elevationLayer, focusTelemetry.resolutionM, goal, isSolving, selectedRoverId, start, weights])
+  }, [goal, isSolving, selectedRoverId, start, weights])
+
+  const handleLocalNavigation = useCallback(async (local: LocalNavigationRequest) => {
+    if (!goal || localReplanInFlightRef.current) return
+    if (local.decision === 'LOCAL_DETOUR') {
+      setIsPlaying(false)
+      setExecutionWaypoints((current) => applyLocalDetour(
+        current ?? planResult?.waypoints ?? [],
+        routePlaybackStep ?? 0,
+        playbackHours,
+        { current: local.current, waypoints: local.local_waypoints },
+        focusTelemetry.resolutionM,
+        roverSpeedRef.current,
+      ))
+      pushToast({
+        tone: 'warning',
+        title: 'LiDAR local detour',
+        message: 'A bounded local trajectory was inserted and rejoins the global corridor. Playback is paused for review.',
+      })
+      return
+    }
+    const replanKey = localNavigationSnapshotKey(local)
+    if (replanKey === lastRemoteReplanKeyRef.current) return
+    // Mark before awaiting so a render or a delayed callback cannot enqueue
+    // an equivalent request between now and the in-flight guard below.
+    lastRemoteReplanKeyRef.current = replanKey
+    localReplanInFlightRef.current = true
+    setIsPlaying(false)
+    setIsSolving(true)
+    setPlanError(null)
+    try {
+      const response = await requestReplan({
+        current: local.current,
+        goal: { row: goal[0], col: goal[1] },
+        rover_id: selectedRoverId,
+        weights,
+        state: {},
+        force: true,
+        observed_obstacles: local.observed_obstacles,
+      })
+      if (!response.replanned || !isPlanResponse(response.plan)) {
+        throw new Error(response.reason ?? 'LiDAR-triggered replan did not produce a route.')
+      }
+      setStart([local.current.row, local.current.col])
+      setPlanResult(response.plan)
+      setExecutionWaypoints(null)
+      setPlaybackHours(0)
+      pushToast({
+        tone: 'warning',
+        title: 'LiDAR replan',
+        message: `${response.observed_obstacles?.accepted ?? 0} observed obstacle(s) applied. Playback is paused for review.`,
+      })
+    } catch (error) {
+      setPlanError((error as Error).message)
+      pushToast({
+        tone: 'warning',
+        title: 'LiDAR replan failed',
+        message: (error as Error).message,
+      })
+    } finally {
+      setIsSolving(false)
+      localReplanInFlightRef.current = false
+    }
+  }, [focusTelemetry.resolutionM, goal, planResult?.waypoints, playbackHours, pushToast, routePlaybackStep, selectedRoverId, weights])
 
   // Reset full mission setup. Every call here is a state setter, so this is
   // stable for the life of the app.
@@ -699,12 +743,12 @@ export default function App() {
     setStart(null)
     setGoal(null)
     setPlanResult(null)
+    setExecutionWaypoints(null)
     setPlanError(null)
     setClickMode('idle')
     setHoverPoint(null)
     setIsPlaying(false)
     setPlaybackHours(0)
-    setObstacleRocks(null)
     setMissionMode('plan')
   }, [])
 
@@ -724,7 +768,7 @@ export default function App() {
   // MEMOISED. `?? []` her render'da yeni bir dizi kimligi uretiyordu ve bu
   // dizi asagidaki odak telemetrisi efektinin bagimlilik listesinde; plan
   // yokken efekt her render'da yeniden kosardi.
-  const waypoints = useMemo(() => planResult?.waypoints ?? [], [planResult])
+  const waypoints = useMemo(() => routeForPlayback ?? [], [routeForPlayback])
   const selectedRover = rovers.find((entry) => entry.id === selectedRoverId) ?? null
   // The clock's recharge-stop test compares against the selected rover's own
   // top speed; a ref rather than a dependency so changing rover never
@@ -1159,7 +1203,7 @@ export default function App() {
                     thermalGrid={thermalLayer?.data ?? null}
                     costGrid={costLayer?.data ?? null}
                     traversableGrid={traversableLayer?.data ?? null}
-                    waypoints={planResult?.waypoints ?? null}
+                    waypoints={routeForPlayback}
                     start={start}
                     goal={goal}
                     clickMode={clickMode}
@@ -1172,11 +1216,11 @@ export default function App() {
                 ) : (
                   <TerrainCanvas3D
                     viewMode={viewMode}
-                    waypoints={planResult?.waypoints ?? null}
+                    waypoints={routeForPlayback}
                     activeWaypoint={activeWaypoint3D}
                     roverFraction={roverFraction3D}
                     isPlaying={isPlaying}
-                    obstacleRocks={obstacleRocks}
+                    onLocalNavigation={handleLocalNavigation}
                     clickMode={clickMode}
                     onCellClick={handleCellClick}
                     fullscreen={fullscreen.active}
