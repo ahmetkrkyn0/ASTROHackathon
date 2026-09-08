@@ -809,6 +809,24 @@ const MAX_YAW_RATE_RAD_PER_M = 1.2
  *  as a wheel snapped sideways. */
 const MAX_STEER_RAD = THREE.MathUtils.degToRad(34)
 
+/**
+ * How far the planned route floats above the ground it is drawn on. Small
+ * enough to read as painted onto the regolith; large enough that the ribbon
+ * never z-fights the mesh triangle underneath it.
+ */
+const ROUTE_RIBBON_LIFT_M = 0.12
+/** Half-width of the drawn corridor. ~1.8 m overall: a lane the rover fits. */
+const ROUTE_RIBBON_HALF_WIDTH_M = 0.9
+/**
+ * Route segments are re-sampled to at most this spacing before being drawn.
+ * Planned waypoints can sit several metres apart, and a ribbon built only
+ * from those chords cuts straight through every rise between them -- it
+ * sinks into the hillside going up and lifts off it coming down. Sampling
+ * the terrain along the way makes the path hug ground it never had vertices
+ * for.
+ */
+const ROUTE_RESAMPLE_STEP_M = 2
+
 /** Orbit-mode locator exaggeration, and the camera distance below which the
  *  rover is drawn at its true size instead. */
 const ROVER_ORBIT_SCALE = 10
@@ -974,6 +992,17 @@ interface Props {
   /** Mirrors MapCanvas's own start/goal picker so both views share one flow. */
   clickMode?: ClickMode
   onCellClick?: (row: number, col: number) => void
+  /**
+   * Fullscreen is owned by App.tsx because the element that goes fullscreen
+   * is .map-stage -- this canvas's parent, and the shared parent of the
+   * telemetry HUD and photo-drape controls. This view only renders the
+   * button, since the 3-D scene is where a bigger viewport actually buys
+   * something.
+   */
+  fullscreen?: boolean
+  /** False where the Fullscreen API is missing or blocked; hides the button. */
+  canFullscreen?: boolean
+  onToggleFullscreen?: () => void
   onReady?: (info: {
     slices: number
     timeVarying: boolean
@@ -997,6 +1026,9 @@ export default function TerrainCanvas3D({
   photo,
   clickMode,
   onCellClick,
+  fullscreen = false,
+  canFullscreen = false,
+  onToggleFullscreen,
   onReady,
   onError,
 }: Props) {
@@ -1059,6 +1091,22 @@ export default function TerrainCanvas3D({
   const lastRockFieldWaypointsRef = useRef<Waypoint[] | null | undefined>(undefined)
   /** The mesh.scale.z the current rock field was placed against. */
   const lastRockFieldScaleRef = useRef<number | null>(null)
+  /**
+   * The live route ribbon's shader and its arc-length table. The render loop
+   * animates uTime/uProgress through this rather than through React state --
+   * a uniform write per frame must not cost a re-render.
+   */
+  const routeRibbonRef = useRef<{
+    material: THREE.ShaderMaterial
+    distances: number[]
+    totalLength: number
+  } | null>(null)
+  /**
+   * Metres of route already driven, or -1 before a drive starts. Feeds the
+   * ribbon's uProgress so the trail behind the rover dims. A ref, not state:
+   * the render loop reads it every frame.
+   */
+  const routeProgressRef = useRef(-1)
   // Where the gravel layer was last built. Unlike the navigation rocks --
   // anchored to the route so they stay put while the rover drives past --
   // gravel is a distance-graded LOD around the sensor and has to follow it,
@@ -1884,6 +1932,13 @@ export default function TerrainCanvas3D({
         sweepPositions.needsUpdate = true
         state.lidarSweep.geometry.setDrawRange(0, 2)
       }
+      // Route ribbon animation. Uniforms only -- no geometry is touched, so
+      // this is a couple of float writes per frame.
+      const ribbon = routeRibbonRef.current
+      if (ribbon) {
+        ribbon.material.uniforms.uTime.value = performance.now() / 1000
+        ribbon.material.uniforms.uProgress.value = routeProgressRef.current
+      }
       renderer.render(scene, camera)
       // After render, not before: world matrices (rocks, camera) are only
       // guaranteed current once the renderer's own traversal has updated
@@ -2318,6 +2373,28 @@ export default function TerrainCanvas3D({
     )
     roverSteerRef.current += (targetSteer - roverSteerRef.current) * 0.25
 
+    // How far along the drawn corridor the rover has reached, in the same
+    // metres the ribbon's `along` attribute uses. The ribbon resamples the
+    // route, so its arc-length table is indexed by resampled point, not by
+    // waypoint -- interpolating between the two node distances that bracket
+    // the current pose is what keeps the wake edge under the wheels rather
+    // than snapping a whole waypoint at a time.
+    const ribbon = routeRibbonRef.current
+    if (ribbon && waypointIndex >= 0 && waypoints) {
+      const perWaypoint = ribbon.distances.length - 1
+      const span = Math.max(waypoints.length - 1, 1)
+      const at = ((waypointIndex + THREE.MathUtils.clamp(roverFraction, 0, 1)) / span) * perWaypoint
+      const i0 = Math.min(ribbon.distances.length - 1, Math.max(0, Math.floor(at)))
+      const i1 = Math.min(ribbon.distances.length - 1, i0 + 1)
+      routeProgressRef.current = THREE.MathUtils.lerp(
+        ribbon.distances[i0],
+        ribbon.distances[i1],
+        at - i0,
+      )
+    } else {
+      routeProgressRef.current = -1
+    }
+
     state.roverGroup.position.set(roverX, roverGroundY, roverZ)
     // Sitting ON the slope, not floating level above it: the body's up axis
     // follows the terrain normal and the heading is applied within that
@@ -2694,75 +2771,247 @@ export default function TerrainCanvas3D({
     const stepZ = (rows * res) / (rows - 1)
     const halfX = (cols * res) / 2
     const halfZ = (rows * res) / 2
+    // The route has to stand on the SAME surface the rover drives on, and
+    // that surface is the mesh's own geometry -- sampleTerrainHeight reads
+    // the very heights array the vertices were built from, then applies
+    // mesh.scale.z. The waypoint's own altitude_m is a different source (the
+    // backend's DEM lookup at cell centres, unscaled), so using it drew the
+    // path in a frame the mesh does not share: in FPS mode, where the mesh
+    // is life-size but the route was still lifted by the orbit exaggeration,
+    // the ribbon hung in the sky above the terrain entirely. Falling back to
+    // the waypoint altitude only where the sample misses (off-grid, or a
+    // NaN in the DEM) keeps a route drawn at all rather than collapsing it
+    // to y=0.
+    const terrainField: TerrainField = {
+      rows,
+      cols,
+      resolutionM: res,
+      minElevationM: minM,
+      heights: state.heights ?? new Float32Array(0),
+      verticalScale: vx,
+    }
     const points = waypoints.map((w) => {
       // Row 0 is the north (-Z) edge after the -90 deg tilt.
       const x = w.col * stepX - halfX
       const z = w.row * stepZ - halfZ
-      const y = ((w.altitude_m ?? minM) - minM) * vx + 4
-      return new THREE.Vector3(x, y, z)
+      const sampled = state.heights ? sampleTerrainHeight(terrainField, x, z) : null
+      const groundY = sampled ?? ((w.altitude_m ?? minM) - minM) * vx
+      // Just clear of the surface: enough that z-fighting never speckles the
+      // ribbon, far too little to read as floating. The old +4 m was a
+      // rover-height hover even when the rest of the frame was right.
+      return new THREE.Vector3(x, groundY + ROUTE_RIBBON_LIFT_M, z)
     })
+
+    // Re-sample along each planned chord so the ribbon follows the ground
+    // between waypoints instead of spanning it. Heights come from the same
+    // terrain sample as the nodes themselves, so a resampled point is no
+    // more approximate than a planned one -- it is simply the surface, read
+    // more often.
+    const sampleGroundY = (x: number, z: number, fallback: number) => {
+      const sampled = state.heights ? sampleTerrainHeight(terrainField, x, z) : null
+      return (sampled ?? fallback) + ROUTE_RIBBON_LIFT_M
+    }
+    const path: THREE.Vector3[] = [points[0]]
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i]
+      const b = points[i + 1]
+      const span = Math.hypot(b.x - a.x, b.z - a.z)
+      const steps = Math.max(1, Math.ceil(span / ROUTE_RESAMPLE_STEP_M))
+      for (let k = 1; k <= steps; k++) {
+        const t = k / steps
+        const x = THREE.MathUtils.lerp(a.x, b.x, t)
+        const z = THREE.MathUtils.lerp(a.z, b.z, t)
+        // The straight-line height between the two nodes is the fallback,
+        // used only where the DEM sample misses.
+        const chordY = THREE.MathUtils.lerp(a.y, b.y, t) - ROUTE_RIBBON_LIFT_M
+        path.push(new THREE.Vector3(x, sampleGroundY(x, z, chordY), z))
+      }
+    }
     // A flat, glowing ribbon rather than a thin wire: reference perception
     // HUDs draw the planned path as a road-width band on the ground, not a
     // 1px line lost against a metre-scale rock field. Each segment gets its
     // own perpendicular (cross of travel direction with world-up), so a
     // sharp turn seams rather than mitres -- fine at this width.
-    const RIBBON_HALF_WIDTH_M = 0.9
+    // Two attributes drive the look: `across` (-1..1 edge-to-edge) lets the
+    // shader fade the corridor's rim and burn its two rails, and `along`
+    // (metres travelled) carries the energy pulse down the path at a real
+    // speed rather than a per-vertex-index one, so pulse spacing stays
+    // constant whether waypoints are 2 m or 20 m apart.
     const ribbonVerts: number[] = []
+    const ribbonAcross: number[] = []
+    const ribbonAlong: number[] = []
     const up = new THREE.Vector3(0, 1, 0)
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i]
-      const b = points[i + 1]
+    let travelled = 0
+    const distances: number[] = [0]
+    for (let i = 1; i < path.length; i++) {
+      travelled += path[i].distanceTo(path[i - 1])
+      distances.push(travelled)
+    }
+    const totalLength = travelled
+
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i]
+      const b = path[i + 1]
       const dir = new THREE.Vector3().subVectors(b, a)
       if (dir.lengthSq() < 1e-6) continue
       dir.normalize()
-      const perp = new THREE.Vector3().crossVectors(dir, up).normalize().multiplyScalar(RIBBON_HALF_WIDTH_M)
-      const aL = new THREE.Vector3().addVectors(a, perp)
-      const aR = new THREE.Vector3().subVectors(a, perp)
-      const bL = new THREE.Vector3().addVectors(b, perp)
-      const bR = new THREE.Vector3().subVectors(b, perp)
+      const perp = new THREE.Vector3()
+        .crossVectors(dir, up)
+        .normalize()
+        .multiplyScalar(ROUTE_RIBBON_HALF_WIDTH_M)
+      // Each rail is re-sampled at its OWN offset position rather than
+      // inheriting the centreline's height. Across any cross-slope the two
+      // edges sit at different elevations, and holding both at the centre
+      // height tips the band out of the hillside -- one rail buried, the
+      // other standing off the ground on a visible skirt. Sampling per
+      // corner banks the ribbon into the slope instead.
+      const edge = (base: THREE.Vector3, sign: 1 | -1) => {
+        const x = base.x + perp.x * sign
+        const z = base.z + perp.z * sign
+        return new THREE.Vector3(x, sampleGroundY(x, z, base.y - ROUTE_RIBBON_LIFT_M), z)
+      }
+      const aL = edge(a, 1)
+      const aR = edge(a, -1)
+      const bL = edge(b, 1)
+      const bR = edge(b, -1)
+      const da = distances[i]
+      const db = distances[i + 1]
       ribbonVerts.push(
         aL.x, aL.y, aL.z, aR.x, aR.y, aR.z, bR.x, bR.y, bR.z,
         aL.x, aL.y, aL.z, bR.x, bR.y, bR.z, bL.x, bL.y, bL.z,
       )
+      ribbonAcross.push(1, -1, -1, 1, -1, 1)
+      ribbonAlong.push(da, da, db, da, db, db)
     }
     const ribbonGeometry = new THREE.BufferGeometry()
     ribbonGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ribbonVerts), 3))
-    ribbonGeometry.computeVertexNormals()
-    routeGroup.add(
-      new THREE.Mesh(
-        ribbonGeometry,
-        new THREE.MeshBasicMaterial({
-          color: 0x39ff6a,
-          transparent: true,
-          opacity: 0.5,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
-      ),
-    )
-    const centerlinePoints = points.map((p) => new THREE.Vector3(p.x, p.y + 0.12, p.z))
-    const centerline = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(centerlinePoints),
-      new THREE.LineDashedMaterial({ color: 0xd6ffde, dashSize: 3, gapSize: 2 }),
-    )
-    centerline.computeLineDistances()
-    routeGroup.add(centerline)
-    // res * 2.5 = 12.5 m radius, a 25 m ball -- fine as a landmark against a
-    // 2.5 km overview, but the scene now also renders 0.3-2 m rocks and a
-    // LiDAR cloud at metre scale, and up close this dwarfed all of it. res
-    // * 0.6 = 3 m radius still reads clearly from orbit while sitting only
-    // a little larger than the rover itself at ground level.
-    const marker = (p: THREE.Vector3, color: number) =>
-      new THREE.Mesh(
+    ribbonGeometry.setAttribute('across', new THREE.BufferAttribute(new Float32Array(ribbonAcross), 1))
+    ribbonGeometry.setAttribute('along', new THREE.BufferAttribute(new Float32Array(ribbonAlong), 1))
+
+    // Hand-written shader rather than a stack of meshes: the rails, the
+    // scanline hatching, the travelling pulse and the edge falloff are all
+    // functions of the same two attributes, so one draw call does what half
+    // a dozen overlaid ribbons would have.
+    const ribbonMaterial = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uColor: { value: new THREE.Color(0x36f5c8) },
+        uRailColor: { value: new THREE.Color(0xaefff0) },
+        uProgress: { value: -1 },
+        uTotal: { value: Math.max(totalLength, 1e-3) },
+      },
+      vertexShader: `
+        attribute float across;
+        attribute float along;
+        varying float vAcross;
+        varying float vAlong;
+        void main() {
+          vAcross = across;
+          vAlong = along;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform vec3 uColor;
+        uniform vec3 uRailColor;
+        uniform float uProgress;
+        uniform float uTotal;
+        varying float vAcross;
+        varying float vAlong;
+
+        void main() {
+          float edge = abs(vAcross);
+
+          // Two bright rails at the corridor edges, a dim floor between.
+          float rail = smoothstep(0.72, 0.98, edge) * (1.0 - smoothstep(0.98, 1.0, edge));
+          float floorFill = (1.0 - smoothstep(0.0, 0.95, edge)) * 0.16;
+
+          // Rungs every 3 m: a surveyed corridor, not a painted stripe.
+          float rung = smoothstep(0.86, 1.0, sin(vAlong * 2.094) * 0.5 + 0.5) * 0.22;
+
+          // Energy pulses running toward the goal at 9 m/s.
+          float pulse = fract((vAlong - uTime * 9.0) / 14.0);
+          float pulseGlow = pow(1.0 - pulse, 8.0) * 0.85;
+
+          // Everything behind the rover dims to a surveyed-but-driven trail,
+          // so the path reads as progress rather than decoration. uProgress
+          // < 0 means "not driving" and leaves the whole route lit.
+          float driven = uProgress < 0.0 ? 0.0 : step(vAlong, uProgress);
+          float wake = 1.0 - driven * 0.62;
+
+          float intensity = (rail * 1.15 + floorFill + rung + pulseGlow) * wake;
+          vec3 color = mix(uColor, uRailColor, rail * 0.75 + pulseGlow * 0.5);
+
+          // Fade the last centimetre of the rim so the band has no hard
+          // sawtooth edge against the regolith.
+          float alpha = intensity * (1.0 - smoothstep(0.97, 1.0, edge));
+          if (alpha < 0.01) discard;
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
+    })
+    const ribbon = new THREE.Mesh(ribbonGeometry, ribbonMaterial)
+    // Drawn after the terrain and the rocks so the additive glow lands on
+    // top of them rather than being sorted behind whatever it crosses.
+    ribbon.renderOrder = 3
+    routeGroup.add(ribbon)
+    routeRibbonRef.current = { material: ribbonMaterial, distances, totalLength }
+    // Endpoint markers. A solid ball works from orbit and fails completely on
+    // the surface: the start sits exactly where the rover -- and therefore the
+    // FPS eye -- begins, so at 3 m radius against a 3.2 m eye height it filled
+    // the screen with flat colour on the first frame of every drive. On the
+    // ground these are drawn instead as a flat ring painted on the regolith,
+    // which is what a landing/target marker looks like from a rover's own
+    // camera and cannot swallow the view however close you stand to it.
+    const onSurface = cameraMode === 'fps'
+    const marker = (p: THREE.Vector3, color: number) => {
+      if (onSurface) {
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(res * 0.34, res * 0.5, 40),
+          new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.85,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          }),
+        )
+        // RingGeometry is built in the XY plane; lay it flat on the ground.
+        ring.rotation.x = -Math.PI / 2
+        ring.position.set(p.x, p.y + ROUTE_RIBBON_LIFT_M, p.z)
+        ring.renderOrder = 4
+        return ring
+      }
+      return new THREE.Mesh(
         new THREE.SphereGeometry(res * 0.6, 12, 12),
         new THREE.MeshBasicMaterial({ color }),
       ).translateX(p.x).translateY(p.y).translateZ(p.z)
+    }
     routeGroup.add(marker(points[0], 0x2ee59d))
     routeGroup.add(marker(points[points.length - 1], 0xff5252))
   }, [waypoints, exaggeration, cameraMode, status])
 
   // ── 3D Camera Mode (FPS Surface View vs Orbit Overview) ─────────────────────
   const fpsAngles = useRef({ yaw: 0.35, pitch: 0.02 })
+  /**
+   * Set once the driver drags the view in FPS mode. From then on the camera
+   * effect below moves the eye with the rover but leaves the AIM alone.
+   *
+   * Without this the two fought each other and the driver always lost: the
+   * effect re-runs on every activeWaypoint/roverFraction change -- about 20
+   * times a second during playback -- and each run ended in a camera.lookAt()
+   * back down the terrain gradient. Dragging while parked worked, because
+   * nothing re-ran; dragging while driving appeared to do nothing at all,
+   * since the next tick (~50 ms later) overwrote it. Reset when the camera
+   * mode is re-entered or a new route is loaded, so the automatic framing
+   * still gets to introduce each drive.
+   */
+  const fpsLookOwnedByUser = useRef(false)
 
   useEffect(() => {
     const state = sceneRef.current
@@ -2836,12 +3085,33 @@ export default function TerrainCanvas3D({
         : altM
     const targetWorldY = targetAltM - minM + 1.6
 
+    if (fpsLookOwnedByUser.current) {
+      // The driver is aiming. Keep the eye travelling with the rover, but
+      // re-apply THEIR angles instead of the gradient-derived ones.
+      const { yaw: heldYaw, pitch: heldPitch } = fpsAngles.current
+      const dir = new THREE.Vector3(
+        Math.sin(heldYaw) * Math.cos(heldPitch),
+        Math.sin(heldPitch),
+        -Math.cos(heldYaw) * Math.cos(heldPitch),
+      )
+      camera.lookAt(camera.position.clone().add(dir))
+      camera.updateProjectionMatrix()
+      return
+    }
+
     camera.lookAt(targetWorldX, targetWorldY, targetWorldZ)
     camera.updateProjectionMatrix()
 
     const forward = new THREE.Vector3(targetWorldX - rx, targetWorldY - ry, targetWorldZ - rz).normalize()
     fpsAngles.current = { yaw, pitch: Math.asin(THREE.MathUtils.clamp(forward.y, -1, 1)) }
   }, [activeWaypoint, roverFraction, cameraMode, waypoints, status])
+
+  // A fresh drive, or a return to first person, gets the automatic framing
+  // back -- otherwise one drag early in a session would leave every later
+  // route staring off at whatever the driver last looked at.
+  useEffect(() => {
+    fpsLookOwnedByUser.current = false
+  }, [cameraMode, waypoints])
 
   // ── Orbit camera setup ───────────────────────────────────────────────────────
   // Deliberately NOT keyed on activeWaypoint/roverFraction: this used to share
@@ -2921,6 +3191,11 @@ export default function TerrainCanvas3D({
       const dy = e.clientY - startY
       startX = e.clientX
       startY = e.clientY
+
+      // Any real drag hands the aim to the driver for the rest of this
+      // route. A stationary click (dx = dy = 0) must not, or simply
+      // clicking to place a waypoint would freeze the automatic framing.
+      if (dx !== 0 || dy !== 0) fpsLookOwnedByUser.current = true
 
       fpsAngles.current.yaw -= dx * 0.003
       fpsAngles.current.pitch = THREE.MathUtils.clamp(
@@ -3109,6 +3384,33 @@ export default function TerrainCanvas3D({
             <Icon name="map" className="cam-icon" />
             <span>Orbit</span>
           </button>
+
+          {canFullscreen && onToggleFullscreen && (
+            <>
+              {/* Divider: fullscreen changes the viewport, not the camera, so
+                  it should not read as a third mutually-exclusive mode. */}
+              <span className="terrain3d-cam-divider" aria-hidden="true" />
+              <button
+                type="button"
+                className="terrain3d-cam-btn terrain3d-cam-btn--icon"
+                aria-pressed={fullscreen}
+                onClick={onToggleFullscreen}
+                title={
+                  fullscreen
+                    ? 'Exit fullscreen (Esc)'
+                    : 'Fill the screen with the 3-D view'
+                }
+              >
+                <Icon
+                  name={fullscreen ? 'fullscreenexit' : 'fullscreen'}
+                  className="cam-icon"
+                />
+                <span className="lp-visually-hidden">
+                  {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                </span>
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
