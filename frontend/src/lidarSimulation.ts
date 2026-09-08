@@ -589,6 +589,23 @@ const FIXED_BOULDER_CLUSTER: ReadonlyArray<{
   { x_m: -2.6, z_m: 39.2, diameter_m: 1.2, seed: 0x4f66 },
   { x_m: 12.8, z_m: 21.4, diameter_m: 0.9, seed: 0x4f67 },
   { x_m: -14.1, z_m: 34.9, diameter_m: 0.7, seed: 0x4f68 },
+
+  // South-east scatter: a looser field with a broader size mix than the
+  // compact gardens, so the Apollo samples do not read as one repeated row
+  // of props when orbiting or approaching in first person.
+  { x_m: 38.5, z_m: -31.4, diameter_m: 4.6, seed: 0x4f71 },
+  { x_m: 45.1, z_m: -27.8, diameter_m: 3.5, seed: 0x4f72 },
+  { x_m: 32.8, z_m: -24.6, diameter_m: 2.8, seed: 0x4f73 },
+  { x_m: 51.9, z_m: -34.2, diameter_m: 2.3, seed: 0x4f74 },
+  { x_m: 40.7, z_m: -20.1, diameter_m: 1.9, seed: 0x4f75 },
+  { x_m: 29.4, z_m: -37.6, diameter_m: 1.6, seed: 0x4f76 },
+  { x_m: 55.6, z_m: -23.9, diameter_m: 1.4, seed: 0x4f77 },
+  { x_m: 35.4, z_m: -17.8, diameter_m: 1.2, seed: 0x4f78 },
+  { x_m: 47.6, z_m: -18.9, diameter_m: 1.0, seed: 0x4f79 },
+  { x_m: 26.1, z_m: -30.2, diameter_m: 0.9, seed: 0x4f7a },
+  { x_m: 59.4, z_m: -31.1, diameter_m: 0.8, seed: 0x4f7b },
+  { x_m: 42.3, z_m: -39.7, diameter_m: 0.7, seed: 0x4f7c },
+  { x_m: 31.2, z_m: -16.5, diameter_m: 0.6, seed: 0x4f7d },
 ]
 
 export function generateFixedBoulderCluster(anchorX: number, anchorZ: number): RockDescriptor[] {

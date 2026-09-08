@@ -107,8 +107,8 @@ describe('generateFixedBoulderCluster', () => {
     const movedAnchor = generateFixedBoulderCluster(130, -15)
 
     expect(first).toEqual(later)
-    expect(first).toHaveLength(47)
-    expect(first.filter((rock) => rock.radiusX * 2 >= 3.8)).toHaveLength(11)
+    expect(first).toHaveLength(60)
+    expect(first.filter((rock) => rock.radiusX * 2 >= 3.8)).toHaveLength(12)
     for (let index = 0; index < first.length; index++) {
       expect(movedAnchor[index].x - first[index].x).toBeCloseTo(30)
       expect(movedAnchor[index].z - first[index].z).toBeCloseTo(25)
