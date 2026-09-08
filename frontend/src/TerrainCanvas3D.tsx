@@ -597,9 +597,6 @@ const NASA_ROCK_GLB_URLS = [
   '/models/nasa_rocks_optimized/apollo_lunar_sample_702950.glb',
 ]
 
-/** Textured scans are hero assets; the rest retain the fast low-poly proxy. */
-const SCANNED_ROCK_RENDER_LIMIT = 12
-
 function normaliseRockVisualGeometry(geometry: THREE.BufferGeometry, transform: THREE.Matrix4): THREE.BufferGeometry | null {
   const normalised = geometry.clone()
   normalised.applyMatrix4(transform)
@@ -2784,7 +2781,6 @@ export default function TerrainCanvas3D({
           fixedRockAnchorRef.current.x,
           fixedRockAnchorRef.current.z,
         )
-        const visualStride = Math.max(1, Math.ceil(rockDescriptors.length / SCANNED_ROCK_RENDER_LIMIT))
         const rockUp = new THREE.Vector3(0, 1, 0)
         for (const [rockIndex, descriptor] of rockDescriptors.entries()) {
           const groundY = sampleTerrainHeight(terrain, descriptor.x, descriptor.z)
@@ -2818,9 +2814,9 @@ export default function TerrainCanvas3D({
           proxy.rotateX(descriptor.tiltX)
           proxy.rotateZ(descriptor.tiltZ)
           proxy.userData.lidarRockId = descriptor.id
-          const visualTemplate = rockIndex % visualStride === 0
-            ? visualTemplates[Math.floor(rockIndex / visualStride) % visualTemplates.length]
-            : undefined
+          // Every visible boulder uses a scanned Apollo asset. The low-poly
+          // mesh remains only as the invisible LiDAR collision proxy.
+          const visualTemplate = visualTemplates[rockIndex % visualTemplates.length]
           if (visualTemplate) {
             proxy.visible = false
             const visual = new THREE.Mesh(visualTemplate.geometry, visualTemplate.material)
