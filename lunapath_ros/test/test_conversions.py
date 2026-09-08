@@ -209,6 +209,8 @@ def test_all_zero_covariance_is_unknown_not_certain():
     """An all-zero 6x6 is what most publishers emit when nothing filled it
     in; only a NEGATIVE variance used to be caught, so the common case was
     laundered into perfect confidence. (Round 3 review, M-5.)"""
+    from lunapath_ros.conversions import odometry_to_pose_estimate
+
     message = _odometry(var_x=0.0, var_y=0.0, var_yaw=0.0)
     with pytest.raises(ValueError, match="covariance"):
         odometry_to_pose_estimate(message, source="visual_odometry",

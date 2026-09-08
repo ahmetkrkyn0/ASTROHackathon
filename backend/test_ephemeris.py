@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 import numpy as np
 import pytest
 
@@ -252,6 +255,42 @@ def test_utc_to_et_without_the_fix_would_have_failed_cold(monkeypatch):
     monkeypatch.setattr(spiceypy, "str2et", _fake_str2et)
     with pytest.raises(RuntimeError, match="NOLEAPSECONDS"):
         spiceypy.str2et("2026-08-30T00:00:00")
+
+
+def test_utc_to_et_serializes_concurrent_spice_calls(monkeypatch):
+    """CSPICE has one process-global error stack; it is not thread-safe."""
+    import spiceypy
+
+    from app import ephemeris
+
+    active = 0
+    max_active = 0
+    active_lock = threading.Lock()
+
+    monkeypatch.setattr(spiceypy, "furnsh", lambda _path: None)
+    monkeypatch.setattr(spiceypy, "ktotal", lambda _category: 1)
+
+    def _fake_str2et(_utc):
+        nonlocal active, max_active
+        with active_lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.02)
+        with active_lock:
+            active -= 1
+        return 12345.0
+
+    monkeypatch.setattr(spiceypy, "str2et", _fake_str2et)
+    ephemeris._FURNISHED.clear()
+    try:
+        threads = [threading.Thread(target=ephemeris.utc_to_et, args=("2026-08-30T00:00:00",)) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert max_active == 1
+    finally:
+        ephemeris._FURNISHED.clear()
 
 
 # ── body-parameterised ephemeris (A4: the Earth is the same call as the Sun) ─

@@ -1,11 +1,19 @@
 .lp-time-card {
+  width: 100%;
+  min-width: 0;
   border: 1px solid rgba(139, 148, 166, 0.22);
   border-radius: var(--radius);
   padding: 10px 14px;
   background: rgba(12, 16, 24, 0.6);
 }
 
-.lp-time-row { display: flex; align-items: center; gap: 10px; }
+.lp-time-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
 
 .lp-time-play,
 .lp-time-plan {
@@ -21,7 +29,11 @@
 .lp-time-play:disabled,
 .lp-time-plan:disabled { opacity: 0.45; cursor: default; }
 
-.lp-time-slider { flex: 1; accent-color: var(--cyan); }
+.lp-time-slider {
+  flex: 1 1 160px;
+  min-width: 0;
+  accent-color: var(--cyan);
+}
 
 .lp-time-clock {
   font-size: var(--fs-body);

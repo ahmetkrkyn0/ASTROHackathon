@@ -5613,6 +5613,25 @@ select {
   overflow: hidden;
 }
 
+/* FeatureHost intentionally adds no wrapper.  The playback host therefore
+   sits directly in this strip, inside .lp-status-right.  Without an explicit
+   width the wrapper takes the playback's max-content width; justify-content:
+   flex-end then moves its first controls past the LEFT edge of the viewport.
+   Give it the available strip width instead, so the flexible scrubber yields
+   space before any visible control can be clipped. */
+.lp-status-right {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.lp-status-right > .lp-playback-dock {
+  width: 100%;
+  min-width: 0;
+}
+
 @media (max-width: 900px) {
   /* Below this there is no room for two columns: the photograph would be a
      sliver and the specifications a column of wrapped single words. This block

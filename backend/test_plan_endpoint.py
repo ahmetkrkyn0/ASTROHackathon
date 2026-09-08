@@ -152,6 +152,33 @@ def test_weights_default_accepted():
     check(r.status_code in (200, 404), "no weights field is accepted")
 
 
+def test_plan_rejects_preknown_local_obstacles():
+    """Global planning must not accept a browser-provided rock map."""
+    _inject_grids(_make_grids())
+    r = client.post("/api/plan", json={
+        "start": {"row": 0, "col": 0},
+        "goal": {"row": 2, "col": 2},
+        "obstacle_cells": [{"row": 1, "col": 1}],
+    })
+    check(r.status_code == 422, "pre-known local obstacles are rejected by /api/plan")
+
+
+def test_replan_accepts_only_observed_lidar_obstacles():
+    _inject_grids(_make_grids())
+    r = client.post("/api/replan", json={
+        "current": {"row": 0, "col": 0},
+        "goal": {"row": 4, "col": 4},
+        "force": True,
+        "observed_obstacles": [
+            {"row": 1, "col": 1, "radius_m": 1.0, "confidence": 0.9, "observed_at_s": 2.0, "source": "lidar"},
+            {"row": 2, "col": 2, "radius_m": 1.0, "confidence": 0.2, "observed_at_s": 2.0, "source": "lidar"},
+        ],
+    })
+    check(r.status_code == 200, "POST /api/replan accepts LiDAR observations")
+    observed = r.json()["observed_obstacles"]
+    check(observed["received"] == 2 and observed["accepted"] == 1, "replan applies only confident observations")
+
+
 # ── Coordinate input: pixel vs geo ────────────────────────────────────────────
 
 def test_pixel_input_accepted():
@@ -382,6 +409,8 @@ if __name__ == "__main__":
         test_plan_503_when_no_grids,
         test_weights_out_of_range,
         test_weights_default_accepted,
+        test_plan_rejects_preknown_local_obstacles,
+        test_replan_accepts_only_observed_lidar_obstacles,
         test_pixel_input_accepted,
         test_geo_input_accepted,
         test_geo_out_of_range_returns_422,

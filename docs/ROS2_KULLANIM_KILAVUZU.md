@@ -20,7 +20,7 @@ FastAPI kabuğu (`backend/app/main.py`) zaten çalışıyordu ve kalkmadı — h
 
 ## Bu makinede kurulum durumu
 
-WSL2 Ubuntu-24.04 içinde ROS 2 Jazzy zaten kurulu (`grid_map`, `navigation2`, `rosbag2` dahil). Repo Windows'ta geliştiriliyor, WSL'den `/mnt/c/Users/Berke/TUAASTROHackathon` altında görünüyor. Python çekirdeği (FastAPI + A*) Windows'ta kalıyor — yalnızca ROS düğümleri Linux tarafında (WSL) koşuyor.
+WSL2 Ubuntu-24.04 içinde ROS 2 Jazzy zaten kurulu (`grid_map`, `navigation2`, `rosbag2` dahil). Repo Windows'ta geliştiriliyor, WSL'den `/mnt/c/Users/Berke/ASTROHackathon` altında görünüyor. Python çekirdeği (FastAPI + A*) Windows'ta kalıyor — yalnızca ROS düğümleri Linux tarafında (WSL) koşuyor.
 
 ---
 
@@ -29,22 +29,78 @@ WSL2 Ubuntu-24.04 içinde ROS 2 Jazzy zaten kurulu (`grid_map`, `navigation2`, `
 Bir WSL terminali aç (`wsl -d Ubuntu`):
 
 ```bash
-cd /mnt/c/Users/Berke/TUAASTROHackathon
+cd /mnt/c/Users/Berke/ASTROHackathon
 source /opt/ros/jazzy/setup.bash
 colcon build --packages-select lunapath_msgs lunapath_ros
 source install/setup.bash
 ros2 launch lunapath_ros lunapath.launch.py
 ```
 
-Bu tek komut üç düğümü birden ayağa kaldırıyor:
+Bu tek komut planlama, izleme ve güvenlik düğümlerini ayağa kaldırır. Yerel
+hareket denetleyicisi de başlar ancak varsayılan olarak hareket komutu vermez:
 
 | Düğüm | Ne yapar |
 |---|---|
 | `map_to_moon_map` | `map` ↔ `moon_map` birim (identity) transform'u — RViz'in `map`'i sabit çerçeve olarak kullanabilmesi için |
 | `lunapath_grid_publisher` | Arazi katmanlarını (`elevation`, `slope`, `aspect`, `temperature`, `illumination`, `traversability`, `cost`) `/lunapath/grid_map`'te latched olarak yayınlar |
 | `lunapath_planner` | `/plan_traverse` action server'ı — rota isteklerini karşılar |
+| `lunapath_pose_monitor` | Odometriyi aktif koridora karşı denetler ve gerektiğinde `ReplanTrigger` yayınlar |
+| `lunapath_safety_monitor` | Canlı telemetriden formal güvenlik ihlallerini `ReplanTrigger` olarak yayınlar |
+| `lunapath_local_controller` | Global yolu izler, `LOCAL_DETOUR` yoluna geçici öncelik verir; varsayılan kapalıdır ve replan tetikleyicisinde durur |
+| `lunapath_lidar_perception` | `PointCloud2` dönüşlerini TF ile rover/map çerçevelerine taşır, anonim `ObservedObstacles` kümeleri yayınlar |
+| `lunapath_local_planner` | Koridor, odometri ve taze LiDAR gözleminden `FOLLOW`, `LOCAL_DETOUR` veya `STOP_AND_REPLAN` üretir |
+| `lunapath_replan_coordinator` | Aktif görev + güncel odometri + taze LiDAR gözlemiyle `/plan_traverse` action'ını yeniden çağırır |
+| `lunapath_execution_monitor` | Aktif planın hedef değerlerini ölçülen odometri ve BatteryState ile `execution_status` üzerinde karşılaştırır |
 
 `PYTHONPATH`'i elle `export` etmene gerek yok — launch dosyası `backend/`'i kendi konumundan otomatik buluyor.
+
+### ROS paket testleri
+
+`lunapath_ros` bir ROS kabuğu, planlama çekirdeği ise `backend/app/` altında olduğu için test koşumunda backend dizini açıkça eklenir. Launch sırasında buna gerek yoktur.
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cd /mnt/c/Users/Berke/ASTROHackathon
+colcon build --packages-select lunapath_msgs lunapath_ros
+source install/setup.bash
+PYTHONPATH="$PWD/backend:$PYTHONPATH" colcon test --packages-select lunapath_msgs lunapath_ros
+colcon test-result --verbose
+```
+
+### Yerel detour denetleyicisini etkinleştirme
+
+Bu düğüm gerçek motor sürücüsü değildir. `moon_map` çerçevesindeki doğrulanmış
+`global_path` yolunu izler; `lunapath_msgs/LocalPlan` içindeki
+`decision: LOCAL_DETOUR` waypoint'leri geldiğinde onları geçici olarak önceler.
+Varsayılan `false` güvenlik
+ayarını ancak hız çıkışının bir safety/velocity mux üzerinden geçtiği test
+ortamında açın:
+
+```bash
+ros2 launch lunapath_ros lunapath.launch.py \
+  enable_local_controller:=true \
+  odom_topic:=/odometry \
+  local_plan_topic:=/local_plan \
+  cmd_vel_topic:=/lunapath/local_cmd_vel
+```
+
+`STOP_AND_REPLAN`, `STOP_UNCERTAIN`, boş bir rota veya `replan_triggers`
+üzerindeki `continue` dışı herhangi bir öneri anında sıfır `Twist` yayınlar.
+Çerçeve uyuşmazlığında da rota reddedilir. LiDAR algı düğümü varsayılan olarak
+`points` dinler ve `observed_obstacles` yayınlar. Gerçek sensörün bu topic'i
+ve geçerli `sensor_frame → base_link → moon_map` TF zincirini sağlaması gerekir;
+TF yoksa düğüm sessizce engel uydurmaz. `lunapath_local_planner`, yalnız taze
+ve yeter güvenli LiDAR kümelerini aktif koridor üzerinde dener; güvenli bir
+sapma bulamazsa `local_obstacle_blocked_corridor` adlı `ReplanTrigger` yayınlar.
+`lunapath_replan_coordinator`, aktif görevin hedefini ve güncel odometriyi
+kullanarak `PlanTraverse` action'ını yalnız taze LiDAR gözlemleriyle yeniden
+çağırır. Planlayıcı yeni `global_path` ve koridor yayınlamadan sürüş devam etmez.
+
+`lunapath_execution_monitor`, yeni bir plan geldiğinde odometri sayacını ve
+SOC başlangıcını yeniden başlatır. `execution_status`, planlanan mesafe/enerji/
+süre ile ölçülen mesafe, SOC ve SOC'den türetilen tüketimi birlikte taşır;
+telemetri eksikse bunu `status` alanında açıkça bildirir. Bu yayın gözlemdir;
+plan maliyetini veya sürüş komutunu kendiliğinden değiştirmez.
 
 ---
 

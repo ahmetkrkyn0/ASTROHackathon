@@ -5,6 +5,9 @@ string rover_id
 MissionWeights weights
 builtin_interfaces/Time epoch          # reserved for the 4-D planner; see below
 bool use_start
+# Empty for an initial plan. A replan coordinator may provide only
+# LiDAR-observed obstacles; simulator mesh ids and unseen obstacles are invalid.
+ObservedObstacle[] observed_obstacles
 ---
 # Result -- error codes deliberately match nav2_msgs/action/ComputePathToPose.
 # Verify against the INSTALLED Nav2 (Task 1 Step 2) before committing; Nav2

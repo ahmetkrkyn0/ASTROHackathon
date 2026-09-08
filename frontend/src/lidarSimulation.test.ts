@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import {
+  generateFixedBoulderCluster,
   generatePebbleField,
   generateRockField,
   PEBBLE_TIERS,
@@ -96,6 +97,31 @@ describe('generateRockField', () => {
       expect(rock.burial).toBeLessThanOrEqual(0.46)
       expect(Math.abs(rock.tiltX)).toBeLessThanOrEqual(0.23)
     }
+  })
+})
+
+describe('generateFixedBoulderCluster', () => {
+  it('is a stable, rigidly translated boulder garden with close large rocks', () => {
+    const first = generateFixedBoulderCluster(100, -40)
+    const later = generateFixedBoulderCluster(100, -40)
+    const movedAnchor = generateFixedBoulderCluster(130, -15)
+
+    expect(first).toEqual(later)
+    expect(first).toHaveLength(47)
+    expect(first.filter((rock) => rock.radiusX * 2 >= 3.8)).toHaveLength(11)
+    for (let index = 0; index < first.length; index++) {
+      expect(movedAnchor[index].x - first[index].x).toBeCloseTo(30)
+      expect(movedAnchor[index].z - first[index].z).toBeCloseTo(25)
+    }
+
+    const large = first.slice(0, 3)
+    const nearestPair = Math.min(
+      ...large.flatMap((rock, index) =>
+        large.slice(index + 1).map((other) => Math.hypot(rock.x - other.x, rock.z - other.z)),
+      ),
+    )
+    expect(nearestPair).toBeLessThan(6)
+    expect(Math.max(...first.map((rock) => rock.x)) - Math.min(...first.map((rock) => rock.x))).toBeGreaterThan(130)
   })
 })
 

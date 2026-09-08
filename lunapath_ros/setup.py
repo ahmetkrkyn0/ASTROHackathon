@@ -25,6 +25,11 @@ setup(
             "grid_publisher = lunapath_ros.grid_publisher:main",
             "pose_monitor = lunapath_ros.pose_monitor:main",
             "safety_monitor = lunapath_ros.safety_monitor_node:main",
+            "local_controller = lunapath_ros.local_controller_node:main",
+            "lidar_perception = lunapath_ros.lidar_perception_node:main",
+            "local_planner = lunapath_ros.local_planner_node:main",
+            "replan_coordinator = lunapath_ros.replan_coordinator_node:main",
+            "execution_monitor = lunapath_ros.execution_monitor_node:main",
         ],
     },
 )
