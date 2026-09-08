@@ -3,18 +3,14 @@ import { riskToDashArray, riskToHex } from '../../colormap'
 import './map-legend.css'
 
 /**
- * Scale and risk key, on the map rather than under it.
+ * Scale and risk key, in the status strip under the map.
  *
- * Both of these describe what the map is showing -- how far a pixel is, and
- * what a line's colour and dash mean -- so they belong on the thing they
- * describe. In the status strip they were a band of chrome the eye had to
- * leave the terrain to read, and they took vertical room from the map to do
- * it.
- *
- * Bottom centre, which is the one edge free in both renderers: the 3-D scene
- * already holds all four corners (surface telemetry, the LiDAR readout, the
- * camera toggle and the photo drape), and a scale bar that hid behind one of
- * them in 3-D and not in 2-D would be worse than either place.
+ * This used to float over the terrain, on the argument that a key belongs on
+ * the thing it describes. In practice it is a wide band -- a scale bar plus
+ * four risk levels -- and the map is what the operator actually works in: in
+ * 2-D it sat across the bottom of the plate, covering the ground start/goal
+ * markers get picked on. Reading it now costs a glance down; leaving it on
+ * the map cost pixels that carry data.
  *
  * The dash pattern is in the key as well as the colour, because the map
  * encodes risk in both and a key showing only colour would document half of
@@ -32,7 +28,7 @@ export function MapLegend() {
   const focusTelemetry = useFocusTelemetry()
 
   return (
-    <div className="map-overlay map-overlay-bottom-center lp-map-key">
+    <div className="lp-map-key">
       <div className="lp-map-key-scale">
         <span className="lp-map-key-rule" aria-hidden="true" />
         <span className="lp-map-key-copy">
