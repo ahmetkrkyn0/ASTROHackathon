@@ -4692,7 +4692,47 @@ select {
   cursor: not-allowed;
 }
 
-/* ── Minimizable Telemetry HUD Overlay on Canvas ── */
+/* ── Minimizable Telemetry HUD Overlay on Canvas ──
+   Translucent on purpose: this sits on the map's top-left corner, which on a
+   north-up plate carries real cells, so the terrain has to stay visible
+   through it. The blur is what makes 40% affordable -- against a bare wash
+   the regolith's own speckle runs straight through the digits and the
+   numbers stop being readable at a glance. Blurred, the ground reads as
+   depth behind the panel instead of noise inside it.
+
+   The label and value colours are high-contrast against a dark ground, and
+   lunar terrain is mid-grey at its brightest, so the text still clears WCAG
+   AA over the worst case this can sit on. */
+.lp-hud-card,
+.lp-hud-minimized {
+  /* No wash at all: the panel is the blur. A frosted pane separates the
+     readout from the terrain without tinting any of it away, so the ground
+     under the HUD is the same ground as beside it -- just out of focus.
+     Contrast for the digits comes from the text shadow below rather than
+     from a dark plate behind them. */
+  background: transparent;
+  backdrop-filter: blur(14px) saturate(0.9);
+  -webkit-backdrop-filter: blur(14px) saturate(0.9);
+}
+
+/* A blurred pane makes its own contrast; a fully transparent one does not.
+   These shadows are what keep the numbers legible where the terrain under
+   them is bright regolith rather than crater shadow. */
+.lp-hud-card,
+.lp-hud-minimized {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.65);
+}
+
+/* Where the browser cannot blur there is nothing separating the panel from
+   the map, so fall back to an opaque-enough ground -- transparent text over
+   a photograph is not a readable panel. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lp-hud-card,
+  .lp-hud-minimized {
+    background: rgba(8, 11, 18, 0.82);
+  }
+}
+
 .lp-hud-card {
   min-width: 232px;
   max-width: 262px;
@@ -4760,13 +4800,18 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(8, 11, 18, 0.85);
+  /* Background deliberately absent -- the shared rule above owns it. It used
+     to be re-declared here at 0.85 and, coming later in the file, that won
+     on source order and quietly undid the translucency. */
   border: 1px solid rgba(29, 36, 50, 0.4);
   border-radius: var(--radius);
   cursor: pointer;
   box-shadow: var(--shadow-pop);
   transition: all 0.2s ease;
   user-select: none;
+  /* One line. The chip is only as wide as its contents, so without this the
+     altitude broke between its number and its unit ("+818.1" / "m"). */
+  white-space: nowrap;
 }
 
 .lp-hud-minimized:hover {
