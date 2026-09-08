@@ -22,6 +22,7 @@ import {
   phaseFromHref,
 } from './shell/phaseUrl'
 import { Icon } from './components/Fleet/SpecIcons'
+import { useFullscreen } from './shell/useFullscreen'
 import MapCanvas, { type ClickMode, DOWNSAMPLE, type MapViewMode } from './MapCanvas'
 import { generateRockField, type RockDescriptor } from './lidarSimulation'
 import SpaceBackdrop from './SpaceBackdrop'
@@ -151,6 +152,12 @@ export default function App() {
   // Rail and HUD collapse states
   const [hudOpen, setHudOpen] = useState(true)
   const [hudMinimized, setHudMinimized] = useState(false)
+  // The whole stage goes fullscreen, not just the canvas: the telemetry
+  // HUD, LiDAR panel, camera switch and photo-drape controls are all
+  // absolutely positioned children of it, so taking the canvas alone
+  // would leave the driver in fullscreen with nothing to drive with.
+  const mapStageRef = useRef<HTMLDivElement>(null)
+  const fullscreen = useFullscreen(mapStageRef)
   const [systemsOpen, setSystemsOpen] = useState(false)
 
   // Raster layers
@@ -1043,7 +1050,10 @@ export default function App() {
 
           {/* ── CENTER STAGE: 2D/3D TERRAIN WORKBENCH ───────────────────────── */}
           <section className="center-stage">
-            <div className="map-stage">
+            <div
+              ref={mapStageRef}
+              className={`map-stage${fullscreen.active ? ' is-fullscreen' : ''}`}
+            >
               {/* Top-Left: Collapsible & Minimizable Surface Telemetry HUD */}
               {hudOpen && (
                 hudMinimized ? (
@@ -1134,6 +1144,9 @@ export default function App() {
                     obstacleRocks={obstacleRocks}
                     clickMode={clickMode}
                     onCellClick={handleCellClick}
+                    fullscreen={fullscreen.active}
+                    canFullscreen={fullscreen.supported}
+                    onToggleFullscreen={fullscreen.toggle}
                     exaggeration={null}
                     sliceIndex={sliceIndex}
                     photo={photoDrape}

@@ -1543,6 +1543,34 @@ select {
   overflow: hidden;
 }
 
+/* Fullscreen: .map-stage is the element handed to requestFullscreen, so it
+   becomes the viewport itself. The browser paints the fullscreen backdrop
+   white by default, which flashes through the rounded corners of the canvas
+   shell -- hence the explicit ground. The padding that insets the map inside
+   the console frame is spent here on screen the driver asked for, so it goes.
+
+   The overlays are already absolutely positioned against this element, so
+   they follow it into fullscreen with no further work; they only need their
+   insets grown so they do not crowd the edge of a much larger stage. */
+.map-stage.is-fullscreen {
+  padding: 0;
+  background: var(--void);
+}
+
+.map-stage.is-fullscreen .map-canvas-shell {
+  border-radius: 0;
+}
+
+.map-stage.is-fullscreen .map-overlay-top-left {
+  top: 32px;
+  left: 32px;
+}
+
+.map-stage.is-fullscreen .map-overlay-bottom-right {
+  right: 32px;
+  bottom: 32px;
+}
+
 .map-canvas-shell {
   width: 100%;
   height: 100%;
@@ -6168,6 +6196,24 @@ select {
 .terrain3d-cam-btn:hover {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* Square, label-less: the two mode buttons beside it are a choice between
+   each other, and an icon-only control reads as the separate action it is. */
+.terrain3d-cam-btn--icon {
+  padding: 6px 9px;
+}
+
+.terrain3d-cam-btn--icon[aria-pressed='true'] {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.terrain3d-cam-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 2px;
+  background: rgba(148, 163, 184, 0.28);
 }
 
 .terrain3d-cam-btn.is-active {
