@@ -55,6 +55,20 @@
   box-shadow: var(--shadow-float);
   padding: 8px;
   z-index: 100;
+  /* The list is longer than the space under the trigger: each overlay carries
+     a name, a description and a caveat, and past the fourth the panel simply
+     ran off the bottom of the window with no way to reach the rest. Cap it
+     against the viewport and let the list scroll instead.
+
+     The trigger sits at top: 68px, so 68 + its own height + a margin is what
+     the panel has to give back -- 108px leaves a clear gap at the bottom
+     edge rather than ending flush against it. */
+  max-height: calc(100vh - 108px);
+  display: flex;
+  flex-direction: column;
+  /* The panel itself does not scroll -- the header stays put and the list
+     below it does. */
+  overflow: hidden;
 }
 
 .lp-analysis-header {
@@ -66,6 +80,46 @@
 .lp-analysis-items {
   display: grid;
   gap: 4px;
+  /* This is the part that scrolls. min-height: 0 is what allows it: a grid
+     item in a flex column refuses to shrink below its content without it,
+     and the panel would grow past its own max-height instead of scrolling.
+
+     Padding on the right keeps the last few pixels of text off the
+     scrollbar where one is drawn. */
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 2px;
+  overscroll-behavior: contain;
+}
+
+/* A thin, dark scrollbar rather than the platform default, which lands as a
+   bright slab against this panel. Firefox takes the standard properties;
+   WebKit needs its own pseudo-elements. */
+.lp-analysis-items {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(199, 205, 219, 0.28) transparent;
+}
+
+.lp-analysis-items::-webkit-scrollbar {
+  width: 8px;
+}
+
+.lp-analysis-items::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.lp-analysis-items::-webkit-scrollbar-thumb {
+  background: rgba(199, 205, 219, 0.22);
+  border-radius: 4px;
+  /* Inset the thumb from the track edge so it reads as a slider in a gutter
+     rather than a bar welded to the panel wall. */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.lp-analysis-items::-webkit-scrollbar-thumb:hover {
+  background: rgba(199, 205, 219, 0.4);
+  background-clip: content-box;
 }
 
 .lp-analysis-item {

@@ -2746,6 +2746,35 @@ select {
   box-shadow: var(--shadow-float);
   padding: 8px;
   z-index: 100;
+  /* Same cap as the analysis panel below it: seven layers in three groups
+     fit a tall window and run off a short one, and a menu whose last entries
+     cannot be reached is a menu missing entries. The trigger sits at
+     top: 24px, so this gives back that plus its height and a margin. */
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(199, 205, 219, 0.28) transparent;
+}
+
+.lp-layer-dropdown-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.lp-layer-dropdown-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.lp-layer-dropdown-panel::-webkit-scrollbar-thumb {
+  background: rgba(199, 205, 219, 0.22);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.lp-layer-dropdown-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(199, 205, 219, 0.4);
+  background-clip: content-box;
 }
 
 .lp-layer-group {
