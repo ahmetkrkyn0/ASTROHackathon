@@ -151,7 +151,9 @@ describe('simulateLidarScan', () => {
     const terrain = flatTerrain(161, 1)
     const rock = new THREE.Mesh(
       new THREE.SphereGeometry(1.5, 16, 12),
-      new THREE.MeshBasicMaterial(),
+      // GLB visuals hide their low-poly LiDAR proxies through the material,
+      // not Object3D.visible. The proxy must remain raycastable.
+      new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
     )
     rock.position.set(0, 1.25, -8)
     rock.userData.lidarRockId = 'test-boulder'

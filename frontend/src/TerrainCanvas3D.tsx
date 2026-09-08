@@ -1383,6 +1383,8 @@ export default function TerrainCanvas3D({
     /** One InstancedMesh per gravel variant; see buildPebbleVariants. */
     pebbleMeshes: THREE.InstancedMesh[]
     rockMaterial: THREE.MeshStandardMaterial
+    /** Draw-invisible but raycastable material used by GLB collision proxies. */
+    lidarProxyMaterial: THREE.MeshBasicMaterial
     rockTexture: THREE.Texture
     roverGroup: THREE.Group
     lidarHead: THREE.Group
@@ -1487,6 +1489,13 @@ export default function TerrainCanvas3D({
     // block carry grain at the same physical scale instead of one looking
     // like sandpaper and the other like a smooth boulder.
     applyTriplanarMapping(rockMaterial, 1.6)
+    // Object3D.visible=false removes a mesh from Three.js raycasts too. The
+    // proxy therefore stays object-visible and only its material is hidden,
+    // so LiDAR can still intersect it when a scanned visual replaces it.
+    const lidarProxyMaterial = new THREE.MeshBasicMaterial({
+      visible: false,
+      side: THREE.DoubleSide,
+    })
     const rockGroup = new THREE.Group()
     scene.add(rockGroup)
 
@@ -1948,6 +1957,7 @@ export default function TerrainCanvas3D({
       lidarRockMeshes: [],
         pebbleMeshes,
         rockMaterial,
+        lidarProxyMaterial,
         rockTexture,
         roverGroup: rover.group,
         lidarHead: rover.lidarHead,
@@ -1982,6 +1992,7 @@ export default function TerrainCanvas3D({
           })
           roverEnvironment.dispose()
           rockMaterial.dispose()
+          lidarProxyMaterial.dispose()
           rockTexture.dispose()
           regolithTexture.dispose()
           solidDotTexture.dispose()
@@ -2798,7 +2809,7 @@ export default function TerrainCanvas3D({
             rockTemplates,
             2,
           )
-          const proxy = new THREE.Mesh(proxyGeometry, state.rockMaterial)
+          const proxy = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(proxyGeometry, state.rockMaterial)
           // Sunk by its own burial fraction rather than a flat 12%: a rock
           // sits IN the regolith it has been gardened into, and how deep
           // depends on how long it has been there, which is what the field
@@ -2818,7 +2829,7 @@ export default function TerrainCanvas3D({
           // mesh remains only as the invisible LiDAR collision proxy.
           const visualTemplate = visualTemplates[rockIndex % visualTemplates.length]
           if (visualTemplate) {
-            proxy.visible = false
+            proxy.material = state.lidarProxyMaterial
             const visual = new THREE.Mesh(visualTemplate.geometry, visualTemplate.material)
             visual.position.copy(proxy.position)
             visual.quaternion.copy(proxy.quaternion)
