@@ -1,0 +1,125 @@
+/* Transport controls inside the 3-D scene, for fullscreen.
+ *
+ * Borrows the camera switch's treatment -- rounded, cyan-edged, blurred over
+ * the terrain -- so the two read as the same layer of scene chrome rather
+ * than one control from the map and one from the page. New rules live here
+ * rather than in App.css, which is legacy global base only.
+ */
+
+.lp-scene-transport {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  /* Above the scene's own overlays (LiDAR at 24) so a wide viewport that
+     brings them close never buries the controls. */
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px;
+  border-radius: 24px;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  background: rgba(7, 13, 30, 0.82);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 15px rgba(56, 189, 248, 0.15);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  /* Wide enough to scrub usefully, never so wide it meets the panels in the
+     bottom corners. Those are the LiDAR readout on the left (330px wide at
+     16px from the edge) and the photo-drape card on the right (from 190px at
+     32px), so the reservation is what they occupy plus a gap either side. */
+  width: min(560px, calc(100% - 640px));
+  min-width: 300px;
+}
+
+.lp-scene-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.16);
+  color: #e8f6ff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.lp-scene-play:hover {
+  background: rgba(56, 189, 248, 0.3);
+  border-color: rgba(56, 189, 248, 0.7);
+}
+
+/* The scrubber takes the slack: it is the only control here whose usefulness
+   scales with the width it gets. */
+.lp-scene-range {
+  flex: 1;
+  min-width: 0;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+.lp-scene-step {
+  flex: none;
+  font-family: var(--font-data);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  color: #cfe9f7;
+  letter-spacing: var(--track-normal);
+}
+
+.lp-scene-scale {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.lp-scene-scale-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #94a3b8;
+  font-family: var(--font-data);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.lp-scene-scale-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lp-scene-scale-btn.is-active {
+  color: #e8f6ff;
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.2);
+}
+
+/* Below this the corner panels leave no room for a 300px bar between them,
+   so the transport stops sharing the row and sits above them instead. The
+   LiDAR card is ~150px tall, hence the lift. */
+@media (max-width: 1240px) {
+  .lp-scene-transport {
+    bottom: 186px;
+    width: min(560px, calc(100% - 32px));
+    min-width: 0;
+  }
+}
+
+/* Narrower still: the step counter goes. The scrubber's own position already
+   says where in the route you are. */
+@media (max-width: 820px) {
+  .lp-scene-step {
+    display: none;
+  }
+}

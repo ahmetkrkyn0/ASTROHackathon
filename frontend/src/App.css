@@ -1571,6 +1571,79 @@ select {
   bottom: 32px;
 }
 
+/* ── 2-D fullscreen: the plate and the route, nothing else ──
+   3-D fullscreen keeps its instruments because a first-person cockpit
+   without them is just a photograph. The 2-D plate is the opposite case: it
+   IS the instrument, and every panel over it hides cells the operator is
+   reading. So here fullscreen means the map alone.
+
+   Everything absolutely positioned inside the stage goes, including the
+   canvas overlay layer that carries the layer picker, the analysis toggles
+   and the risk key. The one exception is the fullscreen button itself --
+   without it the only way back is Esc, and a control that hides itself the
+   moment you use it is a trapdoor. */
+.map-stage.is-2d.is-fullscreen .map-overlay,
+.map-stage.is-2d.is-fullscreen .lp-slot-canvas {
+  display: none;
+}
+
+/* The plate loses its frame: at full screen the border and drop shadow are
+   chrome around a picture the operator asked to see whole.
+
+   `!important` because MapCanvas sets these inline (see the comment on its
+   <canvas>, which also explains why it deliberately avoids the .map-canvas
+   class), and an inline style beats any selector without it. The canvas
+   keeps its own square aspect -- it is a 1:1 grid, and stretching it would
+   make every distance on it wrong along one axis. */
+.map-stage.is-2d.is-fullscreen .map-canvas-shell canvas {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* ── The 2-D fullscreen button ──
+   Top right, where a viewer's own fullscreen control sits. Above the canvas
+   overlay layer (z-index 3) so it survives that layer being hidden, and
+   dimmed until hovered so it does not read as part of the map. */
+.lp-map-fullscreen-btn {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-muted);
+  background: rgba(8, 11, 18, 0.55);
+  border: 1px solid rgba(29, 36, 50, 0.5);
+  border-radius: var(--radius);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.lp-map-fullscreen-btn:hover,
+.lp-map-fullscreen-btn:focus-visible {
+  opacity: 1;
+  color: var(--text);
+  border-color: rgba(79, 216, 240, 0.45);
+}
+
+.lp-map-fullscreen-btn .lp-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* In fullscreen the layer/analysis dock is gone, so the button takes its
+   corner and stands a little clearer of the edge. */
+.map-stage.is-2d.is-fullscreen .lp-map-fullscreen-btn {
+  top: 20px;
+  right: 20px;
+}
+
 .map-canvas-shell {
   width: 100%;
   height: 100%;
@@ -5704,15 +5777,25 @@ select {
   flex: none;
   display: flex;
   align-items: center;
-  /* The scale and the risk key moved onto the map, where the things they
-     describe are. What is left is the transport, so the strip aligns to the
-     end rather than splitting a single child across the width. */
+  /* The scale and risk key sit at the left (they push everything else over
+     with their own margin-right: auto) and the transport at the right, so the
+     strip aligns to the end and the key's margin does the splitting. With no
+     key mounted the transport still lands where it always did. */
   justify-content: flex-end;
   gap: 18px;
   padding: 0 16px;
   background: var(--bg-surface);
   border-top: 1px solid var(--line);
   overflow: hidden;
+}
+
+/* The key is the flexible one: it shrinks (and scrolls internally) rather
+   than pushing the transport off the end. Without a min-width of 0 a flex
+   item refuses to shrink below its content, which is what let the two
+   collide instead of one giving way. */
+.lp-status-bar .lp-map-key {
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 @media (max-width: 900px) {
@@ -5944,7 +6027,13 @@ select {
    elsewhere: the rail's RISK DISTRIBUTION carries the same four colours with
    their share of the route beside them, which is the legend plus the data. In
    PLAN there is no rail and no transport, so the strip keeps it. */
-.lp-status-bar.is-analyze .lp-risk-legend {
+/* Analyze fills this strip with the transport: a play control, a waypoint
+   counter, a scrub bar and four mission readouts, all of which want the
+   width. The scale/risk key is the thing that gives way -- it describes the
+   map, and in analyze the operator is reading the drive, not picking cells.
+   Without this the two overlapped: the key held the left with its auto
+   margin while the dock claimed the same row with flex: 1. */
+.lp-status-bar.is-analyze .lp-map-key {
   display: none;
 }
 

@@ -28,6 +28,7 @@ import { generateRockField, type RockDescriptor } from './lidarSimulation'
 import SpaceBackdrop from './SpaceBackdrop'
 import SplashScreen, { type BootStage } from './SplashScreen'
 import TerrainCanvas3D from './TerrainCanvas3D'
+import SceneTransport from './features/playback/SceneTransport'
 import {
   advancePlaybackHours,
   hoursForStep,
@@ -1052,9 +1053,22 @@ export default function App() {
           <section className="center-stage">
             <div
               ref={mapStageRef}
-              className={`map-stage${fullscreen.active ? ' is-fullscreen' : ''}`}
+              className={[
+                'map-stage',
+                fullscreen.active ? 'is-fullscreen' : '',
+                // The dimension is on the stage so fullscreen can be a
+                // different thing in each renderer: 3-D keeps its HUD and
+                // LiDAR readout (a cockpit without instruments is not a
+                // cockpit), 2-D strips to the plate and the drawn route.
+                `is-${dimension}`,
+              ]
+                .filter(Boolean)
+                .join(' ')}
             >
-              {/* Top-Left: Collapsible & Minimizable Surface Telemetry HUD */}
+              {/* Top-Left: Collapsible & Minimizable Surface Telemetry HUD.
+                  Translucent (see .lp-hud-card) so the terrain underneath
+                  stays readable through it -- it sits on the map's top-left
+                  corner, which on a north-up plate carries real cells. */}
               {hudOpen && (
                 hudMinimized ? (
                   <div
@@ -1104,10 +1118,31 @@ export default function App() {
                       <span className="map-data-label">TMP</span>
                       <span className="map-data-value">{formatTemperature(focusTelemetry.thermalC)}</span>
                     </div>
-
-
                   </div>
                 )
+              )}
+
+              {/* 2-D fullscreen control. In 3-D this lives in the camera
+                  switch inside the canvas; 2-D has no such bar, and in
+                  fullscreen every other control is hidden, so this doubles
+                  as the way back out. */}
+              {dimension === '2d' && fullscreen.supported && (
+                <button
+                  type="button"
+                  className="lp-map-fullscreen-btn"
+                  aria-pressed={fullscreen.active}
+                  onClick={fullscreen.toggle}
+                  title={
+                    fullscreen.active
+                      ? 'Exit fullscreen (Esc)'
+                      : 'Fill the screen with the map alone'
+                  }
+                >
+                  <Icon name={fullscreen.active ? 'fullscreenexit' : 'fullscreen'} />
+                  <span className="lp-visually-hidden">
+                    {fullscreen.active ? 'Exit fullscreen' : 'Fullscreen'}
+                  </span>
+                </button>
               )}
 
               {/* Primary Map Viewport (2D or 3D). .map-canvas-shell already
@@ -1166,6 +1201,21 @@ export default function App() {
                 )}
               </div>
 
+              {/* Transport, for 3-D fullscreen only.
+                  The real one lives in the status strip below the map, which
+                  is outside the element that goes fullscreen -- so without
+                  this the drive could be watched but not started, stopped or
+                  scrubbed. Not rendered otherwise: two play buttons on one
+                  screen is a question about which one is real.
+
+                  Gated on analyze for the same reason the strip's transport
+                  is (registry.ts: playback is an analyze feature). Surfacing
+                  a control in fullscreen that has no counterpart when you
+                  leave it would read as one of the two being broken. */}
+              {dimension === '3d' && fullscreen.active && missionMode === 'analyze' && (
+                <SceneTransport />
+              )}
+
               {/* 3D Sun Position & LROC NAC Photo Drape Controls */}
               {dimension === '3d' && (
                 <div className="map-overlay map-overlay-bottom-right terrain3d-time">
@@ -1210,11 +1260,13 @@ export default function App() {
 
             <BottomDock />
 
-            {/* ── STATUS STRIP: what the map is showing, and how to move through it ── */}
+            {/* ── STATUS STRIP: what the map is showing, and how to move through it ──
+                The slot's features are direct children of the strip rather
+                than of a wrapper div: the scale/risk key wants the left end
+                and the transport the right, and a single wrapper made them
+                one flex item that could only be placed together. */}
             <footer className={`lp-status-bar ${missionMode === 'analyze' ? 'is-analyze' : ''}`}>
-              <div className="lp-status-right">
-                <StatusBarSlot />
-              </div>
+              <StatusBarSlot />
             </footer>
           </section>
 
