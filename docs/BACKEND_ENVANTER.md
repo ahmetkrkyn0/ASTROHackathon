@@ -267,10 +267,12 @@ Bu kısıtlar **istek gövdesinden değiştirilemez** — yalnızca profil katal
 |---|---|---|---|---|---|---|---|---|---|
 | `lpr_1` | `LPR-1 (Varsayilan)` | 450.0 | 0.2 | 5420.0 | 25.0 | 18.0 | 0.2 | 50.0 | 0.409 / 0.259 / 0.142 / 0.19 |
 | `luvmi_m` | `LUVMI-M` | 40.0 | 0.05 | 1400.0 | 25.0 | 15.0 | 0.2 | 4.0 | 0.4 / 0.3 / 0.3 / 0.0 |
-| `nasa_viper` | `NASA VIPER` | 450.0 | 0.06 | 4000.0 | 20.0 | 15.0 | 0.2 | 96.0 | 0.35 / 0.25 / 0.2 / 0.2 |
-| `cnsa_yutu_2` | `CNSA Yutu-2` | 140.0 | 0.05 | 1500.0 | 20.0 | 15.0 | 0.3 | 2.0 | 0.5 / 0.3 / 0.2 / 0.0 |
+| `nasa_viper` | `NASA VIPER` | 447.0 | 0.20 | 5420.0 | 15.0 | 15.0 | 0.2 | 50.0 | 0.35 / 0.25 / 0.2 / 0.2 |
+| `cnsa_yutu_2` | `CNSA Yutu-2` | 135.0 | 0.0556 | 1500.0* | 20.0 | 15.0 | 0.3 | 2.0 | 0.5 / 0.3 / 0.2 / 0.0 |
 
 Her kayıtta ayrıca `sensor_payload_w` ve `sensor_heater_w` (dördünde de `null`) ve bir `declared_only` bloğu var: `f_net_n`, `regen_efficiency`, `thermal_tau_s`, `h_design_shadow_h`. **`declared_only` adı, bu değerlerin beyan edildiğini ama hesaplamada kullanılmadığını ima ediyor; bu iddia denetimde kod üzerinden doğrulanmadı — BİLİNMİYOR.**
+
+\* Yutu-2'nin Wh cinsinden uçuş batarya kapasitesi kamuya açık teknik belgelerde yayımlanmadığından, 1.500 Wh simülasyon varsayımıdır; doğrulanmış araç spesifikasyonu değildir.
 
 ### Görev profili katalogu — 4 kayıt
 

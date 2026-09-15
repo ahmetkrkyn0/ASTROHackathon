@@ -33,8 +33,8 @@ import { Icon } from './components/Fleet/SpecIcons'
 import {
   buildLidarScanFromBackend,
   fetchBackendLidarScan,
+  generateFixedBoulderCluster,
   generatePebbleField,
-  generateRockField,
   LIDAR_CONFIG,
   ROCK_FIELD,
   sampleTerrainHeight,
@@ -42,10 +42,15 @@ import {
   seededRandom,
   simulateLidarScan,
 } from './lidarSimulation'
+import {
+  buildLocalOccupancyGrid,
+  localNavigationSnapshotKey,
+  observeObstaclesFromLidar,
+} from './localPerception'
+import { planLocalDetour, type LocalPlanDecision } from './localPlanner'
 import type {
   LidarScanResult,
   LidarScanSummary,
-  RockDescriptor,
   RockShape,
   TerrainField,
 } from './lidarSimulation'
@@ -181,6 +186,165 @@ function hasAlignedNacTexture(manifest: TerrainManifest): boolean {
     Math.abs(georeference.origin.x - NAC_TEXTURE_WINDOW.originX) < 1e-6 &&
     Math.abs(georeference.origin.y - NAC_TEXTURE_WINDOW.originY) < 1e-6
   )
+}
+
+/**
+ * A lightweight, unlit cursor placed on the DEM while an endpoint picker is
+ * armed. It is deliberately a scene object rather than a DOM overlay: the
+ * operator can read the exact grid cell on sloped ground before committing a
+ * Start or Goal click.
+ */
+function createTerrainSelectionCursor(resolutionM: number): {
+  group: THREE.Group
+  setMode: (mode: Exclude<ClickMode, 'idle'>) => void
+  dispose: () => void
+} {
+  const group = new THREE.Group()
+  group.name = 'terrain-endpoint-selection-cursor'
+  group.visible = false
+  group.renderOrder = 20
+
+  const radius = Math.max(resolutionM * 0.72, 2.8)
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0x35e7c1,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  const lineMaterial = new THREE.LineBasicMaterial({
+    color: 0x35e7c1,
+    transparent: true,
+    opacity: 1,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.72, radius, 40), ringMaterial)
+  ring.rotation.x = -Math.PI / 2
+  ring.position.y = 0.08
+
+  const crossGeometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-radius * 1.24, 0.1, 0), new THREE.Vector3(-radius * 0.42, 0.1, 0),
+    new THREE.Vector3(radius * 0.42, 0.1, 0), new THREE.Vector3(radius * 1.24, 0.1, 0),
+    new THREE.Vector3(0, 0.1, -radius * 1.24), new THREE.Vector3(0, 0.1, -radius * 0.42),
+    new THREE.Vector3(0, 0.1, radius * 0.42), new THREE.Vector3(0, 0.1, radius * 1.24),
+    new THREE.Vector3(0, 0.12, 0), new THREE.Vector3(0, radius * 0.9, 0),
+  ])
+  const cross = new THREE.LineSegments(crossGeometry, lineMaterial)
+  const tip = new THREE.Mesh(
+    new THREE.ConeGeometry(radius * 0.16, radius * 0.42, 16),
+    ringMaterial,
+  )
+  tip.position.y = radius * 1.08
+  group.add(ring, cross, tip)
+
+  const setMode = (mode: Exclude<ClickMode, 'idle'>) => {
+    const color = mode === 'start' ? 0x35e7c1 : 0xffa550
+    ringMaterial.color.setHex(color)
+    lineMaterial.color.setHex(color)
+  }
+
+  return {
+    group,
+    setMode,
+    dispose: () => {
+      ring.geometry.dispose()
+      ringMaterial.dispose()
+      crossGeometry.dispose()
+      lineMaterial.dispose()
+      tip.geometry.dispose()
+    },
+  }
+}
+
+/**
+ * Intersect a camera ray with the DEM height field directly. This is both
+ * materially cheaper than raycasting the 500 x 500 render mesh on each mouse
+ * move and, unlike a flat y=0 proxy, remains accurate on a sloping ridge.
+ */
+function intersectTerrainHeightfield(
+  ray: THREE.Ray,
+  terrain: TerrainField,
+  result: THREE.Vector3,
+): boolean {
+  const width = terrain.cols * terrain.resolutionM
+  const depth = terrain.rows * terrain.resolutionM
+  const minX = -width / 2
+  const maxX = width / 2
+  const minZ = -depth / 2
+  const maxZ = depth / 2
+  let enterT = 0
+  let exitT = Number.POSITIVE_INFINITY
+
+  const clipAxis = (origin: number, direction: number, low: number, high: number): boolean => {
+    if (Math.abs(direction) < 1e-9) return origin >= low && origin <= high
+    const a = (low - origin) / direction
+    const b = (high - origin) / direction
+    enterT = Math.max(enterT, Math.min(a, b))
+    exitT = Math.min(exitT, Math.max(a, b))
+    return enterT <= exitT
+  }
+
+  if (!clipAxis(ray.origin.x, ray.direction.x, minX, maxX)) return false
+  if (!clipAxis(ray.origin.z, ray.direction.z, minZ, maxZ)) return false
+  // A terrain click must be looking down onto the map. The base plane gives a
+  // finite end point even for a perfectly vertical camera ray.
+  if (ray.direction.y >= -1e-9) return false
+  const basePlaneT = -ray.origin.y / ray.direction.y
+  if (basePlaneT < 0) return false
+  exitT = Math.min(exitT, basePlaneT)
+  if (enterT > exitT) return false
+
+  const signedHeight = (distance: number): number | null => {
+    const point = ray.at(distance, result)
+    const terrainY = sampleTerrainHeight(terrain, point.x, point.z)
+    return terrainY === null ? null : point.y - terrainY
+  }
+
+  const horizontalDistance = Math.hypot(ray.direction.x, ray.direction.z) * (exitT - enterT)
+  // Sample at <= half a DEM cell. This catches steep local relief while doing
+  // only scalar height lookups rather than hundreds of thousands of triangle
+  // intersection tests.
+  const steps = THREE.MathUtils.clamp(
+    Math.ceil(horizontalDistance / Math.max(terrain.resolutionM * 0.5, 0.25)),
+    1,
+    4096,
+  )
+  let previousT = enterT
+  let previousHeight = signedHeight(previousT)
+  if (previousHeight === null) return false
+
+  for (let i = 1; i <= steps; i++) {
+    const currentT = enterT + (exitT - enterT) * (i / steps)
+    const currentHeight = signedHeight(currentT)
+    if (currentHeight === null) return false
+    if (previousHeight === 0 || currentHeight === 0 || previousHeight * currentHeight < 0) {
+      let lowT = previousT
+      let highT = currentT
+      let lowHeight = previousHeight
+      for (let iteration = 0; iteration < 14; iteration++) {
+        const midT = (lowT + highT) / 2
+        const midHeight = signedHeight(midT)
+        if (midHeight === null) return false
+        if (Math.abs(midHeight) < 0.002) {
+          lowT = highT = midT
+          break
+        }
+        if (lowHeight * midHeight > 0) {
+          lowT = midT
+          lowHeight = midHeight
+        } else {
+          highT = midT
+        }
+      }
+      ray.at((lowT + highT) / 2, result)
+      return true
+    }
+    previousT = currentT
+    previousHeight = currentHeight
+  }
+  return false
 }
 
 async function fetchF32(url: string): Promise<Float32Array> {
@@ -352,28 +516,9 @@ function createRegolithTexture(): THREE.CanvasTexture {
   return texture
 }
 
-/** Soft round sprite for locator markers -- a flat square SpriteMaterial dot
- * reads as a pixelated smear at any scale; this alpha-fades to the edge so
- * clusters blend instead of tiling visibly. */
-function createSoftDotTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
-  const ctx = canvas.getContext('2d')!
-  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-  grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)')
-  grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.65)')
-  grad.addColorStop(1, 'rgba(255, 255, 255, 0)')
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, 64, 64)
-  return new THREE.CanvasTexture(canvas)
-}
-
 /** Point-cloud dot: a solid disc with only a 1-2 px antialiased rim, not a
  * soft glow. A LiDAR return is a discrete measurement -- CloudCompare, RViz
- * and PDAL all draw it as a crisp, fully-opaque dot, and the wide soft
- * falloff createSoftDotTexture uses reads as a faint, sparse haze at typical
- * point counts instead of the dense, confident cloud a real one shows. */
+ * and PDAL all draw it as a crisp, fully-opaque dot. */
 function createSolidDotTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = 32
@@ -394,6 +539,12 @@ interface RockTemplatePayload {
   position: string
   /** Non-indexed Float32Array, base64: nx,ny,nz per vertex. */
   normal: string
+}
+
+/** A web-ready Apollo sample mesh and its baked PBR material. */
+interface ScannedRockVisualTemplate {
+  geometry: THREE.BufferGeometry
+  material: THREE.MeshStandardMaterial
 }
 
 function base64ToFloat32Array(base64: string): Float32Array {
@@ -435,6 +586,70 @@ const NASA_ROCK_TEMPLATE_URLS = [
   '/models/nasa_rocks/rock-15016.json',
   '/models/nasa_rocks/rock-15556.json',
 ]
+
+// Pre-simplified versions of the supplied GLBs. Optimising these files before
+// they reach the browser avoids blocking the loading screen while the JS
+// thread tries to decimate hundreds of thousands of vertices at runtime.
+const NASA_ROCK_GLB_URLS = [
+  '/models/nasa_rocks_optimized/apollo_lunar_sample_1201311.glb',
+  '/models/nasa_rocks_optimized/apollo_lunar_sample_143211404.glb',
+  '/models/nasa_rocks_optimized/apollo_lunar_sample_701750.glb',
+  '/models/nasa_rocks_optimized/apollo_lunar_sample_702950.glb',
+]
+
+function normaliseRockVisualGeometry(geometry: THREE.BufferGeometry, transform: THREE.Matrix4): THREE.BufferGeometry | null {
+  const normalised = geometry.clone()
+  normalised.applyMatrix4(transform)
+  normalised.computeBoundingBox()
+  const bounds = normalised.boundingBox
+  if (!bounds) {
+    normalised.dispose()
+    return null
+  }
+  const size = bounds.getSize(new THREE.Vector3())
+  const largestAxis = Math.max(size.x, size.y, size.z)
+  if (!(largestAxis > 1e-6)) {
+    normalised.dispose()
+    return null
+  }
+  const centre = bounds.getCenter(new THREE.Vector3())
+  normalised.translate(-centre.x, -centre.y, -centre.z)
+  // A normalised maximum diameter of 2 means the descriptor's radiusX/Y/Z
+  // continues to be metres, exactly like the previous procedural geometry.
+  const scale = 2 / largestAxis
+  normalised.scale(scale, scale, scale)
+  normalised.computeBoundingSphere()
+  return normalised
+}
+
+async function loadScannedRockVisualTemplate(url: string): Promise<ScannedRockVisualTemplate | null> {
+  try {
+    const gltf = await new GLTFLoader().loadAsync(url)
+    gltf.scene.updateMatrixWorld(true)
+    const candidates: THREE.Mesh[] = []
+    gltf.scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.geometry.getAttribute('position')) candidates.push(object)
+    })
+    // Apollo sample exports normally contain one surface mesh. Selecting the
+    // largest surface also ignores any helper/ground mesh an exporter added.
+    candidates.sort(
+      (a, b) => (b.geometry.getAttribute('position')?.count ?? 0) - (a.geometry.getAttribute('position')?.count ?? 0),
+    )
+    const source = candidates[0]
+    if (!source) return null
+    const material = Array.isArray(source.material) ? source.material[0] : source.material
+    if (!(material instanceof THREE.MeshStandardMaterial)) return null
+    const geometry = normaliseRockVisualGeometry(source.geometry, source.matrixWorld)
+    if (!geometry) return null
+    const visualMaterial = material.clone()
+    visualMaterial.side = THREE.DoubleSide
+    visualMaterial.roughness = Math.max(visualMaterial.roughness, 0.72)
+    visualMaterial.metalness = 0
+    return { geometry, material: visualMaterial }
+  } catch {
+    return null
+  }
+}
 
 /**
  * Make a MeshStandardMaterial sample its map by world-space triplanar
@@ -809,6 +1024,24 @@ const MAX_YAW_RATE_RAD_PER_M = 1.2
  *  as a wheel snapped sideways. */
 const MAX_STEER_RAD = THREE.MathUtils.degToRad(34)
 
+/**
+ * How far the planned route floats above the ground it is drawn on. Small
+ * enough to read as painted onto the regolith; large enough that the ribbon
+ * never z-fights the mesh triangle underneath it.
+ */
+const ROUTE_RIBBON_LIFT_M = 0.12
+/** Half-width of the drawn corridor. ~1.8 m overall: a lane the rover fits. */
+const ROUTE_RIBBON_HALF_WIDTH_M = 0.9
+/**
+ * Route segments are re-sampled to at most this spacing before being drawn.
+ * Planned waypoints can sit several metres apart, and a ribbon built only
+ * from those chords cuts straight through every rise between them -- it
+ * sinks into the hillside going up and lifts off it coming down. Sampling
+ * the terrain along the way makes the path hug ground it never had vertices
+ * for.
+ */
+const ROUTE_RESAMPLE_STEP_M = 2
+
 /** Orbit-mode locator exaggeration, and the camera distance below which the
  *  rover is drawn at its true size instead. */
 const ROVER_ORBIT_SCALE = 10
@@ -932,6 +1165,21 @@ function disposeObjectTree(root: THREE.Object3D): void {
   materials.forEach((material) => material.dispose())
 }
 
+export interface LocalNavigationRequest {
+  current: { row: number; col: number }
+  decision: LocalPlanDecision
+  /** Bounded local path; present for LOCAL_DETOUR and ends at global rejoin. */
+  local_waypoints: Array<{ row: number; col: number }>
+  observed_obstacles: Array<{
+    row: number
+    col: number
+    radius_m: number
+    confidence: number
+    observed_at_s: number
+    source: 'lidar'
+  }>
+}
+
 interface Props {
   viewMode: MapViewMode
   waypoints: Waypoint[] | null
@@ -957,16 +1205,6 @@ interface Props {
    * back over the moment the rover settles.
    */
   isPlaying?: boolean
-  /**
-   * Rocks App.tsx generated (via the same generateRockField this file's
-   * fallback path also calls) BEFORE the route was planned, and already
-   * sent to the backend as obstacle_cells. Rendering these exact instances
-   * instead of independently re-rolling the field keeps what got avoided
-   * and what gets drawn from ever drifting apart. Null/absent (no route
-   * yet, or the grid metadata App.tsx needs wasn't ready) falls back to
-   * this file's own route-bounding-box field.
-   */
-  obstacleRocks?: RockDescriptor[] | null
   exaggeration: number | null
   sliceIndex: number
   /** Drape the real NAC photograph instead of shading a flat albedo. */
@@ -974,6 +1212,19 @@ interface Props {
   /** Mirrors MapCanvas's own start/goal picker so both views share one flow. */
   clickMode?: ClickMode
   onCellClick?: (row: number, col: number) => void
+  /** Invoked once for a bounded local detour or a safe-stop replan. */
+  onLocalNavigation?: (request: LocalNavigationRequest) => void
+  /**
+   * Fullscreen is owned by App.tsx because the element that goes fullscreen
+   * is .map-stage -- this canvas's parent, and the shared parent of the
+   * telemetry HUD and photo-drape controls. This view only renders the
+   * button, since the 3-D scene is where a bigger viewport actually buys
+   * something.
+   */
+  fullscreen?: boolean
+  /** False where the Fullscreen API is missing or blocked; hides the button. */
+  canFullscreen?: boolean
+  onToggleFullscreen?: () => void
   onReady?: (info: {
     slices: number
     timeVarying: boolean
@@ -991,12 +1242,15 @@ export default function TerrainCanvas3D({
   activeWaypoint,
   roverFraction = 0,
   isPlaying = false,
-  obstacleRocks = null,
   exaggeration,
   sliceIndex,
   photo,
   clickMode,
   onCellClick,
+  onLocalNavigation,
+  fullscreen = false,
+  canFullscreen = false,
+  onToggleFullscreen,
   onReady,
   onError,
 }: Props) {
@@ -1008,6 +1262,11 @@ export default function TerrainCanvas3D({
   const [cameraMode, setCameraMode] = useState<'fps' | 'orbit'>('fps')
   const [lidarEnabled, setLidarEnabled] = useState(true)
   const [lidarTelemetry, setLidarTelemetry] = useState<LidarScanSummary | null>(null)
+  const [localNavigation, setLocalNavigation] = useState<{
+    observedObstacles: number
+    occupiedCells: number
+    decision: LocalPlanDecision
+  } | null>(null)
   // Real NASA Astromaterials 3D lunar sample scans (decimated offline --
   // see frontend/simplify_rock.mjs -- from ~100k verts down to a few
   // hundred), used as the rock field's shape templates once they arrive.
@@ -1017,6 +1276,9 @@ export default function TerrainCanvas3D({
   // is the flag that does that, exactly once, when loading finishes.
   const rockTemplatesRef = useRef<THREE.BufferGeometry[]>([])
   const [rockTemplatesReady, setRockTemplatesReady] = useState(false)
+  /** Textured Apollo sample meshes for rendering; LiDAR keeps its low-poly proxies. */
+  const rockVisualTemplatesRef = useRef<ScannedRockVisualTemplate[]>([])
+  const [rockVisualTemplatesReady, setRockVisualTemplatesReady] = useState(false)
   // Populated once the rover GLB loads (viper_rover.glb ships wheel_1/
   // wheel_2/wheek_3/wheel_4 as separate child nodes of rover_body, unlike
   // the earlier single fused-mesh export). Each wheel's own spin axis and
@@ -1050,20 +1312,69 @@ export default function TerrainCanvas3D({
   // driving. Tracking the last actual run lets it fire on a fixed cadence
   // instead, so LiDAR keeps refreshing throughout the drive.
   const lastLidarRunRef = useRef(0)
-  // The rock field is seeded once per ROUTE (keyed on the waypoints array
-  // reference itself, which App.tsx replaces with a new array only when a
-  // route is actually (re)planned) rather than on the rover's live
-  // position -- see the rock/LiDAR effect below for why anchoring it to
-  // "where the rover currently is" always reads as the rocks travelling
-  // with it, no matter how wide the radius or how coarse the recentring.
-  const lastRockFieldWaypointsRef = useRef<Waypoint[] | null | undefined>(undefined)
-  /** The mesh.scale.z the current rock field was placed against. */
+  // A stopped rover keeps scanning. Deduplicate the same obstacle snapshot so
+  // a 5 Hz LiDAR cannot issue a replan storm while the request is in flight.
+  const lastLocalStopKeyRef = useRef<string | null>(null)
+  // The boulder garden belongs to one world-space patch. Its anchor is set
+  // once from the initial scene pose and deliberately survives route changes,
+  // replans and rover playback; rocks are terrain, not a route effect.
+  const fixedRockAnchorRef = useRef<{ x: number; z: number } | null>(null)
+  /** The mesh.scale.z the fixed cluster was last seated against. */
   const lastRockFieldScaleRef = useRef<number | null>(null)
+  /**
+   * How many scanned Apollo visuals existed when the cluster was last built.
+   *
+   * The GLBs download on a 1.2 s delay -- deliberately, so they do not
+   * compete with the terrain for the first frame -- which is always AFTER
+   * the boulders are first placed. Without this the cluster stayed built
+   * against zero templates and every boulder kept its low-poly collision
+   * proxy as its visible mesh: the scans loaded, reported no error, and
+   * never reached the screen. The effect did re-run when they arrived; its
+   * body simply had no reason to rebuild.
+   */
+  const lastRockFieldVisualCountRef = useRef(0)
+  /**
+   * The latest onLocalNavigation, held so the scan effect below does not have
+   * to depend on it.
+   *
+   * App.tsx memoises that handler on playbackHours and routePlaybackStep,
+   * which the playback clock changes continuously -- so the callback identity
+   * changed on nearly every tick, re-running the scan effect and aborting its
+   * in-flight request. The backend scan takes ~4.7 s; nothing survived that
+   * long, so /api/lidar-scan was cancelled over and over and the perception
+   * panel stayed blank with no error to show for it.
+   */
+  const onLocalNavigationRef = useRef(onLocalNavigation)
+  onLocalNavigationRef.current = onLocalNavigation
+  /**
+   * The live route ribbon's shader and its arc-length table. The render loop
+   * animates uTime/uProgress through this rather than through React state --
+   * a uniform write per frame must not cost a re-render.
+   */
+  const routeRibbonRef = useRef<{
+    material: THREE.ShaderMaterial
+    distances: number[]
+    totalLength: number
+  } | null>(null)
+  /**
+   * Metres of route already driven, or -1 before a drive starts. Feeds the
+   * ribbon's uProgress so the trail behind the rover dims. A ref, not state:
+   * the render loop reads it every frame.
+   */
+  const routeProgressRef = useRef(-1)
   // Where the gravel layer was last built. Unlike the navigation rocks --
   // anchored to the route so they stay put while the rover drives past --
   // gravel is a distance-graded LOD around the sensor and has to follow it,
   // so it is rebuilt on real movement rather than on every throttle tick.
   const lastPebbleOriginRef = useRef<{ x: number; z: number } | null>(null)
+  /** Last cell shown by the live endpoint cursor. Pointer-up reuses it so
+   * the visible marker and the committed Start/Goal cannot disagree. */
+  const selectionPreviewRef = useRef<{
+    row: number
+    col: number
+    clientX: number
+    clientY: number
+  } | null>(null)
 
   // The raw NAC crop still carries its own 2010 grazing-light shadow
   // micro-texture (see PHOTO_TEXTURE_URL's own comment on why it is drawn
@@ -1089,12 +1400,16 @@ export default function TerrainCanvas3D({
     regolithTexture: THREE.CanvasTexture
     photoAvailable: boolean
     routeGroup: THREE.Group
+    selectionCursor: ReturnType<typeof createTerrainSelectionCursor>
+    endpointMarkers: Record<Exclude<ClickMode, 'idle'>, ReturnType<typeof createTerrainSelectionCursor>>
     rockGroup: THREE.Group
+    /** Low-poly collision meshes only; never render the same GLB geometry in a LiDAR scan. */
+    lidarRockMeshes: THREE.Mesh[]
     /** One InstancedMesh per gravel variant; see buildPebbleVariants. */
     pebbleMeshes: THREE.InstancedMesh[]
-    rockMarkerGroup: THREE.Group
-    rockMarkerMaterial: THREE.SpriteMaterial
     rockMaterial: THREE.MeshStandardMaterial
+    /** Draw-invisible but raycastable material used by GLB collision proxies. */
+    lidarProxyMaterial: THREE.MeshBasicMaterial
     rockTexture: THREE.Texture
     roverGroup: THREE.Group
     lidarHead: THREE.Group
@@ -1119,6 +1434,7 @@ export default function TerrainCanvas3D({
     if (!container) return
 
     let disposed = false
+    let visualRockLoadTimer: number | null = null
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0x020308)
 
@@ -1198,6 +1514,13 @@ export default function TerrainCanvas3D({
     // block carry grain at the same physical scale instead of one looking
     // like sandpaper and the other like a smooth boulder.
     applyTriplanarMapping(rockMaterial, 1.6)
+    // Object3D.visible=false removes a mesh from Three.js raycasts too. The
+    // proxy therefore stays object-visible and only its material is hidden,
+    // so LiDAR can still intersect it when a scanned visual replaces it.
+    const lidarProxyMaterial = new THREE.MeshBasicMaterial({
+      visible: false,
+      side: THREE.DoubleSide,
+    })
     const rockGroup = new THREE.Group()
     scene.add(rockGroup)
 
@@ -1218,21 +1541,7 @@ export default function TerrainCanvas3D({
       return mesh
     })
 
-    const softDotTexture = createSoftDotTexture()
     const solidDotTexture = createSolidDotTexture()
-
-    // Metre-scale rocks are correctly tiny across a 2.5 km overview. These
-    // non-colliding markers make their locations inspectable in orbit mode;
-    // the actual meshes and LiDAR intersections remain at physical scale.
-    const rockMarkerMaterial = new THREE.SpriteMaterial({
-      map: softDotTexture,
-      color: 0xff9b52,
-      transparent: true,
-      opacity: 0.75,
-      depthTest: false,
-    })
-    const rockMarkerGroup = new THREE.Group()
-    scene.add(rockMarkerGroup)
 
     const regolithTexture = createRegolithTexture()
 
@@ -1598,6 +1907,18 @@ export default function TerrainCanvas3D({
       mesh.rotation.x = -Math.PI / 2 // +Z becomes height; row 0 falls to -Z (north)
       scene.add(mesh)
 
+      const selectionCursor = createTerrainSelectionCursor(res)
+      scene.add(selectionCursor.group)
+      const endpointMarkers = {
+        start: createTerrainSelectionCursor(res),
+        goal: createTerrainSelectionCursor(res),
+      }
+      endpointMarkers.start.group.name = 'terrain-start-selection-marker'
+      endpointMarkers.goal.group.name = 'terrain-goal-selection-marker'
+      endpointMarkers.start.setMode('start')
+      endpointMarkers.goal.setMode('goal')
+      scene.add(endpointMarkers.start.group, endpointMarkers.goal.group)
+
       // The illumination series is optional: without NAIF kernels or the
       // horizon cube the backend says so rather than faking it, and the scene
       // still renders under a fixed light.
@@ -1655,11 +1976,13 @@ export default function TerrainCanvas3D({
         regolithTexture,
         photoAvailable,
         routeGroup,
-        rockGroup,
+        selectionCursor,
+        endpointMarkers,
+      rockGroup,
+      lidarRockMeshes: [],
         pebbleMeshes,
-        rockMarkerGroup,
-        rockMarkerMaterial,
         rockMaterial,
+        lidarProxyMaterial,
         rockTexture,
         roverGroup: rover.group,
         lidarHead: rover.lidarHead,
@@ -1678,12 +2001,15 @@ export default function TerrainCanvas3D({
         dispose: () => {
           geometry.dispose()
           material.dispose()
+          selectionCursor.dispose()
+          endpointMarkers.start.dispose()
+          endpointMarkers.goal.dispose()
           skyAbort.abort()
           sky.dispose()
           earth.sprite.material.map?.dispose()
           earth.sprite.material.dispose()
           rockGroup.children.forEach((rock) => {
-            if (rock instanceof THREE.Mesh) rock.geometry.dispose()
+            if (rock instanceof THREE.Mesh && !rock.userData.scannedApolloRock) rock.geometry.dispose()
           })
           pebbleMeshes.forEach((mesh) => {
             mesh.geometry.dispose()
@@ -1691,13 +2017,17 @@ export default function TerrainCanvas3D({
           })
           roverEnvironment.dispose()
           rockMaterial.dispose()
+          lidarProxyMaterial.dispose()
           rockTexture.dispose()
-          rockMarkerMaterial.dispose()
           regolithTexture.dispose()
-          softDotTexture.dispose()
           solidDotTexture.dispose()
           rockTemplatesRef.current.forEach((geometry) => geometry.dispose())
           rockTemplatesRef.current = []
+          rockVisualTemplatesRef.current.forEach((template) => {
+            template.geometry.dispose()
+            template.material.dispose()
+          })
+          rockVisualTemplatesRef.current = []
           disposeObjectTree(rover.group)
           lidarPointGeometry.dispose()
           lidarPointMaterial.dispose()
@@ -1739,6 +2069,30 @@ export default function TerrainCanvas3D({
         photoAvailable,
         brightestSlice,
       })
+
+      // The terrain must become interactive before optional presentation
+      // assets start downloading or parsing. Loading one scan at a time also
+      // avoids a burst of GLB decoding and texture uploads competing with the
+      // terrain, sky and rover on the first frame.
+      visualRockLoadTimer = window.setTimeout(() => {
+        void (async () => {
+          const templates: ScannedRockVisualTemplate[] = []
+          for (const url of NASA_ROCK_GLB_URLS) {
+            if (disposed) return
+            const template = await loadScannedRockVisualTemplate(url)
+            if (template) templates.push(template)
+            // Yield between models so a slow device can keep painting.
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+          }
+          if (disposed) return
+          if (templates.length === 0) {
+            console.warn('No textured Apollo rock GLBs loaded; keeping the low-poly NASA rock proxies visible')
+            return
+          }
+          rockVisualTemplatesRef.current = templates
+          setRockVisualTemplatesReady(true)
+        })()
+      }, 1200)
     }
 
     build().catch((error: unknown) => {
@@ -1752,7 +2106,20 @@ export default function TerrainCanvas3D({
     // unlike the corner telemetry panel, a fixed-rate update would visibly
     // lag behind orbit drags and FPS look-ahead. Scratch objects are
     // module-scope-per-mount to avoid per-frame allocation.
-    const MAX_ROCK_BOXES = 6
+    // Every boulder inside LiDAR range that is actually on screen gets a
+    // box. The old cap of 6 left most of a 61-rock cluster unmarked while
+    // the perception panel beside it reported dozens tracked -- a detector
+    // that visibly misses what it is looking straight at reads as broken.
+    //
+    // The cap that remains is a rendering budget, not a perception limit:
+    // these are DOM nodes repositioned every frame, and past a few dozen the
+    // cost shows. Sorted nearest-first, so if the budget ever binds it drops
+    // the far rocks, which are the ones a driver cares least about.
+    const MAX_ROCK_BOXES = 48
+    // Below this on-screen height a box is smaller than its own label, so
+    // the text is dropped and the marker stays a plain bracket. Keeps a
+    // dense field readable instead of a wall of overlapping tags.
+    const ROCK_LABEL_MIN_PX = 26
     const rockBoxTempBox = new THREE.Box3()
     const rockBoxWorldPos = new THREE.Vector3()
     const rockBoxNdc = new THREE.Vector3()
@@ -1769,7 +2136,15 @@ export default function TerrainCanvas3D({
 
       const candidates: Array<{ left: number; top: number; w: number; h: number; distance: number }> = []
       for (const child of state.rockGroup.children) {
-        if (!(child instanceof THREE.Mesh)) continue
+        if (!(child instanceof THREE.Mesh) || !child.visible) continue
+        // A boulder is TWO meshes: the scanned Apollo visual and the low-poly
+        // LiDAR collision proxy sitting inside it. The proxy stays visible as
+        // an object -- only its material is invisible -- so `child.visible`
+        // does not separate them, and boxing both drew a second bracket
+        // around every rock, slightly offset because the two hulls differ.
+        // Box what the driver can actually see.
+        const childMaterial = Array.isArray(child.material) ? child.material[0] : child.material
+        if (childMaterial && childMaterial.visible === false) continue
         child.getWorldPosition(rockBoxWorldPos)
         const distance = rockBoxWorldPos.distanceTo(state.lidarOrigin)
         if (distance > LIDAR_CONFIG.maxRangeM) continue
@@ -1804,7 +2179,12 @@ export default function TerrainCanvas3D({
           if (py > maxY) maxY = py
         }
         if (behind || maxX < 0 || minX > width || maxY < 0 || minY > height) continue
-        if (maxX - minX < 4 || maxY - minY < 4) continue
+        // Skip only what is too small to draw a bracket around at all. This
+        // used to be 4px on BOTH axes, which quietly dropped anything seen
+        // edge-on or far enough away to be a couple of pixels wide -- rocks
+        // plainly visible on the ground, sitting inside the scan rings, with
+        // no marker on them.
+        if (maxX - minX < 3 && maxY - minY < 3) continue
 
         candidates.push({ left: minX, top: minY, w: maxX - minX, h: maxY - minY, distance })
       }
@@ -1837,8 +2217,13 @@ export default function TerrainCanvas3D({
         el.style.borderColor = color
         el.style.boxShadow = `0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 8px ${color}`
         const label = el.firstElementChild as HTMLSpanElement
-        label.textContent = `ROCK ${item.distance.toFixed(1)} m`
-        label.style.background = color
+        if (item.h >= ROCK_LABEL_MIN_PX) {
+          label.style.display = ''
+          label.textContent = `ROCK ${item.distance.toFixed(1)} m`
+          label.style.background = color
+        } else {
+          label.style.display = 'none'
+        }
       })
     }
 
@@ -1884,6 +2269,13 @@ export default function TerrainCanvas3D({
         sweepPositions.needsUpdate = true
         state.lidarSweep.geometry.setDrawRange(0, 2)
       }
+      // Route ribbon animation. Uniforms only -- no geometry is touched, so
+      // this is a couple of float writes per frame.
+      const ribbon = routeRibbonRef.current
+      if (ribbon) {
+        ribbon.material.uniforms.uTime.value = performance.now() / 1000
+        ribbon.material.uniforms.uProgress.value = routeProgressRef.current
+      }
       renderer.render(scene, camera)
       // After render, not before: world matrices (rocks, camera) are only
       // guaranteed current once the renderer's own traversal has updated
@@ -1895,6 +2287,7 @@ export default function TerrainCanvas3D({
 
     return () => {
       disposed = true
+      if (visualRockLoadTimer !== null) window.clearTimeout(visualRockLoadTimer)
       cancelAnimationFrame(frame)
       observer.disconnect()
       controls.dispose()
@@ -2318,6 +2711,28 @@ export default function TerrainCanvas3D({
     )
     roverSteerRef.current += (targetSteer - roverSteerRef.current) * 0.25
 
+    // How far along the drawn corridor the rover has reached, in the same
+    // metres the ribbon's `along` attribute uses. The ribbon resamples the
+    // route, so its arc-length table is indexed by resampled point, not by
+    // waypoint -- interpolating between the two node distances that bracket
+    // the current pose is what keeps the wake edge under the wheels rather
+    // than snapping a whole waypoint at a time.
+    const ribbon = routeRibbonRef.current
+    if (ribbon && waypointIndex >= 0 && waypoints) {
+      const perWaypoint = ribbon.distances.length - 1
+      const span = Math.max(waypoints.length - 1, 1)
+      const at = ((waypointIndex + THREE.MathUtils.clamp(roverFraction, 0, 1)) / span) * perWaypoint
+      const i0 = Math.min(ribbon.distances.length - 1, Math.max(0, Math.floor(at)))
+      const i1 = Math.min(ribbon.distances.length - 1, i0 + 1)
+      routeProgressRef.current = THREE.MathUtils.lerp(
+        ribbon.distances[i0],
+        ribbon.distances[i1],
+        at - i0,
+      )
+    } else {
+      routeProgressRef.current = -1
+    }
+
     state.roverGroup.position.set(roverX, roverGroundY, roverZ)
     // Sitting ON the slope, not floating level above it: the body's up axis
     // follows the terrain normal and the heading is applied within that
@@ -2398,80 +2813,55 @@ export default function TerrainCanvas3D({
         heights,
         verticalScale: state.mesh.scale.z,
       }
-      // Re-seeding a field CENTRED ON THE ROVER every time it moves far
-      // enough still reads as "the rocks are travelling with the rover" no
-      // matter how wide the radius, because the field's centre is still
-      // tied to a position that keeps changing -- the only way for it to
-      // actually be a fixed part of the world is to anchor it to something
-      // that does NOT change during a drive: the route itself. Keyed on the
-      // waypoints array reference (App.tsx hands down a new array only when
-      // a route is genuinely (re)planned), this builds one field sized to
-      // the route's own bounding box exactly once, and touches it again
-      // only when the route changes -- never while just driving it.
       // Rocks are placed at sampleTerrainHeight(), which already multiplies by
-      // the field's verticalScale -- and that is mesh.scale.z: 1.0 in FPS mode,
-      // the vertical exaggeration in orbit. Rebuilding only when the route
-      // changed meant switching to orbit raised the terrain out from under a
-      // field still sitting at its unexaggerated heights, and every rock sank
-      // beneath the surface it was resting on. The scale a field was built for
-      // is therefore part of what makes that field stale, exactly as its route
-      // is. Rebuilding rather than just lifting each rock is deliberate: the
-      // bedding normal from sampleTerrainNormal() is stretched by the same
-      // scale, so a rock moved without being re-seated would sit at the wrong
-      // angle on every slope.
+      // the field's verticalScale. Re-seat the fixed cluster only when this
+      // scale changes, so its ground contact and slope orientation stay true
+      // in both FPS and orbit view without letting replans move it.
       const verticalScale = terrain.verticalScale
       const shouldRebuildRocks =
-        lastRockFieldWaypointsRef.current !== (waypoints ?? null) ||
-        lastRockFieldScaleRef.current !== verticalScale
-
-      let fieldCenterX = roverX
-      let fieldCenterZ = roverZ
-      let fieldRadiusM = 150 // no route yet: a modest field around the default view
-      if (waypoints && waypoints.length > 0) {
-        let minX = Infinity
-        let maxX = -Infinity
-        let minZ = Infinity
-        let maxZ = -Infinity
-        for (const wp of waypoints) {
-          const wx = wp.col * stepX - width / 2
-          const wz = wp.row * stepZ - depth / 2
-          if (wx < minX) minX = wx
-          if (wx > maxX) maxX = wx
-          if (wz < minZ) minZ = wz
-          if (wz > maxZ) maxZ = wz
-        }
-        fieldCenterX = (minX + maxX) / 2
-        fieldCenterZ = (minZ + maxZ) / 2
-        // Capped at 500 m so a very long route does not balloon the rock
-        // count (and per-Mesh draw call count) without bound.
-        fieldRadiusM = Math.min(500, Math.hypot(maxX - minX, maxZ - minZ) / 2 + 60)
-      }
+        fixedRockAnchorRef.current === null ||
+        lastRockFieldScaleRef.current !== verticalScale ||
+        // The scans finished downloading after the cluster was built:
+        // rebuild once so the boulders actually take their scanned geometry
+        // instead of keeping the placeholder proxies for the session.
+        lastRockFieldVisualCountRef.current !== rockVisualTemplatesRef.current.length
 
       if (shouldRebuildRocks) {
-        lastRockFieldWaypointsRef.current = waypoints ?? null
         lastRockFieldScaleRef.current = verticalScale
+        lastRockFieldVisualCountRef.current = rockVisualTemplatesRef.current.length
+        if (!fixedRockAnchorRef.current) {
+          // Starts ahead and to one side of the initial rover pose, outside
+          // its safety footprint but within LiDAR range. It never moves after
+          // this one placement decision.
+          fixedRockAnchorRef.current = { x: roverX, z: roverZ }
+        }
         for (const child of [...state.rockGroup.children]) {
           state.rockGroup.remove(child)
-          if (child instanceof THREE.Mesh) child.geometry.dispose()
+          // Scanned visuals share their template geometry. The template owns
+          // it and releases it during scene cleanup; disposing it here would
+          // break the next rebuild after a vertical-exaggeration change.
+          if (child instanceof THREE.Mesh && !child.userData.scannedApolloRock) child.geometry.dispose()
         }
-        state.rockMarkerGroup.clear()
+        state.lidarRockMeshes.length = 0
 
         const rockTemplates = rockTemplatesRef.current
-        // When App.tsx already generated this route's rock field (and sent
-        // it to the backend as obstacle_cells), render those exact
-        // instances rather than rolling a second, independent field -- the
-        // only way the rover visibly avoiding a rock and the rock actually
-        // being there stay guaranteed consistent. Falls back to generating
-        // locally (idle view, or obstacleRocks not ready yet) otherwise.
-        const rockDescriptors =
-          waypoints && waypoints.length > 0 && obstacleRocks
-            ? obstacleRocks
-            : generateRockField(fieldCenterX, fieldCenterZ, fieldRadiusM)
+        const visualTemplates = rockVisualTemplatesRef.current
+        // Rocks are scene truth for the LiDAR simulation only. The fixed
+        // cluster is never sent to the global planner; it reaches avoidance
+        // exclusively through local LiDAR returns.
+        const rockDescriptors = generateFixedBoulderCluster(
+          fixedRockAnchorRef.current.x,
+          fixedRockAnchorRef.current.z,
+        )
         const rockUp = new THREE.Vector3(0, 1, 0)
-        for (const descriptor of rockDescriptors) {
+        for (const [rockIndex, descriptor] of rockDescriptors.entries()) {
           const groundY = sampleTerrainHeight(terrain, descriptor.x, descriptor.z)
           if (groundY === null) continue
-          const geometry = buildRockGeometry(
+          // The collision proxy stays compact enough for the 4,320-beam
+          // LiDAR pass. It is hidden whenever a textured Apollo visual is
+          // available at the same pose, but it remains the exact object the
+          // range sensor intersects.
+          const proxyGeometry = buildRockGeometry(
             descriptor.shape,
             descriptor.seed,
             descriptor.radiusX,
@@ -2480,29 +2870,38 @@ export default function TerrainCanvas3D({
             rockTemplates,
             2,
           )
-          const rock = new THREE.Mesh(geometry, state.rockMaterial)
+          const proxy = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(proxyGeometry, state.rockMaterial)
           // Sunk by its own burial fraction rather than a flat 12%: a rock
           // sits IN the regolith it has been gardened into, and how deep
           // depends on how long it has been there, which is what the field
           // encodes as size-dependent burial.
-          rock.position.set(descriptor.x, groundY - descriptor.radiusY * descriptor.burial, descriptor.z)
+          proxy.position.set(descriptor.x, groundY - descriptor.radiusY * descriptor.burial, descriptor.z)
           // Oriented against the local surface, not against world up. On a
           // slope a world-up rock cuts into the hill on its uphill side and
           // hangs off it on the downhill side; matching the terrain normal
           // first, then applying the rock's own yaw and bedding tilt in
           // that frame, is what makes it read as resting on the ground.
-          rock.quaternion.setFromUnitVectors(rockUp, sampleTerrainNormal(terrain, descriptor.x, descriptor.z))
-          rock.rotateY(descriptor.rotationY)
-          rock.rotateX(descriptor.tiltX)
-          rock.rotateZ(descriptor.tiltZ)
-          rock.userData.lidarRockId = descriptor.id
-          state.rockGroup.add(rock)
-
-          const marker = new THREE.Sprite(state.rockMarkerMaterial)
-          marker.position.set(descriptor.x, groundY + descriptor.radiusY + 3, descriptor.z)
-          marker.scale.set(4, 4, 1)
-          marker.userData.rockId = descriptor.id
-          state.rockMarkerGroup.add(marker)
+          proxy.quaternion.setFromUnitVectors(rockUp, sampleTerrainNormal(terrain, descriptor.x, descriptor.z))
+          proxy.rotateY(descriptor.rotationY)
+          proxy.rotateX(descriptor.tiltX)
+          proxy.rotateZ(descriptor.tiltZ)
+          proxy.userData.lidarRockId = descriptor.id
+          // Every visible boulder uses a scanned Apollo asset. The low-poly
+          // mesh remains only as the invisible LiDAR collision proxy.
+          const visualTemplate = visualTemplates[rockIndex % visualTemplates.length]
+          if (visualTemplate) {
+            proxy.material = state.lidarProxyMaterial
+            const visual = new THREE.Mesh(visualTemplate.geometry, visualTemplate.material)
+            visual.position.copy(proxy.position)
+            visual.quaternion.copy(proxy.quaternion)
+            visual.scale.set(descriptor.radiusX, descriptor.radiusY, descriptor.radiusZ)
+            visual.userData.lidarRockId = descriptor.id
+            visual.userData.scannedApolloRock = true
+            visual.userData.rockBaseScale = visual.scale.clone()
+            state.rockGroup.add(visual)
+          }
+          state.rockGroup.add(proxy)
+          state.lidarRockMeshes.push(proxy)
         }
 
         // Position, heading, orbit-mode scale and lidarOrigin are the other
@@ -2564,11 +2963,8 @@ export default function TerrainCanvas3D({
       // bounding-sphere test a couple of thousand meshes it had no chance of
       // hitting, several times a second, for nothing.
       const scanReachM = LIDAR_CONFIG.maxRangeM + ROCK_FIELD.maxDiameterM
-      const rockMeshes = state.rockGroup.children.filter(
-        (object): object is THREE.Mesh =>
-          object instanceof THREE.Mesh &&
-          Math.hypot(object.position.x - state.lidarOrigin.x, object.position.z - state.lidarOrigin.z) <=
-            scanReachM,
+      const rockMeshes = state.lidarRockMeshes.filter(
+        (rock) => Math.hypot(rock.position.x - state.lidarOrigin.x, rock.position.z - state.lidarOrigin.z) <= scanReachM,
       )
       const scanSeed = ((row + 1) * 73856093) ^ ((col + 1) * 19349663)
 
@@ -2621,7 +3017,9 @@ export default function TerrainCanvas3D({
       // Marker visibility is the lidarEnabled/cameraMode effect's job now
       // (below) -- it reacts immediately, where this effect is debounced.
       for (const child of state.rockGroup.children) {
-        child.scale.setScalar(orbitRockScale)
+        const baseScale = child.userData.rockBaseScale as THREE.Vector3 | undefined
+        if (baseScale) child.scale.copy(baseScale).multiplyScalar(orbitRockScale)
+        else child.scale.setScalar(orbitRockScale)
       }
 
       const pointGeometry = state.lidarPoints.geometry
@@ -2634,6 +3032,75 @@ export default function TerrainCanvas3D({
       state.terrainNet.geometry = new THREE.BufferGeometry()
       state.terrainNet.geometry.setAttribute('position', new THREE.BufferAttribute(netPositions, 3))
 
+      // This is the only route from scene sensing into local navigation:
+      // first returns -> anonymous obstacle hypotheses -> occupancy -> bounded
+      // local decision. No mesh ID or pre-generated rock list reaches the
+      // planner, and the global API is never called from this path.
+      const observations = observeObstaclesFromLidar(scan, performance.now() / 1000)
+      const occupancy = buildLocalOccupancyGrid({ x_m: roverX, z_m: roverZ }, observations)
+      const activeIndex = source && waypoints
+        ? waypoints.findIndex((waypoint) => waypoint === source || (
+          waypoint.row === source.row && waypoint.col === source.col
+        ))
+        : -1
+      const nextWaypoint = activeIndex >= 0 ? waypoints?.[activeIndex + 1] : undefined
+      const localPlan = nextWaypoint
+        ? planLocalDetour({
+          pose: { x_m: roverX, z_m: roverZ },
+          lookahead: {
+            x_m: nextWaypoint.col * stepX - width / 2,
+            z_m: nextWaypoint.row * stepZ - depth / 2,
+          },
+          obstacles: observations,
+          rover_radius_m: 0.5,
+          safety_margin_m: 0.35,
+          max_deviation_m: 5,
+        })
+        : null
+      const decision = localPlan?.decision ?? 'FOLLOW'
+      setLocalNavigation({
+        observedObstacles: observations.length,
+        occupiedCells: occupancy.cells.filter((cell) => cell === 'occupied').length,
+        decision,
+      })
+      const onLocalNavigationLatest = onLocalNavigationRef.current
+      if (decision !== 'FOLLOW' && onLocalNavigationLatest) {
+        const confirmed = observations.filter((obstacle) => obstacle.confidence >= 0.65)
+        const obstacleCells = confirmed.map((obstacle) => ({
+          row: THREE.MathUtils.clamp(Math.round((obstacle.z_m + depth / 2) / stepZ), 0, rows - 1),
+          col: THREE.MathUtils.clamp(Math.round((obstacle.x_m + width / 2) / stepX), 0, cols - 1),
+          radius_m: obstacle.radius_m,
+          confidence: obstacle.confidence,
+          observed_at_s: obstacle.observed_at_s,
+          source: obstacle.source,
+        }))
+        const localWaypoints = (localPlan?.waypoints ?? []).map((point) => ({
+          row: THREE.MathUtils.clamp(Math.round((point.z_m + depth / 2) / stepZ), 0, rows - 1),
+          col: THREE.MathUtils.clamp(Math.round((point.x_m + width / 2) / stepX), 0, cols - 1),
+        }))
+        const currentRow = THREE.MathUtils.clamp(Math.round((roverZ + depth / 2) / stepZ), 0, rows - 1)
+        const currentCol = THREE.MathUtils.clamp(Math.round((roverX + width / 2) / stepX), 0, cols - 1)
+        // Do not use observed_at_s here. It changes on every scan even when
+        // the rover, obstacle footprint and local decision are unchanged,
+        // which previously caused a completed replan to be issued again.
+        const stopKey = localNavigationSnapshotKey({
+          current: { row: currentRow, col: currentCol },
+          decision,
+          local_waypoints: localWaypoints,
+          observed_obstacles: obstacleCells,
+        })
+        if (obstacleCells.length > 0 && stopKey !== lastLocalStopKeyRef.current) {
+          lastLocalStopKeyRef.current = stopKey
+          onLocalNavigationLatest({
+            current: { row: currentRow, col: currentCol },
+            decision,
+            local_waypoints: localWaypoints,
+            observed_obstacles: obstacleCells,
+          })
+        }
+      } else {
+        lastLocalStopKeyRef.current = null
+      }
       setLidarTelemetry(scan.summary)
     }, delay)
 
@@ -2645,7 +3112,10 @@ export default function TerrainCanvas3D({
     // rockTemplatesReady forces exactly one extra run once the NASA rock
     // shapes arrive, so the field does not stay on icosahedra all session
     // just because nothing else happened to change afterwards.
-  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints, rockTemplatesReady, isPlaying, obstacleRocks])
+    // onLocalNavigation is deliberately NOT a dependency -- it is reached
+    // through a ref (see onLocalNavigationRef) precisely so its per-tick
+    // identity change cannot abort an in-flight scan.
+  }, [activeWaypoint, cameraMode, exaggeration, status, waypoints, rockTemplatesReady, rockVisualTemplatesReady, isPlaying])
 
   useEffect(() => {
     const state = sceneRef.current
@@ -2658,14 +3128,22 @@ export default function TerrainCanvas3D({
     state.lidarPoints.visible = lidarEnabled
     state.terrainNet.visible = lidarEnabled
     state.lidarSweep.visible = lidarEnabled && cameraMode === 'fps'
-    // Rock markers are this scan's orbit-scale stand-in (see their own
-    // comment at creation) -- turning the sensor off should hide every
-    // trace of "detected rocks", not just the point cloud.
-    state.rockMarkerGroup.visible = lidarEnabled && cameraMode === 'orbit'
     state.rockBoxContainer.style.display = lidarEnabled ? '' : 'none'
     // The physical sensor mast/dome model is never shown -- see where
     // rover.mast/rover.lidarHead are created, just below createRoverModel().
   }, [lidarEnabled, cameraMode, status])
+
+  // Start/Goal are useful while composing a mission, then the generated route
+  // has its own endpoint markers. Keep the placement cursors only for the
+  // former so a planned route does not show two competing marker systems.
+  useEffect(() => {
+    const state = sceneRef.current
+    if (!state || status !== 'ready') return
+    const routeIsGenerated = Boolean(waypoints && waypoints.length >= 2)
+    for (const marker of Object.values(state.endpointMarkers)) {
+      marker.group.visible = Boolean(marker.group.userData.placed) && !routeIsGenerated
+    }
+  }, [status, waypoints])
 
   // ── Planned route, drawn in the same metric frame as the mesh. ─────────────
   useEffect(() => {
@@ -2694,75 +3172,247 @@ export default function TerrainCanvas3D({
     const stepZ = (rows * res) / (rows - 1)
     const halfX = (cols * res) / 2
     const halfZ = (rows * res) / 2
+    // The route has to stand on the SAME surface the rover drives on, and
+    // that surface is the mesh's own geometry -- sampleTerrainHeight reads
+    // the very heights array the vertices were built from, then applies
+    // mesh.scale.z. The waypoint's own altitude_m is a different source (the
+    // backend's DEM lookup at cell centres, unscaled), so using it drew the
+    // path in a frame the mesh does not share: in FPS mode, where the mesh
+    // is life-size but the route was still lifted by the orbit exaggeration,
+    // the ribbon hung in the sky above the terrain entirely. Falling back to
+    // the waypoint altitude only where the sample misses (off-grid, or a
+    // NaN in the DEM) keeps a route drawn at all rather than collapsing it
+    // to y=0.
+    const terrainField: TerrainField = {
+      rows,
+      cols,
+      resolutionM: res,
+      minElevationM: minM,
+      heights: state.heights ?? new Float32Array(0),
+      verticalScale: vx,
+    }
     const points = waypoints.map((w) => {
       // Row 0 is the north (-Z) edge after the -90 deg tilt.
       const x = w.col * stepX - halfX
       const z = w.row * stepZ - halfZ
-      const y = ((w.altitude_m ?? minM) - minM) * vx + 4
-      return new THREE.Vector3(x, y, z)
+      const sampled = state.heights ? sampleTerrainHeight(terrainField, x, z) : null
+      const groundY = sampled ?? ((w.altitude_m ?? minM) - minM) * vx
+      // Just clear of the surface: enough that z-fighting never speckles the
+      // ribbon, far too little to read as floating. The old +4 m was a
+      // rover-height hover even when the rest of the frame was right.
+      return new THREE.Vector3(x, groundY + ROUTE_RIBBON_LIFT_M, z)
     })
+
+    // Re-sample along each planned chord so the ribbon follows the ground
+    // between waypoints instead of spanning it. Heights come from the same
+    // terrain sample as the nodes themselves, so a resampled point is no
+    // more approximate than a planned one -- it is simply the surface, read
+    // more often.
+    const sampleGroundY = (x: number, z: number, fallback: number) => {
+      const sampled = state.heights ? sampleTerrainHeight(terrainField, x, z) : null
+      return (sampled ?? fallback) + ROUTE_RIBBON_LIFT_M
+    }
+    const path: THREE.Vector3[] = [points[0]]
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i]
+      const b = points[i + 1]
+      const span = Math.hypot(b.x - a.x, b.z - a.z)
+      const steps = Math.max(1, Math.ceil(span / ROUTE_RESAMPLE_STEP_M))
+      for (let k = 1; k <= steps; k++) {
+        const t = k / steps
+        const x = THREE.MathUtils.lerp(a.x, b.x, t)
+        const z = THREE.MathUtils.lerp(a.z, b.z, t)
+        // The straight-line height between the two nodes is the fallback,
+        // used only where the DEM sample misses.
+        const chordY = THREE.MathUtils.lerp(a.y, b.y, t) - ROUTE_RIBBON_LIFT_M
+        path.push(new THREE.Vector3(x, sampleGroundY(x, z, chordY), z))
+      }
+    }
     // A flat, glowing ribbon rather than a thin wire: reference perception
     // HUDs draw the planned path as a road-width band on the ground, not a
     // 1px line lost against a metre-scale rock field. Each segment gets its
     // own perpendicular (cross of travel direction with world-up), so a
     // sharp turn seams rather than mitres -- fine at this width.
-    const RIBBON_HALF_WIDTH_M = 0.9
+    // Two attributes drive the look: `across` (-1..1 edge-to-edge) lets the
+    // shader fade the corridor's rim and burn its two rails, and `along`
+    // (metres travelled) carries the energy pulse down the path at a real
+    // speed rather than a per-vertex-index one, so pulse spacing stays
+    // constant whether waypoints are 2 m or 20 m apart.
     const ribbonVerts: number[] = []
+    const ribbonAcross: number[] = []
+    const ribbonAlong: number[] = []
     const up = new THREE.Vector3(0, 1, 0)
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i]
-      const b = points[i + 1]
+    let travelled = 0
+    const distances: number[] = [0]
+    for (let i = 1; i < path.length; i++) {
+      travelled += path[i].distanceTo(path[i - 1])
+      distances.push(travelled)
+    }
+    const totalLength = travelled
+
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i]
+      const b = path[i + 1]
       const dir = new THREE.Vector3().subVectors(b, a)
       if (dir.lengthSq() < 1e-6) continue
       dir.normalize()
-      const perp = new THREE.Vector3().crossVectors(dir, up).normalize().multiplyScalar(RIBBON_HALF_WIDTH_M)
-      const aL = new THREE.Vector3().addVectors(a, perp)
-      const aR = new THREE.Vector3().subVectors(a, perp)
-      const bL = new THREE.Vector3().addVectors(b, perp)
-      const bR = new THREE.Vector3().subVectors(b, perp)
+      const perp = new THREE.Vector3()
+        .crossVectors(dir, up)
+        .normalize()
+        .multiplyScalar(ROUTE_RIBBON_HALF_WIDTH_M)
+      // Each rail is re-sampled at its OWN offset position rather than
+      // inheriting the centreline's height. Across any cross-slope the two
+      // edges sit at different elevations, and holding both at the centre
+      // height tips the band out of the hillside -- one rail buried, the
+      // other standing off the ground on a visible skirt. Sampling per
+      // corner banks the ribbon into the slope instead.
+      const edge = (base: THREE.Vector3, sign: 1 | -1) => {
+        const x = base.x + perp.x * sign
+        const z = base.z + perp.z * sign
+        return new THREE.Vector3(x, sampleGroundY(x, z, base.y - ROUTE_RIBBON_LIFT_M), z)
+      }
+      const aL = edge(a, 1)
+      const aR = edge(a, -1)
+      const bL = edge(b, 1)
+      const bR = edge(b, -1)
+      const da = distances[i]
+      const db = distances[i + 1]
       ribbonVerts.push(
         aL.x, aL.y, aL.z, aR.x, aR.y, aR.z, bR.x, bR.y, bR.z,
         aL.x, aL.y, aL.z, bR.x, bR.y, bR.z, bL.x, bL.y, bL.z,
       )
+      ribbonAcross.push(1, -1, -1, 1, -1, 1)
+      ribbonAlong.push(da, da, db, da, db, db)
     }
     const ribbonGeometry = new THREE.BufferGeometry()
     ribbonGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ribbonVerts), 3))
-    ribbonGeometry.computeVertexNormals()
-    routeGroup.add(
-      new THREE.Mesh(
-        ribbonGeometry,
-        new THREE.MeshBasicMaterial({
-          color: 0x39ff6a,
-          transparent: true,
-          opacity: 0.5,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
-      ),
-    )
-    const centerlinePoints = points.map((p) => new THREE.Vector3(p.x, p.y + 0.12, p.z))
-    const centerline = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(centerlinePoints),
-      new THREE.LineDashedMaterial({ color: 0xd6ffde, dashSize: 3, gapSize: 2 }),
-    )
-    centerline.computeLineDistances()
-    routeGroup.add(centerline)
-    // res * 2.5 = 12.5 m radius, a 25 m ball -- fine as a landmark against a
-    // 2.5 km overview, but the scene now also renders 0.3-2 m rocks and a
-    // LiDAR cloud at metre scale, and up close this dwarfed all of it. res
-    // * 0.6 = 3 m radius still reads clearly from orbit while sitting only
-    // a little larger than the rover itself at ground level.
-    const marker = (p: THREE.Vector3, color: number) =>
-      new THREE.Mesh(
+    ribbonGeometry.setAttribute('across', new THREE.BufferAttribute(new Float32Array(ribbonAcross), 1))
+    ribbonGeometry.setAttribute('along', new THREE.BufferAttribute(new Float32Array(ribbonAlong), 1))
+
+    // Hand-written shader rather than a stack of meshes: the rails, the
+    // scanline hatching, the travelling pulse and the edge falloff are all
+    // functions of the same two attributes, so one draw call does what half
+    // a dozen overlaid ribbons would have.
+    const ribbonMaterial = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uColor: { value: new THREE.Color(0x36f5c8) },
+        uRailColor: { value: new THREE.Color(0xaefff0) },
+        uProgress: { value: -1 },
+        uTotal: { value: Math.max(totalLength, 1e-3) },
+      },
+      vertexShader: `
+        attribute float across;
+        attribute float along;
+        varying float vAcross;
+        varying float vAlong;
+        void main() {
+          vAcross = across;
+          vAlong = along;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform vec3 uColor;
+        uniform vec3 uRailColor;
+        uniform float uProgress;
+        uniform float uTotal;
+        varying float vAcross;
+        varying float vAlong;
+
+        void main() {
+          float edge = abs(vAcross);
+
+          // Two bright rails at the corridor edges, a dim floor between.
+          float rail = smoothstep(0.72, 0.98, edge) * (1.0 - smoothstep(0.98, 1.0, edge));
+          float floorFill = (1.0 - smoothstep(0.0, 0.95, edge)) * 0.16;
+
+          // Rungs every 3 m: a surveyed corridor, not a painted stripe.
+          float rung = smoothstep(0.86, 1.0, sin(vAlong * 2.094) * 0.5 + 0.5) * 0.22;
+
+          // Energy pulses running toward the goal at 9 m/s.
+          float pulse = fract((vAlong - uTime * 9.0) / 14.0);
+          float pulseGlow = pow(1.0 - pulse, 8.0) * 0.85;
+
+          // Everything behind the rover dims to a surveyed-but-driven trail,
+          // so the path reads as progress rather than decoration. uProgress
+          // < 0 means "not driving" and leaves the whole route lit.
+          float driven = uProgress < 0.0 ? 0.0 : step(vAlong, uProgress);
+          float wake = 1.0 - driven * 0.62;
+
+          float intensity = (rail * 1.15 + floorFill + rung + pulseGlow) * wake;
+          vec3 color = mix(uColor, uRailColor, rail * 0.75 + pulseGlow * 0.5);
+
+          // Fade the last centimetre of the rim so the band has no hard
+          // sawtooth edge against the regolith.
+          float alpha = intensity * (1.0 - smoothstep(0.97, 1.0, edge));
+          if (alpha < 0.01) discard;
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
+    })
+    const ribbon = new THREE.Mesh(ribbonGeometry, ribbonMaterial)
+    // Drawn after the terrain and the rocks so the additive glow lands on
+    // top of them rather than being sorted behind whatever it crosses.
+    ribbon.renderOrder = 3
+    routeGroup.add(ribbon)
+    routeRibbonRef.current = { material: ribbonMaterial, distances, totalLength }
+    // Endpoint markers. A solid ball works from orbit and fails completely on
+    // the surface: the start sits exactly where the rover -- and therefore the
+    // FPS eye -- begins, so at 3 m radius against a 3.2 m eye height it filled
+    // the screen with flat colour on the first frame of every drive. On the
+    // ground these are drawn instead as a flat ring painted on the regolith,
+    // which is what a landing/target marker looks like from a rover's own
+    // camera and cannot swallow the view however close you stand to it.
+    const onSurface = cameraMode === 'fps'
+    const marker = (p: THREE.Vector3, color: number) => {
+      if (onSurface) {
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(res * 0.34, res * 0.5, 40),
+          new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.85,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+          }),
+        )
+        // RingGeometry is built in the XY plane; lay it flat on the ground.
+        ring.rotation.x = -Math.PI / 2
+        ring.position.set(p.x, p.y + ROUTE_RIBBON_LIFT_M, p.z)
+        ring.renderOrder = 4
+        return ring
+      }
+      return new THREE.Mesh(
         new THREE.SphereGeometry(res * 0.6, 12, 12),
         new THREE.MeshBasicMaterial({ color }),
       ).translateX(p.x).translateY(p.y).translateZ(p.z)
+    }
     routeGroup.add(marker(points[0], 0x2ee59d))
     routeGroup.add(marker(points[points.length - 1], 0xff5252))
   }, [waypoints, exaggeration, cameraMode, status])
 
   // ── 3D Camera Mode (FPS Surface View vs Orbit Overview) ─────────────────────
   const fpsAngles = useRef({ yaw: 0.35, pitch: 0.02 })
+  /**
+   * Set once the driver drags the view in FPS mode. From then on the camera
+   * effect below moves the eye with the rover but leaves the AIM alone.
+   *
+   * Without this the two fought each other and the driver always lost: the
+   * effect re-runs on every activeWaypoint/roverFraction change -- about 20
+   * times a second during playback -- and each run ended in a camera.lookAt()
+   * back down the terrain gradient. Dragging while parked worked, because
+   * nothing re-ran; dragging while driving appeared to do nothing at all,
+   * since the next tick (~50 ms later) overwrote it. Reset when the camera
+   * mode is re-entered or a new route is loaded, so the automatic framing
+   * still gets to introduce each drive.
+   */
+  const fpsLookOwnedByUser = useRef(false)
 
   useEffect(() => {
     const state = sceneRef.current
@@ -2836,12 +3486,33 @@ export default function TerrainCanvas3D({
         : altM
     const targetWorldY = targetAltM - minM + 1.6
 
+    if (fpsLookOwnedByUser.current) {
+      // The driver is aiming. Keep the eye travelling with the rover, but
+      // re-apply THEIR angles instead of the gradient-derived ones.
+      const { yaw: heldYaw, pitch: heldPitch } = fpsAngles.current
+      const dir = new THREE.Vector3(
+        Math.sin(heldYaw) * Math.cos(heldPitch),
+        Math.sin(heldPitch),
+        -Math.cos(heldYaw) * Math.cos(heldPitch),
+      )
+      camera.lookAt(camera.position.clone().add(dir))
+      camera.updateProjectionMatrix()
+      return
+    }
+
     camera.lookAt(targetWorldX, targetWorldY, targetWorldZ)
     camera.updateProjectionMatrix()
 
     const forward = new THREE.Vector3(targetWorldX - rx, targetWorldY - ry, targetWorldZ - rz).normalize()
     fpsAngles.current = { yaw, pitch: Math.asin(THREE.MathUtils.clamp(forward.y, -1, 1)) }
   }, [activeWaypoint, roverFraction, cameraMode, waypoints, status])
+
+  // A fresh drive, or a return to first person, gets the automatic framing
+  // back -- otherwise one drag early in a session would leave every later
+  // route staring off at whatever the driver last looked at.
+  useEffect(() => {
+    fpsLookOwnedByUser.current = false
+  }, [cameraMode, waypoints])
 
   // ── Orbit camera setup ───────────────────────────────────────────────────────
   // Deliberately NOT keyed on activeWaypoint/roverFraction: this used to share
@@ -2922,6 +3593,11 @@ export default function TerrainCanvas3D({
       startX = e.clientX
       startY = e.clientY
 
+      // Any real drag hands the aim to the driver for the rest of this
+      // route. A stationary click (dx = dy = 0) must not, or simply
+      // clicking to place a waypoint would freeze the automatic framing.
+      if (dx !== 0 || dy !== 0) fpsLookOwnedByUser.current = true
+
       fpsAngles.current.yaw -= dx * 0.003
       fpsAngles.current.pitch = THREE.MathUtils.clamp(
         fpsAngles.current.pitch - dy * 0.003,
@@ -2957,6 +3633,88 @@ export default function TerrainCanvas3D({
     }
   }, [cameraMode, status])
 
+  // Live terrain cursor for Start/Goal selection. It intersects the actual
+  // DEM height field, then snaps to the same cell the click handler commits,
+  // without raycasting the 500 x 500 render mesh on every mouse-move.
+  useEffect(() => {
+    const container = containerRef.current
+    const state = sceneRef.current
+    if (!container || !state || status !== 'ready' || !onCellClick || !clickMode || clickMode === 'idle') return
+    const { camera, manifest, heights, mesh, selectionCursor } = state
+    if (!camera || !heights) return
+
+    const { rows, cols, resolution_m: resolutionM } = manifest.grid
+    const width = cols * resolutionM
+    const depth = rows * resolutionM
+    const stepX = width / (cols - 1)
+    const stepZ = depth / (rows - 1)
+    const terrain: TerrainField = {
+      rows, cols, resolutionM,
+      minElevationM: manifest.elevation.min_m,
+      heights,
+      verticalScale: mesh.scale.z,
+    }
+    const raycaster = new THREE.Raycaster()
+    const groundPoint = new THREE.Vector3()
+    const terrainNormal = new THREE.Vector3()
+    const up = new THREE.Vector3(0, 1, 0)
+
+    const clearPreview = () => {
+      selectionPreviewRef.current = null
+      selectionCursor.group.visible = false
+    }
+
+    const onMove = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('button, input, label, .terrain3d-lidar, .terrain3d-camera-switch')) {
+        clearPreview()
+        return
+      }
+      const rect = container.getBoundingClientRect()
+      const ndc = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      raycaster.setFromCamera(ndc, camera)
+      if (!intersectTerrainHeightfield(raycaster.ray, terrain, groundPoint)) {
+        clearPreview()
+        return
+      }
+
+      const col = Math.round((groundPoint.x + width / 2) / stepX)
+      const row = Math.round((groundPoint.z + depth / 2) / stepZ)
+      if (row < 0 || row >= rows || col < 0 || col >= cols) {
+        clearPreview()
+        return
+      }
+      const x = col * stepX - width / 2
+      const z = row * stepZ - depth / 2
+      const y = sampleTerrainHeight(terrain, x, z)
+      if (y === null) {
+        clearPreview()
+        return
+      }
+
+      terrainNormal.copy(sampleTerrainNormal(terrain, x, z))
+      selectionCursor.setMode(clickMode)
+      selectionCursor.group.position.set(x, y + 0.16, z)
+      selectionCursor.group.quaternion.setFromUnitVectors(up, terrainNormal)
+      selectionCursor.group.visible = true
+      selectionPreviewRef.current = { row, col, clientX: event.clientX, clientY: event.clientY }
+    }
+
+    selectionCursor.setMode(clickMode)
+    selectionCursor.group.visible = false
+    container.style.cursor = 'crosshair'
+    container.addEventListener('pointermove', onMove)
+    container.addEventListener('pointerleave', clearPreview)
+    return () => {
+      clearPreview()
+      container.style.cursor = ''
+      container.removeEventListener('pointermove', onMove)
+      container.removeEventListener('pointerleave', clearPreview)
+    }
+  }, [cameraMode, clickMode, onCellClick, status])
+
   // ── Click-to-select start/goal ──────────────────────────────────────────────
   // Mirrors MapCanvas's own picker exactly (same onCellClick(row, col)
   // signature, same clickMode) so App.tsx wires this in without a second
@@ -2969,13 +3727,22 @@ export default function TerrainCanvas3D({
     if (!container || !state || status !== 'ready' || !onCellClick || !clickMode || clickMode === 'idle') {
       return
     }
-    const { camera, mesh, manifest } = state
+    const { camera, mesh, manifest, selectionCursor, endpointMarkers } = state
     if (!camera) return
 
     let downX = 0
     let downY = 0
     let tracking = false
     const raycaster = new THREE.Raycaster()
+
+    const placeEndpointMarker = (mode: Exclude<ClickMode, 'idle'>, point: THREE.Vector3, normal: THREE.Vector3) => {
+      const marker = endpointMarkers[mode]
+      marker.setMode(mode)
+      marker.group.position.copy(point).addScaledVector(normal, 0.16)
+      marker.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal)
+      marker.group.userData.placed = true
+      marker.group.visible = true
+    }
 
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return
@@ -2988,6 +3755,21 @@ export default function TerrainCanvas3D({
       if (!tracking) return
       tracking = false
       if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return
+
+      // Prefer the cell visibly marked under the pointer. The proximity check
+      // prevents a stale preview from being used if a click arrives before a
+      // matching pointermove event.
+      const preview = selectionPreviewRef.current
+      if (preview && Math.hypot(e.clientX - preview.clientX, e.clientY - preview.clientY) <= 8) {
+        const marker = endpointMarkers[clickMode]
+        marker.setMode(clickMode)
+        marker.group.position.copy(selectionCursor.group.position)
+        marker.group.quaternion.copy(selectionCursor.group.quaternion)
+        marker.group.userData.placed = true
+        marker.group.visible = true
+        onCellClick(preview.row, preview.col)
+        return
+      }
 
       const rect = container.getBoundingClientRect()
       const ndc = new THREE.Vector2(
@@ -3010,6 +3792,10 @@ export default function TerrainCanvas3D({
       const col = Math.round((hit.point.x + width / 2) / stepX)
       const row = Math.round((hit.point.z + depth / 2) / stepZ)
       if (row < 0 || row > rows - 1 || col < 0 || col > cols - 1) return
+      const normal = hit.face
+        ? hit.face.normal.clone().transformDirection(mesh.matrixWorld).normalize()
+        : new THREE.Vector3(0, 1, 0)
+      placeEndpointMarker(clickMode, hit.point, normal)
       onCellClick(row, col)
     }
 
@@ -3057,6 +3843,7 @@ export default function TerrainCanvas3D({
                 <div><span>RANGE</span><strong>{LIDAR_CONFIG.maxRangeM} m</strong></div>
                 <div><span>RETURNS</span><strong>{lidarTelemetry.returns.toLocaleString()}</strong></div>
                 <div><span>ROCK HITS</span><strong>{lidarTelemetry.rockReturns}</strong></div>
+                <div><span>OCCUPIED</span><strong>{localNavigation?.occupiedCells ?? 0}</strong></div>
                 <div>
                   <span>NEAREST</span>
                   <strong className={
@@ -3082,6 +3869,11 @@ export default function TerrainCanvas3D({
                 }>
                   {lidarTelemetry.detectedRocks} rocks tracked
                 </b>
+                {localNavigation && (
+                  <b className={localNavigation.decision === 'FOLLOW' ? '' : 'is-danger'}>
+                    {localNavigation.observedObstacles} observed · {localNavigation.decision}
+                  </b>
+                )}
               </div>
             </>
           )}
@@ -3109,6 +3901,33 @@ export default function TerrainCanvas3D({
             <Icon name="map" className="cam-icon" />
             <span>Orbit</span>
           </button>
+
+          {canFullscreen && onToggleFullscreen && (
+            <>
+              {/* Divider: fullscreen changes the viewport, not the camera, so
+                  it should not read as a third mutually-exclusive mode. */}
+              <span className="terrain3d-cam-divider" aria-hidden="true" />
+              <button
+                type="button"
+                className="terrain3d-cam-btn terrain3d-cam-btn--icon"
+                aria-pressed={fullscreen}
+                onClick={onToggleFullscreen}
+                title={
+                  fullscreen
+                    ? 'Exit fullscreen (Esc)'
+                    : 'Fill the screen with the 3-D view'
+                }
+              >
+                <Icon
+                  name={fullscreen ? 'fullscreenexit' : 'fullscreen'}
+                  className="cam-icon"
+                />
+                <span className="lp-visually-hidden">
+                  {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                </span>
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

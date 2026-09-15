@@ -1543,6 +1543,107 @@ select {
   overflow: hidden;
 }
 
+/* Fullscreen: .map-stage is the element handed to requestFullscreen, so it
+   becomes the viewport itself. The browser paints the fullscreen backdrop
+   white by default, which flashes through the rounded corners of the canvas
+   shell -- hence the explicit ground. The padding that insets the map inside
+   the console frame is spent here on screen the driver asked for, so it goes.
+
+   The overlays are already absolutely positioned against this element, so
+   they follow it into fullscreen with no further work; they only need their
+   insets grown so they do not crowd the edge of a much larger stage. */
+.map-stage.is-fullscreen {
+  padding: 0;
+  background: var(--void);
+}
+
+.map-stage.is-fullscreen .map-canvas-shell {
+  border-radius: 0;
+}
+
+.map-stage.is-fullscreen .map-overlay-top-left {
+  top: 32px;
+  left: 32px;
+}
+
+.map-stage.is-fullscreen .map-overlay-bottom-right {
+  right: 32px;
+  bottom: 32px;
+}
+
+/* ── 2-D fullscreen: the plate and the route, nothing else ──
+   3-D fullscreen keeps its instruments because a first-person cockpit
+   without them is just a photograph. The 2-D plate is the opposite case: it
+   IS the instrument, and every panel over it hides cells the operator is
+   reading. So here fullscreen means the map alone.
+
+   Everything absolutely positioned inside the stage goes, including the
+   canvas overlay layer that carries the layer picker, the analysis toggles
+   and the risk key. The one exception is the fullscreen button itself --
+   without it the only way back is Esc, and a control that hides itself the
+   moment you use it is a trapdoor. */
+.map-stage.is-2d.is-fullscreen .map-overlay,
+.map-stage.is-2d.is-fullscreen .lp-slot-canvas {
+  display: none;
+}
+
+/* The plate loses its frame: at full screen the border and drop shadow are
+   chrome around a picture the operator asked to see whole.
+
+   `!important` because MapCanvas sets these inline (see the comment on its
+   <canvas>, which also explains why it deliberately avoids the .map-canvas
+   class), and an inline style beats any selector without it. The canvas
+   keeps its own square aspect -- it is a 1:1 grid, and stretching it would
+   make every distance on it wrong along one axis. */
+.map-stage.is-2d.is-fullscreen .map-canvas-shell canvas {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* ── The 2-D fullscreen button ──
+   Top right, where a viewer's own fullscreen control sits. Above the canvas
+   overlay layer (z-index 3) so it survives that layer being hidden, and
+   dimmed until hovered so it does not read as part of the map. */
+.lp-map-fullscreen-btn {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-muted);
+  background: rgba(8, 11, 18, 0.55);
+  border: 1px solid rgba(29, 36, 50, 0.5);
+  border-radius: var(--radius);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.lp-map-fullscreen-btn:hover,
+.lp-map-fullscreen-btn:focus-visible {
+  opacity: 1;
+  color: var(--text);
+  border-color: rgba(79, 216, 240, 0.45);
+}
+
+.lp-map-fullscreen-btn .lp-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* In fullscreen the layer/analysis dock is gone, so the button takes its
+   corner and stands a little clearer of the edge. */
+.map-stage.is-2d.is-fullscreen .lp-map-fullscreen-btn {
+  top: 20px;
+  right: 20px;
+}
+
 .map-canvas-shell {
   width: 100%;
   height: 100%;
@@ -2718,6 +2819,35 @@ select {
   box-shadow: var(--shadow-float);
   padding: 8px;
   z-index: 100;
+  /* Same cap as the analysis panel below it: seven layers in three groups
+     fit a tall window and run off a short one, and a menu whose last entries
+     cannot be reached is a menu missing entries. The trigger sits at
+     top: 24px, so this gives back that plus its height and a margin. */
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(199, 205, 219, 0.28) transparent;
+}
+
+.lp-layer-dropdown-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.lp-layer-dropdown-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.lp-layer-dropdown-panel::-webkit-scrollbar-thumb {
+  background: rgba(199, 205, 219, 0.22);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.lp-layer-dropdown-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(199, 205, 219, 0.4);
+  background-clip: content-box;
 }
 
 .lp-layer-group {
@@ -4635,7 +4765,47 @@ select {
   cursor: not-allowed;
 }
 
-/* ── Minimizable Telemetry HUD Overlay on Canvas ── */
+/* ── Minimizable Telemetry HUD Overlay on Canvas ──
+   Translucent on purpose: this sits on the map's top-left corner, which on a
+   north-up plate carries real cells, so the terrain has to stay visible
+   through it. The blur is what makes 40% affordable -- against a bare wash
+   the regolith's own speckle runs straight through the digits and the
+   numbers stop being readable at a glance. Blurred, the ground reads as
+   depth behind the panel instead of noise inside it.
+
+   The label and value colours are high-contrast against a dark ground, and
+   lunar terrain is mid-grey at its brightest, so the text still clears WCAG
+   AA over the worst case this can sit on. */
+.lp-hud-card,
+.lp-hud-minimized {
+  /* No wash at all: the panel is the blur. A frosted pane separates the
+     readout from the terrain without tinting any of it away, so the ground
+     under the HUD is the same ground as beside it -- just out of focus.
+     Contrast for the digits comes from the text shadow below rather than
+     from a dark plate behind them. */
+  background: transparent;
+  backdrop-filter: blur(14px) saturate(0.9);
+  -webkit-backdrop-filter: blur(14px) saturate(0.9);
+}
+
+/* A blurred pane makes its own contrast; a fully transparent one does not.
+   These shadows are what keep the numbers legible where the terrain under
+   them is bright regolith rather than crater shadow. */
+.lp-hud-card,
+.lp-hud-minimized {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.65);
+}
+
+/* Where the browser cannot blur there is nothing separating the panel from
+   the map, so fall back to an opaque-enough ground -- transparent text over
+   a photograph is not a readable panel. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lp-hud-card,
+  .lp-hud-minimized {
+    background: rgba(8, 11, 18, 0.82);
+  }
+}
+
 .lp-hud-card {
   min-width: 232px;
   max-width: 262px;
@@ -4703,13 +4873,18 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(8, 11, 18, 0.85);
+  /* Background deliberately absent -- the shared rule above owns it. It used
+     to be re-declared here at 0.85 and, coming later in the file, that won
+     on source order and quietly undid the translucency. */
   border: 1px solid rgba(29, 36, 50, 0.4);
   border-radius: var(--radius);
   cursor: pointer;
   box-shadow: var(--shadow-pop);
   transition: all 0.2s ease;
   user-select: none;
+  /* One line. The chip is only as wide as its contents, so without this the
+     altitude broke between its number and its unit ("+818.1" / "m"). */
+  white-space: nowrap;
 }
 
 .lp-hud-minimized:hover {
@@ -5602,15 +5777,39 @@ select {
   flex: none;
   display: flex;
   align-items: center;
-  /* The scale and the risk key moved onto the map, where the things they
-     describe are. What is left is the transport, so the strip aligns to the
-     end rather than splitting a single child across the width. */
+  /* The scale and risk key sit at the left (they push everything else over
+     with their own margin-right: auto) and the transport at the right, so the
+     strip aligns to the end and the key's margin does the splitting. With no
+     key mounted the transport still lands where it always did. */
   justify-content: flex-end;
   gap: 18px;
   padding: 0 16px;
   background: var(--bg-surface);
   border-top: 1px solid var(--line);
   overflow: hidden;
+}
+
+/* The key is the flexible one: it shrinks (and scrolls internally) rather
+   than pushing the transport off the end. Without a min-width of 0 a flex
+   item refuses to shrink below its content, which is what let the two
+   collide instead of one giving way. */
+.lp-status-bar .lp-map-key {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* The transport takes the rest of the strip.
+   Merge note: the codex branch fixed this same overflow by sizing a
+   .lp-status-right wrapper, but that wrapper no longer exists -- the strip's
+   features are direct children now, precisely so the key and the transport
+   could be placed at opposite ends instead of travelling as one flex item.
+   The fix still applies, just addressed to the dock itself: without a width
+   the dock takes its max-content size, and justify-content: flex-end then
+   pushes its first controls off the LEFT edge. Given the available width,
+   the flexible scrubber yields before any visible control is clipped. */
+.lp-status-bar .lp-playback-dock {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
@@ -5842,7 +6041,13 @@ select {
    elsewhere: the rail's RISK DISTRIBUTION carries the same four colours with
    their share of the route beside them, which is the legend plus the data. In
    PLAN there is no rail and no transport, so the strip keeps it. */
-.lp-status-bar.is-analyze .lp-risk-legend {
+/* Analyze fills this strip with the transport: a play control, a waypoint
+   counter, a scrub bar and four mission readouts, all of which want the
+   width. The scale/risk key is the thing that gives way -- it describes the
+   map, and in analyze the operator is reading the drive, not picking cells.
+   Without this the two overlapped: the key held the left with its auto
+   margin while the dock claimed the same row with flex: 1. */
+.lp-status-bar.is-analyze .lp-map-key {
   display: none;
 }
 
@@ -6168,6 +6373,24 @@ select {
 .terrain3d-cam-btn:hover {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* Square, label-less: the two mode buttons beside it are a choice between
+   each other, and an icon-only control reads as the separate action it is. */
+.terrain3d-cam-btn--icon {
+  padding: 6px 9px;
+}
+
+.terrain3d-cam-btn--icon[aria-pressed='true'] {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.terrain3d-cam-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 2px;
+  background: rgba(148, 163, 184, 0.28);
 }
 
 .terrain3d-cam-btn.is-active {

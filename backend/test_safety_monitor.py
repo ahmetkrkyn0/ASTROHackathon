@@ -461,12 +461,12 @@ def _bound(rover_id: str, **kwargs):
 def test_catalogue_thresholds_come_from_the_rover():
     viper = _bound("nasa_viper")
     assert [rid for rid in viper] == [f"LP-R{i:02d}" for i in range(1, 13)]
-    assert viper["LP-R01"].threshold == 96.0 and viper["LP-R01"].requirement.rover_parameter == "h_max_shadow_h"
+    assert viper["LP-R01"].threshold == 50.0 and viper["LP-R01"].requirement.rover_parameter == "h_max_shadow_h"
     assert viper["LP-R02"].threshold == 20.0
     assert viper["LP-R03"].threshold == 6.0 and viper["LP-R03"].threshold_source == "catalogue"
     assert viper["LP-R04"].threshold == (-20.0, 50.0)
     assert viper["LP-R05"].threshold == (0.0, 35.0)
-    assert viper["LP-R06"].threshold == 20.0
+    assert viper["LP-R06"].threshold == 15.0
     assert viper["LP-R07"].threshold == 15.0
     assert viper["LP-R11"].threshold == 20.0
     assert all(viper[rid].applicable for rid in viper)
@@ -496,7 +496,7 @@ _SAMPLES = [
      "moving": False, "earth_link_h": 30.0, "haven_margin_h": 12.0, "dist_to_goal_m": 400.0},
     {"t_h": 1.0, "soc_pct": 60.0, "inner_temp_c": 20.0, "in_shadow": True, "slope_deg": 12.0, "lateral_slope_deg": 6.0,
      "moving": True, "earth_link_h": 25.0, "haven_margin_h": 10.0, "dist_to_goal_m": 300.0},
-    {"t_h": 3.0, "soc_pct": 30.0, "inner_temp_c": 33.0, "in_shadow": True, "slope_deg": 18.0, "lateral_slope_deg": 14.0,
+    {"t_h": 3.0, "soc_pct": 30.0, "inner_temp_c": 33.0, "in_shadow": True, "slope_deg": 14.0, "lateral_slope_deg": 13.0,
      "moving": True, "earth_link_h": 20.0, "haven_margin_h": 7.0, "dist_to_goal_m": 100.0},
     {"t_h": 4.0, "soc_pct": 25.0, "inner_temp_c": 5.0, "in_shadow": False, "slope_deg": 3.0, "lateral_slope_deg": 1.0,
      "moving": True, "earth_link_h": 19.0, "haven_margin_h": 9.0, "dist_to_goal_m": 0.0},
@@ -512,9 +512,9 @@ def test_evaluate_catalogue_reports_hand_computed_margins():
     block = sm.evaluate_catalogue(sm.trace_from_samples(_SAMPLES, rover), rover)
     r = _by_id(block)
     expected = {
-        "LP-R01": (93.0, "h", 2), "LP-R02": (5.0, "pct", 3), "LP-R03": (6.0, "h", 0),
-        "LP-R04": (17.0, "degC", 2), "LP-R05": (2.0, "degC", 2), "LP-R06": (2.0, "deg", 2),
-        "LP-R07": (1.0, "deg", 2), "LP-R08": (19.0, "h", 3), "LP-R09": (7.0, "h", 2),
+        "LP-R01": (47.0, "h", 2), "LP-R02": (5.0, "pct", 3), "LP-R03": (6.0, "h", 0),
+        "LP-R04": (17.0, "degC", 2), "LP-R05": (2.0, "degC", 2), "LP-R06": (1.0, "deg", 2),
+        "LP-R07": (2.0, "deg", 2), "LP-R08": (19.0, "h", 3), "LP-R09": (7.0, "h", 2),
         "LP-R10": (0.0, "m", 3), "LP-R11": (5.0, "pct", 3),
     }
     for rid, (rho, unit, worst) in expected.items():
@@ -526,13 +526,13 @@ def test_evaluate_catalogue_reports_hand_computed_margins():
         assert entry["worst_at"]["index"] == worst, rid
         assert entry["worst_at"]["hours"] == pytest.approx(_SAMPLES[worst]["t_h"]), rid
     assert r["LP-R10"]["boundary"] is True and r["LP-R02"]["boundary"] is False
-    assert r["LP-R01"]["rho_normalized"] == pytest.approx(93.0 / 96.0)
+    assert r["LP-R01"]["rho_normalized"] == pytest.approx(47.0 / 50.0)
     assert r["LP-R04"]["rho_normalized"] == pytest.approx(17.0 / 35.0)
     assert r["LP-R08"]["rho_normalized"] == pytest.approx(19.0 / 24.0)
     assert r["LP-R10"]["rho_normalized"] == pytest.approx(0.0)
     assert r["LP-R03"]["threshold_source"] == "catalogue" and r["LP-R01"]["threshold_source"] == "rover"
     assert block["min_margin"] == {
-        "id": "LP-R07", "rho": pytest.approx(1.0), "unit": "deg", "rho_normalized": pytest.approx(1.0 / 15.0, abs=1e-6)
+        "id": "LP-R06", "rho": pytest.approx(1.0), "unit": "deg", "rho_normalized": pytest.approx(1.0 / 15.0, abs=1e-6)
     }
     assert block["n_applicable"] == 11 and block["n_violated"] == 0 and block["violated"] == []
     assert block["verdict"] == "satisfied"

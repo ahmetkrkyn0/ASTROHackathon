@@ -11,8 +11,10 @@
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>grid_map_msgs</depend>
   <depend>tf2_ros</depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
   <depend>lunapath_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>

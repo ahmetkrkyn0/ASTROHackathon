@@ -80,6 +80,10 @@ lunapath/data/processed/thermal_envelope_meta.json
 # data at {1500, 1000}.
 *.zip
 *.glb
+# Curated, web-ready Apollo sample models used by the 3-D scene. These are
+# authored visual assets, not generated build output.
+!frontend/public/models/nasa_rocks/*.glb
+!frontend/public/models/nasa_rocks_optimized/*.glb
 frontend/public/cesium/
 lunapath/data/processed/sp-site01-connecting-ridge-5km/
 lunapath/data/processed/*.bak

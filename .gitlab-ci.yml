@@ -52,3 +52,22 @@ lunapath-offline-tests:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
+
+ros2-jazzy-tests:
+  stage: test
+  # Build the real IDL and run the ROS-shell tests in the same distribution
+  # used by the deployment container. This catches action/message changes
+  # that Windows-side py_compile cannot see.
+  image: osrf/ros:jazzy-desktop
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends build-essential cmake ros-jazzy-grid-map ros-jazzy-sensor-msgs-py python3-colcon-common-extensions python3-pytest python3-numpy python3-scipy
+    - python3 -m pip install --break-system-packages -r backend/requirements.txt
+  script:
+    - source /opt/ros/jazzy/setup.bash
+    - colcon build --packages-select lunapath_msgs lunapath_ros
+    - source install/setup.bash
+    - PYTHONPATH="$CI_PROJECT_DIR/backend:$PYTHONPATH" colcon test --packages-select lunapath_msgs lunapath_ros
+    - colcon test-result --verbose
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH

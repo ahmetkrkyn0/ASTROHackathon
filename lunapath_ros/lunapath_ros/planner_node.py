@@ -13,6 +13,7 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from nav_msgs.msg import Path
 
 from app.constants import UnknownRoverError, get_rover
 from app.corridor import build_corridor
@@ -22,12 +23,14 @@ from app.pathfinder import astar
 from app.rover_grids import grids_for_rover
 from app.simulation import simulate_path, summarize_simulation
 from lunapath_msgs.action import PlanTraverse
+from lunapath_msgs.msg import ActiveMission, Corridor as CorridorMsg
 from lunapath_ros.conversions import (
     corridor_to_msg,
     pixels_to_path,
     pose_to_pixel,
     weights_msg_to_dict,
 )
+from lunapath_ros.observed_obstacle_grid import with_observed_obstacles
 
 WEIGHT_MIN, WEIGHT_MAX = 0.0, 2.0
 
@@ -59,11 +62,16 @@ class LunaPathPlanner(Node):
         # Latched so the pose monitor receives the active corridor even if
         # it starts after the plan was made (see pose_monitor.LATCHED_QOS,
         # the subscribing side of the same profile).
-        from lunapath_msgs.msg import Corridor as CorridorMsg
         from lunapath_ros.pose_monitor import LATCHED_QOS
 
         self._corridor_pub = self.create_publisher(
             CorridorMsg, "corridor", LATCHED_QOS
+        )
+        self._path_pub = self.create_publisher(
+            Path, "global_path", LATCHED_QOS
+        )
+        self._active_mission_pub = self.create_publisher(
+            ActiveMission, "active_mission", LATCHED_QOS
         )
         self.get_logger().info("PlanTraverse action server ready on /plan_traverse")
 
@@ -173,6 +181,14 @@ class LunaPathPlanner(Node):
                 goal_handle, result, result.GOAL_OCCUPIED, f"goal {goal} is not traversable"
             )
 
+        # The initial action has no observations. A replan coordinator may
+        # supply only LiDAR-originated, confidence-qualified obstacle records;
+        # this is deliberately after the base start validation so an observed
+        # rock under the stationary rover cannot invalidate its own start.
+        grids, accepted_observations = with_observed_obstacles(
+            grids, request.observed_obstacles, start
+        )
+
         feedback = PlanTraverse.Feedback()
         feedback.progress = 0.0
         goal_handle.publish_feedback(feedback)
@@ -186,6 +202,7 @@ class LunaPathPlanner(Node):
         result.path = pixels_to_path(
             plan["path_pixels"], metadata, self._frame_id, stamp
         )
+        self._path_pub.publish(result.path)
 
         # -- corridor -------------------------------------------------------
         # error_code stays NONE on a corridor failure (the path itself is
@@ -270,12 +287,23 @@ class LunaPathPlanner(Node):
         result.planning_time.sec = int(elapsed)
         result.planning_time.nanosec = int((elapsed % 1.0) * 1e9)
         result.error_code = result.NONE
-        result.error_msg = "; ".join(m for m in (corridor_err, sim_err) if m)
+        messages = [m for m in (corridor_err, sim_err) if m]
+        if accepted_observations:
+            messages.append(f"replan used {accepted_observations} confirmed LiDAR obstacle(s)")
+        result.error_msg = "; ".join(messages)
 
         feedback.progress = 1.0
         feedback.nodes_expanded = metrics.nodes_expanded
         goal_handle.publish_feedback(feedback)
         goal_handle.succeed()
+        active = ActiveMission()
+        active.header.frame_id = self._frame_id
+        active.header.stamp = stamp
+        active.goal = request.goal
+        active.rover_id = request.rover_id
+        active.weights = request.weights
+        active.metrics = result.metrics
+        self._active_mission_pub.publish(active)
         return result
 
     def _fail(self, goal_handle, result, code: int, message: str):
@@ -296,9 +324,13 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        executor.shutdown()
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            executor.shutdown()
+            node.destroy_node()
+        except KeyboardInterrupt:
+            pass
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

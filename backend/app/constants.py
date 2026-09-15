@@ -308,11 +308,15 @@ ROVERS: dict[str, dict[str, Any]] = {
     },
     "nasa_viper": {
         "name": "NASA VIPER",
-        "mass_kg": 450,
-        "v_max_ms": 0.06,
+        # NASA's February 2025 technical briefing: 447 kg roving mass,
+        # 5,420 Wh beginning-of-life capacity at 0 C, and 50+ h low-power
+        # shadow survival. NTRS 20230004239 gives the 0.20 m/s flat-terrain
+        # maximum; operational "speed made good" is not a vehicle speed limit.
+        "mass_kg": 447,
+        "v_max_ms": 0.20,
         "p_base_w": 250,
         "p_peak_w": 500,
-        "e_cap_wh": 4000,
+        "e_cap_wh": 5420,
         "p_idle_w": 80,
         "p_heater_w": 50,
         "p_shadow_w": 130,
@@ -320,10 +324,12 @@ ROVERS: dict[str, dict[str, Any]] = {
         "p_solar_w": 450,
         "regen_efficiency": 0.10,
         "slope_comfortable_deg": 15,
-        "slope_max_deg": 20,
+        # NASA's rover page and VIPER mission planning constrain traverses
+        # to 15 degrees.
+        "slope_max_deg": 15,
         "slope_lateral_max_deg": 15,
-        "h_max_shadow_h": 96,
-        "h_design_shadow_h": 120,
+        "h_max_shadow_h": 50,
+        "h_design_shadow_h": 50,
         "soc_min_pct": 0.20,
         "thermal_tau_s": 8000,
         "thermal_offset_cold": 60,
@@ -351,8 +357,11 @@ ROVERS: dict[str, dict[str, Any]] = {
     },
     "cnsa_yutu_2": {
         "name": "CNSA Yutu-2",
-        "mass_kg": 140,
-        "v_max_ms": 0.05,
+        # Published Yutu-2 mass is 135 kg and its design speed is 200 m/h.
+        # CNSA/public engineering sources do not publish a Wh battery
+        # capacity, so e_cap_wh below deliberately remains a model parameter.
+        "mass_kg": 135,
+        "v_max_ms": 200.0 / 3600.0,
         "p_base_w": 100,
         "p_peak_w": 200,
         "e_cap_wh": 1500,

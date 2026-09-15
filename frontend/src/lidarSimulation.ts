@@ -53,15 +53,6 @@ export interface RockDescriptor {
   /** Bedding tilt applied on top of the terrain normal, radians. */
   tiltX: number
   tiltZ: number
-  /**
-   * Grid cell this rock sits in, only populated when generateRockField is
-   * given grid metadata to convert into. App.tsx uses this to tell the
-   * backend planner which cells these (otherwise purely client-side,
-   * decorative) rocks occupy, so a route can actually be planned around
-   * them instead of just rendered on top of them.
-   */
-  row?: number
-  col?: number
 }
 
 export interface LidarScanSummary {
@@ -77,6 +68,8 @@ export interface LidarScanSummary {
 export interface LidarScanResult {
   positions: Float32Array
   colors: Float32Array
+  /** First-return points classified as non-terrain by the local sensor pass. */
+  obstacleReturns: Float32Array
   /** Nearest first-return for every azimuth; used by the animated sweep fan. */
   azimuthEndpoints: Array<THREE.Vector3 | null>
   summary: LidarScanSummary
@@ -438,12 +431,6 @@ export function generateRockField(
   originX: number,
   originZ: number,
   radiusM = LIDAR_CONFIG.maxRangeM + 8,
-  // Optional: when given, each descriptor also gets the (row, col) grid
-  // cell its world position falls in, using the exact inverse of the
-  // x = col*stepX - width/2 / z = row*stepZ - depth/2 mapping every other
-  // world<->grid conversion in this codebase already uses. Only App.tsx's
-  // pre-planning obstacle pass needs this; rendering call sites can omit it.
-  grid?: { rows: number; cols: number; resolutionM: number },
 ): RockDescriptor[] {
   const chunkM = ROCK_FIELD.chunkM
   // One chunk of overscan: rocks just outside the requested radius still
@@ -517,17 +504,122 @@ export function generateRockField(
   for (const rock of kept) {
     const distance = Math.hypot(rock.x - originX, rock.z - originZ)
     if (distance > radiusM || distance < ROCK_FIELD.safetyRadiusM) continue
-    if (grid) {
-      const gridWidth = grid.cols * grid.resolutionM
-      const gridDepth = grid.rows * grid.resolutionM
-      const stepX = gridWidth / (grid.cols - 1)
-      const stepZ = gridDepth / (grid.rows - 1)
-      rock.col = Math.round((rock.x + gridWidth / 2) / stepX)
-      rock.row = Math.round((rock.z + gridDepth / 2) / stepZ)
-    }
     rocks.push(rock)
   }
   return rocks
+}
+
+/**
+ * Deliberately small, fixed boulder garden used by the interactive local
+ * avoidance demo.  Unlike the broad, statistically distributed field above,
+ * this is a repeatable scene feature: its anchor is chosen once by the
+ * renderer and never follows a replan or the rover's moving pose.
+ *
+ * Six separated patches give the scene a wider obstacle field rather than
+ * one artificial pile. Each patch starts with large, close but
+ * non-overlapping boulders; its smaller surrounding rocks and loose outliers
+ * keep it from reading as a few copied props.
+ */
+const FIXED_BOULDER_CLUSTER: ReadonlyArray<{
+  x_m: number
+  z_m: number
+  diameter_m: number
+  seed: number
+}> = [
+  { x_m: 18, z_m: 7, diameter_m: 5.4, seed: 0x4f11 },
+  { x_m: 23.4, z_m: 8.2, diameter_m: 4.4, seed: 0x4f12 },
+  { x_m: 20.3, z_m: 13, diameter_m: 3.8, seed: 0x4f13 },
+  { x_m: 14, z_m: 12.4, diameter_m: 2.5, seed: 0x4f14 },
+  { x_m: 26.2, z_m: 13.8, diameter_m: 2.2, seed: 0x4f15 },
+  { x_m: 17.1, z_m: 18.1, diameter_m: 1.6, seed: 0x4f16 },
+  { x_m: 23.8, z_m: 18.2, diameter_m: 1.3, seed: 0x4f17 },
+  { x_m: 29.1, z_m: 9.6, diameter_m: 1.1, seed: 0x4f18 },
+
+  // West-south patch: a second obstacle choice as the rover leaves the
+  // initial garden, deliberately separated from it by open terrain.
+  { x_m: -30, z_m: -12, diameter_m: 4.8, seed: 0x4f21 },
+  { x_m: -24.8, z_m: -10.8, diameter_m: 3.9, seed: 0x4f22 },
+  { x_m: -27.7, z_m: -5.4, diameter_m: 3.3, seed: 0x4f23 },
+  { x_m: -35.1, z_m: -7.1, diameter_m: 2.2, seed: 0x4f24 },
+  { x_m: -21.1, z_m: -4.1, diameter_m: 1.9, seed: 0x4f25 },
+  { x_m: -32.2, z_m: -1.2, diameter_m: 1.4, seed: 0x4f26 },
+  { x_m: -19.9, z_m: -14.4, diameter_m: 1.1, seed: 0x4f27 },
+
+  // East-north patch: visible as a distinct destination-sized cluster in
+  // orbit mode, with a tight three-boulder core for local LiDAR avoidance.
+  { x_m: 44, z_m: 31, diameter_m: 4.7, seed: 0x4f31 },
+  { x_m: 49.2, z_m: 32.5, diameter_m: 3.8, seed: 0x4f32 },
+  { x_m: 46, z_m: 37, diameter_m: 3.2, seed: 0x4f33 },
+  { x_m: 39.2, z_m: 36.1, diameter_m: 2.4, seed: 0x4f34 },
+  { x_m: 53.2, z_m: 37.2, diameter_m: 2.0, seed: 0x4f35 },
+  { x_m: 42, z_m: 42.2, diameter_m: 1.5, seed: 0x4f36 },
+  { x_m: 52.3, z_m: 43.1, diameter_m: 1.2, seed: 0x4f37 },
+
+  // South-east scatter: a large pair, an almost touching trio and several
+  // small outliers make this feel like a natural ejecta apron rather than a
+  // uniformly spaced obstacle course.
+  { x_m: 58.4, z_m: -15.2, diameter_m: 5.7, seed: 0x4f41 },
+  { x_m: 64.8, z_m: -12.7, diameter_m: 3.9, seed: 0x4f42 },
+  { x_m: 60.1, z_m: -7.9, diameter_m: 3.1, seed: 0x4f43 },
+  { x_m: 66.9, z_m: -6.3, diameter_m: 2.4, seed: 0x4f44 },
+  { x_m: 54.2, z_m: -5.6, diameter_m: 1.8, seed: 0x4f45 },
+  { x_m: 70.8, z_m: -15.8, diameter_m: 1.5, seed: 0x4f46 },
+  { x_m: 61.9, z_m: -22.1, diameter_m: 1.2, seed: 0x4f47 },
+  { x_m: 51.6, z_m: -19.7, diameter_m: 0.9, seed: 0x4f48 },
+  { x_m: 73.5, z_m: -9.4, diameter_m: 0.7, seed: 0x4f49 },
+
+  // North-west debris fan: visibly spread small fragments with two larger
+  // anchors, so a route can encounter isolated rocks as well as a dense core.
+  { x_m: -52.6, z_m: 24.1, diameter_m: 4.9, seed: 0x4f51 },
+  { x_m: -47.1, z_m: 27.3, diameter_m: 3.6, seed: 0x4f52 },
+  { x_m: -55.7, z_m: 31.2, diameter_m: 3.0, seed: 0x4f53 },
+  { x_m: -43.2, z_m: 22.4, diameter_m: 2.2, seed: 0x4f54 },
+  { x_m: -49.4, z_m: 35.4, diameter_m: 1.7, seed: 0x4f55 },
+  { x_m: -60.9, z_m: 27.8, diameter_m: 1.4, seed: 0x4f56 },
+  { x_m: -41.6, z_m: 33.2, diameter_m: 1.1, seed: 0x4f57 },
+  { x_m: -57.6, z_m: 18.6, diameter_m: 0.8, seed: 0x4f58 },
+
+  // North-centre loose field: unlike the tight gardens above, these clasts
+  // deliberately have irregular gaps and mixed diameters.
+  { x_m: -6.4, z_m: 29.2, diameter_m: 4.2, seed: 0x4f61 },
+  { x_m: 0.4, z_m: 31.8, diameter_m: 2.9, seed: 0x4f62 },
+  { x_m: 5.8, z_m: 26.7, diameter_m: 2.1, seed: 0x4f63 },
+  { x_m: -11.5, z_m: 23.8, diameter_m: 1.9, seed: 0x4f64 },
+  { x_m: 9.4, z_m: 34.7, diameter_m: 1.5, seed: 0x4f65 },
+  { x_m: -2.6, z_m: 39.2, diameter_m: 1.2, seed: 0x4f66 },
+  { x_m: 12.8, z_m: 21.4, diameter_m: 0.9, seed: 0x4f67 },
+  { x_m: -14.1, z_m: 34.9, diameter_m: 0.7, seed: 0x4f68 },
+
+  // South-east scatter: a looser field with a broader size mix than the
+  // compact gardens, so the Apollo samples do not read as one repeated row
+  // of props when orbiting or approaching in first person.
+  { x_m: 38.5, z_m: -31.4, diameter_m: 4.6, seed: 0x4f71 },
+  { x_m: 45.1, z_m: -27.8, diameter_m: 3.5, seed: 0x4f72 },
+  { x_m: 32.8, z_m: -24.6, diameter_m: 2.8, seed: 0x4f73 },
+  { x_m: 51.9, z_m: -34.2, diameter_m: 2.3, seed: 0x4f74 },
+  { x_m: 40.7, z_m: -20.1, diameter_m: 1.9, seed: 0x4f75 },
+  { x_m: 29.4, z_m: -37.6, diameter_m: 1.6, seed: 0x4f76 },
+  { x_m: 55.6, z_m: -23.9, diameter_m: 1.4, seed: 0x4f77 },
+  { x_m: 35.4, z_m: -17.8, diameter_m: 1.2, seed: 0x4f78 },
+  { x_m: 47.6, z_m: -18.9, diameter_m: 1.0, seed: 0x4f79 },
+  { x_m: 26.1, z_m: -30.2, diameter_m: 0.9, seed: 0x4f7a },
+  { x_m: 59.4, z_m: -31.1, diameter_m: 0.8, seed: 0x4f7b },
+  { x_m: 42.3, z_m: -39.7, diameter_m: 0.7, seed: 0x4f7c },
+  { x_m: 31.2, z_m: -16.5, diameter_m: 0.6, seed: 0x4f7d },
+]
+
+export function generateFixedBoulderCluster(anchorX: number, anchorZ: number): RockDescriptor[] {
+  return FIXED_BOULDER_CLUSTER.map((entry, index) => {
+    const random = seededRandom(entry.seed)
+    return describeRock(
+      `boulder-garden:${index}`,
+      anchorX + entry.x_m,
+      anchorZ + entry.z_m,
+      entry.diameter_m,
+      entry.seed,
+      random,
+    )
+  })
 }
 
 /**
@@ -632,6 +724,7 @@ export function simulateLidarScan(
   scanSeed = 1,
 ): LidarScanResult {
   const positions: number[] = []
+  const obstacleReturns: number[] = []
   const azimuthEndpoints: Array<THREE.Vector3 | null> = []
   const raycaster = new THREE.Raycaster()
   raycaster.near = LIDAR_CONFIG.minRangeM
@@ -678,6 +771,7 @@ export function simulateLidarScan(
 
       if (rockDistance < groundDistance) {
         rockReturns++
+        obstacleReturns.push(point.x, point.y, point.z)
         const rockId = String(rockHit.object.userData.lidarRockId ?? rockHit.object.uuid)
         detectedRockIds.add(rockId)
         nearestObstacleM = nearestObstacleM === null
@@ -712,6 +806,7 @@ export function simulateLidarScan(
   return {
     positions: new Float32Array(positions),
     colors,
+    obstacleReturns: new Float32Array(obstacleReturns),
     azimuthEndpoints,
     summary: {
       beams,
@@ -779,6 +874,7 @@ export function buildLidarScanFromBackend(
 ): LidarScanResult {
   const verticalScale = terrain.verticalScale
   const positions: number[] = []
+  const obstacleReturns: number[] = []
   const random = seededRandom(scanSeed)
   const detectedRockIds = new Set<string>()
   let rockReturns = 0
@@ -865,6 +961,7 @@ export function buildLidarScanFromBackend(
       if (measuredDistance === null) continue
       const point = origin.clone().addScaledVector(direction, measuredDistance)
       rockReturns++
+      obstacleReturns.push(point.x, point.y, point.z)
       const rockId = String(rockHit.object.userData.lidarRockId ?? rockHit.object.uuid)
       detectedRockIds.add(rockId)
       nearestObstacleM = nearestObstacleM === null
@@ -895,6 +992,7 @@ export function buildLidarScanFromBackend(
   return {
     positions: new Float32Array(positions),
     colors,
+    obstacleReturns: new Float32Array(obstacleReturns),
     azimuthEndpoints,
     summary: {
       beams,

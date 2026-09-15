@@ -1,28 +1,20 @@
-/* Scale and risk key, over the terrain.
+/* Scale and risk key, in the status strip under the map.
 
-   Inherits .map-overlay for its translucent ground, border and radius -- the
-   map's own chrome treatment -- and adds only the layout. Deliberately small:
-   this is a key, and a key that competes with the map it describes has stopped
-   being one. */
-
-.map-overlay-bottom-center {
-  bottom: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  /* The one edge free in both renderers: 3-D holds all four corners. */
-  z-index: 3;
-  max-width: calc(100% - 48px);
-}
+   No card treatment any more: the strip is already a surface with its own
+   ground and top border, so a bordered pill inside it would be a box in a
+   box. Deliberately small -- this is a key, and a key that competes with the
+   map it describes has stopped being one. */
 
 .lp-map-key {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 6px 12px;
+  /* First child of a flex-end strip: this pushes the transport to the far
+     end and keeps the key at the left, rather than the two meeting in the
+     middle. */
+  margin-right: auto;
   font-size: var(--fs-micro);
   color: var(--text-muted);
-  backdrop-filter: blur(6px);
-  pointer-events: none;
   white-space: nowrap;
   overflow-x: auto;
   scrollbar-width: none;

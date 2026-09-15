@@ -91,6 +91,9 @@ export type IconName =
   | 'clear'
   // Map HUD.
   | 'location'
+  // 3-D viewport chrome.
+  | 'fullscreen'
+  | 'fullscreenexit'
 
 const PATHS: Record<IconName, string> = {
   battery:
@@ -188,6 +191,10 @@ const PATHS: Record<IconName, string> = {
     'm40-240 240-320 180 240h300L560-586 460-454l-50-66 150-200 360 480H40Zm521-80Zm-361 0h160l-80-107-80 107Zm0 0h160-160Z',
   flag:
     'M200-120v-680h360l16 80h224v400H520l-16-80H280v280h-80Zm300-440Zm86 160h134v-240H510l-16-80H280v240h290l16 80Z',
+  fullscreen:
+    'M120-120v-200h80v120h120v80H120Zm520 0v-80h120v-120h80v200H640ZM120-640v-200h200v80H200v120h-80Zm640 0v-120H640v-80h200v200h-80Z',
+  fullscreenexit:
+    'M240-120v-120H120v-80h200v200h-80Zm400 0v-200h200v80H720v120h-80ZM120-640v-80h120v-120h80v200H120Zm520 0v-200h80v120h120v80H640Z',
 }
 
 interface IconProps {

@@ -67,11 +67,20 @@ export default function SystemsDrawer({ open, onClose }: Props) {
         </p>
 
         <div className="lp-systems-grid">
-          {features.map(({ id, Component }) => (
-            <div key={id} className="lp-systems-cell">
-              <Component />
-            </div>
-          ))}
+          {/*
+            The drawer is visually hidden while closed, but CSS cannot stop
+            React effects.  Mounting these optional evidence panels at startup
+            made them all query their caches immediately, even though the
+            operator had not asked to inspect them.  Besides wasting work it
+            produced expected 404/422 cache-missing responses in the browser
+            console.  They mount only when their surface is actually opened.
+          */}
+          {open &&
+            features.map(({ id, Component }) => (
+              <div key={id} className="lp-systems-cell">
+                <Component />
+              </div>
+            ))}
         </div>
       </aside>
     </>

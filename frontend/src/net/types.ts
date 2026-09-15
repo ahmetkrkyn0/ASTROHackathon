@@ -287,6 +287,13 @@ export interface ReplanResponse {
   skipped: SkippedTrigger[]
   reason?: string
   plan?: unknown
+  observed_obstacles?: {
+    received: number
+    accepted: number
+    confidence_threshold?: number
+    source?: 'lidar'
+    reason?: string
+  }
 }
 
 // ── POST /api/plan-4d ──────────────────────────────────────────────────────

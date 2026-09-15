@@ -191,10 +191,13 @@ export const FEATURES: readonly FeatureRegistration[] = [
   // solving indicator covers the map while a route is being solved, so it
   // comes after the picker it may draw over.
   { id: 'layer-picker', slot: 'canvasOverlay', Component: LayerPicker },
-  // Scale and risk key, over the terrain rather than under it: both describe
-  // what the map is showing, so they belong on the thing they describe rather
-  // than in a band the eye has to leave it to read.
-  { id: 'map-legend', slot: 'canvasOverlay', Component: MapLegend },
+  // Scale and risk key, in the strip UNDER the map rather than floating over
+  // it. It had been moved onto the terrain on the argument that a key belongs
+  // on the thing it describes -- but at four risk levels plus a scale bar it
+  // is a wide band, and over a 2-D map with markers near the bottom edge it
+  // covers the very terrain the operator is picking on. Out of the map it
+  // costs a glance; in the map it costs pixels that carry data.
+  { id: 'map-legend', slot: 'statusBar', Component: MapLegend },
   // Additive overlays, beside the base-layer radio rather than inside it.
   // A view mode replaces what the map is; these sit on top of whatever it
   // already is, and several can be on at once -- which is also the only way

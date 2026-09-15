@@ -251,27 +251,17 @@ def expected_sun_angles(
     """
     from .ephemeris import (
         DEFAULT_META_KERNEL,
-        _ensure_kernels,
         sun_azel_from_vector,
         sun_vector_body,
         true_azimuth_to_grid_azimuth,
         true_north_grid_azimuth,
+        utc_to_et,
     )
 
-    try:
-        import spiceypy as spice
-    except ImportError as exc:  # pragma: no cover - environment dependent
-        raise RuntimeError(
-            "spiceypy is required for ephemeris queries. "
-            "Install it and run lunapath/src/fetch_kernels.py first."
-        ) from exc
-
     kernel = meta_kernel or DEFAULT_META_KERNEL
-    # furnsh before str2et: converting a UTC string needs the leapsecond
-    # kernel loaded, so the order matters on a cold SPICE pool. sun_track
-    # does the same for the same reason.
-    _ensure_kernels(spice, kernel)
-    et = spice.str2et(timestamp_utc)
+    # Route all CSPICE calls through ephemeris: it furnishes before conversion
+    # and serialises the process-global CSPICE state across API workers.
+    et = utc_to_et(timestamp_utc, kernel)
     sun_vec = sun_vector_body(et, kernel)
     true_az_deg, elevation_deg = sun_azel_from_vector(sun_vec, lat_deg, lon_deg)
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import {
+  generateFixedBoulderCluster,
   generatePebbleField,
   generateRockField,
   PEBBLE_TIERS,
@@ -99,6 +100,31 @@ describe('generateRockField', () => {
   })
 })
 
+describe('generateFixedBoulderCluster', () => {
+  it('is a stable, rigidly translated boulder garden with close large rocks', () => {
+    const first = generateFixedBoulderCluster(100, -40)
+    const later = generateFixedBoulderCluster(100, -40)
+    const movedAnchor = generateFixedBoulderCluster(130, -15)
+
+    expect(first).toEqual(later)
+    expect(first).toHaveLength(60)
+    expect(first.filter((rock) => rock.radiusX * 2 >= 3.8)).toHaveLength(12)
+    for (let index = 0; index < first.length; index++) {
+      expect(movedAnchor[index].x - first[index].x).toBeCloseTo(30)
+      expect(movedAnchor[index].z - first[index].z).toBeCloseTo(25)
+    }
+
+    const large = first.slice(0, 3)
+    const nearestPair = Math.min(
+      ...large.flatMap((rock, index) =>
+        large.slice(index + 1).map((other) => Math.hypot(rock.x - other.x, rock.z - other.z)),
+      ),
+    )
+    expect(nearestPair).toBeLessThan(6)
+    expect(Math.max(...first.map((rock) => rock.x)) - Math.min(...first.map((rock) => rock.x))).toBeGreaterThan(130)
+  })
+})
+
 describe('generatePebbleField', () => {
   it('stays below the navigation layer and grades coarser with distance', () => {
     const pebbles = generatePebbleField(0, 0)
@@ -125,7 +151,9 @@ describe('simulateLidarScan', () => {
     const terrain = flatTerrain(161, 1)
     const rock = new THREE.Mesh(
       new THREE.SphereGeometry(1.5, 16, 12),
-      new THREE.MeshBasicMaterial(),
+      // GLB visuals hide their low-poly LiDAR proxies through the material,
+      // not Object3D.visible. The proxy must remain raycastable.
+      new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
     )
     rock.position.set(0, 1.25, -8)
     rock.userData.lidarRockId = 'test-boulder'
