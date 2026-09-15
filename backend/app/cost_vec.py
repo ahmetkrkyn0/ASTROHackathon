@@ -61,6 +61,7 @@ def f_energy_cell_grid(
     shadow_ratio: np.ndarray | float = 0.0,
     risk_alpha: float | None = None,
     slope_sigma: np.ndarray | None = None,
+    solar_gain: float = 1.0,
 ) -> np.ndarray:
     """Array form of :func:`app.cost_engine.f_energy_cell`.
 
@@ -95,7 +96,9 @@ def f_energy_cell_grid(
     slip = None
     if risk_alpha is not None:
         slip = slip_cvar_array(np.clip(theta, 0.0, None), risk_alpha, rover_cfg, slope_sigma)
-    here_wh = _energy_per_metre_wh_grid(theta, shadow, rover_cfg, slip=slip)
+    here_wh = _energy_per_metre_wh_grid(
+        theta, shadow, rover_cfg, slip=slip, solar_gain=solar_gain
+    )
     value = np.clip((here_wh - best_wh) / span, 0.0, 1.0)
     return np.where(theta > slope_max, np.inf, value)
 
@@ -117,12 +120,19 @@ def _energy_per_metre_wh_grid(
     shadow_ratio: np.ndarray,
     rover_cfg: Mapping[str, Any],
     slip: np.ndarray | None = None,
+    solar_gain: float = 1.0,
 ) -> np.ndarray:
     """Array form of :func:`app.cost_engine.net_energy_per_metre_wh`.
 
     The per-metre time is ``edge_travel_time_s(theta, 1.0)`` -- since C3
     including the rover's slip curve, or the explicit *slip* (B2) -- taken
     from its vectorised twin so the two forms cannot drift.
+
+    *solar_gain* is C1's per-slice panel gain and is a SCALAR here: the gain
+    is site-wide (the Sun's azimuth and elevation do not vary meaningfully
+    across a 2.5 km window), so it multiplies the whole grid. It is applied
+    in the same position in the same expression as the scalar form, because
+    the two are asserted equal to 1e-12 cell for cell.
     """
     mu_coeff = float(rover_cfg["mu_coeff"])
     p_base = float(rover_cfg["p_base_w"])
@@ -132,7 +142,7 @@ def _energy_per_metre_wh_grid(
     seconds = edge_travel_time_s_array(theta_clipped, 1.0, rover_cfg, slip=slip)
     traction_w = p_base * (1.0 + mu_coeff * np.sin(theta_rad))
     ratio = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
-    solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio)
+    solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * float(solar_gain)
     net_w = np.maximum(
         0.0, traction_w + _housekeeping_power_w_grid(ratio, rover_cfg) - solar_w
     )

@@ -215,7 +215,7 @@ flowchart TB
         SIM --> VERDICT["Verdict + evidence"]
     end
 
-    CORE --> API["FastAPI · 33 routes"]
+    CORE --> API["FastAPI · 34 routes"]
     CORE --> ROS["ROS 2 nodes<br/>lunapath_ros/"]
     API --> UI["React + Three.js cockpit"]
 ```
@@ -284,6 +284,7 @@ return a route that violates them rather than returning an expensive one.
 | **Safe havens** | Locations the rover can reach and survive in until the light returns. |
 | **Slip model** | Wheels slip on regolith, and slip costs time and energy. Anchored to Yutu-2's measured slip on Chang'e-4 and VIPER's design constraint. |
 | **Thermal dwell** | How long the rover can sit in one place before its internals leave the safe envelope. |
+| **Solar panel geometry** | Opt-in: charging power can follow the incidence angle between the array and the Sun, not just "is it lit". At 1.5 degrees of polar Sun that is the difference between a body-mounted array that can turn and a flat one. Off by default, so every existing number is unchanged. |
 
 ### Risk and uncertainty
 
@@ -384,7 +385,7 @@ kernels are hundreds of megabytes and are fetched or generated locally.
 
 ## API reference
 
-33 routes, all documented interactively at `/docs`. Grouped by what they do:
+34 routes, all documented interactively at `/docs`. Grouped by what they do:
 
 <details>
 <summary><b>Planning</b> — 8 routes</summary>
@@ -403,7 +404,7 @@ kernels are hundreds of megabytes and are fetched or generated locally.
 </details>
 
 <details>
-<summary><b>Environment layers</b> — 12 routes</summary>
+<summary><b>Environment layers</b> — 13 routes</summary>
 
 | Method | Route | Purpose |
 |---|---|---|
@@ -415,6 +416,7 @@ kernels are hundreds of megabytes and are fetched or generated locally.
 | `GET` | `/api/comm-window` | Communication window for a cell |
 | `GET` | `/api/thermal-envelope` | Operating envelope matrix |
 | `GET` | `/api/thermal-dwell` | Tolerable dwell time per cell |
+| `GET` | `/api/panel-gain` | Solar panel cos i gain over time |
 | `GET` | `/api/survival` | `P_safe` layer |
 | `GET` | `/api/safe-haven` | Reachable survivable locations |
 | `GET` | `/api/lidar-scan` | Virtual LiDAR sweep of the DEM |
@@ -586,7 +588,7 @@ Transferred anchors are marked `assumption:` in the catalogue.
 
 - [`docs/archive/lunapath_referans_belgesi_2.md`](docs/archive/lunapath_referans_belgesi_2.md) — formulas, constants, cost model
 - [`docs/BACKEND_ENVANTER.md`](docs/BACKEND_ENVANTER.md) — full backend inventory audit
-- [`docs/research/`](docs/research/) — 30 research and measurement documents
+- [`docs/research/`](docs/research/) — 32 research and measurement documents
 - [`docs/ROS2_KULLANIM_KILAVUZU.md`](docs/ROS2_KULLANIM_KILAVUZU.md) — ROS 2 usage guide
 
 ## License

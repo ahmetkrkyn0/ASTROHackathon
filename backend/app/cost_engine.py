@@ -207,6 +207,7 @@ def net_energy_per_metre_wh(
     shadow_ratio: float = 0.0,
     rover: Mapping[str, Any] | None = None,
     slip: float | None = None,
+    solar_gain: float = 1.0,
 ) -> float:
     """Energy the BATTERY loses to advance one metre.
 
@@ -217,9 +218,17 @@ def net_energy_per_metre_wh(
     cell where the array outproduces the drive is free, not negative, because
     this feeds a penalty in [0, 1] and banking charge is not a cost.
 
-    Solar input is ``p_solar_w * (1 - shadow_ratio)`` -- the same convention
-    ``simulation.simulate_path`` and ``cost_cube.wait_cost`` already use, so
-    the three places that reason about solar power agree.
+    Solar input is ``p_solar_w * (1 - shadow_ratio) * solar_gain`` -- the
+    same convention ``simulation.simulate_path`` and ``cost_cube.wait_cost``
+    already use, so the three places that reason about solar power agree.
+
+    *solar_gain* is C1's panel gain ``g = max(0, cos i)`` normalised to the
+    array's own best geometry (:mod:`app.panel`). It defaults to 1.0, which
+    is the pre-C1 model -- an array permanently face-on to the Sun -- and
+    multiplying by exactly 1.0 is bit-for-bit the identity, so every existing
+    number is untouched. The vectorised twin
+    ``cost_vec._energy_per_metre_wh_grid`` applies it in the same position in
+    the same expression; the two are asserted equal cell for cell.
 
     This is the quantity the energy criterion should always have measured.
     Counting only the draw made the penalty a monotone function of slope --
@@ -239,7 +248,7 @@ def net_energy_per_metre_wh(
     mu = 1.0 + float(rover_cfg["mu_coeff"]) * math.sin(math.radians(theta))
     traction_w = float(rover_cfg["p_base_w"]) * mu
     ratio = min(1.0, max(0.0, float(shadow_ratio)))
-    solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio)
+    solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * float(solar_gain)
     net_w = max(
         0.0, traction_w + housekeeping_power_w(ratio, rover_cfg) - solar_w
     )
@@ -251,6 +260,7 @@ def move_battery_drain_wh(
     distance_m: float,
     shadow_ratio: float = 0.0,
     rover: Mapping[str, Any] | None = None,
+    solar_gain: float = 1.0,
 ) -> float:
     """Signed change the BATTERY sees for one drive: draw minus solar income.
 
@@ -268,7 +278,9 @@ def move_battery_drain_wh(
     hours = seconds / 3600.0
     drawn = gross_energy_per_metre_wh(theta_deg, shadow_ratio, rover_cfg) * float(distance_m)
     ratio = min(1.0, max(0.0, float(shadow_ratio)))
-    solar_wh = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * hours
+    solar_wh = (
+        float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * float(solar_gain) * hours
+    )
     return drawn - solar_wh
 
 
@@ -276,6 +288,7 @@ def wait_battery_drain_wh(
     shadow_ratio: float,
     hours: float,
     rover: Mapping[str, Any] | None = None,
+    solar_gain: float = 1.0,
 ) -> float:
     """Signed battery change for holding position: housekeeping minus solar.
 
@@ -287,7 +300,7 @@ def wait_battery_drain_wh(
     """
     rover_cfg = _resolve_rover(rover)
     ratio = min(1.0, max(0.0, float(shadow_ratio)))
-    solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio)
+    solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * float(solar_gain)
     net_w = housekeeping_power_w(ratio, rover_cfg) - solar_w
     return net_w * max(0.0, float(hours))
 
@@ -298,6 +311,7 @@ def f_energy_cell(
     shadow_ratio: float = 0.0,
     risk_alpha: float | None = None,
     slope_sigma: float | None = None,
+    solar_gain: float = 1.0,
 ) -> float:
     """Cell-level energy penalty in MRU [0, 1].
 
@@ -361,12 +375,19 @@ def f_energy_cell(
     # that fixed scale, and a cell whose slip-inclusive energy exceeds the
     # slip-free worst saturates at 1.0 (its time and battery cost are still
     # charged in full by the planner and the simulator).
+    # C1: the same argument pins the reference to an UNGAINED array. The
+    # panel gain is a property of where the Sun is, not of the cell, so
+    # letting it move best_wh and worst_wh would rescale the whole [0, 1]
+    # axis with the Sun's azimuth and make "the cheapest possible cell" a
+    # moving target. Only the cell being priced reads solar_gain.
     reference = slip_free_view(rover_cfg)
     best_wh = net_energy_per_metre_wh(0.0, 0.0, reference)
     slip = None
     if risk_alpha is not None:
         slip = slip_cvar(max(0.0, theta), risk_alpha, rover_cfg, slope_sigma)
-    here_wh = net_energy_per_metre_wh(max(0.0, theta), shadow_ratio, rover_cfg, slip=slip)
+    here_wh = net_energy_per_metre_wh(
+        max(0.0, theta), shadow_ratio, rover_cfg, slip=slip, solar_gain=solar_gain
+    )
     worst_wh = net_energy_per_metre_wh(slope_max, 1.0, reference)
     if not math.isfinite(here_wh) or best_wh < 0.0:
         return float("inf")

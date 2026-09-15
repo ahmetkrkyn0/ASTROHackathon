@@ -62,6 +62,7 @@ from .illumination_series import (
     horizon_cache_path,
     sun_track_for_series,
 )
+from . import panel as panel_module
 from .thermal_model import (
     REGOLITH_LAG_VALIDITY,
     REGOLITH_THERMAL_TAU_S,
@@ -785,6 +786,23 @@ class Plan4DRequest(BaseModel):
             "tightest declared envelope (LPR-1 and VIPER 17.5 C)."
         ),
     )
+    # The panel's incidence angle (C1). The panel block is always reported;
+    # this makes the gain ACTUALLY multiply the solar income -- in the cost
+    # cube's energy criterion, in the wait cost and in the battery the
+    # planner carries. "sun_pointed" is the pre-C1 model, bit for bit.
+    panel_model: Literal["sun_pointed", "cos_incidence"] = Field(
+        default="sun_pointed",
+        description=(
+            "'sun_pointed' (default): the array is treated as permanently face-on to the "
+            "Sun -- the pre-C1 model, which is Otten's and Lamarre's two-degree-of-freedom "
+            "articulated array. 'cos_incidence': the catalogue's panel geometry against "
+            "the SPICE Sun track, g = sum over faces of max(0, cos i) normalised to the "
+            "array's own best geometry. Needs start_utc, the kernels and a rover that "
+            "declares panel geometry; without them the request is a 422 rather than a "
+            "silently ungained plan. MODEL: geometry only, and every profile's geometry "
+            "is an assumption."
+        ),
+    )
     heater_model: Literal["none", "thermostat_assumed"] = Field(
         default="none",
         description=(
@@ -903,6 +921,21 @@ class StressTestRequest(BaseModel):
     perturbations: Optional[PerturbationOverrides] = None
     label: Optional[str] = Field(default=None, max_length=80)
     n_bins: int = Field(default=20, ge=5, le=100)
+    # C1: price the runs' solar income at the panel's cos i gain, as the plan
+    # was priced. Give it whenever the plan was made with it, or the stress
+    # test is optimistic about exactly the income the plan already discounted.
+    panel_model: Literal["sun_pointed", "cos_incidence"] = Field(
+        default="sun_pointed",
+        description=(
+            "'cos_incidence' charges the array at the catalogue geometry's cos i gain over "
+            "this run's own (extended) slices, integrated on the continuous clock the runs "
+            "advance on. On a STATIC sky -- no start_utc, or no horizon cache -- it is "
+            "reported but NOT applied (sky_model.panel_model.reason says why): a long-run "
+            "shadow fraction times an instantaneous cos i is the incoherence /api/plan "
+            "refuses. On a time-varying sky whose Sun track or panel geometry is missing it "
+            "is a 422. Default is the pre-C1 model."
+        ),
+    )
 
 
 class DemUncertaintyRequest(BaseModel):
@@ -1500,6 +1533,21 @@ def _plan(
     # the criterion per cell, and how many cells lie in NASA's PSR mask.
     # applied=false with the reason when the cache is absent.
     response["roughness"] = _roughness_block_2d(planned_pixels, grids_for_plan)
+
+    # The panel geometry (C1). Reported, never applied here: a 2-D plan has
+    # no epoch, so there is no Sun elevation to take a cosine of, and the
+    # 2-D shadow grid is a long-run fraction rather than an instant. The
+    # cos i model lives on /api/plan-4d, where both exist.
+    response["panel"] = panel_module.panel_block(
+        rover,
+        None,
+        requested=False,
+        reason=(
+            "the 2-D cost grid has no epoch: cos i needs a Sun elevation, and this "
+            "grid's shadow_ratio is a long-run fraction. Use /api/plan-4d with "
+            "panel_model='cos_incidence'."
+        ),
+    )
 
     # Published only once the response the caller receives is fully built.
     # Assigning mid-request meant a plan whose serialisation then failed
@@ -2104,6 +2152,48 @@ def _coarse_time_to_haven(
 _SHADOW_EXTENSION_CHUNK = 64
 
 
+def _panel_gain_for_plan(
+    rover: dict,
+    metadata: dict,
+    n_slices: int,
+    slice_hours: float,
+    start_utc: str | None,
+    build_gain: bool = True,
+) -> tuple[Any, list[dict[str, Any]] | None, str | None]:
+    """``(gains, sun_track, reason)`` -- C1's per-slice panel gain for a plan.
+
+    The gain needs two things the rest of the pipeline does not: an epoch
+    (cos i is a function of where the Sun is, and without a start_utc there
+    is no Sun) and a rover that declares panel geometry (none is invented
+    for a profile that does not). Either missing returns
+    ``(None, None, reason)`` and the caller decides whether that is a 422 or
+    just an unapplied block.
+
+    NOTE the Sun track is computed independently of the shadow series'
+    provenance. A missing horizon cache makes the SHADOW static while the Sun
+    keeps moving, so ``shadow_provenance["time_varying"]`` is the wrong gate
+    here and is deliberately not reused.
+
+    *build_gain* false returns the track WITHOUT the rover's gain series. The
+    track is what the reported block needs -- the Sun elevation range and the
+    counterfactual geometries -- and it is cheap; the rover's own series is
+    not, and on the default ``sun_pointed`` path it would be computed and
+    then discarded.
+    """
+    array = panel_module.array_for_rover(rover)
+    if array is None:
+        return None, None, f"{rover.get('name', 'this rover')} declares no panel geometry"
+    if not start_utc:
+        return None, None, "no start_utc: the Sun's elevation is undefined without an epoch"
+    try:
+        track = sun_track_for_series(metadata, int(n_slices), float(slice_hours), start_utc)
+    except Exception as exc:  # noqa: BLE001 - kernels absent or SPICE refused
+        return None, None, f"the Sun track could not be computed ({exc})"
+    if not build_gain:
+        return None, track, "panel_model='sun_pointed': the gain series was not requested"
+    return panel_module.gain_series(track, array), track, None
+
+
 @dataclass(frozen=True)
 class _SurvivalOptions:
     """What a caller may choose about the survival field (B1)."""
@@ -2114,6 +2204,13 @@ class _SurvivalOptions:
     safe_set: str = "leg"
     horizon_hours: float | None = None
     max_states: int = MAX_SURVIVAL_STATES
+    # C1: whether the field charges the array at the panel gain at all. Not
+    # the gain itself: the field's horizon is LONGER than the plan's (plan +
+    # recovery + twice the fastest drive), so the minimum gain has to be taken
+    # over the FIELD's slices, and only _survival_field_for_plan knows how
+    # many those are. A plan-horizon minimum would be optimistic exactly when
+    # the Sun sets just after the plan ends.
+    apply_panel_gain: bool = False
 
 
 def _shift_utc(start_utc: str, hours: float) -> str:
@@ -2186,6 +2283,50 @@ def _survival_field_for_plan(
     n_bins = int(math.ceil(n_slices_needed / m))
     n_total_slices = n_bins * m
 
+    # C1: the gain over the FIELD's own horizon, as one conservative scalar.
+    # app.survival._power_terms explains why it cannot be per-bin; taking the
+    # minimum means the reach-avoid bound never assumes more charge than the
+    # array will actually collect anywhere in the window it reasons over.
+    solar_gain = 1.0
+    panel_gain_info: dict[str, Any] = {"applied": False}
+    if options.apply_panel_gain:
+        field_gains, _field_track, gain_reason = _panel_gain_for_plan(
+            rover, metadata, n_total_slices, slice_hours, start_utc
+        )
+        if field_gains is None:
+            panel_gain_info = {"applied": False, "reason": gain_reason}
+        else:
+            # The worst POINTING loss the array suffers while there IS light,
+            # not the worst number in the series. panel_gain returns exactly
+            # 0 whenever the Sun is below the horizon, and this horizon
+            # deliberately runs past the plan into the night, so a plain
+            # np.min collapses to 0 the moment one tail slice is dark -- and
+            # _power_terms(rover, 0.0) then models a rover whose array
+            # produces nothing even in a fully lit cell at a fully lit time.
+            # That is not conservative, it double-counts darkness: the
+            # field's own per-bin exposure table already carries it
+            # (net_wait_w = base_w + shadow * slope_w, and shadow = 1 in a
+            # dark bin makes the gain irrelevant). Measured on a fully lit
+            # 24 h plan whose field horizon reached past sunset: the plain
+            # minimum was 0.0 against a lit minimum of 0.999992, and P_safe
+            # at 30 percent SOC in a fully lit cell fell from 1.0 to 0.904.
+            lit = field_gains[field_gains > 0.0]
+            solar_gain = panel_module.conservative_gain(field_gains)
+            panel_gain_info = {
+                "applied": True,
+                "solar_gain": solar_gain,
+                "mean_gain": float(np.mean(field_gains)),
+                "mean_gain_when_lit": float(np.mean(lit)) if lit.size else None,
+                "lit_slices": int(lit.size),
+                "n_slices": int(field_gains.size),
+                "note": (
+                    "the MINIMUM gain over the field's horizon SLICES THAT HAVE SUNLIGHT, "
+                    "as one scalar: a survival bound may be conservative about pointing, "
+                    "never optimistic, but darkness is already carried by the field's own "
+                    "exposure table and must not be counted twice"
+                ),
+            }
+
     key = (
         str(metadata.get("processed_dir") or id(grids_for_plan)),
         str(rover_id),
@@ -2201,6 +2342,7 @@ def _survival_field_for_plan(
         float(options.recovery_h),
         (height, width),
         str(shadow_provenance.get("model")),
+        round(float(solar_gain), 12),
     )
 
     def _build() -> SurvivalField:
@@ -2269,6 +2411,7 @@ def _survival_field_for_plan(
             recovery_hours=float(options.recovery_h),
             provenance=provenance,
             safe_set=options.safe_set,
+            solar_gain=float(solar_gain),
         )
 
     try:
@@ -2279,6 +2422,9 @@ def _survival_field_for_plan(
         **field.info(),
         "shadow_model": field.provenance.get("shadow_model"),
         "haven_model": field.provenance.get("haven_model"),
+        # C1: which panel gain this field charged the array at, and over how
+        # many of its OWN slices the minimum was taken.
+        "panel_gain": panel_gain_info,
     }
     return field, info
 
@@ -2610,6 +2756,32 @@ def plan_4d(req: Plan4DRequest, request: Request):
     )
     illum_series = [1.0 - snapshot for snapshot in shadow_series]
 
+    # The panel's cos i gain per slice (C1). One (T,) vector over the PLAN's
+    # slices, computed here so the cost cube, the wait cube and the planner's
+    # battery all read the same array -- computing it twice for those three
+    # would let the copies differ in the last ulp and break the bit-equality
+    # lock. The survival field and the stress test deliberately build their
+    # OWN series instead, because both reason over horizons longer than the
+    # plan's and this array does not cover them.
+    panel_requested = req.panel_model == "cos_incidence"
+    panel_gains, panel_sun_track, panel_reason = _panel_gain_for_plan(
+        rover, metadata, n_slices, slice_hours, req.start_utc,
+        # The default path still gets the track (the block reports the Sun's
+        # elevation range and the counterfactual geometries from it) but not
+        # the rover's own series, which it would only throw away.
+        build_gain=panel_requested,
+    )
+    if panel_requested and panel_gains is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "panel_model='cos_incidence' needs a Sun track and the rover's panel "
+                f"geometry: {panel_reason}"
+            ),
+        )
+    # Only built when requested, so this is the series itself.
+    applied_gains = panel_gains
+
     # The per-slice surface temperature on the planner's grid, computed once
     # (C6): the cost cube prices it and the thermal dwell integrates the
     # rover's inner temperature against it, so the two see one surface.
@@ -2636,9 +2808,16 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # cube like the slope; None without the cache.
         roughness=grids_for_plan.get("roughness"),
         roughness_scale=_roughness_scale_of(grids_for_plan),
+        # C1: the panel gain, None unless the caller asked for cos i.
+        solar_gain_series=applied_gains,
     )
     wait_cube = build_wait_cost_cube(
-        illum_series, rover, slice_hours, weights_dict, coarsen=req.coarsen
+        illum_series,
+        rover,
+        slice_hours,
+        weights_dict,
+        coarsen=req.coarsen,
+        solar_gain_series=applied_gains,
     )
     # The illumination each label is exposed to, on the planner's own grid:
     # this is what drains or charges the battery and what counts as shadow
@@ -2759,6 +2938,9 @@ def plan_4d(req: Plan4DRequest, request: Request):
             soc_bins=int(req.survival_soc_bins),
             safe_set=req.survival_safe_set,
             horizon_hours=req.survival_horizon_hours,
+            # C1: the field takes the gain over its OWN horizon (longer than
+            # the plan's), as its conservative minimum.
+            apply_panel_gain=applied_gains is not None,
         )
         fastest_h = float(move_count) * slice_hours if drive is None else float(drive[0])
         survival_field, survival_info = _survival_field_for_plan(
@@ -2826,6 +3008,7 @@ def plan_4d(req: Plan4DRequest, request: Request):
         max_failure_probability=req.max_failure_probability,
         max_dwell_cube=dwell_cube,
         require_thermal_dwell=req.require_thermal_dwell,
+        solar_gain_series=applied_gains,
     )
     if result["error"]:
         # move_count already accounted for the edge gates, so a failure here
@@ -3030,6 +3213,17 @@ def plan_4d(req: Plan4DRequest, request: Request):
         # know whether a zero means "waiting did not help" or "waiting could
         # not have helped". (Round 3 review, M-1.)
         "shadow_model": shadow_provenance,
+        # The panel's incidence-angle model (C1): always reported -- the
+        # geometry, the per-slice gain and the counterfactual geometries --
+        # and `applied` only when the caller asked for cos i AND a gain
+        # series could be built.
+        "panel": panel_module.panel_block(
+            rover,
+            applied_gains,
+            requested=panel_requested,
+            reason=None if applied_gains is not None else panel_reason,
+            sun_track=panel_sun_track,
+        ),
         # Same three-way honesty for the Earth field: spice_horizon, static
         # (the long-run layer) or unavailable, with the reason. (A4.)
         "earth_model": earth_provenance,
@@ -3062,6 +3256,9 @@ def plan_4d(req: Plan4DRequest, request: Request):
                 shadow_model=survival_info.get("shadow_model"),
             ),
             **({"haven_model": survival_info.get("haven_model")} if survival_field is not None else {}),
+            # C1: the panel gain this field charged the array at -- its own
+            # horizon's minimum, which is not the plan's.
+            **({"panel_gain": survival_info.get("panel_gain")} if survival_field is not None else {}),
         },
         # Robustness of every formal safety requirement along this route
         # (D3): rho per requirement in hours / degC / pct / deg, the smallest
@@ -3175,6 +3372,17 @@ def _stress_test_sky(
             "reason": reason,
             "n_slices_extended": n_extended,
             "horizon_hours_extended": round(n_extended * req.slice_hours, 4),
+            # C1: a static sky is the long-run shadow fraction, and pairing a
+            # long-run mean with an instantaneous cos i is the same
+            # incoherence /api/plan refuses. Reported, never applied here.
+            "panel_model": {
+                "applied": False,
+                "requested": getattr(req, "panel_model", "sun_pointed"),
+                "reason": (
+                    "the static sky is a long-run shadow fraction; cos i needs the "
+                    "time-varying sky, and this run does not have one: " + reason
+                ),
+            },
         }
         haven_model = {
             "model": "unavailable",
@@ -3213,9 +3421,37 @@ def _stress_test_sky(
         grids_for_plan, req.rover_id, req.start_utc, rover, geometry, req.coarsen
     )
     tts = None if coarse_tts is None else coarse_tts[rows, cols]
-    sky = RouteSky(shadow, earth, deadline, tts, req.slice_hours, time_varying=True)
+    # C1: the gain over THIS run's slices -- the stress test extends well past
+    # the plan's horizon, so it needs its own series, not the plan's.
+    gain_series = None
+    panel_model_block: dict[str, Any] = {"applied": False, "requested": getattr(req, "panel_model", "sun_pointed")}
+    if getattr(req, "panel_model", "sun_pointed") == "cos_incidence":
+        gain_series, _gain_track, gain_reason = _panel_gain_for_plan(
+            rover, metadata, n_total, req.slice_hours, req.start_utc
+        )
+        if gain_series is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "panel_model='cos_incidence' needs a Sun track and the rover's panel "
+                    f"geometry: {gain_reason}"
+                ),
+            )
+        panel_model_block = {
+            "applied": True,
+            "requested": "cos_incidence",
+            "min": float(np.min(gain_series)),
+            "mean": float(np.mean(gain_series)),
+            "max": float(np.max(gain_series)),
+            "n_slices": int(gain_series.size),
+        }
+    sky = RouteSky(
+        shadow, earth, deadline, tts, req.slice_hours, time_varying=True,
+        solar_gain=gain_series,
+    )
     sky_model = {
         "model": "spice_horizon",
+        "panel_model": panel_model_block,
         "time_varying": True,
         "horizon_cache": cache_path,
         "start_utc": req.start_utc,
@@ -4589,6 +4825,14 @@ def illumination_series(
     downsample: int = Query(1, ge=1, le=50),
     format: str = Query("json", pattern="^(json|f32)$"),
     field: str = Query("shadow", pattern="^(shadow|surface_temp_c)$"),
+    # C1: whose panel geometry the `panel` block describes, and whether the
+    # caller actually wants the gain series. Without the rover_id this block
+    # silently published the default profile's geometry as if it were the
+    # caller's; without the model flag its `requested` was derived from
+    # whether the artefact happened to build, which is not what the caller
+    # asked for.
+    rover_id: str = DEFAULT_ROVER_ID,
+    panel_model: Literal["sun_pointed", "cos_incidence"] = Query("sun_pointed"),
 ):
     """Illumination and surface temperature over time, for an animated scene.
 
@@ -4699,6 +4943,10 @@ def illumination_series(
             "validity": REGOLITH_LAG_VALIDITY,
         },
         "sun": sun,
+        # The panel's cos i gain for this very Sun track (C1), per rover, plus
+        # the counterfactual geometries. A viewer drawing the Sun already has
+        # the track; this says how much of that light an array actually faces.
+        "panel": _panel_block_for_track(sun, rover_id, panel_model),
         "fields": fields,
         "binary_format": {
             "dtype": "float32",
@@ -4707,6 +4955,98 @@ def illumination_series(
             "shape": [int(n_slices), rows, cols],
             "nodata": "NaN",
         },
+    }
+
+
+def _panel_block_for_track(
+    sun: list[dict[str, Any]],
+    rover_id: str = DEFAULT_ROVER_ID,
+    panel_model: str = "sun_pointed",
+) -> dict[str, Any]:
+    """The C1 panel block for an already-computed Sun track.
+
+    ``requested`` is a property of the REQUEST, never of the outcome: the
+    documented rule is ``applied = bool(requested and artefact is not
+    None)``, and deriving ``requested`` from whether the gain happened to
+    build inverts it. A caller who did not ask for cos i gets the geometry,
+    the counterfactuals and the claim -- which is what makes the block worth
+    publishing here -- but not an `applied` that overstates what was asked.
+    """
+    try:
+        rover = get_rover(rover_id)
+    except UnknownRoverError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    requested = panel_model == "cos_incidence"
+    array = panel_module.array_for_rover(rover)
+    reason = None
+    gains = None
+    if not sun:
+        reason = "no Sun track (no epoch or no kernels)"
+    elif array is None:
+        reason = f"{rover['name']} declares no panel geometry"
+    elif not requested:
+        reason = "panel_model='sun_pointed': the gain series was not requested"
+    else:
+        gains = panel_module.gain_series(sun, array)
+    block = panel_module.panel_block(
+        rover, gains, requested=requested, reason=reason, sun_track=sun or None
+    )
+    block["rover_id"] = rover_id
+    return block
+
+
+@app.get("/api/panel-gain")
+def panel_gain_endpoint(
+    start_utc: Optional[str] = None,
+    rover_id: str = DEFAULT_ROVER_ID,
+    n_slices: int = Query(48, ge=2, le=MAX_PLAN_4D_SLICES),
+    slice_hours: float = Query(0.5, gt=0.0, le=24.0),
+):
+    """The panel's cos i gain per time slice, with its counterfactuals (C1).
+
+    The gain multiplies ``p_solar_w`` everywhere the model reasons about
+    solar income. It is site-wide -- the Sun's azimuth and elevation do not
+    vary meaningfully across a 2.5 km window -- so one scalar per slice is
+    the whole field.
+
+    MODEL: geometry only, and every profile's panel geometry in this
+    catalogue is an assumption carrying its own source string.
+    """
+    grids = _get_grids()
+    metadata = grids["metadata"]
+    try:
+        rover = get_rover(rover_id)
+    except UnknownRoverError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not start_utc:
+        raise HTTPException(
+            status_code=422,
+            detail="start_utc is required: without an epoch the Sun has no elevation",
+        )
+    array = panel_module.array_for_rover(rover)
+    if array is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{rover['name']} declares no panel geometry, and none is invented",
+        )
+    try:
+        sun = sun_track_for_series(metadata, int(n_slices), float(slice_hours), start_utc)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"the Sun track could not be computed ({exc})",
+        ) from exc
+    gains = panel_module.gain_series(sun, array)
+    block = panel_module.panel_block(
+        rover, gains, requested=True, reason=None, sun_track=sun
+    )
+    return {
+        "rover_id": rover_id,
+        "start_utc": start_utc,
+        "slices": int(n_slices),
+        "slice_hours": float(slice_hours),
+        "sun": sun,
+        "panel": block,
     }
 
 

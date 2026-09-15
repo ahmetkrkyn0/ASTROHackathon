@@ -560,8 +560,27 @@ def astar_4d(
     max_failure_probability: float | None = None,
     max_dwell_cube: Any | None = None,
     require_thermal_dwell: bool = False,
+    solar_gain_series: Any | None = None,
 ) -> dict[str, Any]:
     """Plan through space and time. Returns path_states, path_pixels, metrics.
+
+    The panel gain (C1)
+    -------------------
+    *solar_gain_series* is the per-slice cos i gain (:mod:`app.panel`), one
+    scalar per slice, which scales the solar income in the battery
+    integration below exactly as it scales it in the cost cube the caller
+    built with the same array. ``None`` -- the default -- is the pre-C1
+    model, an array permanently face-on to the Sun, and the search is then
+    bit-identical: same path, same ``nodes_expanded``, same ``total_cost``.
+
+    A move can span several slices. Its solar income is the trapezoid of the
+    two endpoint SLICE INCOMES -- ``0.5 * [(1 - e_dep) g_dep + (1 - e_arr)
+    g_arr]`` -- which is what the cost cube charged for the same edge, since
+    the cube prices each slice with that slice's own gain. It is NOT the mean
+    exposure times the mean gain: the solar term is bilinear in (exposure,
+    gain) once the gain varies, and those two differ by up to a factor of two
+    on an edge that crosses the terminator. Housekeeping still follows the
+    mean exposure, as before. A wait uses its own slice's gain.
 
     The thermal dwell (C6)
     ----------------------
@@ -979,6 +998,25 @@ def astar_4d(
     )
     p_solar_w = float(rover.get("p_solar_w") or 0.0)
 
+    # C1: the panel gain per slice. Absent, every slice gains 1.0 and the
+    # arithmetic below is the pre-C1 one, term for term.
+    if solar_gain_series is None:
+        gain_of = None
+    else:
+        _gains = np.asarray(solar_gain_series, dtype=np.float64).reshape(-1)
+        if _gains.size < n_slices:
+            return _empty(
+                f"solar_gain_series has {_gains.size} entries for {n_slices} slices"
+            )
+
+        def gain_of(index: int) -> float:
+            return float(_gains[index])
+
+    def solar_w_at(index: int, exposure: float) -> float:
+        """Solar power the array collects at *index* under *exposure* shadow."""
+        lit = p_solar_w * (1.0 - exposure)
+        return lit if gain_of is None else lit * gain_of(index)
+
     def housekeeping_w(ratio: float) -> float:
         return p_idle_w + ratio * shadow_extra_w
 
@@ -1123,9 +1161,10 @@ def astar_4d(
             if math.isfinite(wait_step):
                 if track:
                     exposure = float(shadow[slice_index, row, col])
-                    # == wait_battery_drain_wh(exposure, slice_hours, rover)
+                    # == wait_battery_drain_wh(exposure, slice_hours, rover,
+                    #                           solar_gain=gain[slice_index])
                     drain_wh = (
-                        housekeeping_w(exposure) - p_solar_w * (1.0 - exposure)
+                        housekeeping_w(exposure) - solar_w_at(slice_index, exposure)
                     ) * slice_hours
                     new_battery, new_dark, refused = envelope_after(
                         exposure, slice_hours, battery_wh, dark_h, drain_wh
@@ -1262,14 +1301,36 @@ def astar_4d(
                     + float(shadow[arrival, nr, nc])
                 )
                 # == move_battery_drain_wh(edge_slope, distance_m,
-                #                          mean_exposure, rover)
+                #                          mean_exposure, rover,
+                #                          solar_gain=mean gain over the edge)
                 traction_w = p_base_w * (
                     1.0 + mu_coeff * math.sin(math.radians(max(0.0, edge_slope)))
                 )
+                if gain_of is None:
+                    # The pre-C1 expression, character for character: the
+                    # rewrite below is algebraically the same at gain 1 but
+                    # not the same in IEEE-754, and this path is the
+                    # bit-equality lock.
+                    solar_move_w = p_solar_w * (1.0 - mean_exposure)
+                else:
+                    # The trapezoid of the two SLICE INCOMES, not the product
+                    # of two separate means. The cost cube prices slice k with
+                    # slice k's own gain, so the edge's cost carries
+                    # 0.5 * [(1 - e_dep) g_dep + (1 - e_arr) g_arr]; under the
+                    # pre-C1 affine term the product of the means happened to
+                    # equal that, but with the gain the term is BILINEAR and
+                    # the two diverge by 0.25 * p_solar * (e_arr - e_dep) *
+                    # (g_dep - g_arr) * h -- a factor two on an edge that
+                    # crosses the terminator. B5's Monte Carlo integrates the
+                    # product too (stress_test.cumulative_lit_gain), so this
+                    # is also what keeps the plan and its stress test on the
+                    # same number.
+                    solar_move_w = p_solar_w * 0.5 * (
+                        (1.0 - float(shadow[slice_index, row, col])) * gain_of(slice_index)
+                        + (1.0 - float(shadow[arrival, nr, nc])) * gain_of(arrival)
+                    )
                 drain_wh = (
-                    traction_w
-                    + housekeeping_w(mean_exposure)
-                    - p_solar_w * (1.0 - mean_exposure)
+                    traction_w + housekeeping_w(mean_exposure) - solar_move_w
                 ) * travel_h
                 new_battery, new_dark, refused = envelope_after(
                     float(shadow[arrival, nr, nc]), travel_h, battery_wh, dark_h, drain_wh

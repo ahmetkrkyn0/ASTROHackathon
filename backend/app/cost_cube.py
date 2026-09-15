@@ -167,6 +167,7 @@ def build_cost_cube(
     roughness: np.ndarray | None = None,
     roughness_scale: "RoughnessScale | None" = None,
     surface_series: np.ndarray | None = None,
+    solar_gain_series: Sequence[float] | np.ndarray | None = None,
 ) -> np.ndarray:
     """(T, H', W') cost cube, one slice per shadow-ratio snapshot.
 
@@ -177,6 +178,12 @@ def build_cost_cube(
     Given, it is used as is (the thermal dwell model reads the same array,
     so the cube and the dwell see one surface); omitted, it is computed
     here. Either way the slices are identical bit for bit.
+
+    Panel gain (C1)
+    ---------------
+    *solar_gain_series* is the per-slice cos i gain (:mod:`app.panel`), one
+    scalar per snapshot, which the energy criterion multiplies into the
+    cell's solar income. ``None`` is the pre-C1 cube, bit for bit.
 
     Roughness (C4)
     --------------
@@ -300,6 +307,15 @@ def build_cost_cube(
     # removed np.vectorize), so per-slice evaluation costs a handful of
     # array ops per slice rather than the ~22 s that made the optimisation
     # necessary in the first place.
+    gains = None
+    if solar_gain_series is not None:
+        gains = np.asarray(solar_gain_series, dtype=np.float64).reshape(-1)
+        if gains.size != len(shadow_ratio_series):
+            raise ValueError(
+                f"solar_gain_series has {gains.size} entries for "
+                f"{len(shadow_ratio_series)} shadow snapshots"
+            )
+
     slices: list[np.ndarray] = []
     for index, snapshot in enumerate(shadow_ratio_series):
         shadow_c = coarsen_grid(np.asarray(snapshot, dtype=np.float64), coarsen)
@@ -329,6 +345,7 @@ def build_cost_cube(
             slope_sigma=sigma_c,
             roughness=roughness_c,
             roughness_scale=roughness_scale,
+            solar_gain=1.0 if gains is None else float(gains[index]),
         )
         slices.append(cost_map.total(context))
 
@@ -348,6 +365,7 @@ def wait_cost(
     dt_hours: float,
     rover: Mapping[str, Any],
     weights: Mapping[str, float],
+    solar_gain: float = 1.0,
 ) -> float:
     """Cost of holding position for one time slice.
 
@@ -371,11 +389,16 @@ def wait_cost(
     the heater load here matches the one the energy penalty and the
     simulator use. It previously charged full heater power even in full
     sunlight. (Round 3 review, M-9.)
+
+    *solar_gain* is C1's panel gain for THIS slice. The illuminated fraction
+    says whether the Sun is visible from the cell; the gain says how much of
+    that light the array actually faces. 1.0 is the pre-C1 model and is
+    bit-for-bit the identity. (C1.)
     """
     frac = min(1.0, max(0.0, float(illum_frac)))
     dt = max(0.0, float(dt_hours))
 
-    solar_in_w = float(rover["p_solar_w"]) * frac
+    solar_in_w = float(rover["p_solar_w"]) * frac * float(solar_gain)
     net_w = solar_in_w - housekeeping_power_w(1.0 - frac, rover)
 
     # Rate form, so the dt factor is applied once, at the end.
@@ -398,8 +421,17 @@ def build_wait_cost_cube(
     dt_hours: float,
     weights: Mapping[str, float] | None = None,
     coarsen: int = 1,
+    solar_gain_series: Sequence[float] | np.ndarray | None = None,
 ) -> np.ndarray:
-    """(T, H', W') cost of waiting one slice in each cell at each time."""
+    """(T, H', W') cost of waiting one slice in each cell at each time.
+
+    *solar_gain_series* is C1's per-slice panel gain, one scalar per
+    snapshot. Omitted, the pre-C1 whole-cube value table is used and the
+    result is bit-identical to before. Given, the value table has to be
+    built PER SLICE: with a slice-dependent gain the same illuminated
+    fraction buys different amounts of charge at different times, and one
+    table across the whole cube would collapse exactly that distinction.
+    """
     if len(illum_frac_series) == 0:
         raise ValueError("illum_frac_series must contain at least one snapshot")
 
@@ -416,12 +448,34 @@ def build_wait_cost_cube(
         for frac in illum_frac_series
     ]
     stacked = np.stack(coarse, axis=0)
-    unique, inverse = np.unique(stacked, return_inverse=True)
-    table = np.array(
-        [wait_cost(value, dt_hours, rover, resolved) for value in unique],
-        dtype=np.float64,
-    )
-    return table[inverse].reshape(stacked.shape)
+
+    if solar_gain_series is None:
+        unique, inverse = np.unique(stacked, return_inverse=True)
+        table = np.array(
+            [wait_cost(value, dt_hours, rover, resolved) for value in unique],
+            dtype=np.float64,
+        )
+        return table[inverse].reshape(stacked.shape)
+
+    gains = np.asarray(solar_gain_series, dtype=np.float64).reshape(-1)
+    if gains.size != stacked.shape[0]:
+        raise ValueError(
+            f"solar_gain_series has {gains.size} entries for "
+            f"{stacked.shape[0]} illumination snapshots"
+        )
+    out = np.empty(stacked.shape, dtype=np.float64)
+    for index in range(stacked.shape[0]):
+        slice_frac = stacked[index]
+        unique, inverse = np.unique(slice_frac, return_inverse=True)
+        table = np.array(
+            [
+                wait_cost(value, dt_hours, rover, resolved, solar_gain=float(gains[index]))
+                for value in unique
+            ],
+            dtype=np.float64,
+        )
+        out[index] = table[inverse].reshape(slice_frac.shape)
+    return out
 
 
 def auto_slice_hours(
