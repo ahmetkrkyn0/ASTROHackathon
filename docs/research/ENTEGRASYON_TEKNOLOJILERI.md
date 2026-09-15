@@ -949,7 +949,7 @@ arXiv 2603.17229. DEM'den türetilen yükseklik + yüzey-normali kısıtlarını
 | **A/B/C/D ablasyon protokolü** | [03](03_sentetik_minimum_veri.md) §4.2 | Gerçek veri (§1.1, §1.4) girdikten **sonra** anlamlı |
 | **NASA-STD-7009 skorkart / TRL beyanı** | [09](09_olgunluk_kiyaslama.md) | Sunum çerçevesi; rapor aşamasında |
 | **MMGIS eklentisi · cFS/F´ · Moon Trek ayrışması** | [10](10_sektorel_projeler_envanteri.md), [04](04_acik_kaynak_modeller.md) §6 | Konumlandırma; kod işi değil |
-| **AYAP-2 misyon-bağımsızlığı + çok noktalı tur** | [`../rover_project/AYAP2_ANALIZ.md`](../rover_project/AYAP2_ANALIZ.md) | Ayrı bir kapsam kararı gerektiriyor |
+| **AYAP-2 misyon-bağımsızlığı + çok noktalı tur** | `rover_project/AYAP2_ANALIZ.md` | Ayrı bir kapsam kararı gerektiriyor |
 
 ---
 

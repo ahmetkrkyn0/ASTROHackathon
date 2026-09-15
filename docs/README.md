@@ -5,7 +5,7 @@ Bu klasör iki bölüme ayrılmıştır:
 | Klasör | Kapsam |
 |--------|--------|
 | [`final/`](final/) | **Final versiyonun bağlamı.** TUA Astro Hackathon Ulusal Final (7–13 Eylül 2026) hazırlığı için üretilen araştırma ve mühendislik karar belgeleri. Hedeflenen sistemi tanımlar. |
-| [`archive/`](archive/) | **Önceki versiyonun dokümanları.** Depodaki mevcut kodun yazıldığı dönemin referans belgeleri, çalışma planı ve ekip raporları. |
+| [`archive/`](archive/) | **Önceki versiyonun dokümanları.** Depodaki mevcut kodun yazıldığı dönemin referans belgesi. |
 
 Ayrımın nedeni: `final/` altındaki belgeler ileriye dönüktür ve büyük ölçüde **henüz uygulanmamış** kararları içerir (zaman ekseni, ufuk-maskesi aydınlanma modeli, Diviner termal verisi, SPICE efemeris). `archive/` altındaki belgeler ise bugün depoda çalışan kodu tanımlar.
 
@@ -34,12 +34,5 @@ Bu belgelerin ortak kuralı: **"bugün LunaPath'te var olan" ile "önerilen" ayr
 | Belge | İçerik |
 |-------|--------|
 | [lunapath_referans_belgesi_2.md](archive/lunapath_referans_belgesi_2.md) | Formüller, sabitler, maliyet modeli ve görev profili tanımları. |
-| [ay_termal_navigasyon_proje_dokumani.md](archive/ay_termal_navigasyon_proje_dokumani.md) | Proje dokümanı: modül yapısı, riskler, hedefler. |
-| [lunar_data_thermal_team_docs.md](archive/lunar_data_thermal_team_docs.md) | Veri ve termal ekip notları. |
-| [stitch_design_brief.md](archive/stitch_design_brief.md) | Arayüz tasarım notları. |
-| [lunar_report_markdown/lunar_data_preprocessing_report.md](archive/lunar_report_markdown/lunar_data_preprocessing_report.md) | Veri ön işleme raporu (görsellerle). |
-| `lunar_data_preprocessing_report.pdf` | Yukarıdaki raporun PDF sürümü. |
-| `lunapath_calisma_plani.pdf` | Çalışma planı. |
-| `2_kisi_teknik_rol_raporu.pdf` | Teknik rol raporu. |
 
 **Önemli:** `archive/` "geçersiz" anlamına gelmez. Depodaki mevcut kod hâlâ `lunapath_referans_belgesi_2.md` içindeki formülleri uygular — `backend/app/cost_engine.py` ve `backend/app/scenarios.py` doğrudan bu belgeye atıf verir. Kodun bugünkü davranışını anlamak için başvurulacak belge budur; final versiyonda neyin değişmesi planlandığını anlamak için `final/` klasörü okunur.

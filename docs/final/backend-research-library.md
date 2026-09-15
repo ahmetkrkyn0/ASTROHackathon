@@ -1485,7 +1485,7 @@ class CostMap:
         """Bu hucrenin maliyetine hangi katman ne kadar katki yapti?"""
 ```
 
-**`explain()` metodu, LunaPath'in "neden bu rota seçildi" hedefinin ([ay_termal_navigasyon_proje_dokumani.md](../archive/ay_termal_navigasyon_proje_dokumani.md) §8 Modül 8) doğru teknik cevabıdır** ve mevcut `/api/cell-telemetry` endpoint'inin (`main.py:279`) doğal uzantısıdır.
+**`explain()` metodu, LunaPath'in "neden bu rota seçildi" hedefinin (`ay_termal_navigasyon_proje_dokumani.md` §8 Modül 8) doğru teknik cevabıdır** ve mevcut `/api/cell-telemetry` endpoint'inin (`main.py:279`) doğal uzantısıdır.
 
 ---
 

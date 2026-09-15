@@ -182,7 +182,6 @@ Bu proje, 12 ileri özelliği bir matris altında geliştirdi. Kodları jüri so
 Bu bilgi tabanı şunlardan derlendi (ve hepsi kod okunarak doğrulandı):
 
 - `backend/app/*.py` — modül dokümanları ve kaynak kodu
-- `BACKEND_ENHANCE_OZET.md` — 12 özelliğin ölçüm raporları
 - `docs/BACKEND_ENVANTER.md` — API envanteri
 - `docs/research/*.md` — özellik başına ölçüm raporları
 - `docs/requirements/` — FRETISH gereksinim katalogu

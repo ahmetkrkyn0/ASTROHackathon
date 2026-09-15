@@ -45,7 +45,7 @@ Bu üç eksende toplam **22 özellik/teknik** belgelendi. Aşağıdaki 10'u, efo
 3. **Challenge'a özgü olma:** Termal güvenlik, enerji, gölge/aydınlanma, görev sürdürülebilirliği eksenlerinden en az birine doğrudan dokunmalı.
 4. **Yeni olma:** 01–11 numaralı belgelerde zaten önerilmiş şeyler (Diviner indirme, heat1d, hiyerarşik planlama, D* Lite, radyasyon SEP senaryosu, ablasyon) burada yalnızca referans verilerek geçildi.
 
-"Wow" puanı, jürinin (TÜBİTAK UZAY / rover topluluğu çevresi; bkz. [rover_project/AYAP2_ANALIZ.md](../rover_project/AYAP2_ANALIZ.md)) *"bunu bir öğrenci ekibi yapmış olamaz"* diyeceği tahmini ile verildi. "Challenge etkisi" ise özelliğin proje belgesindeki ([ay_termal_navigasyon_proje_dokumani.md](../ay_termal_navigasyon_proje_dokumani.md)) Modül 4–6 çıktılarına (risk, health, replanning, safe haven, alternatif rota) ne kadar dokunduğudur.
+"Wow" puanı, jürinin (TÜBİTAK UZAY / rover topluluğu çevresi; bkz. `rover_project/AYAP2_ANALIZ.md`) *"bunu bir öğrenci ekibi yapmış olamaz"* diyeceği tahmini ile verildi. "Challenge etkisi" ise özelliğin proje belgesindeki (`ay_termal_navigasyon_proje_dokumani.md`) Modül 4–6 çıktılarına (risk, health, replanning, safe haven, alternatif rota) ne kadar dokunduğudur.
 
 ---
 
