@@ -1,5 +1,6 @@
 import { Icon } from '../../components/Fleet/SpecIcons'
 import {
+  ConstraintInput,
   STORE_CONTRIBUTORS,
   setConstraint,
   useConstraint,
@@ -30,7 +31,6 @@ import './mission-constraints.css'
 
 function ConstraintRow({ contributor }: { contributor: PlanRequestContributor }) {
   const state = useConstraint(contributor.id)
-  const { control } = contributor
 
   return (
     <li className={`lp-mc-row ${state.enabled ? 'is-on' : ''}`}>
@@ -50,43 +50,11 @@ function ConstraintRow({ contributor }: { contributor: PlanRequestContributor })
           whether to switch the thing on. */}
       <p className="lp-mc-hint">{contributor.hint}</p>
 
-      {state.enabled && control.kind === 'number' ? (
-        <div className="lp-mc-control">
-          <input
-            type="range"
-            min={control.min}
-            max={control.max}
-            step={control.step}
-            value={typeof state.value === 'number' ? state.value : control.initial}
-            onChange={(event) =>
-              setConstraint(contributor.id, {
-                enabled: true,
-                value: Number(event.target.value),
-              })
-            }
-          />
-          <output className="lp-mc-value">
-            {typeof state.value === 'number' ? state.value.toFixed(3) : control.initial.toFixed(3)}
-            {control.unit ?? ''}
-          </output>
-        </div>
-      ) : null}
-
-      {state.enabled && control.kind === 'choice' ? (
-        <div className="lp-mc-control">
-          <select
-            className="lp-mc-select"
-            value={typeof state.value === 'string' ? state.value : control.initial}
-            onChange={(event) =>
-              setConstraint(contributor.id, { enabled: true, value: event.target.value })
-            }
-          >
-            {control.options.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </div>
-      ) : null}
+      {/* The value control, shared with the time-axis strip so the two
+          cannot drift apart. Rendered only while the constraint is on: an
+          alpha slider under an off switch invites the reading that the
+          number is doing something. */}
+      {state.enabled ? <ConstraintInput contributor={contributor} classPrefix="lp-mc" /> : null}
     </li>
   )
 }

@@ -157,3 +157,134 @@
   color: var(--text-2);
   font-weight: 600;
 }
+
+/* Advanced constraints that carry a value as well as an on/off.
+   The chip stays the switch; the slider or select sits under it, so the
+   strip still reads as a row of switches rather than a form. */
+.lp-time-constraint-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-time-constraint-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.lp-time-constraint-control input[type='range'] {
+  width: 96px;
+  accent-color: var(--accent);
+}
+
+.lp-time-constraint-value {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  min-width: 40px;
+}
+
+.lp-time-constraint-select {
+  background: rgba(8, 11, 18, 0.7);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 2px 6px;
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  max-width: 210px;
+}
+
+/* What the constraints reported back. Quiet by default: these are readouts,
+   not alerts, and a permanent caution colour is how an interface teaches
+   that its warnings can be ignored. */
+.lp-time-blocks {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.lp-time-block {
+  border-left: 1px solid rgba(199, 205, 219, 0.14);
+  padding-left: 8px;
+}
+
+.lp-time-block-idle {
+  margin: 0;
+  border-left: 1px solid rgba(199, 205, 219, 0.14);
+  padding-left: 8px;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.lp-time-block-head {
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+}
+
+/* Provenance labels. Deliberately the same weight as the numbers they
+   qualify: a MODEL badge that reads as decoration has failed. */
+.lp-time-badge {
+  font-family: var(--font-label);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--text-dim-2);
+  border: 1px solid var(--border-line);
+  border-radius: var(--radius);
+  padding: 1px 6px;
+}
+
+.lp-time-badge.is-on {
+  color: var(--text-2);
+  border-color: var(--border-focus);
+}
+
+.lp-time-block-list {
+  margin: 0;
+  padding-left: 14px;
+  display: grid;
+  gap: 3px;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.lp-time-block-list b {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.lp-time-block-note,
+.lp-time-block-claim {
+  color: var(--text-dim-2);
+}
+
+.lp-time-block-claim {
+  margin: 4px 0 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+
+/* The heater assumption. Marked, not coloured as a fault: choosing it is a
+   legitimate operator decision, and the label is there so the result is
+   never mistaken for a validated heater model. */
+.lp-time-block-assumption {
+  margin: 4px 0 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.lp-time-block-assumption strong {
+  font-family: var(--font-label);
+  letter-spacing: var(--track-caps);
+  color: var(--text-2);
+}

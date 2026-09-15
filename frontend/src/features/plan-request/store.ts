@@ -30,6 +30,16 @@ const listeners = new Set<() => void>()
  */
 let snapshot: Record<string, unknown> = {}
 
+/**
+ * The same caching rule for the by-constraintKey view.
+ *
+ * Rebuilt in `rebuild()` rather than computed per call: `useSyncExternalStore`
+ * compares snapshots by identity, so a getter that returned a fresh object
+ * would re-render forever. Same hazard the overlay contract documents for
+ * `register(featureId, commands)`.
+ */
+let keySnapshot: Record<string, unknown> = {}
+
 function rebuild(): void {
   let fields: Record<string, unknown> = {}
   for (const contributor of PLAN_REQUEST_CONTRIBUTORS) {
@@ -46,6 +56,7 @@ function rebuild(): void {
     fields = mergeContributedFields(fields, produced)
   }
   snapshot = fields
+  keySnapshot = buildConstraintKeys()
 }
 
 export function setConstraint(id: string, next: ConstraintState): void {
@@ -84,6 +95,52 @@ function getSnapshot(): Record<string, unknown> {
  */
 export function readPlanConstraints(): Record<string, unknown> {
   return snapshot
+}
+
+/**
+ * The same state, addressed the way the 4-D builder addresses it.
+ *
+ * `readPlanConstraints` returns finished request FIELDS for the 2-D path --
+ * `risk_alpha`, `weights` -- because the store is that path's builder. The
+ * 4-D path has its own builder (`applyPlanRequestContributors`) and wants the
+ * layer below: the operator's raw settings keyed by `constraintKey`, which it
+ * then folds in itself.
+ *
+ * The two must not become two stores. Before this, 4-D constraints lived in a
+ * `useState` inside the time-axis hook while 2-D constraints lived here, so
+ * `risk` was settable in one place and read in the other, and the value never
+ * crossed. One store, two readers.
+ *
+ * A constraint that is OFF produces NO KEY -- not `false`, not the control's
+ * initial value. `constraintStateFrom` reads absence as off, so this is the
+ * same non-regression rule as everywhere else, restated at the one seam that
+ * could break it.
+ */
+export function readConstraintKeys(): Record<string, unknown> {
+  return keySnapshot
+}
+
+/** The same object, for anything that must re-render when it changes. */
+export function useConstraintKeys(): Record<string, unknown> {
+  return useSyncExternalStore(subscribe, readConstraintKeys, readConstraintKeys)
+}
+
+function buildConstraintKeys(): Record<string, unknown> {
+  const keys: Record<string, unknown> = {}
+  for (const contributor of PLAN_REQUEST_CONTRIBUTORS) {
+    const held = state.get(contributor.id)
+    if (!held?.enabled) continue
+    // A toggle carries no value of its own; its key IS the statement. The
+    // other two carry the control's value, falling back to its initial so a
+    // switched-on slider that was never dragged still sends the number the
+    // panel is displaying rather than an undefined.
+    if (contributor.control.kind === 'toggle') {
+      keys[contributor.constraintKey] = true
+      continue
+    }
+    keys[contributor.constraintKey] = held.value ?? contributor.control.initial
+  }
+  return keys
 }
 
 /** The same object, for anything that must re-render when it changes. */

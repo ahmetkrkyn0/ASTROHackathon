@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  FOUR_D_CONTRIBUTORS,
   PLAN_REQUEST_CONTRIBUTORS,
+  STORE_CONTRIBUTORS,
   applyPlanRequestContributors,
   mergeContributedFields,
   type PlanRequestContext,
@@ -203,5 +205,150 @@ describe('plan request contributions', () => {
       available: { roughness: true },
     })
     expect(JSON.stringify(BASELINE_PLAN_BODY)).toBe(before)
+  })
+})
+
+/**
+ * The five constraints added to close the integration audit's blocking
+ * findings, and the two seams that made them unreachable in the first place.
+ *
+ * Both seams were silent. A boolean-only constraint record could not carry an
+ * alpha, and `constraintStateFrom` had no branch for a `choice` control at
+ * all, so a contributor could be written correctly, rendered correctly, and
+ * contribute nothing. Neither would fail a type check; only a test that
+ * asserts the field ARRIVES catches them.
+ */
+describe('4-D constraint surface', () => {
+  const AVAILABLE = {
+    'earth-visibility': true,
+    'safe-haven': true,
+    'illumination-corridor': true,
+    roughness: true,
+    survival: true,
+    'thermal-dwell': true,
+  }
+
+  const build = (constraints: Record<string, unknown>) =>
+    applyPlanRequestContributors(BASELINE_PLAN_4D_BODY, {
+      endpoint: 'plan-4d',
+      constraints,
+      available: AVAILABLE,
+    })
+
+  it('partitions the registry between the two panels, with nothing left out', () => {
+    // The 4-D strip renders FOUR_D_CONTRIBUTORS and the drawer renders
+    // STORE_CONTRIBUTORS. A contributor in neither is one nothing can switch
+    // on -- which is precisely how B1, C6 and the lit rule were unreachable.
+    const both = [...STORE_CONTRIBUTORS, ...FOUR_D_CONTRIBUTORS]
+    expect(both).toHaveLength(PLAN_REQUEST_CONTRIBUTORS.length)
+    expect(new Set(both.map((c) => c.id)).size).toBe(PLAN_REQUEST_CONTRIBUTORS.length)
+    for (const contributor of PLAN_REQUEST_CONTRIBUTORS) expect(both).toContain(contributor)
+  })
+
+  it('carries a number through the 4-D path -- audit B2-1 and B2-2', () => {
+    // The record these arrive in used to be typed `boolean`, so neither of
+    // these keys could hold its value and both fields were silently dropped.
+    expect(build({ riskAlpha: 0.97 })).toMatchObject({ risk_alpha: 0.97 })
+    expect(build({ wRoughness: 0.4 }).weights).toMatchObject({ w_roughness: 0.4 })
+  })
+
+  it('carries a choice through the 4-D path -- audit A2-1', () => {
+    const built = build({ requireIlluminationCorridor: true, litRule: 'majority' })
+    expect(built).toMatchObject({ require_continuous_illumination: true, lit_rule: 'majority' })
+  })
+
+  it('sends the survival fields once asked -- audit B1-1', () => {
+    expect(build({ reportSurvival: true })).toMatchObject({ report_survival: true })
+    expect(build({ maxFailureProbability: 0.05 })).toMatchObject({
+      max_failure_probability: 0.05,
+    })
+  })
+
+  it('sends the thermal fields once asked -- audit C6-1', () => {
+    const built = build({ requireThermalDwell: true, heaterModel: 'thermostat_assumed' })
+    expect(built).toMatchObject({
+      require_thermal_dwell: true,
+      heater_model: 'thermostat_assumed',
+    })
+  })
+
+  it('omits an enum still sitting on the backend default', () => {
+    // `lit_rule: 'all'` and `heater_model: 'none'` ARE the backend defaults.
+    // Sending them asserts a value nobody chose, and -- because the route
+    // identity is derived from the request body -- marks every post-route
+    // analysis stale for a request that did not change the route.
+    const lit = build({ requireIlluminationCorridor: true, litRule: 'all' })
+    expect(lit).not.toHaveProperty('lit_rule')
+    const heater = build({ requireThermalDwell: true, heaterModel: 'none' })
+    expect(heater).not.toHaveProperty('heater_model')
+  })
+
+  it('omits an enum whose own constraint is off', () => {
+    // A lit rule means nothing when the corridor is not being enforced.
+    expect(build({ litRule: 'majority' })).not.toHaveProperty('lit_rule')
+    expect(build({ heaterModel: 'thermostat_assumed' })).not.toHaveProperty('heater_model')
+  })
+
+  it('rejects a value outside the contributor own options', () => {
+    // Not merely "is a string": every choice maps to a backend Literal, and
+    // a value outside it is a 422 rather than a different plan.
+    const built = build({ requireIlluminationCorridor: true, litRule: 'sometimes' })
+    expect(built).not.toHaveProperty('lit_rule')
+  })
+
+  it('adds nothing at all when the capability is absent', () => {
+    const built = applyPlanRequestContributors(BASELINE_PLAN_4D_BODY, {
+      endpoint: 'plan-4d',
+      constraints: {
+        reportSurvival: true,
+        maxFailureProbability: 0.05,
+        requireThermalDwell: true,
+        requireIlluminationCorridor: true,
+        litRule: 'majority',
+      },
+      available: {},
+    })
+    expect(JSON.stringify(built)).toBe(JSON.stringify(BASELINE_PLAN_4D_BODY))
+  })
+
+  it('refuses a failure limit outside the contract interval', () => {
+    // Plan4DRequest is gt=0.0, lt=1.0. Sending 0 or 1 is a 422, which would
+    // turn a slider into a failed plan rather than a nominal route.
+    expect(build({ maxFailureProbability: 0 })).not.toHaveProperty('max_failure_probability')
+    expect(build({ maxFailureProbability: 1 })).not.toHaveProperty('max_failure_probability')
+  })
+
+  it('leaves the fault-model assumptions to the backend', () => {
+    // Spec 6.5: default assumption values are not hard-coded by the UI. The
+    // backend applies Lamarre's published figures and reports them with
+    // their source; echoing our own numbers back would assert values the
+    // operator never chose.
+    const built = build({ reportSurvival: true, maxFailureProbability: 0.05 })
+    for (const field of [
+      'failure_rate_per_km',
+      'recovery_hours',
+      'survival_soc_bins',
+      'survival_safe_set',
+      'survival_horizon_hours',
+      'initial_inner_c',
+    ]) {
+      expect(built).not.toHaveProperty(field)
+    }
+  })
+
+  it('adds only its own field, one constraint at a time', () => {
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ reportSurvival: true }, 'report_survival'],
+      [{ maxFailureProbability: 0.05 }, 'max_failure_probability'],
+      [{ requireThermalDwell: true }, 'require_thermal_dwell'],
+      [{ riskAlpha: 0.9 }, 'risk_alpha'],
+    ]
+    for (const [constraints, field] of cases) {
+      const built = build(constraints) as Record<string, unknown>
+      const added = Object.keys(built).filter(
+        (key) => !(key in BASELINE_PLAN_4D_BODY),
+      )
+      expect(added).toEqual([field])
+    }
   })
 })

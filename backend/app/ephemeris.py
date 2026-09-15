@@ -183,15 +183,45 @@ def grid_azimuth_to_true_azimuth(
 # (Round 2 review, L-3.)
 _FURNISHED: set[str] = set()
 
-# CSPICE keeps a process-global error stack and kernel pool. FastAPI executes
-# synchronous request handlers in a worker thread pool, while spiceypy
-# releases the GIL during its C calls; two requests can therefore corrupt that
-# shared SPICE state even though the Python code appears ordinary. In practice
-# this surfaced as a fatal ``SPICE(BADSUBSCRIPT)`` from ``str2et`` and took the
-# whole API process down. Keep every CSPICE entry point serialised. RLock is
-# required because sun_track holds the transaction while calling the public
-# vector helpers below.
+# CSPICE is not thread-safe, and FastAPI runs every sync endpoint in a
+# threadpool -- so two requests reach this module at once as a matter of
+# course, not as an edge case.
+#
+# The library keeps process-global state that no caller can partition: the
+# KEEPER kernel database furnsh/ktotal read and write, and the traceback
+# stack chkin_/chkout_ push and pop around every entry point. Two threads
+# inside spkpos pop that stack against each other and the process dies with
+#
+#     SPICE(BADSUBSCRIPT): Subscript out of range on file line 1189,
+#     procedure "trcpkg". Attempt to access element 0 of variable "stack".
+#     spkpos_c->SPKPOS->SPKEZP->FRINFO
+#
+# which is not an exception a caller can catch: CSPICE's default error
+# action terminates the process. A long-running server therefore does not
+# degrade, it disappears, taking every in-flight request with it. Before
+# this lock, 12 threads x 40 iterations reproduced it in seconds.
+#
+# The lock is deliberately COARSE -- one lock for the whole library, held
+# across each public call rather than around individual spice.* invocations.
+# Finer granularity would be a guess about which of CSPICE's globals matter,
+# and a wrong guess reads as safety without being it. The cost is small:
+# these are microsecond-to-millisecond calls, and the grids they feed are
+# computed outside the lock.
+#
+# RLock, not Lock: sun_track holds it and then calls sun_vector_body, which
+# takes it again. A plain Lock would deadlock the first time anyone asked
+# for a Sun track.
 _SPICE_LOCK = threading.RLock()
+
+
+def spice_lock() -> "threading.RLock":
+    """The lock every CSPICE call in this process must be made under.
+
+    Exported because this module is not quite the only door: skyline.py
+    imports spiceypy directly for one call. Anything else reaching for
+    spiceypy should either route through the functions here or take this.
+    """
+    return _SPICE_LOCK
 
 
 def _ensure_kernels(spice, meta_kernel: str) -> None:
@@ -201,14 +231,19 @@ def _ensure_kernels(spice, meta_kernel: str) -> None:
     # kernels loaded and fail obscurely -- or worse, succeed against a
     # partially reloaded pool. Checking the pool is one cheap call.
     # (Round 3 review, L-17.)
-    try:
-        if int(spice.ktotal("ALL")) == 0:
+    # Under the lock as well as its callers: _FURNISHED is a plain set, and
+    # the check-then-furnsh below is a read-modify-write over both it and
+    # CSPICE's own pool. RLock, so the callers that already hold it pay
+    # nothing.
+    with _SPICE_LOCK:
+        try:
+            if int(spice.ktotal("ALL")) == 0:
+                _FURNISHED.clear()
+        except Exception:  # pragma: no cover - defensive, ktotal is not optional
             _FURNISHED.clear()
-    except Exception:  # pragma: no cover - defensive, ktotal is not optional
-        _FURNISHED.clear()
-    if meta_kernel not in _FURNISHED:
-        spice.furnsh(meta_kernel)
-        _FURNISHED.add(meta_kernel)
+        if meta_kernel not in _FURNISHED:
+            spice.furnsh(meta_kernel)
+            _FURNISHED.add(meta_kernel)
 
 
 def utc_to_et(utc: str, meta_kernel: str = DEFAULT_META_KERNEL) -> float:
@@ -294,6 +329,11 @@ def sun_track(
             "Install it and run lunapath/src/fetch_kernels.py first."
         ) from exc
 
+    # Held across the whole track rather than re-taken per sample: this loop
+    # is the single heaviest CSPICE user in the product (n_samples calls to
+    # spkpos), and releasing between samples would let another thread in
+    # between two points of one Sun track for no benefit -- the work is
+    # serialised either way.
     with _SPICE_LOCK:
         _ensure_kernels(spice, meta_kernel)
         et0 = spice.str2et(utc_start)

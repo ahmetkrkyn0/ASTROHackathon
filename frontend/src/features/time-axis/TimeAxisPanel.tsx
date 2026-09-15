@@ -1,40 +1,58 @@
 import type { Plan4DResponse, SeriesManifest } from '../../net/types'
 import { cleanShadowReason } from './reason'
-import type { PlanConstraints, SeriesField } from './useTimeAxis'
+import { Plan4DResultBlocks } from './Plan4DResultBlocks'
+import {
+  ConstraintInput,
+  FOUR_D_CONTRIBUTORS,
+  setConstraint,
+  useConstraint,
+  type PlanRequestContributor,
+} from '../plan-request'
+import type { SeriesField } from './useTimeAxis'
 import './time-axis.css'
 
 /**
- * The three forward constraints A owns, with what each needs.
+ * One advanced constraint, drawn from the registry rather than from a list
+ * kept here.
  *
- * `needs` names a capability id rather than a layer name: A1 and A2 are
- * built from the horizon cube, not from a manifest layer, so "is it there"
- * is a different question for each and the hook answers it.
+ * This panel used to hold its own literal table of three toggles with their
+ * own labels and capability ids. That table was the audit's B1-1, C6-1 and
+ * A2-1 in one object: a contributor appended to the registry showed up in the
+ * mission-constraints drawer and was invisible here, so the survival limit,
+ * the thermal envelope and the lit rule had no way to be switched on at all.
+ * Nothing about them was missing except a surface.
+ *
+ * Now the registry is the list. Appending a contributor makes a control
+ * appear, and the failure cannot recur without someone deleting this.
  */
-const CONSTRAINT_CONTROLS: Array<{
-  key: keyof PlanConstraints
-  label: string
-  title: string
-  needs: string
-}> = [
-  {
-    key: 'requireEarthVisibility',
-    label: 'Earth link',
-    title: 'Every drive step must arrive in a cell that can see Earth. Waiting is never restricted.',
-    needs: 'earth-visibility',
-  },
-  {
-    key: 'requireSafeHaven',
-    label: 'Haven deadline',
-    title: 'The rover must always be able to reach a safe haven before the Earth sets.',
-    needs: 'safe-haven',
-  },
-  {
-    key: 'requireIlluminationCorridor',
-    label: 'Stay lit',
-    title: 'The route must stay inside the continuously illuminated corridor.',
-    needs: 'illumination-corridor',
-  },
-]
+function ConstraintChip({
+  contributor,
+  ready,
+}: {
+  contributor: PlanRequestContributor
+  ready: boolean
+}) {
+  const state = useConstraint(contributor.id)
+  const on = state.enabled
+
+  return (
+    <div className={`lp-time-constraint-item ${on ? 'is-on' : ''}`}>
+      <button
+        type="button"
+        className={`lp-time-constraint ${on ? 'is-on' : ''}`}
+        onClick={() => setConstraint(contributor.id, { ...state, enabled: !on })}
+        disabled={!ready}
+        aria-pressed={on}
+        title={contributor.hint}
+      >
+        {contributor.label}
+      </button>
+      {/* The value, once the switch that uses it is on. A slider under an
+          off toggle invites the reading that its number is doing something. */}
+      {on ? <ConstraintInput contributor={contributor} classPrefix="lp-time-constraint" /> : null}
+    </div>
+  )
+}
 
 export function TimeAxisPanel({
   manifest,
@@ -51,8 +69,6 @@ export function TimeAxisPanel({
   runPlan4D,
   error,
   timeVarying,
-  constraints,
-  toggleConstraint,
   constraintAvailable,
   constraintReasons,
 }: {
@@ -70,8 +86,6 @@ export function TimeAxisPanel({
   runPlan4D: () => void
   error: string | null
   timeVarying: boolean
-  constraints: PlanConstraints
-  toggleConstraint: (key: keyof PlanConstraints) => void
   constraintAvailable: Readonly<Record<string, boolean>>
   constraintReasons: Readonly<Record<string, string | null>>
 }) {
@@ -138,22 +152,16 @@ export function TimeAxisPanel({
       */}
       <div className="lp-time-constraints">
         <span className="lp-time-constraints-label">Require</span>
-        {CONSTRAINT_CONTROLS.map(({ key, label, title, needs }) => {
-          const ready = constraintAvailable[needs] === true
-          return (
-            <button
-              key={key}
-              type="button"
-              className={`lp-time-constraint ${constraints[key] ? 'is-on' : ''}`}
-              onClick={() => toggleConstraint(key)}
-              disabled={!ready}
-              aria-pressed={constraints[key]}
-              title={title}
-            >
-              {label}
-            </button>
-          )
-        })}
+        {FOUR_D_CONTRIBUTORS.map((contributor) => (
+          <ConstraintChip
+            key={contributor.id}
+            contributor={contributor}
+            ready={
+              contributor.dataId === undefined ||
+              constraintAvailable[contributor.dataId] === true
+            }
+          />
+        ))}
       </div>
 
       {/*
@@ -170,14 +178,16 @@ export function TimeAxisPanel({
         and printing it twice would read as two separate problems.
       */}
       {(() => {
-        const blocked = CONSTRAINT_CONTROLS.filter(
-          (control) => constraintReasons[control.needs] !== null,
+        const blocked = FOUR_D_CONTRIBUTORS.filter(
+          (contributor) =>
+            contributor.dataId !== undefined &&
+            constraintReasons[contributor.dataId] != null,
         )
         if (blocked.length === 0) return null
         const byReason = new Map<string, string[]>()
-        for (const control of blocked) {
-          const reason = constraintReasons[control.needs] as string
-          byReason.set(reason, [...(byReason.get(reason) ?? []), control.label])
+        for (const contributor of blocked) {
+          const reason = constraintReasons[contributor.dataId as string] as string
+          byReason.set(reason, [...(byReason.get(reason) ?? []), contributor.label])
         }
         return (
           <div className="lp-time-constraint-notes">
@@ -235,6 +245,9 @@ export function TimeAxisPanel({
           )}
         </p>
       ) : null}
+
+      {/* What the advanced constraints reported, if any were asked for. */}
+      {plan4d ? <Plan4DResultBlocks plan4d={plan4d} /> : null}
 
       {error ? (
         <p className="lp-time-note lp-time-warn">{cleanShadowReason(error) ?? error}</p>

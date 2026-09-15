@@ -258,9 +258,20 @@ def expected_sun_angles(
         utc_to_et,
     )
 
+    try:
+        import spiceypy  # noqa: F401 - preflight, for the message below
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise RuntimeError(
+            "spiceypy is required for ephemeris queries. "
+            "Install it and run lunapath/src/fetch_kernels.py first."
+        ) from exc
+
     kernel = meta_kernel or DEFAULT_META_KERNEL
-    # Route all CSPICE calls through ephemeris: it furnishes before conversion
-    # and serialises the process-global CSPICE state across API workers.
+    # utc_to_et rather than a local _ensure_kernels + spice.str2et pair: this
+    # was the one place outside ephemeris.py that called CSPICE directly, and
+    # therefore the one place the module's lock did not cover. It already
+    # furnishes before converting -- the ordering this comment used to
+    # explain is now a property of that function.
     et = utc_to_et(timestamp_utc, kernel)
     sun_vec = sun_vector_body(et, kernel)
     true_az_deg, elevation_deg = sun_azel_from_vector(sun_vec, lat_deg, lon_deg)

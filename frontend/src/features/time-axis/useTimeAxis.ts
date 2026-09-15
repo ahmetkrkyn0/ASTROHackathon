@@ -5,38 +5,43 @@ import { useMission } from '../../mission/MissionContext'
 import { cleanShadowReason } from './reason'
 import { SESSION_MISSION_TIME } from '../../mission/missionTime'
 import { useLayerAvailability } from '../../mission/useLayerAvailability'
+import { useThermalDwellCapability } from '../../mission/useThermalDwellCapability'
 import {
   applyPlanRequestContributors,
   type PlanRequestContext,
 } from '../plan-request/contributors'
+import { readConstraintKeys, useConstraintKeys } from '../plan-request/store'
 import type { Plan4DResponse, SeriesManifest } from '../../net/types'
 
 export type SeriesField = 'shadow' | 'surface_temp_c'
 
 /**
- * The forward constraints A owns, as the 4-D planner takes them.
+ * The advanced constraints as the 4-D planner takes them, keyed by
+ * `constraintKey`.
  *
- * They live beside the button that uses them rather than in each layer's
- * own panel. A toggle in the safe-haven card that silently changed what a
- * button in a different panel sent would be worse than the cross-feature
- * coupling it saved, and these are planner inputs, not layer settings.
+ * The controls live beside the button that sends them rather than in each
+ * layer's own panel: a toggle in the safe-haven card that silently changed
+ * what a button in a different panel sent would be worse than the
+ * cross-feature coupling it saved. These are planner inputs, not layer
+ * settings.
  *
- * All three default OFF, and an off constraint contributes no field at all
- * -- the request stays byte-identical to what the cockpit sent before any
- * of this existed. `planRequest.nonregression.test.ts` pins that down.
+ * Every one of them defaults OFF, and an off constraint contributes no field
+ * at all -- the request stays byte-identical to what the cockpit sent before
+ * any of this existed. `planRequest.nonregression.test.ts` pins that down.
  */
 export interface PlanConstraints {
-  requireEarthVisibility: boolean
-  requireSafeHaven: boolean
-  requireIlluminationCorridor: boolean
-  /** So the shape satisfies the contributor context, which reads by name. */
-  [key: string]: boolean
-}
-
-const NO_CONSTRAINTS: PlanConstraints = {
-  requireEarthVisibility: false,
-  requireSafeHaven: false,
-  requireIlluminationCorridor: false,
+  /**
+   * Keyed by `constraintKey`, valued by whatever that contributor's control
+   * holds -- a flag, an alpha, a weight, a backend enum name.
+   *
+   * `boolean` alone, which this was, silently excluded half the registry:
+   * `constraintStateFrom` opens a number control on `Number.isFinite(raw)`
+   * and a choice on membership in its options, and a boolean-only record can
+   * satisfy neither. `risk_alpha` and `w_roughness` therefore could not reach
+   * POST /api/plan-4d at all -- not because nobody wired them, but because
+   * the type of this record forbade the value. Audit finding B2-1/B2-2.
+   */
+  [key: string]: boolean | number | string
 }
 
 const N_SLICES = 24
@@ -172,8 +177,22 @@ export function useTimeAxis() {
 
   const togglePlay = useCallback(() => setPlaying((current) => !current), [])
 
-  const [constraints, setConstraints] = useState<PlanConstraints>(NO_CONSTRAINTS)
+  /*
+   * The operator's advanced constraints, read from the one store that holds
+   * them rather than from a second copy kept here.
+   *
+   * This used to be a `useState` local to this hook, which is how the audit's
+   * B2-1 happened: `risk` is set in the mission-constraints drawer, which
+   * writes the store, and this hook read its own object -- so the alpha the
+   * operator moved never reached POST /api/plan-4d and the 4-D route came
+   * back nominal with nothing on screen saying so.
+   */
+  const constraints = useConstraintKeys() as PlanConstraints
   const layers = useLayerAvailability(roverId, weights)
+  // Per-rover, not per-deployment: LUVMI-M publishes no thermal lag, so the
+  // envelope constraint is a 422 on that vehicle and a valid request on the
+  // other three.
+  const thermalDwell = useThermalDwellCapability(roverId)
 
   /*
    * What the backend can actually enforce here.
@@ -216,8 +235,36 @@ export function useTimeAxis() {
         : 'The earth_visibility layer is not loaded on this deployment.',
       'safe-haven': staticReason,
       'illumination-corridor': staticReason,
+      /*
+       * B1. The survival field is built over the horizon cube for a specific
+       * goal, so it needs both. The goal is checked here rather than left to
+       * the request because "pick a goal first" is a different sentence from
+       * "this deployment cannot do that", and a control that is dark for a
+       * reason the operator can fix in one click should say which click.
+       *
+       * What is deliberately NOT checked here: whether the goal's coarse
+       * block happens to be traversable at this coarsening. That is a
+       * property of the route being asked for, not of the capability, and
+       * the backend answers it with a 422 naming the block. Pre-empting it
+       * would mean reimplementing the planner's own admissibility test in
+       * the panel, and getting it subtly wrong.
+       */
+      survival: staticReason ?? (goal ? null : 'Pick a goal: the survival field is built toward it.'),
+      /*
+       * C6. The backend's own sentence about this rover, not ours.
+       *
+       * Loading is NOT available. `thermalDwell.reason` is null while the
+       * probe is in flight, and passing that through would have derived
+       * `available: true` from "we have not asked yet" -- the exact mistake
+       * useLayerAvailability documents itself for refusing. A control that
+       * flickers on during load and then goes dark is worse than one that
+       * arrives late.
+       */
+      'thermal-dwell': thermalDwell.ready
+        ? null
+        : (thermalDwell.reason ?? 'Checking what this rover declares.'),
     }
-  }, [layers, manifest, shadowIsTimeVarying])
+  }, [goal, layers, manifest, shadowIsTimeVarying, thermalDwell])
 
   // The boolean view the plan-request contributors take.
   const constraintAvailable = useMemo(
@@ -227,10 +274,6 @@ export function useTimeAxis() {
       ),
     [constraintReasons],
   )
-
-  const toggleConstraint = useCallback((key: keyof PlanConstraints) => {
-    setConstraints((previous) => ({ ...previous, [key]: !previous[key] }))
-  }, [])
 
   const runPlan4D = useCallback(async () => {
     if (!start || !goal) {
@@ -255,9 +298,16 @@ export function useTimeAxis() {
       // Every advanced constraint enters here and nowhere else. With all of
       // them off this returns `base` unchanged, which is the non-regression
       // rule holding at the one call site that could break it.
+      //
+      // Read from the store at the moment of the request rather than from
+      // the rendered value closed over above: the two agree in practice, but
+      // only the synchronous read is guaranteed to be what the operator has
+      // set when the button was pressed. It also keeps `constraints` out of
+      // this callback's dependency list, so moving a slider does not rebuild
+      // the planner callback on every frame of the drag.
       const context: PlanRequestContext = {
         endpoint: 'plan-4d',
-        constraints,
+        constraints: readConstraintKeys(),
         available: constraintAvailable,
       }
       const response = await planRoute4D(
@@ -272,7 +322,7 @@ export function useTimeAxis() {
     } finally {
       setPlanning(false)
     }
-  }, [goal, roverId, start, weights, startUtc, constraints, constraintAvailable])
+  }, [goal, roverId, start, weights, startUtc, constraintAvailable])
 
   // "static" means the cube did NOT vary with time. Playing it would be a
   // lie told at 8 fps (spec T7). Unknown until the manifest lands, so this
@@ -296,7 +346,6 @@ export function useTimeAxis() {
     error,
     timeVarying,
     constraints,
-    toggleConstraint,
     constraintAvailable,
     constraintReasons,
   }

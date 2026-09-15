@@ -312,6 +312,100 @@ export interface ShadowModel {
   start_utc?: string
 }
 
+/**
+ * B1: the route-level survival block, as `/api/plan-4d` reports it.
+ *
+ * Not the same thing as `CellSurvival` above, which answers "what should the
+ * rover do from THIS cell". This one answers "how likely is this whole plan
+ * to end in failure, with the recovery policy as its fallback".
+ *
+ * The block is always present, and its first two fields are the reason it can
+ * be read without guessing:
+ *
+ *   requested false               -- nobody asked. Not an error, not a zero.
+ *   requested true, applied false -- asked and could not be built; `reason`
+ *                                   says why, in the backend's words.
+ *   applied true                  -- beta was enforced and the numbers below
+ *                                   describe the route that survived it.
+ *
+ * Typed to what is rendered plus an index signature for the rest -- the block
+ * also carries the field's size, its references and Lamarre's quoted figures,
+ * which belong in a provenance view rather than in this type.
+ */
+export interface PlanSurvival {
+  requested: boolean
+  applied: boolean
+  /** MODEL. Never a measurement: the fault model is an assumption. */
+  validity: string
+  model: string
+  /** Present when the field could not be built. */
+  reason?: string | null
+  /** The limit that was enforced, or null when only reporting. */
+  beta?: number | null
+  safe_set?: string
+  safe_set_definition?: string
+  route?: {
+    execution_failure_probability: number | null
+    min_recovery_prob: number | null
+    mean_recovery_prob: number | null
+    start_recovery_prob: number | null
+    /** A COUNT of refused moves, not a rate. Zero is a real answer. */
+    moves_refused: number
+  }
+  claim?: string
+  [key: string]: unknown
+}
+
+/**
+ * C6: the route-level thermal dwell block, as `/api/plan-4d` reports it.
+ *
+ * `dwell_model` is the capability, in the `{ model, reason }` shape
+ * `mission/capability.ts` folds: a rover with no declared thermal lag comes
+ * back `unavailable` with the backend's sentence, and the rest of the block
+ * still describes the envelope it could not time.
+ *
+ * `heater_source` is load-bearing. It is non-null exactly when the heater
+ * model was the ASSUMPTION that a thermostat holds the inner temperature at
+ * the envelope floor, and it carries that assumption's own wording. Anything
+ * showing these numbers shows that string too -- the model is UNCALIBRATED,
+ * and nothing here may be presented as a thermal qualification.
+ */
+export interface PlanThermalDwell {
+  model: string
+  validity: string
+  /** UNCALIBRATED on every rover today. */
+  thermal_lag_validity: string
+  requested: boolean
+  applied: boolean
+  dwell_model: ModelStatus
+  envelope: { lo_c: number; hi_c: number; lo_component: string; hi_component: string } | null
+  initial_inner_c: number | null
+  heater_model: string
+  /** Non-null only for `thermostat_assumed`. The assumption, in words. */
+  heater_source: string | null
+  tau_s: number | null
+  route?: {
+    wait_steps: number | null
+    max_stay_h: number | null
+    min_dwell_margin_h: number | null
+    min_margin_side: string | null
+    min_margin_component: string | null
+    states_past_thermal_dwell: number | null
+    open_ended_states: number | null
+    inner: {
+      min_c: number | null
+      max_c: number | null
+      states_outside: number | null
+      first_exit_h: number | null
+      side: string | null
+      component: string | null
+      target_rule: string | null
+    } | null
+  } | null
+  claim?: string
+  [key: string]: unknown
+}
+
 export interface Plan4DResponse {
   /** FINE grid pixels -- this is what gets drawn. */
   path_pixels: Array<[number, number]>
@@ -333,6 +427,31 @@ export interface Plan4DResponse {
   coarsen: number
   effective_resolution_m: number
   rover_id: string
+
+  /*
+   * The blocks the advanced constraints produce.
+   *
+   * Optional, and read as optional. The backend sends `survival` and
+   * `thermal_dwell` on every 4-D plan, but this cockpit must keep working
+   * against a deployment that predates them -- the same rule the capability
+   * model states for layers, applied to a response body. A missing block is
+   * "not reported", never zero.
+   *
+   * The response carries more than this: `risk`, `roughness`, `slip_model`,
+   * `illumination_corridor`, `safety_margins` and their own path arrays. They
+   * are deliberately not typed here yet. Declaring a field is a promise that
+   * something reads it, and nothing does; `metrics` already carries an index
+   * signature so they survive the round trip untouched until something does.
+   */
+  survival?: PlanSurvival
+  thermal_dwell?: PlanThermalDwell
+  /** One entry per state. Null entries where no field covered that state. */
+  path_survival_prob?: Array<number | null> | null
+  path_recovery_prob?: Array<number | null> | null
+  /** Inner temperature integrated along the route, degC. */
+  path_inner_c?: Array<number | null> | null
+  /** Stay budget minus stay, hours. Null where the stay is open-ended. */
+  path_dwell_margin_h?: Array<number | null> | null
 }
 
 // ── GET /api/illumination-series ───────────────────────────────────────────
