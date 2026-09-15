@@ -84,7 +84,7 @@ def test_plan_response_carries_safety_margins(client):
 def test_plan_safety_margins_follow_the_rover(client):
     viper = client.post("/api/plan", json={"start": {"row": 0, "col": 0}, "goal": {"row": 12, "col": 12}, "rover_id": "nasa_viper"}).json()
     r = _by_id(viper["safety_margins"])
-    assert r["LP-R01"]["threshold"] == 96.0 and r["LP-R06"]["threshold"] == 20.0 and r["LP-R07"]["threshold"] == 15.0
+    assert r["LP-R01"]["threshold"] == 50.0 and r["LP-R06"]["threshold"] == 15.0 and r["LP-R07"]["threshold"] == 15.0
     luvmi = client.post("/api/plan", json={"start": {"row": 0, "col": 0}, "goal": {"row": 12, "col": 12}, "rover_id": "luvmi_m"}).json()
     assert _by_id(luvmi["safety_margins"])["LP-R04"]["applicable"] is False
 
@@ -175,7 +175,7 @@ SAMPLES = [
      "moving": False, "earth_link_h": 30.0, "haven_margin_h": 12.0, "dist_to_goal_m": 400.0, "extra": 1},
     {"t_h": 1.0, "soc_pct": 60.0, "inner_temp_c": 20.0, "in_shadow": True, "slope_deg": 12.0, "lateral_slope_deg": 6.0,
      "moving": True, "earth_link_h": 25.0, "haven_margin_h": 10.0, "dist_to_goal_m": 300.0},
-    {"t_h": 3.0, "soc_pct": 30.0, "inner_temp_c": 33.0, "in_shadow": True, "slope_deg": 18.0, "lateral_slope_deg": 14.0,
+    {"t_h": 3.0, "soc_pct": 30.0, "inner_temp_c": 33.0, "in_shadow": True, "slope_deg": 13.0, "lateral_slope_deg": 14.0,
      "moving": True, "earth_link_h": 20.0, "haven_margin_h": 7.0, "dist_to_goal_m": 100.0},
     {"t_h": 4.0, "soc_pct": 25.0, "inner_temp_c": 5.0, "in_shadow": False, "slope_deg": 3.0, "lateral_slope_deg": 1.0,
      "moving": True, "earth_link_h": 19.0, "haven_margin_h": 9.0, "dist_to_goal_m": 0.0},
@@ -191,7 +191,7 @@ def test_safety_check_evaluates_a_telemetry_trace():
     assert "soc_pct" in payload["signals_present"] and "shadow_continuous_h" in payload["signals_present"]
     block = payload["safety_margins"]
     r = _by_id(block)
-    assert r["LP-R01"]["rho"] == pytest.approx(93.0) and r["LP-R07"]["rho"] == pytest.approx(1.0)
+    assert r["LP-R01"]["rho"] == pytest.approx(47.0) and r["LP-R07"]["rho"] == pytest.approx(1.0)
     assert block["min_margin"]["id"] == "LP-R07" and block["verdict"] == "satisfied"
 
 

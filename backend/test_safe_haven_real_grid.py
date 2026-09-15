@@ -128,7 +128,7 @@ def test_safe_haven_endpoint_publishes_the_real_map(client, grids):
         f"/api/safe-haven?start_utc={_EPOCH_VIPER}&rover_id=nasa_viper"
     ).json()
     assert manifest["safe_haven_model"]["model"] == "spice_horizon"
-    assert manifest["h_max_shadow_h"] == 96.0
+    assert manifest["h_max_shadow_h"] == 50.0
     assert manifest["safe_haven_fraction"] > 0.05
     assert manifest["n_steps"] == 355
 
@@ -157,8 +157,8 @@ def test_cell_telemetry_reports_the_verdict_for_a_haven_and_a_plain_cell(client,
     assert haven["safe_haven_model"]["model"] == "spice_horizon"
     assert haven["safe_haven"]["is_safe_haven"] is True
     assert haven["safe_haven"]["time_to_safe_haven_h"] == 0.0
-    assert haven["safe_haven"]["max_dark_hours_without_dte_h"] <= 96.0
-    assert haven["safe_haven"]["h_max_shadow_h"] == 96.0
+    assert haven["safe_haven"]["max_dark_hours_without_dte_h"] <= 50.0
+    assert haven["safe_haven"]["h_max_shadow_h"] == 50.0
 
     plain_cell = client.get(
         "/api/cell-telemetry", params={"row": plain_row, "col": plain_col, **params}

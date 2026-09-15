@@ -105,16 +105,16 @@ def test_alpha_none_is_the_v4_path_bit_for_bit():
 
 
 def test_the_slope_criterion_reads_the_tail_but_gates_on_the_nominal_slope():
-    rover = _viper()  # slope_max 20
+    rover = _viper()  # slope_max 15
     assert f_slope(10.0, rover, risk_alpha=0.9, slope_sigma=1.5) == pytest.approx(
         f_slope(slope_cvar(10.0, 0.9, 1.5, rover), rover)
     )
     assert f_slope(10.0, rover, risk_alpha=0.9, slope_sigma=1.5) > f_slope(10.0, rover)
     # Capped at the limit: the same finite penalty as a cell AT the limit.
-    assert f_slope(19.5, rover, risk_alpha=0.99, slope_sigma=1.5) == pytest.approx(f_slope(20.0, rover))
-    assert math.isfinite(f_slope(19.5, rover, risk_alpha=0.99, slope_sigma=3.0))
+    assert f_slope(14.5, rover, risk_alpha=0.99, slope_sigma=1.5) == pytest.approx(f_slope(15.0, rover))
+    assert math.isfinite(f_slope(14.5, rover, risk_alpha=0.99, slope_sigma=3.0))
     # Above the limit stays impassable regardless of alpha; no sigma, no tail.
-    assert math.isinf(f_slope(20.5, rover, risk_alpha=0.99, slope_sigma=0.0))
+    assert math.isinf(f_slope(15.5, rover, risk_alpha=0.99, slope_sigma=0.0))
     assert f_slope(10.0, rover, risk_alpha=0.9, slope_sigma=None) == f_slope(10.0, rover)
 
 

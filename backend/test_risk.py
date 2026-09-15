@@ -143,9 +143,9 @@ def test_slope_sigma_widens_the_slip_tail_by_the_delta_method():
 
 
 def test_slope_cvar_is_capped_at_the_rovers_limit_and_needs_a_sigma():
-    rover = _viper()  # slope_max 20
+    rover = _viper()  # slope_max 15
     assert slope_cvar(10.0, 0.9, 1.5, rover) == pytest.approx(10.0 + 1.5 * cvar_multiplier(0.9), rel=1e-12)
-    assert slope_cvar(19.0, 0.99, 1.5, rover) == 20.0
+    assert slope_cvar(14.0, 0.99, 1.5, rover) == 15.0
     assert slope_cvar(10.0, 0.9, None, rover) == 10.0
     assert slope_cvar(10.0, 0.9, float("nan"), rover) == 10.0
     assert slope_cvar(10.0, 0.9, 0.0, rover) == 10.0
