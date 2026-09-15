@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Icon, type IconName } from '../../components/Fleet/SpecIcons'
-import { Field, FieldRow } from '../../components/Instrument'
+import { Field, FieldRow, Meter } from '../../components/Instrument'
 import type { RouteModelView } from './routeModel'
 import './route-model.css'
 
@@ -186,6 +186,20 @@ export function RouteModelPanel({ view }: { view: RouteModelView }) {
                     : `${view.roughness.cellsInPsr}`}
                 />
               </FieldRow>
+              {/* Where the mean sits between zero and the roughest cell this
+                  route crosses. Both ends are measured figures from this route
+                  -- no external scale is implied, because the LDRM product
+                  publishes none that a rover tolerance could be read against. */}
+              {view.roughness.meanRoughnessM !== null &&
+              view.roughness.maxRoughnessM !== null &&
+              view.roughness.maxRoughnessM > 0 ? (
+                <Meter
+                  fraction={view.roughness.meanRoughnessM / view.roughness.maxRoughnessM}
+                  low="0"
+                  high={`${view.roughness.maxRoughnessM.toFixed(2)} m max on route`}
+                  ticks={4}
+                />
+              ) : null}
               <p className="lp-rm-cost">
                 <Icon name="layers" />
                 <span>
