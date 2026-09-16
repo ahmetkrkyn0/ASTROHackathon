@@ -18,8 +18,23 @@ THERMAL_MIN_TRAVERSABLE_C = -150.0
 # nothing -- ``rover_catalog`` says so explicitly rather than letting a
 # frontend infer that every listed number is modelled. Seven fields used to
 # sit in the catalogue with zero readers anywhere in the codebase; four of
-# them are now wired (p_peak_w, p_shadow_w, p_hibernate_w, h_max_shadow_h)
-# and the rest are labelled. (Round 3 review, M-8.)
+# them were then wired (p_peak_w, p_shadow_w, p_hibernate_w, h_max_shadow_h)
+# and the rest were labelled. (Round 3 review, M-8.)
+#
+# C2 correction: that sentence was FALSE for p_hibernate_w. It was added to
+# this set when the sentence was written and nothing in the repository read
+# it -- not one module, not one test, not one script -- so the catalogue
+# claimed a modelled input that steered nothing, which is the exact defect
+# the DECLARED_ONLY_FIELDS split exists to prevent. C2 is the feature that
+# finally reads it (app/battery.py, the planner's HIBERNATE edge), so the
+# sentence is true again now; it was not true between then and now.
+#
+# C2 also moves thermal_tau_s into this set. C6 has read it since it shipped
+# (thermal_dwell.dwell_unavailable_reason and build_dwell_cube both take
+# rover["thermal_tau_s"]) while the catalogue went on publishing it as
+# reference-only -- the same defect in the other direction. It is published
+# as a top-level key in rover_catalog() as well, so correcting the label does
+# not make the number disappear from the API.
 MODELLED_FIELDS: frozenset[str] = frozenset(
     {
         "mass_kg",
@@ -50,6 +65,9 @@ MODELLED_FIELDS: frozenset[str] = frozenset(
         "w_thermal",
         # C4: the fifth criterion's weight (LOLA LDRM roughness).
         "w_roughness",
+        # C2: the vehicle's internal thermal time constant. C6's dwell model
+        # has always read it; C2's dawn pre-heat times the warm-up with it.
+        "thermal_tau_s",
         "sensor_payload_w",
         "sensor_heater_w",
         # C3: the anchors cost_engine.edge_travel_time_s reads through
@@ -72,7 +90,6 @@ MODELLED_FIELDS: frozenset[str] = frozenset(
 DECLARED_ONLY_FIELDS: tuple[str, ...] = (
     "f_net_n",
     "regen_efficiency",
-    "thermal_tau_s",
     "h_design_shadow_h",
     # C3: published regolith / test-bed parameters behind the slip anchors
     # (Yutu-2's Bekker-type ranges, VIPER's GRC-1 test bed). Reference only:
@@ -232,7 +249,15 @@ HEATER_THERMOSTAT_ASSUMPTION_SOURCE: str = (
     "as the battery lasts -- the reading of a catalogue that publishes a heater power "
     "(p_heater_w, p_shadow_w) and a shadow endurance (h_max_shadow_h) but no W-to-K "
     "coefficient; the energy the heater draws is already in cost_engine.housekeeping_power_w. "
-    "Not a rover specification: no profile publishes a thermostat set point"
+    "Not a rover specification: no profile publishes a thermostat set point. "
+    "C2 AMENDMENT: the clause 'no W-to-K coefficient' describes the CATALOGUE, and it is still "
+    "true of the catalogue -- but it is no longer true of the model. app.battery derives one "
+    "(eps*sigma*A, and its linearisation kA) from p_heater_w under an explicit sizing "
+    "assumption (battery.HEATER_SIZING_SOURCE), so under heater_power_model='delta_t' or "
+    "'radiative' the thermostat becomes POWER-LIMITED rather than unbounded: it holds the "
+    "lower bound only where the array and the heater can actually hold it, and falls short "
+    "in colder cells. Those two flags require this one, because kA*(T_set - T_env) IS the "
+    "steady-state power of exactly the thermostat assumed here"
 )
 
 # ── C1: the solar array's geometry ──────────────────────────────────────────
@@ -525,6 +550,19 @@ def rover_default_weights(rover_id: str | None = None) -> dict[str, float]:
     }
 
 
+def _battery_block_for(rover: dict[str, Any]) -> dict[str, Any]:
+    """C2's per-profile availability block.
+
+    Imported inside the function on purpose: ``app.battery`` reads
+    ``app.thermal_dwell``, which reads this module, so a top-level import
+    would close a cycle. ``app.survival`` imports ``app.safe_haven`` the same
+    way and for the same reason.
+    """
+    from .battery import rover_battery_block
+
+    return rover_battery_block(rover)
+
+
 def rover_catalog() -> list[dict[str, Any]]:
     """Return a frontend-friendly rover catalogue."""
     catalog: list[dict[str, Any]] = []
@@ -544,6 +582,14 @@ def rover_catalog() -> list[dict[str, Any]]:
                 "slope_lateral_max_deg": float(rover["slope_lateral_max_deg"]),
                 "soc_min_pct": float(rover["soc_min_pct"]),
                 "h_max_shadow_h": float(rover["h_max_shadow_h"]),
+                # C2: promoted out of declared_only because C6 has always read
+                # it and C2's dawn pre-heat times the warm-up with it. Published
+                # here so correcting the label does not remove the number from
+                # the API -- nullable, because LUVMI-M declares none.
+                "thermal_tau_s": (
+                    None if rover.get("thermal_tau_s") is None
+                    else float(rover["thermal_tau_s"])
+                ),
                 "sensor_payload_w": rover.get("sensor_payload_w"),
                 "sensor_heater_w": rover.get("sensor_heater_w"),
                 "default_weights": rover_default_weights(rover_id),
@@ -561,6 +607,13 @@ def rover_catalog() -> list[dict[str, Any]]:
                 # from, its faces and its source string. Steers nothing
                 # unless a request asks for panel_model="cos_incidence".
                 "panel_model": rover_panel_block(rover),
+                # C2: whether the cold-capacity curve, the calibrated heater and
+                # hibernation are available for this profile, and the reason
+                # where they are not -- so a reader sees that LUVMI-M has no
+                # cold curve and no hibernation rather than seeing numbers
+                # invented to fill the gaps. Steers nothing unless a request
+                # asks for one of the three models.
+                "battery_model": _battery_block_for(rover),
             }
         )
     return catalog

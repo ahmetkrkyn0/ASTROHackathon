@@ -43,6 +43,14 @@ class PlanContext:
     describes -- a scalar, because the Sun's geometry is site-wide. 1.0 is
     the pre-C1 model (an array always face-on to the Sun) and leaves every
     layer bit-identical; only EnergyLayer reads it.
+
+    *heater_w* (C2) is the survival heater's temperature-derived power for
+    this slice, a grid the caller computed from the slice's own surface
+    temperatures (:func:`app.battery.heater_power_w_grid`). None -- the
+    default -- is the pre-C2 model, in which the heater term is scaled by
+    exposure rather than temperature; only EnergyLayer reads it, and only the
+    4-D pipeline ever supplies it, because the 2-D cost grid has no epoch and
+    therefore no per-slice surface temperature to read.
     """
 
     slope: np.ndarray
@@ -56,6 +64,7 @@ class PlanContext:
     roughness: np.ndarray | None = None
     roughness_scale: RoughnessScale | None = None
     solar_gain: float = 1.0
+    heater_w: np.ndarray | float | None = None
 
 
 @runtime_checkable
@@ -267,6 +276,7 @@ class EnergyLayer:
             risk_alpha=self.risk_alpha,
             slope_sigma=ctx.slope_sigma,
             solar_gain=ctx.solar_gain,
+            heater_w=ctx.heater_w,
         )
 
 

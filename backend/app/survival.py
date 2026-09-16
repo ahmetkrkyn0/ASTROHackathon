@@ -380,8 +380,24 @@ class _PowerTerms:
     p_solar_w: float
 
 
-def _power_terms(rover: Mapping[str, Any], solar_gain: float = 1.0) -> _PowerTerms:
+def _power_terms(
+    rover: Mapping[str, Any],
+    solar_gain: float = 1.0,
+    heater_w: float | None = None,
+) -> _PowerTerms:
     """The affine power law, optionally with C1's panel gain folded in.
+
+    *heater_w* (C2) is the survival heater's temperature-derived power, and it
+    is a SCALAR for the same reason *solar_gain* is: the closed-form integral
+    over cumulative shadow hours needs the draw to be affine in EXPOSURE, and a
+    per-cell, per-slice heater is not. Folding in one scalar keeps the affine
+    form -- it simply moves the heater out of the exposure-scaled term and into
+    the constant one, because a temperature-driven heater does not scale with
+    exposure at all. The caller passes the LARGEST heater power over the
+    field's horizon, so the survival probability is never optimistic about how
+    little heating the rover will actually need: a safety bound may be
+    conservative, not hopeful. That is the opposite direction from the panel
+    gain above, and for the same reason.
 
     *solar_gain* is a SCALAR on purpose. ``p_solar_w`` enters ``base_w`` and
     ``slope_w`` with opposite signs, and that factorisation is what keeps the
@@ -401,6 +417,12 @@ def _power_terms(rover: Mapping[str, Any], solar_gain: float = 1.0) -> _PowerTer
         else float(rover.get("p_heater_w") or 0.0)
     )
     p_solar_w = float(rover.get("p_solar_w") or 0.0) * float(solar_gain)
+    if heater_w is not None:
+        return _PowerTerms(
+            base_w=p_idle_w + max(0.0, float(heater_w)) - p_solar_w,
+            slope_w=p_solar_w,
+            p_solar_w=p_solar_w,
+        )
     return _PowerTerms(base_w=p_idle_w - p_solar_w, slope_w=shadow_extra_w + p_solar_w, p_solar_w=p_solar_w)
 
 
@@ -438,6 +460,10 @@ class SurvivalField:
     #: C1's panel gain, as the single conservative scalar ``_power_terms``
     #: folds into the solar term. 1.0 is the pre-C1 field, bit for bit.
     solar_gain: float = 1.0
+    #: C2's survival-heater power, as the single conservative (largest) scalar
+    #: ``_power_terms`` folds into the constant term. None is the pre-C2 field,
+    #: bit for bit, with the heater scaled by exposure as before.
+    heater_w: float | None = None
 
     # -- indexing -----------------------------------------------------------
 
@@ -533,7 +559,7 @@ class SurvivalField:
         """Battery drawn holding position at (r, c) for ``recovery_h`` hours
         from *from_h*: housekeeping minus solar, integrated over the block's
         shadow series."""
-        terms = _power_terms(self.rover, self.solar_gain)
+        terms = _power_terms(self.rover, self.solar_gain, self.heater_w)
         shadow_hours = self._cumulative_at(r, c, from_h + self.recovery_h) - self._cumulative_at(r, c, from_h)
         return terms.base_w * self.recovery_h + terms.slope_w * shadow_hours
 
@@ -600,7 +626,7 @@ class SurvivalField:
             return {"action": code, "name": "safe", "target": None, "p_safe_now": p_now, "p_safe_next": p_now}
         if code == ACTION_NONE:
             return {"action": code, "name": "none", "target": None, "p_safe_now": p_now, "p_safe_next": None}
-        terms = _power_terms(self.rover, self.solar_gain)
+        terms = _power_terms(self.rover, self.solar_gain, self.heater_w)
         bin_index = min(lo, self.n_bins - 1)
         if code == ACTION_WAIT:
             exposure = float(self.exposure[bin_index, r, c])
@@ -670,6 +696,7 @@ def build_survival_field(
     provenance: Mapping[str, Any] | None = None,
     safe_set: str = "leg",
     solar_gain: float = 1.0,
+    heater_w: float | None = None,
 ) -> SurvivalField:
     """Backward value iteration over ``(bin, block, SOC bin)``.
 
@@ -682,6 +709,11 @@ def build_survival_field(
     reserve, impassable block) at 1 before the minimum. Every action
     advances at least one bin, so one sweep is exact. A bin's exposure is
     the mean shadow of its planner slices (*shadow_bins*).
+
+    *heater_w* (C2) is the survival heater's temperature-derived power, folded
+    in as one conservative (largest-over-the-horizon) scalar so the DP's drain
+    stays a closed-form integral over cumulative shadow hours; None is the
+    pre-C2 field, bit for bit. See :func:`_power_terms`.
 
     *solar_gain* (C1) scales the array's income. It is one scalar for the
     whole field, and the caller passes the MINIMUM gain over the horizon:
@@ -731,7 +763,7 @@ def build_survival_field(
         & ~failed_bin[None, None, :]
     )
 
-    terms = _power_terms(rover, solar_gain)
+    terms = _power_terms(rover, solar_gain, heater_w)
     net_wait_w = terms.base_w + shadow * terms.slope_w  # (T, H, W), signed
     cumulative = np.concatenate(
         [np.zeros((1, height, width)), np.cumsum(shadow, axis=0) * step], axis=0
@@ -905,6 +937,7 @@ def build_survival_field(
         compute_s=time.perf_counter() - t0,
         h_max_shadow_h=h_max,
         solar_gain=float(solar_gain),
+        heater_w=None if heater_w is None else float(heater_w),
     )
 
 
@@ -968,7 +1001,7 @@ def rollout(
     legs = None if plan_states is None else _plan_legs_for_rollout(field, plan_states)
     if legs is not None and (legs[0][1], legs[0][2]) != (r0, c0):
         raise ValueError(f"the plan starts at {(legs[0][1], legs[0][2])}, not at {start}")
-    terms = _power_terms(field.rover, field.solar_gain)
+    terms = _power_terms(field.rover, field.solar_gain, field.heater_w)
     step = field.step_hours
     horizon = field.horizon_hours
     req = field.safe_soc_min_wh

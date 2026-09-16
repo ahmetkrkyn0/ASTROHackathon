@@ -1776,6 +1776,162 @@ yatay panel" karşılaştırma çubuğu; Hangar'da rover başına `panel_model.f
 ve `source` metni; ayrı bir rozette `viper_corner_check.predicted_on_corner_w` ↔ `published_on_corner_w`. Her
 sayının yanında `validity: MODEL` ve geometrinin `source` dizesi (hepsi `"assumption:"` ile başlar).
 
+## Batarya soğuk davranışı, hibernasyon ve karanlık dayanımı (16 Eylül 2026 eki, C2)
+
+**Ne değişti:** hiçbir mevcut alan. Üç yeni istek bayrağı, her yanıtta bir `battery` bloğu, bir yeni uç,
+`/api/rovers`'ta iki yeni anahtar. **Üçü de varsayılan olarak KAPALI** ve kapalıyken her sayı C2'den
+öncekiyle bit-eşittir (LPR-1'in iki checked-in maliyet-gridi SHA-256 özeti kıpırdamadı, `COST_MODEL_ID`
+`…_v5`'te kaldı).
+
+**Etiket: MODEL, kalibre edilmemiş.** Bu katalogdaki hiçbir rover sıcaklığa bağlı kapasite eğrisi, ısıtıcı
+iletkenliği (`k`), ışıma alanı (`A`), termostat set noktası ya da hibernasyon dayanımı yayımlamıyor.
+NASA Glenn'in (200 K donma eşiği, vakumda 4/4, ISRO'nun −160 °C / 14 günü, Surveyor 1'in altı döngüsü) ve
+NASA JSC'nin (Stefan-Boltzmann yasası, %26) sayıları **onlarındır**; `nasa_glenn_quoted` / `jsc_quoted`
+bloklarında alıntı olarak durur ve hiçbir hesabımızla karıştırılmaz.
+
+### `/api/plan-4d` — üç yeni istek alanı
+
+| Alan | Değerler | Varsayılan |
+|---|---|---|
+| `battery_model` | `"constant"` \| `"temperature_derated"` | `"constant"` |
+| `heater_power_model` | `"constant"` \| `"delta_t"` \| `"radiative"` | `"constant"` |
+| `allow_hibernate` | `true` \| `false` | `false` |
+| `battery_shape_exponent` | 0 < x ≤ 8 | `1.0` |
+
+- **`battery_model="temperature_derated"`** depolanan şarjı *teslim edilebilir* şarj olarak okur: profilin
+  kendi `bat_op_min_c`'sinde ve üstünde 1,0, alıntılanan 200 K donma noktasında ve altında 0,0, arada
+  etiketli bir varsayım (varsayılan doğrusal; `battery_shape_exponent` şekli değiştirir). Sürekli karanlık
+  dayanımı da yayımlanan `h_max_shadow_h`'nin bu durumun rezerv üstünde hâlâ teslim edebildiği kesirle
+  ölçeklenmişi olur — tam şarj + rating sıcaklığında **dört profilde de tam olarak** yayımlanan sabiti verir.
+- **`heater_power_model`** ısıtıcının gücünü gölge oranından değil **yüzey sıcaklığından** okur:
+  `radiative` NASA JSC'nin kendi `Q = εσA(T_obj⁴ − T_env⁴)` yasası, `delta_t` onun doğrusal hâli. Tek katsayı
+  (`εσA`, ve doğrusallaştırması `kA`) katalogdaki `p_heater_w`'den, etiketli bir boyutlandırma varsayımıyla
+  okunur; ε ve A **ayrı ayrı asla uydurulmaz**. `heater_model="thermostat_assumed"` **zorunludur**.
+- **`allow_hibernate=true`** planlayıcıya üçüncü bir kenar ailesi ekler: karanlıkta uykuya geçer,
+  `p_hibernate_w` çeker, **ilk ışıkta** uyanır. Uyanma bedeli NASA Glenn'in "dawn mode"udur — ön-ısıtıcılar
+  **güneş dizisinden** beslenir, batarya izoledir, yani bedel zaman ve güneş geliridir, batarya değil.
+
+### Yeni: her yanıtta `battery` bloğu (`/api/plan`, `/api/plan-4d`)
+
+```json
+{"battery": {
+  "model_id": "cold_capacity_radiative_heater_hibernation_v1", "validity": "MODEL",
+  "scope": "...", "claim": "...",
+  "requested": {"battery_model": "constant", "heater_power_model": "constant", "allow_hibernate": false},
+  "applied": false, "reason": null, "shape_exponent": 1.0,
+  "catalogue": {
+    "cold_capacity": {"available": true, "reason": null, "rating_c": 0.0,
+                      "freeze_c": -73.15, "freeze_k": 200.0,
+                      "freeze_source": "assumption: ...", "shape_source": "assumption: ..."},
+    "heater": {"available": true, "k_a_w_per_k": 0.1667, "es_a_w_per_k4": 4.6845e-09,
+               "implied_area_m2_at_emissivity_1": 0.0826, "set_point_c": 0.0,
+               "set_point_component": "battery", "sizing_surface_c": -150.0,
+               "p_heater_w": 25.0, "source": "assumption: ..."},
+    "hibernation": {"available": true, "reason": null, "p_hibernate_w": 108,
+                    "dark_rate": 1.6615, "power_source": "assumption: ...",
+                    "endurance_source": "assumption: ...",
+                    "evidence_limit": {"coldest_cited_k": 80.0, "coldest_cited_c": -193.15,
+                                       "longest_cited_h": 336.0, "note": "..."}},
+    "published_shadow_endurance_h": 50.0},
+  "jsc_survival_temperature_check": {"quoted_pct": 26.0, "predicted_pct": 26.50,
+                                     "difference_pct_points": 0.50, "by_environment": ["..."],
+                                     "quoted_text": "Decreasing a component's survival temperature ..."},
+  "nasa_glenn_quoted": {"freeze_k": 200.0, "isro_days": 14, "surveyor_1": "...", "dawn_mode": "..."},
+  "jsc_quoted": {"law": "Q_rad = eps * sigma * A * (T_obj^4 - T_env^4)", "...": "..."},
+  "viper_quoted": {"drilling_in_shadow_h": 9.5, "min_power_shadow_h": 50.0},
+  "references": ["..."],
+  "route": {"actions": ["move", "wait", "hibernate", "..."], "hibernate_steps": 0,
+            "hibernate_hours": null, "hibernate_dark_hours": null, "coldest_inner_c": null,
+            "beyond_cited_evidence": null, "beyond_cited_evidence_reason": null,
+            "margins_use_nameplate_charge": true}}}
+```
+
+`applied` kuralı A1/A2/B1/C6/C1 ile aynı: **istenmiş VE uygulanabilmiş**. `/api/plan` (2-B) her zaman
+`applied: false` ve gerekçesi yazılı — *"the 2-D cost grid has no epoch"*: sıcaklığa bağlı bir ısıtıcı ve
+derate edilmiş bir batarya dilim başına yüzey ister, 2-B gridin termal katmanı ise uzun vadeli yıllık zirvedir.
+
+**`route.margins_use_nameplate_charge: true`** bilinçli bir sınır beyanıdır: SHERPA marjları
+(`safe_haven.route_margins`) nominal şarj ve sabit idame gücü üzerinden hesaplanır, yani `battery_model`
+açıkken planlayıcının kendi sayıları değildir.
+
+### `/api/plan-4d` — metrikler ve rota dizileri (yalnızca ekleme)
+
+| Alan | Ne |
+|---|---|
+| `path_actions` | dönüşüm başına `"move"` \| `"wait"` \| `"hibernate"`; uzunluk `len(path_states) − 1` |
+| `metrics.hibernate_steps` | hibernasyon kenarı sayısı (bunlar `wait_steps`'e **dahil değildir**) |
+| `metrics.hibernate_hours` | uyku + dawn pre-heat toplam saati |
+| `metrics.hibernate_dark_hours` | uykunun sürekli-karanlık bütçesinden harcadığı saat |
+| `metrics.coldest_inner_c` | uyku boyunca inilen en düşük iç sıcaklık |
+| `metrics.hibernation_beyond_cited_evidence` (+ `_reason`) | alıntılanan kanıtın (80 K / 14 gün) dışına çıkıldı mı |
+| `metrics.hibernation_allowed`, `metrics.battery_model` | hangi kuralların yürürlükte olduğu |
+
+**Önemli:** bir hibernasyon bir bekleme gibi yerinde durur. Ardışık `path_states`'ten bacak türetip
+`previous[:2] == current[:2]` diye bekleme sayan her tüketici artık `path_actions`'ı okumalıdır; yoksa
+uykudaki rover'ı `p_hibernate_w` yerine idame gücünde modeller. `metrics.max_continuous_shadow_h` uyku
+sırasındaki **zirveyi** bildirir (şafaktaki sıfırlamayı değil), yani D3'ün LP-R01'i hâlâ söylediği şeyi ölçer.
+
+### Yeni ret kodları (`metrics.edges_rejected`)
+
+| Anahtar | Ne zaman |
+|---|---|
+| `hibernate_unwakeable` | dawn pre-heat tamamlanamıyor: dizi ön-ısıtıcıyı besleyemiyor ya da ısıtıcı yüzeye karşı doymuş |
+| `hibernate_too_cold` | uyku bataryayı hayatta kalma zarfının dışına çıkarırdı (200 K'nın altı) |
+
+### Yeni uç: `GET /api/battery-model`
+
+```
+GET /api/battery-model?rover_id=lpr_1&inner_c=-20&soc_pct=100&shape_exponent=1.0
+```
+
+```json
+{"rover_id": "lpr_1", "battery": {"...": "yukarıdaki blok"},
+ "curve": [{"inner_c": -73.15, "usable_fraction": 0.0, "endurance_h": 0.0}, "...11 nokta..."],
+ "heater": {"available": true, "k_a_w_per_k": 0.1667, "by_surface": [
+    {"surface_c": -150.0, "constant_w": 25.0, "delta_t_w": 25.0, "radiative_w": 25.0,
+     "heated_equilibrium_c": 0.0}, "..."]},
+ "state": {"inner_c": -20.0, "soc_pct": 100.0, "stored_wh": 5420.0, "usable_fraction": 0.726589,
+           "deliverable_wh": 3937.91, "shadow_endurance_h": 32.9118,
+           "components_past_operating_limit": ["battery", "electronics"],
+           "envelope": {"lo_c": 0.0, "hi_c": 35.0, "lo_component": "battery", "hi_component": "battery"},
+           "nominal_inner_c": 17.5},
+ "survival_envelope": {"lo_c": -73.15, "hi_c": 35.0, "lo_component": "battery", "hi_component": "battery"},
+ "shape_exponent": 1.0}
+```
+
+Bilinmeyen rover **422**. Eğrisi olmayan profilde (LUVMI-M) `curve: []` ve `state.usable_fraction: null`,
+gerekçesiyle — **değer uydurulmaz**.
+
+### `/api/rovers` — iki yeni anahtar
+
+```json
+{"id": "lpr_1", "...": "...",
+ "thermal_tau_s": 7200.0,
+ "battery_model": {"model_id": "...", "validity": "MODEL",
+                   "cold_capacity": {"available": true, "...": "..."},
+                   "heater": {"available": true, "...": "..."},
+                   "hibernation": {"available": true, "...": "..."},
+                   "published_shadow_endurance_h": 50.0}}
+```
+
+**`thermal_tau_s` `declared_only` bloğundan çıktı ve üst düzey anahtar oldu.** Sebep bir dürüstlük
+düzeltmesidir, kapsam değişikliği değil: C6 bu alanı gönderildiği günden beri okuyor
+(`thermal_dwell.build_dwell_cube`), katalog ise onu "hiçbir şey okumuyor" diye yayımlamaya devam ediyordu.
+Sayı **kaybolmadı**, yer değiştirdi. LUVMI-M'de `null`.
+
+> **Frontend'e not (kod değişmediği için burada duruyor):**
+> `frontend/src/mission/useThermalDwellCapability.ts:13`'teki yorum `thermal_tau_s`'yi "declared_only altında
+> yayımlandığı için" okumamayı gerekçelendiriyor. O gerekçe bu ekle **bayatladı** — alan artık modellenmiş
+> ve üst düzeyde. Yorum düzeltilmedi çünkü C2 frontend koduna dokunmuyor; okuyan biri bunu bilsin diye yazıldı.
+
+**Frontend'in çizebileceği (kod değişmeden):** rota kartında `path_actions`'tan bir bant (sürüş / bekleme /
+**uyku**); Hangar'da profil başına `battery_model.cold_capacity.available` rozeti ve LUVMI-M için gerekçe
+metni; `curve`'den sıcaklık-kapasite eğrisi; `heater.by_surface`'tan üç ısıtıcı modelinin karşılaştırma
+çubuğu; `jsc_survival_temperature_check` için C1'in `viper_corner_check` rozetiyle aynı desende bir çapraz
+kontrol rozeti (`quoted_pct` ↔ `predicted_pct`); hibernasyonlu rotalarda `beyond_cited_evidence` uyarısı.
+Her sayının yanında `validity: MODEL` ve ilgili `*_source` dizesi (hepsi `"assumption:"` ile başlar).
+
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,

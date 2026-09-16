@@ -62,6 +62,7 @@ def f_energy_cell_grid(
     risk_alpha: float | None = None,
     slope_sigma: np.ndarray | None = None,
     solar_gain: float = 1.0,
+    heater_w: np.ndarray | float | None = None,
 ) -> np.ndarray:
     """Array form of :func:`app.cost_engine.f_energy_cell`.
 
@@ -96,19 +97,34 @@ def f_energy_cell_grid(
     slip = None
     if risk_alpha is not None:
         slip = slip_cvar_array(np.clip(theta, 0.0, None), risk_alpha, rover_cfg, slope_sigma)
+    # C2: the heater's temperature-derived power prices THIS cell. The
+    # reference scale above stays nominal on purpose -- it is the [0, 1]
+    # normalisation, not a state, and derating one denominator while leaving
+    # the other nominal is the double-count this feature is careful to avoid.
     here_wh = _energy_per_metre_wh_grid(
-        theta, shadow, rover_cfg, slip=slip, solar_gain=solar_gain
+        theta, shadow, rover_cfg, slip=slip, solar_gain=solar_gain, heater_w=heater_w
     )
     value = np.clip((here_wh - best_wh) / span, 0.0, 1.0)
     return np.where(theta > slope_max, np.inf, value)
 
 
 def _housekeeping_power_w_grid(
-    shadow_ratio: np.ndarray, rover_cfg: Mapping[str, Any]
+    shadow_ratio: np.ndarray,
+    rover_cfg: Mapping[str, Any],
+    heater_w: np.ndarray | float | None = None,
 ) -> np.ndarray:
-    """Array form of :func:`app.cost_engine.housekeeping_power_w`."""
+    """Array form of :func:`app.cost_engine.housekeeping_power_w`.
+
+    *heater_w* (C2) is the temperature-derived heater power, a scalar or a
+    grid broadcastable against *shadow_ratio*. It replaces the exposure-scaled
+    heater term exactly as it does in the scalar form, in the same position in
+    the same expression, because the two are asserted equal cell for cell.
+    ``None`` is the pre-C2 body, operation for operation.
+    """
     ratio = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
     idle_w = float(rover_cfg["p_idle_w"])
+    if heater_w is not None:
+        return idle_w + np.maximum(0.0, np.asarray(heater_w, dtype=np.float64))
     shadow_w = rover_cfg.get("p_shadow_w")
     if shadow_w is not None:
         return idle_w + ratio * max(0.0, float(shadow_w) - idle_w)
@@ -121,6 +137,7 @@ def _energy_per_metre_wh_grid(
     rover_cfg: Mapping[str, Any],
     slip: np.ndarray | None = None,
     solar_gain: float = 1.0,
+    heater_w: np.ndarray | float | None = None,
 ) -> np.ndarray:
     """Array form of :func:`app.cost_engine.net_energy_per_metre_wh`.
 
@@ -144,7 +161,7 @@ def _energy_per_metre_wh_grid(
     ratio = np.clip(np.asarray(shadow_ratio, dtype=np.float64), 0.0, 1.0)
     solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * float(solar_gain)
     net_w = np.maximum(
-        0.0, traction_w + _housekeeping_power_w_grid(ratio, rover_cfg) - solar_w
+        0.0, traction_w + _housekeeping_power_w_grid(ratio, rover_cfg, heater_w) - solar_w
     )
     with np.errstate(invalid="ignore"):
         return net_w * seconds / 3600.0

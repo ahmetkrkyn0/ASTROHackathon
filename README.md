@@ -285,6 +285,7 @@ return a route that violates them rather than returning an expensive one.
 | **Slip model** | Wheels slip on regolith, and slip costs time and energy. Anchored to Yutu-2's measured slip on Chang'e-4 and VIPER's design constraint. |
 | **Thermal dwell** | How long the rover can sit in one place before its internals leave the safe envelope. |
 | **Solar panel geometry** | Opt-in: charging power can follow the incidence angle between the array and the Sun, not just "is it lit". At 1.5 degrees of polar Sun that is the difference between a body-mounted array that can turn and a flat one. Off by default, so every existing number is unchanged. |
+| **Cold battery and hibernation** | Opt-in, three switches, **all off by default**: a battery that delivers less of its charge when it is cold (zero below the 200 K freeze point NASA Glenn measured on 18650 cells), a survival heater whose power follows the temperature difference through NASA JSC's own Stefan-Boltzmann law instead of the shadow ratio, and a HIBERNATE action — sleep through the dark, wake at first light on a dawn pre-heat run from the solar array. The darkness endurance stops being one constant per rover. With the switches off every existing number is unchanged. |
 
 ### Risk and uncertainty
 
@@ -417,6 +418,7 @@ kernels are hundreds of megabytes and are fetched or generated locally.
 | `GET` | `/api/thermal-envelope` | Operating envelope matrix |
 | `GET` | `/api/thermal-dwell` | Tolerable dwell time per cell |
 | `GET` | `/api/panel-gain` | Solar panel cos i gain over time |
+| `GET` | `/api/battery-model` | Cold-capacity curve, heater calibration, hibernation |
 | `GET` | `/api/survival` | `P_safe` layer |
 | `GET` | `/api/safe-haven` | Reachable survivable locations |
 | `GET` | `/api/lidar-scan` | Virtual LiDAR sweep of the DEM |

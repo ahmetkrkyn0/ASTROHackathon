@@ -160,7 +160,9 @@ def f_energy(theta_deg: float, d_m: float, rover: Mapping[str, Any] | None = Non
 
 
 def housekeeping_power_w(
-    shadow_ratio: float, rover: Mapping[str, Any] | None = None
+    shadow_ratio: float,
+    rover: Mapping[str, Any] | None = None,
+    heater_w: float | None = None,
 ) -> float:
     """Non-traction power the rover draws in a cell of the given shadow ratio.
 
@@ -170,10 +172,34 @@ def housekeeping_power_w(
     what finally gives that catalogue field a reader (round 3 review, M-8);
     it equals ``p_idle_w + p_heater_w`` in every registered profile, so the
     two forms agree and the fallback is exact rather than approximate.
+
+    The heater's power (C2)
+    -----------------------
+    *heater_w*, when given, REPLACES the exposure-scaled heater term with a
+    heater power the caller computed from the cell's TEMPERATURE
+    (:func:`app.battery.heater_power_w`). ``None`` -- the default -- is the
+    pre-C2 body, evaluated character for character, so every existing number
+    and every checked-in cost-grid digest is untouched.
+
+    The two are not orderable and neither is a conservative version of the
+    other: the term above scales with EXPOSURE and the C2 term with
+    TEMPERATURE, and on Site11 those two layers are independent (measured
+    Spearman correlation between shadow ratio and surface temperature over
+    the 210 063 traversable cells: -0.0014). A cell that is lit but cold pays
+    nothing here and pays for its heater there; a cell that is dark but near
+    its peak pays the full heater here and little there. Measured for LPR-1
+    over the whole grid, the temperature law draws MORE than this term in
+    13.9 percent of cells under ``delta_t`` and 44.2 percent under
+    ``radiative``. That is why C2 adds a model rather than correcting one, and
+    why nothing here claims the new term is a bound on the old.
+
+    The idle draw is never replaced: a dormant bus still runs.
     """
     rover_cfg = _resolve_rover(rover)
     ratio = min(1.0, max(0.0, float(shadow_ratio)))
     idle_w = float(rover_cfg["p_idle_w"])
+    if heater_w is not None:
+        return idle_w + max(0.0, float(heater_w))
     shadow_w = rover_cfg.get("p_shadow_w")
     if shadow_w is not None:
         return idle_w + ratio * max(0.0, float(shadow_w) - idle_w)
@@ -184,12 +210,16 @@ def gross_energy_per_metre_wh(
     theta_deg: float,
     shadow_ratio: float = 0.0,
     rover: Mapping[str, Any] | None = None,
+    heater_w: float | None = None,
 ) -> float:
     """Energy DRAWN to advance one metre: traction plus housekeeping.
 
     ``edge_energy_wh`` counts traction only, which is the right number for a
     corridor's per-segment drive budget. This adds the housekeeping load the
     rover pays for the whole time it is crossing the cell.
+
+    *heater_w* (C2) is the temperature-derived heater power, passed straight
+    through to :func:`housekeeping_power_w`; ``None`` is the pre-C2 body.
     """
     rover_cfg = _resolve_rover(rover)
     theta = max(0.0, float(theta_deg))
@@ -198,7 +228,7 @@ def gross_energy_per_metre_wh(
         return float("inf")
     mu = 1.0 + float(rover_cfg["mu_coeff"]) * math.sin(math.radians(theta))
     traction_w = float(rover_cfg["p_base_w"]) * mu
-    total_w = traction_w + housekeeping_power_w(shadow_ratio, rover_cfg)
+    total_w = traction_w + housekeeping_power_w(shadow_ratio, rover_cfg, heater_w)
     return total_w * seconds / 3600.0
 
 
@@ -208,6 +238,7 @@ def net_energy_per_metre_wh(
     rover: Mapping[str, Any] | None = None,
     slip: float | None = None,
     solar_gain: float = 1.0,
+    heater_w: float | None = None,
 ) -> float:
     """Energy the BATTERY loses to advance one metre.
 
@@ -250,7 +281,7 @@ def net_energy_per_metre_wh(
     ratio = min(1.0, max(0.0, float(shadow_ratio)))
     solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * float(solar_gain)
     net_w = max(
-        0.0, traction_w + housekeeping_power_w(ratio, rover_cfg) - solar_w
+        0.0, traction_w + housekeeping_power_w(ratio, rover_cfg, heater_w) - solar_w
     )
     return net_w * seconds / 3600.0
 
@@ -261,6 +292,7 @@ def move_battery_drain_wh(
     shadow_ratio: float = 0.0,
     rover: Mapping[str, Any] | None = None,
     solar_gain: float = 1.0,
+    heater_w: float | None = None,
 ) -> float:
     """Signed change the BATTERY sees for one drive: draw minus solar income.
 
@@ -276,7 +308,9 @@ def move_battery_drain_wh(
     if not math.isfinite(seconds):
         return float("inf")
     hours = seconds / 3600.0
-    drawn = gross_energy_per_metre_wh(theta_deg, shadow_ratio, rover_cfg) * float(distance_m)
+    drawn = gross_energy_per_metre_wh(
+        theta_deg, shadow_ratio, rover_cfg, heater_w
+    ) * float(distance_m)
     ratio = min(1.0, max(0.0, float(shadow_ratio)))
     solar_wh = (
         float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * float(solar_gain) * hours
@@ -289,6 +323,7 @@ def wait_battery_drain_wh(
     hours: float,
     rover: Mapping[str, Any] | None = None,
     solar_gain: float = 1.0,
+    heater_w: float | None = None,
 ) -> float:
     """Signed battery change for holding position: housekeeping minus solar.
 
@@ -301,7 +336,7 @@ def wait_battery_drain_wh(
     rover_cfg = _resolve_rover(rover)
     ratio = min(1.0, max(0.0, float(shadow_ratio)))
     solar_w = float(rover_cfg.get("p_solar_w") or 0.0) * (1.0 - ratio) * float(solar_gain)
-    net_w = housekeeping_power_w(ratio, rover_cfg) - solar_w
+    net_w = housekeeping_power_w(ratio, rover_cfg, heater_w) - solar_w
     return net_w * max(0.0, float(hours))
 
 
