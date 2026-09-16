@@ -514,7 +514,7 @@ Yürütme politikası (insan operatörü temsil eder): geride kalınca şarj mol
 
 ---
 
-## D4. ⭐⭐⭐ Kontrastif açıklama: "neden bu rota, neden şu değil?"
+## D4. ✅ ⭐⭐⭐ Kontrastif açıklama: "neden bu rota, neden şu değil?"
 
 **Ne:** Kullanıcının çizdiği/önerdiği alternatif rotanın neden seçilmediğini, ihlal edilen kısıtlar ve maliyet farklarıyla açıklamak; ayrıca "rotanın değişmesi için hangi ağırlığın ne kadar değişmesi gerekir" (karşı-olgusal) sorusunu yanıtlamak.
 
@@ -525,6 +525,84 @@ Yürütme politikası (insan operatörü temsil eder): geride kalınca şarj mol
 **Somut katkı:** `/api/explain-contrast`: girdi = alternatif rota (nokta listesi) → çıktı = (a) ihlal edilen sert kısıtlar (hücre, hangi kural, ne kadar), (b) kriter bazında maliyet farkı, (c) **minimum ağırlık değişimi** (ikili arama ile: w_thermal'ı hangi değere çekince alternatif kazanır). Challenge Modül 6 "route rejection/explanation" çıktısı birebir.
 
 **Efor:** 1–2 gün.
+
+> **Yapıldı (16 Eylül 2026, `tuna/backendEnhance`):** Yeni `backend/app/contrastive.py` +
+> yeni `POST /api/explain-contrast` (yalnızca ekleme; `pathfinder.py` **tek satır** değişmedi).
+> Çekirdek bulgu şu: A\*'ın minimize ettiği g-skoru, sabit bir rota için ağırlık vektöründe
+> **tam olarak afin** — `cost(R,w) = D(R) + Σ_k w_k·I_k(R) + B(R)`, burada `I_k` kriterin
+> **yamuk çizgi integrali** ve bariyer ağırlıktan bağımsız. Bu yüzden "hangi ağırlık alternatifi
+> öne geçirir" sorusu **kapalı form**, arama değil (belgenin önerdiği **ikili arama
+> kullanılmadı** — gerekçesi aşağıda). Kimlik koşullu ve koşul varsayılmıyor: `MIN_CELL_COST`
+> kelepçesi her rotada, **her değerlendirilen ağırlıkta** ölçülüyor (`PlanWeights` beş ağırlığın
+> da 0 olmasına izin veriyor ve orada hücrelerin %100'ü kelepçeleniyor).
+>
+> **Belgenin "ikili arama ile" öncülü tutmadı.** "Alternatif kazanır" iki ayrı önerme:
+> alternatif *gösterdiğimiz* rotadan ucuz olur (`vs_fact`, kapalı form, **0** yeniden planlama)
+> ve planlayıcı alternatifi **döndürür** (`vs_replanned`). İkincisinde
+> `Δ(w) = cost_alt(w) − min_R cost_R(w)` afin eksi afinlerin noktasal minimumu, yani
+> **konveks**; sıfır kümesi bir **aralık**, yarı-doğru değil — dolayısıyla yüklem **monoton
+> değil** ve ikili aramanın yakınsayacağı bir eşik yok. Konvekslik **ölçüldü** (41 nokta,
+> 39 ikinci fark, en küçüğü **−6,8e-13**). `Δ_(ii) ≥ Δ_(i)` her noktada, bu yüzden (i) kutuda
+> bir şey bulamıyorsa (ii) de bulamaz — **kanıtla, taramayla değil**.
+>
+> **"Minimum ağırlık değişimi" adı da hak edilmiyordu ve düzeltildi.** Üretilen şey
+> `per_criterion_flip_threshold`: ters problemin **tek boyutlu kesiti**, bir ağırlık oynar,
+> diğer dördü durur — bir **norm minimize etmiyor**. Gerçek ℓ₂-minimal ortak hamle
+> (`l2_minimal_joint_move`) yanında, kapalı formda yayımlanıyor. Ağırlık **yeniden
+> normalleştirilmiyor**: C4 `w_roughness`'ı toplama ekledi, ve dört profilin de ilk dördü
+> tam 1,000000, toplam 1,150 (`get_rover` ile ölçüldü).
+>
+> **Sonuç sözlüğü dört değil on etiket.** Belgenin dördü (`hard_gate`,
+> `dominated_on_every_criterion`, `outside_weight_bounds`, `found…`) burada; diğer altısı
+> ölçümün erişilebilir gösterdiği ve dörde yıkılsa **uydurma olumsuz** üretecek hâller
+> (`found_returned_by_planner`, `unresolved_by_scan`, `criterion_has_no_leverage`,
+> `no_incumbent_route`, `clamp_binds`, `foil_is_the_fact`). `found` bilerek bölündü: bir konsolda
+> "found: 0,42" okuyan operatör ağırlığı ayarlar ve **üçüncü** bir rota alır.
+>
+> **Ölçüm (Site11, `scripts/contrastive_explanation_report.py` →
+> [contrastive_explanation_report.md](contrastive_explanation_report.md)):** 3 standart çift ×
+> 3 alternatif türü = 9 vaka. `hard_gate` **3** (üç çiftte de kullanıcının çizeceği **düz
+> çizgi**; 53/40/14 geçilemez hücre), `dominated_on_every_criterion` **2**,
+> `found_vs_fact_only` **4**. `found_returned_by_planner` **hiç çıkmadı**: 41 noktalık tam
+> eksen taraması planlayıcıyı alternatifi döndürmeye **hiçbir** ağırlıkta ikna etmedi.
+> Yineleme maliyeti **0,2206 s** (0,1049 grid + 0,1157 A\*).
+>
+> **Manşet — karşı-olgusal modelin kendi gürültüsünün içinde olabiliyor.** Tek bir "model
+> çözünürlüğü" yok: dört taban ölçüldü ve **dokuz mertebe** ayrışıyorlar (aritmetik ~1e-10;
+> yayın 1e-4 — bu modül kendi float64 integrallerini farkladığı için **emekli**;
+> bariyer tablosunun 1024 kovası 3,3e-4–4,2e-2; NASA'nın 20 DEM klonu **σ = 4,80–17,85**
+> ağırlıklı metre). Bantlı 4 vakanın **2 tanesinde** fark arazi topluluğunun altında kaldı ve
+> cevap `closer_than_the_model_resolves(level=terrain_ensemble)` oldu. *Ay gecesi / sapma*
+> çiftinde nominal DEM "planlayıcının rotası 3,68 ağırlıklı metre ucuz" derken klonların
+> **4 tanesinde işaret ters dönüyor**. Kapılar da tek bir rasterin özelliği: gündüz çiftinde
+> planlayıcının **kendi** rotası 20 klonun **6'sında** takılıyor, VIPER kısa leg'de (15° limit)
+> **her iki rota da 20/20'sinde**.
+>
+> **`risk_alpha` bant olarak kullanılmadı ve gerekçesi yazıldı:** o bir belirsizlik değil,
+> operatörün **risk iştahı** (`risk.py` kendi söylüyor), en küçük üyesi bile μ+0,798σ olduğu
+> için nominali ortalamaz, ve yalnız `f_slope`/`f_energy`'ye ulaşır — mesafe, bariyer ve
+> gölge/termal/pürüzlülük hiç etkilenmez. **D5'in "94×" cümlesi de tekrarlanmadı:** o
+> karşılaştırma saatteki bir **ortak-mod seviye kaymasıyla** bir cephe genişliğini yan yana
+> koyuyordu, ve D4'ün farkı ağırlıklı metrede — ikisi arasında dönüşüm yok.
+>
+> **Bu maddedeki yöntem atfı birinci elden okununca düzeltildi.** Krarup vd. kontrastif
+> **çerçeveyi** veriyor, ama `vs_replanned` onların **model kısıtlaması** tanımına (2103.15575,
+> Tanım 4: kısıtlı modelin planları orijinalinkilerin alt kümesi olmalı) **girmiyor** —
+> yeniden ağırlıklandırma plan kümesine dokunmaz, yalnız yeniden fiyatlar; bu bir model
+> **revizyonu**. Krarup'a karşılık gelen aslında **(i)** rejimi (φ = "plan tam olarak
+> alternatif" total kısıtlaması). Ağırlık karşı-olgusalı dört XAIP kaynağının **hiçbirinde
+> yok**: evi **ters optimizasyon** — inverse shortest paths (Burton & Toint 1992) ve
+> Heuberger'in taraması. Kriter bazında ayrıştırmanın (b) en yakın öncülü ise Sukkerd,
+> Simmons & Garlan 2020 (arXiv:2004.12960), belgede hiç anılmıyordu. Hepsi
+> `contrastive.CONTRASTIVE_QUOTED`'da, bizim sayılarımızla aynı tabloda değil.
+>
+> **Bit-eşitlik:** LPR-1 v5 maliyet-gridi SHA-256 özeti
+> `55e1bb3cd3b9fb93403140b283cfa38fef8b93836a28512bc95f38db5ed893db` kıpırdamadı,
+> `COST_MODEL_ID` `…_v5`'te, `pathfinder.py` değişmedi. 81 yeni test bunu kilitliyor.
+>
+> **2-B yalnız.** `pathfinder` `weighted_metres`, `pathfinder_4d` `weighted_hours` yayımlıyor;
+> iki toplam karşılaştırılamaz, kod bunu guard'lıyor. 4-B kontrastı kapsam dışı, gerekçesi
+> [tasarım belgesinde](../superpowers/specs/2026-09-16-d4-kontrastif-aciklama-design.md).
 
 ---
 

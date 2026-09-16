@@ -93,6 +93,12 @@ from .thermal_dwell import (
 from .ai_chat import run_chat
 from .ai_contract import ChatRequest, ChatResponse
 from .ai_provider import AiProviderError, resolve_provider
+from .contrastive import (
+    CONTRAST_OUTCOMES,
+    ContrastInputError,
+    explain_contrast,
+    validate_foil,
+)
 from .pareto import (
     OBJECTIVE_KEYS,
     sweep as pareto_sweep,
@@ -327,6 +333,27 @@ MAX_PARETO_SAMPLES = 40
 #: n_samples give the same front, which is what makes a front assertable
 #: in a test at all.
 DEFAULT_PARETO_SEED = 20260916
+
+#: D4: the longest foil /api/explain-contrast will price. Two things are
+#: bounded by it -- the response (a foil threaded through impassable ground
+#: produces one violation entry per edge) and the work, since every scan point
+#: re-integrates the foil. A simple 8-connected route on the 500x500
+#: production grid is a few hundred cells; 10 000 is two orders of magnitude of
+#: headroom and still refuses a caller who posts the whole grid.
+MAX_CONTRAST_ROUTE_CELLS = 10_000
+
+#: How many gate violations one response will list. The tally in ``by_rule`` is
+#: always complete; this caps only the per-edge detail, and the response says
+#: when it truncated.
+MAX_CONTRAST_VIOLATIONS = 50
+
+#: D4: the most points the vs_replanned scan will visit PER CRITERION, and the
+#: most re-plans the whole request will spend. Each point is a full cost-grid
+#: rebuild plus an A* run -- measured 0.29 s on the Site11 daytime pair -- and
+#: there are up to five criteria, so the budget is a request-wide ceiling
+#: rather than a per-criterion one: 30 re-plans is ~8.7 s worst case.
+MAX_CONTRAST_SCAN_POINTS = 12
+MAX_CONTRAST_REPLANS = 30
 
 MAX_LAYER_CELLS = 65536
 
@@ -4632,6 +4659,171 @@ def pareto(req: ParetoRequest, request: Request):
             "completeness note explains what that costs. w_roughness is held at the "
             "rover's own value because C4 made it additive rather than part of the "
             "simplex. For the risk-appetite sweep see /api/risk-sweep."
+        ),
+    }
+
+
+class ExplainContrastRequest(BaseModel):
+    """Why the planner's route, and why not the one you drew (D4).
+
+    ``foil`` is the route being asked about, as ``[[row, col], ...]``; the
+    other fields are what the planner needs to produce the route it is being
+    contrasted AGAINST, and they must be the ones that produced the route the
+    caller is looking at -- including ``risk_alpha``, because that reaches the
+    cost grid and a caller who planned at 0.9 and contrasts at nominal is
+    being answered about a route they were never shown.
+
+    ``extra="forbid"`` matters more here than anywhere else in this API: a
+    typo'd weight key would otherwise be dropped silently and the whole
+    response would answer a question about a DIFFERENT weight vector than the
+    one asked, with nothing in the body to reveal it.
+
+    2-D only. ``pathfinder`` publishes ``cost_units: weighted_metres`` and
+    ``pathfinder_4d`` publishes ``weighted_hours``; the two totals are not
+    comparable, so there is no honest way to contrast a 2-D route against a
+    4-D one. Same limit /api/risk-sweep and /api/pareto already carry.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: Union[StartGoalPixel, StartGoalGeo]
+    goal: Union[StartGoalPixel, StartGoalGeo]
+    foil: conlist(PixelPair, min_length=2, max_length=MAX_CONTRAST_ROUTE_CELLS) = Field(
+        ...,
+        description=(
+            "The route to explain the rejection of, as [[row, col], ...]. Must share "
+            "the planner's resolved start and goal, step between 8-neighbours, stay "
+            "inside the grid and never repeat a cell."
+        ),
+    )
+    rover_id: str = DEFAULT_ROVER_ID
+    weights: PlanWeights = Field(default_factory=PlanWeights)
+    risk_alpha: Optional[float] = _RISK_ALPHA_FIELD
+    scan_points: int = Field(
+        default=6,
+        ge=2,
+        le=MAX_CONTRAST_SCAN_POINTS,
+        description=(
+            "Points per criterion in the vs_replanned scan. Each one is a full cost-grid "
+            "rebuild plus an A* run (measured 0.29 s on the Site11 daytime pair), and "
+            "max_replans caps the request-wide total."
+        ),
+    )
+    max_replans: int = Field(
+        default=MAX_CONTRAST_REPLANS,
+        ge=0,
+        le=MAX_CONTRAST_REPLANS,
+        description=(
+            "Request-wide ceiling on re-plans. 0 skips the vs_replanned scan entirely "
+            "and leaves the exact, zero-re-plan vs_fact answer."
+        ),
+    )
+    terrain_band: bool = Field(
+        default=True,
+        description=(
+            "Re-price both routes on each of NASA's DEM error realisations to measure "
+            "how much of the cost gap the topography's own uncertainty accounts for. "
+            "Measured ~1.4 s for 20 clones. Off leaves the terrain resolution floor "
+            "unmeasured and the response says so rather than assuming it is small."
+        ),
+    )
+    max_clones: int = Field(
+        default=20, ge=2, le=50, description="Clones to use when terrain_band is on."
+    )
+
+
+@app.post("/api/explain-contrast")
+def explain_contrast_endpoint(req: ExplainContrastRequest, request: Request):
+    """Why this route, and why not that one (D4).
+
+    Three answers, and each can be absent for a reason the response NAMES
+    rather than collapsing into a single "not found":
+
+    * ``foil.gate_violations`` -- which of the planner's own per-edge rules
+      the proposed route trips, in the order ``_astar_core`` applies them,
+      with the cell, the rule, the grid value and the exceedance. These are
+      gates fired against a loaded 5 m/px raster, not measurements of the
+      surface, and the block says so.
+    * ``criterion_gap`` -- where the cost difference goes, criterion by
+      criterion, plus the two terms no weight can touch (distance and the
+      barrier). The parts sum to the difference in ``total_weighted_cost``
+      exactly.
+    * ``counterfactual`` -- what one weight would have to become. Published in
+      TWO regimes because they answer different questions: ``vs_fact`` (the
+      foil undercuts the route shown -- closed form, exact, zero re-plans) and
+      ``vs_replanned`` (the planner actually RETURNS the foil -- scanned, and
+      the only one an operator could act on).
+
+    Read ``resolution`` before acting on any threshold. The gap is measured
+    against four floors -- arithmetic, publication, the barrier table's
+    discretisation and NASA's own DEM ensemble -- and a threshold whose gap
+    does not clear the terrain floor is printed but flagged non-actionable.
+
+    Unlike /api/plan, a pair the planner cannot route is answered 200 with
+    ``outcome: no_incumbent_route`` rather than 404: /api/plan 404s because it
+    has nothing to return, while this endpoint still has the whole foil
+    analysis -- and on a complete search "no route at all" is itself most of
+    the explanation for why this one was not chosen.
+    """
+    grids = _active_grids(request)
+    rover = get_rover(req.rover_id)
+    weights = req.weights.model_dump()
+
+    nominal_grids = grids_for_rover(grids, req.rover_id, weights, risk_alpha=req.risk_alpha)
+    metadata = nominal_grids["metadata"]
+    start = _to_pixel(req.start, "start", metadata)
+    goal = _to_pixel(req.goal, "goal", metadata)
+    # The same 422s /api/plan raises for a bad pair, from the same helper, so
+    # a non-traversable start is refused identically wherever it is sent.
+    _validate_start_goal(nominal_grids, start, goal, rover)
+    if tuple(start) == tuple(goal):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"start and goal both resolve to {tuple(start)}; a contrast needs two "
+                "different points, because the planner returns a zero-length route for "
+                "an identical pair and there is nothing to compare against."
+            ),
+        )
+
+    try:
+        foil = validate_foil(
+            [list(cell) for cell in req.foil],
+            start,
+            goal,
+            metadata["shape"],
+            MAX_CONTRAST_ROUTE_CELLS,
+        )
+    except ContrastInputError as exc:
+        raise HTTPException(
+            status_code=422, detail={"reason": exc.reason, "message": exc.message, **exc.detail}
+        ) from exc
+
+    result = explain_contrast(
+        grids,
+        start,
+        goal,
+        req.rover_id,
+        rover,
+        foil,
+        weights=weights,
+        risk_alpha=req.risk_alpha,
+        scan_points=req.scan_points,
+        max_replans=req.max_replans,
+        max_reported_violations=MAX_CONTRAST_VIOLATIONS,
+        clone_band=req.terrain_band,
+        max_clones=req.max_clones,
+    )
+    return {
+        **result,
+        "outcome_vocabulary": list(CONTRAST_OUTCOMES),
+        "note": (
+            "The weights here are the cost model's per-cell criterion weights, the same "
+            "ones /api/pareto sweeps -- not weights on hours, energy or any reported "
+            "objective. A vs_fact threshold is a comparison against the route shown, "
+            "NOT a setting that makes the planner return the foil; only a vs_replanned "
+            "hit says that, and the scan that looks for one publishes the step it used "
+            "and the interval width it could have resolved."
         ),
     }
 

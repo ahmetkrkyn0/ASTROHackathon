@@ -2108,6 +2108,134 @@ ilerleme göstermeli ya da küçük `n_samples` ile başlamalıdır. 4-B tarama 
 6-17 s).
 
 
+## D4 eki — `POST /api/explain-contrast`: "neden bu rota, neden şu değil?" (16 Eylül 2026)
+
+**Var olan hiçbir alan eklenmedi, kaldırılmadı, anlamı değiştirilmedi.** D4 yalnızca **yeni bir
+uç** ekler. `/api/plan`, `/api/plan-4d`, `/api/compare`, `/api/risk-sweep`, `/api/pareto` ve
+maliyet gridi aynen — LPR-1'in checked-in SHA-256 özeti kıpırdamadı, `COST_MODEL_ID` `…_v5`'te,
+`pathfinder.py` tek satır değişmedi.
+
+### İstek
+
+```jsonc
+{
+  "start": {"row": 358, "col": 494},     // veya {"lon":…, "lat":…}
+  "goal":  {"row": 206, "col": 426},
+  "foil":  [[358,494], [357,493], /* … */ [206,426]],  // açıklanacak rota
+  "rover_id": "lpr_1",
+  "weights": {"w_slope": 0.409, "w_energy": 0.259, "w_shadow": 0.142,
+              "w_thermal": 0.19, "w_roughness": 0.15},
+  "risk_alpha": null,        // /api/plan'daki ile AYNI alan; olguyu bununla planlar
+  "scan_points": 6,          // vs_replanned taramasında kriter başına nokta (2-12)
+  "max_replans": 30,         // istek başına yeniden planlama tavanı; 0 = taramayı kapat
+  "terrain_band": true,      // NASA DEM klonlarıyla arazi bandı (~1,4 s)
+  "max_clones": 20
+}
+```
+
+**`foil` sözleşmesi.** Planlayıcının **çözümlenen** start ve goal'unu paylaşmak zorunda
+(paylaşmıyorsa maliyet karşılaştırması iki rotayı değil iki yolculuğu kıyaslar), ardışık
+hücreler 8-komşu olmalı, grid içinde olmalı, hiçbir hücre tekrar etmemeli, uzunluk 2–10 000.
+**`extra: "forbid"`** — yazım hatalı bir alan sessizce düşseydi bütün cevap sorulandan başka
+bir ağırlık vektörü hakkında olurdu.
+
+### Yanıt — üst düzey
+
+| alan | tip | anlam |
+|---|---|---|
+| `outcome` | string | aşağıdaki **on** etiketten biri |
+| `outcome_vocabulary` | string[] | etiketlerin tamamı (istemci `switch`'i için) |
+| `cost_units` | `"weighted_metres"` | 2-B planlayıcının sıralama skaleri; **saat değil** |
+| `criteria` | string[] | bu kurulumun gerçekten fiyatladığı kriterler (4 veya 5) |
+| `weights` | object | **kullanılan** beş ağırlık, çözümlenmiş hâliyle |
+| `fact` | object | planlayıcının rotası: `route_id`, `path_pixels`, `total_weighted_cost`, `gate_violations` |
+| `foil` | object | sorulan rota: `route_id`, `n_cells`, `gate_violations`, `is_the_fact` |
+| `clamp` | object | afin kimliğin ön koşulu: pay, kelepçelenen hücre sayısı, `binds` |
+| `criterion_gap` | object\|null | (b) — kriter bazında fark |
+| `dominance` | object | kriter uzayında baskınlık + **kanıt** metni |
+| `counterfactual` | object\|null | (c) — kriter başına eşik, iki rejim, ℓ₂ ortak hamle |
+| `terrain_band` | object\|null | NASA DEM klonlarıyla ölçülen arazi bandı |
+| `resolution` | object | farkın **dört** çözünürlük tabanına göre yeri |
+| `objective_gap` | object\|null | D5'in rota düzeyi hedefleri (saat/Wh/gölge) — **dönüşüm değil** |
+| `objective_dominance` | object | D5'in `dominates` kuralı, hedef uzayında |
+| `suppressed_because` | string | bir blok neden `null` (sert kapı, olgu yok, kelepçe) |
+| `validity` / `claim` / `references` | | `"MODEL"` + iddia sınırı + birinci-el kaynaklar |
+
+### `outcome` sözlüğü
+
+| etiket | ne demek | istemci ne yapmalı |
+|---|---|---|
+| `hard_gate` | alternatif sert kapı çiğniyor | kapı listesini göster; **ağırlık önerme** |
+| `dominated_on_every_criterion` | hiçbir ağırlık vektörü kazandıramaz (kanıtlı) | `dominance.proof`'u göster |
+| `outside_weight_bounds` | eşik var ama [0, 2] dışında | eşiği göster, **ayar önerme** |
+| `found_vs_fact_only` | eşik kutu içinde, **ama yalnız** gösterilen rotaya karşı | "şu ağırlıkta seninki **gösterdiğimizden** ucuz olurdu" |
+| `found_returned_by_planner` | tarama planlayıcıyı alternatifi döndürürken gördü | **tek** ayar önerilebilir hâl |
+| `unresolved_by_scan` | tarama gördü diyemedi — **olumsuz sonuç değil** | adımı ve çözülebilir en dar aralığı göster |
+| `criterion_has_no_leverage` | ΔI_k ≈ 0; eşik yok | "bu kriter bu kararı değiştiremez" |
+| `no_incumbent_route` | planlayıcı bu çifti rotalayamıyor | 404 **değil** 200; alternatifin kapıları yine de var |
+| `clamp_binds` | `MIN_CELL_COST` bağlıyor; afin kimlik geçersiz | sayı gösterme |
+| `foil_is_the_fact` | alternatif zaten seçtiğimiz rota | "bu bizim rotamız" |
+
+### `criterion_gap` (b)
+
+```jsonc
+{
+  "criteria": [{"criterion": "thermal", "weight_key": "w_thermal", "weight": 0.19,
+                "fact_integral": 885.5678, "foil_integral": 812.4356,
+                "delta_integral": -73.1322, "delta_weighted": -13.8951,
+                "foil_is_cheaper": true, "units": "weighted_metres …"}],
+  "delta_distance": 0.0,        // ağırlıktan bağımsız
+  "delta_barrier": 14.0646,     // ağırlıktan bağımsız — hiçbir ağırlık dokunamaz
+  "delta_total": 90.6173,
+  "basis": "total_weighted_cost"   // bariyer DAHİL; cells_only DEĞİL
+}
+```
+
+`delta_distance + delta_barrier + Σ w_k·delta_integral_k = delta_total` **tam**, artık yok.
+
+### `counterfactual` (c)
+
+`per_criterion[]` her kriter için: `outcome`, `threshold`, `direction`
+(`"increase"`/`"decrease"`), `predicate` (ör. `"w_thermal >= 1.429089"`), `delta_integral`,
+`winning_interval`, ve iç içe bir `vs_replanned` bloğu (`scanned_interval`, `scan_step`,
+`points[]`, `smallest_resolvable_interval`).
+
+**Eşik bir AYAR DEĞİL.** `found_vs_fact_only` yalnızca "o ağırlıkta alternatif, gösterdiğimiz
+rotadan ucuz olurdu" demek; planlayıcı o ağırlıkta her rotayı yeniden sıralar ve genellikle
+**üçüncü** bir rota döndürür. Yalnızca `found_returned_by_planner` bir ayar cümlesi kurar.
+
+`l2_minimal_joint_move` yanında: tek-eksenli eşikler bir **norm minimize etmiyor**; gerçek
+ℓ₂-minimal ortak hamle bu alanda, kapalı formda.
+
+### `resolution` — hangi tabanda "çözülmüş"
+
+`levels[]` dört taban taşır (`arithmetic`, `publication`, `model_discretisation`,
+`terrain_ensemble`), her biri `floor` / `ratio` / `resolved` ile. `headline` ya
+`"resolved_at_every_level"` ya da `"closer_than_the_model_resolves(level=…)"`.
+
+**`actionable: false` ise istemci eşiği bir öneri olarak sunmamalı.** Ölçüldü: bazı gerçek
+vakalarda maliyet farkı, NASA'nın kendi DEM hata gerçeklemelerinin standart sapmasının altında
+kalıyor ve bir vakada klonların 20'sinden 4'ünde **hangi rotanın ucuz olduğu bile ters
+dönüyor**.
+
+### `gate_violations` (a)
+
+`violations[]` her ihlal için `edge_index`, `from_cell`, `to_cell`, `rule`, `source`,
+`grid_value`, `limit`, `exceedance`, `exceedance_pct`, `units`. `by_rule` tamamını sayar;
+`violations` kırpılabilir (`violations_truncated`).
+
+**Alan adı `grid_value`, `measured_value` değil.** Bunlar planlayıcının kendi kurallarının
+5 m/px'lik bir raster ve adı konmuş bir operatör (`abs(dz)/dist`, `np.gradient`) üzerindeki
+hükmü; zeminin ölçümü değil. `claim` alanı bunu yanıtın içinde taşır.
+
+### Sınırlar
+
+- **2-B yalnız.** `pathfinder` `weighted_metres`, `pathfinder_4d` `weighted_hours` yayımlıyor;
+  iki toplam karşılaştırılamaz. (`/api/risk-sweep` ve `/api/pareto` aynı sınırda.)
+- Sonsuz değerler yanıta **hiç** girmez: temsil edilemeyen her sayı `null`
+  (`main._read_grid_value` / `CostMap.explain` konvansiyonu).
+- Tarama bütçesi istek başına: `max_replans` ≤ 30 (~6,5 s en kötü hâl).
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,
