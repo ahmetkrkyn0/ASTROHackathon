@@ -93,6 +93,10 @@ from .thermal_dwell import (
 from .ai_chat import run_chat
 from .ai_contract import ChatRequest, ChatResponse
 from .ai_provider import AiProviderError, resolve_provider
+from .pareto import (
+    OBJECTIVE_KEYS,
+    sweep as pareto_sweep,
+)
 from .pathfinder import astar
 from .profile_comparison import compare_all_profiles, solve_named_profiles
 from .localization import evaluate_pose
@@ -311,6 +315,19 @@ MAX_PLAN_4D_CUBE_BYTES = 512 * 1024 * 1024  # 512 MiB across both cubes
 # nobody asked to be protected from. 65 536 cells is a 256x256 preview --
 # plenty for a map overlay -- and the error names the downsample that fits.
 # (Round 3 review, L-13.)
+#: D5: the most weight vectors /api/pareto will plan in one request, on top
+#: of the rover's own defaults. The sweep is synchronous and uncached --
+#: grids_for_rover recomputes the whole cost grid per vector -- and the
+#: measured worst case is the Site11 lunar-night pair at ~1.4 s per sample,
+#: so 40 is about 55 s in one request. The module API (app.pareto.sweep)
+#: takes any n; only the HTTP surface is capped.
+MAX_PARETO_SAMPLES = 40
+
+#: Fixed so a sweep is reproducible by default: the same pair, seed and
+#: n_samples give the same front, which is what makes a front assertable
+#: in a test at all.
+DEFAULT_PARETO_SEED = 20260916
+
 MAX_LAYER_CELLS = 65536
 
 # A slice series is (T, H, W) float32 on the wire. At 24 slices the full
@@ -907,6 +924,75 @@ class RiskSweepRequest(BaseModel):
                     f"every alpha must lie in [{RISK_ALPHA_MIN}, {RISK_ALPHA_MAX}], got {value}"
                 )
         return values
+
+
+class ParetoRequest(BaseModel):
+    """Sweep the weight simplex and return the routes nothing else beats (D5).
+
+    Plans the same pair once per weight vector -- the rover's own defaults
+    plus ``n_samples`` drawn uniformly from the four-criterion simplex --
+    de-duplicates by cell sequence and filters for non-dominance on
+    (hours, energy, shadow exposure, thermal risk).
+
+    This is NOT the Pareto front of the problem. Weighted-sum
+    scalarisation reaches only supported solutions, and these weights
+    scalarise the per-cell COST CRITERIA rather than those objectives, so
+    no completeness guarantee applies; the response says so in
+    ``completeness`` and ``claim``. 2-D only -- a 4-D sample costs 6-17 s,
+    so a sweep of them would not fit in a request (the same limit B2 put
+    on /api/risk-sweep).
+    """
+
+    start: Union[StartGoalPixel, StartGoalGeo]
+    goal: Union[StartGoalPixel, StartGoalGeo]
+    rover_id: str = DEFAULT_ROVER_ID
+    n_samples: int = Field(
+        default=24,
+        ge=1,
+        le=MAX_PARETO_SAMPLES,
+        description=(
+            "Weight vectors to draw from the simplex, on top of the rover's own "
+            "defaults. Capped because the sweep is synchronous: measured worst case "
+            "on the Site11 lunar-night pair is ~1.4 s per sample. For a heavier sweep "
+            "call app.pareto.sweep directly -- the module takes any n, this does not."
+        ),
+    )
+    seed: int = Field(
+        default=DEFAULT_PARETO_SEED,
+        ge=0,
+        le=2**31 - 1,
+        description="Sampler seed; the same seed and n_samples reproduce the sweep exactly.",
+    )
+    include_corners: bool = Field(
+        default=False,
+        description=(
+            "Also plan the 4 simplex vertices and 6 edge midpoints. Measured: a vertex "
+            "(w_slope = 1) lands on the front for the Site11 daytime pair, so an "
+            "interior-only draw misses it. Adds 10 plans."
+        ),
+    )
+    epsilon: Optional[dict[str, float]] = Field(
+        default=None,
+        description=(
+            "Per-objective tie tolerance. Defaults to each field's own publication "
+            "quantum (1e-4 h, 1e-2 Wh, 1e-4, 1e-4); a finer epsilon is meaningless "
+            "because the objectives arrive already rounded to those quanta."
+        ),
+    )
+
+    @field_validator("epsilon")
+    @classmethod
+    def _check_epsilon(cls, value):
+        if value is None:
+            return value
+        for key, entry in value.items():
+            if key not in OBJECTIVE_KEYS:
+                raise ValueError(
+                    f"unknown objective {key!r}; expected one of {list(OBJECTIVE_KEYS)}"
+                )
+            if not math.isfinite(float(entry)) or float(entry) < 0.0:
+                raise ValueError(f"epsilon for {key!r} must be finite and >= 0, got {entry}")
+        return value
 
 
 # A bare list[int] let a 3-element start reach astar and raise IndexError as
@@ -4492,6 +4578,62 @@ def _validate_pixel_endpoints(grids: dict, start, goal) -> None:
                 status_code=422,
                 detail=f"{label} {tuple(point)} is outside the {rows}x{cols} grid.",
             )
+
+
+@app.post("/api/pareto")
+def pareto(req: ParetoRequest, request: Request):
+    """The weight-simplex sweep and what survives it (D5).
+
+    The planner has always answered for ONE weight vector, and which vector
+    is right was never settled. This plans the pair under many of them and
+    reports which routes no other route beats -- plus, in ``diagnostics``,
+    why the surviving set came out the size it did.
+
+    Read ``counts`` before ``non_dominated``: the five n's here (weight
+    vectors tried, planned, usable, DISTINCT routes, non-dominated) are
+    easy to quote as one another, and every statistic in the response runs
+    over distinct routes because different weight vectors routinely land on
+    the identical cell sequence.
+
+    Not a Pareto front, and ``completeness`` says so: weighted-sum
+    scalarisation reaches only supported solutions, and these weights
+    scalarise the cost CRITERIA rather than the objectives, so nothing here
+    bounds what was missed.
+    """
+    grids = _active_grids(request)
+    rover = get_rover(req.rover_id)
+
+    nominal_grids = grids_for_rover(grids, req.rover_id)
+    metadata = nominal_grids["metadata"]
+    start = _to_pixel(req.start, "start", metadata)
+    goal = _to_pixel(req.goal, "goal", metadata)
+    _validate_start_goal(nominal_grids, start, goal, rover)
+
+    result = pareto_sweep(
+        grids,
+        start,
+        goal,
+        req.rover_id,
+        rover,
+        n_samples=req.n_samples,
+        seed=req.seed,
+        include_corners=req.include_corners,
+        epsilon=req.epsilon,
+    )
+    return {
+        "start": [int(start[0]), int(start[1])],
+        "goal": [int(goal[0]), int(goal[1])],
+        "rover_id": req.rover_id,
+        "planner": "2d",
+        **result,
+        "note": (
+            "The swept weights are the cost model's per-cell criterion weights, not "
+            "weights on the reported objectives -- the two spaces are different and the "
+            "completeness note explains what that costs. w_roughness is held at the "
+            "rover's own value because C4 made it additive rather than part of the "
+            "simplex. For the risk-appetite sweep see /api/risk-sweep."
+        ),
+    }
 
 
 @app.post("/api/plan-multi")

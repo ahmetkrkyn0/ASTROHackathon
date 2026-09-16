@@ -400,6 +400,7 @@ kernels are hundreds of megabytes and are fetched or generated locally.
 | `POST` | `/api/compare` | Plan under all four profiles, side by side |
 | `POST` | `/api/replan` | Evaluate triggers, replan if one fires |
 | `POST` | `/api/risk-sweep` | Same route planned at several risk appetites |
+| `POST` | `/api/pareto` | Weight-simplex sweep: the routes nothing else beats, plus why the surviving set is so small. Measured on Site11 it collapses to 1-4 routes whose spread is ~94x narrower than the model's own uncertainty -- not a Pareto front, and the response says so (`completeness: no_guarantee`). |
 | `POST` | `/api/safety-check` | Run the formal safety monitor over a supplied telemetry trace |
 | `POST` | `/api/stress-test` | Monte Carlo the mission |
 

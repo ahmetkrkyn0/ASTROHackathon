@@ -1998,6 +1998,116 @@ mevsimsel haritalar; PRP v2 ~544 m Kaguya ağı) ve rozette öyle yazılmalıdı
 > termal sayıların yanında "MODEL / UNCALIBRATED" etiketi gösterilmeye devam etmelidir.
 
 
+## D5 eki — `POST /api/pareto`: ağırlık taraması ve baskın-olmayan rotalar (16 Eylül 2026)
+
+**Var olan hiçbir alan eklenmedi, kaldırılmadı, anlamı değiştirilmedi.** D5 yalnızca **yeni bir uç**
+ekler. `/api/plan`, `/api/plan-4d`, `/api/compare`, `/api/risk-sweep` ve maliyet gridi aynen —
+LPR-1'in checked-in SHA-256 özeti kıpırdamadı, `COST_MODEL_ID` `…_v5`'te.
+
+### İstek
+
+```jsonc
+POST /api/pareto
+{
+  "start": { "row": 358, "col": 494 },   // veya { "lon": …, "lat": … }
+  "goal":  { "row": 206, "col": 426 },
+  "rover_id": "lpr_1",
+  "n_samples": 24,          // 1–40; varsayılan 24
+  "seed": 20260916,         // aynı tohum + aynı n ⇒ aynı cephe
+  "include_corners": false, // simpleksin 4 köşesi + 6 kenar ortası (+10 plan)
+  "epsilon": null           // hedef başına tolerans; varsayılan alanın kendi kuantumu
+}
+```
+
+422'ler: `n_samples` aralık dışı, `seed` negatif, bilinmeyen hedef adı ya da negatif `epsilon`,
+bilinmeyen `rover_id`, grid dışı/geçilemez start-goal. Grid yüklü değilse 503.
+
+### Yanıtın okunma sırası: **önce `counts`, sonra `non_dominated`**
+
+Burada **beş ayrı n** var ve birbirinin yerine okunmaları en kolay hatadır:
+
+| alan | ne sayar |
+|---|---|
+| `counts.weight_vectors` | denenen ağırlık vektörü (nominal dâhil) |
+| `counts.planned` | rota üretebilen vektör |
+| `counts.stranded_excluded` | mahsur kaldığı için **dışlanan** rota |
+| `counts.distinct_routes` | **farklı hücre dizisi** — her istatistik bunun üzerinden |
+| `counts.non_dominated` | hayatta kalan rota |
+| `counts.weight_vectors_per_distinct_route` | "ağırlık tartışması ne kadar karar verdi" |
+
+Farklı ağırlık vektörleri **aynı rotayı** üretir; `distinct_routes[*].weight_vectors` kaç vektörün
+o rotaya düştüğünü söyler. Arayüz bir sayı gösterecekse **`distinct_routes`** ile
+**`weight_vectors`**'ı asla aynı etiketle göstermemelidir.
+
+### Hedefler — yönü sunucu söyler, arayüz varsaymaz
+
+`objectives[]` her bileşen için `key`, `source`, `unit`, `direction` (`minimize`/`maximize`) ve
+`note` taşır. **Yönü koda gömmeyin**, bu alandan okuyun.
+
+| `key` | kaynak | birim | yön |
+|---|---|---|---|
+| `hours` | `summary.total_elapsed_hours` | saat | `minimize` |
+| `energy_wh` | `summary.total_energy_consumed_wh` | Wh (brüt, güneş netlenmemiş) | `minimize` |
+| `shadow_exposure_h` | `summary.total_shadow_exposure` | saat (**gölge-oranı ağırlıklı**) | `minimize` |
+| `thermal_risk` | `astar_metrics.max_thermal_risk` | MRU [0,1] | `minimize` |
+
+`shadow_exposure_h` **"gölgede geçen saat" değildir**: `Σ shadow_ratio·Δt`. Etiketi "gölge
+maruziyeti" olmalı, "gölge saati" değil. `thermal_risk` bir **ceza**dır, marj değil — büyük = kötü.
+
+### Bunu "Pareto cephesi" diye etiketlemeyin
+
+Yanıt `pareto_front` anahtarı **taşımaz**; adı `non_dominated`. `completeness` alanı
+`"no_guarantee"` döner ve `completeness_note` nedenini yazar: ağırlıklı toplam yalnız *supported*
+çözümlere ulaşır, üstelik buradaki ağırlıklar **hedefleri değil hücre başı maliyet kriterlerini**
+skalerleştirdiği için o garanti bile geçerli değildir. Arayüz "baskın-olmayan rotalar (taranan
+ağırlıklar arasında)" demelidir.
+
+### Dejenerasyon teşhisi — asıl gösterilecek şey bu
+
+`diagnostics` bloğu cephenin neden o boyda olduğunu söyler:
+
+- `constant_objectives` — rota boyunca **tek değer** alan hedefler. Site11'de `thermal_risk`
+  neredeyse her zaman burada (`f_thermal` LPR-1'in geçilebilir hücrelerinin %72,7'sinde ≥ 0,99).
+- `effective_objectives` — sabitler düşüldükten sonra kalan hedef sayısı. **Arayüz "4 hedef"
+  yazmamalı**, bu sayıyı yazmalıdır (Site11'de genellikle **3**).
+- `objective_spread[*]` — hedef başına min/maks/genişlik, `span_pct_of_min` ve
+  `distinct_values_at_reporting_precision` (yayın kuantumunda kaç ayrı değer).
+- `objective_rank_correlation_spearman` — **Spearman**, **farklı rotalar** üzerinden, sabit
+  eksenler hariç. `correlation_n` her zaman `distinct_routes`.
+
+### Ölçülen: cephe kendi gürültüsünün içinde
+
+Site11 LPR-1 gündüz çiftinde, 211 ağırlık vektörü → 65 farklı rota → **4** baskın-olmayan:
+
+| | cephe genişliği | tüm rotaların genişliği |
+|---|---|---|
+| `hours` | **%0,179** | %22,226 |
+| `energy_wh` | **%0,221** | %36,734 |
+
+Aynı rotaya B2'nin CVaR slip kuyruğu α = 0,5'te **+%16,90** ekliyor (α = 0,99'da +%107,95).
+**Cephe, modelin en iyimser belirsizlik bandından ~94× dardır.**
+
+Arayüz için sonucu: **cepheyi bir "seç ve uygula" menüsü gibi sunmayın.** Ölçülen şey, bu arazide
+hayatta kalan rotalar arasında modelin ayırt edemeyeceği kadar küçük fark olduğudur. Dürüst sunum
+iki sayıyı birlikte gösterir: ağırlık seçiminin **tüm** aralığı (geniş) ve hayatta kalanların
+aralığı (çok dar).
+
+### `nominal` bloğu
+
+Rover'ın kendi ağırlıkları her zaman taranır ve `is_nominal` ile işaretlenir. `nominal.on_front`
+cephede olup olmadığını, `nominal.dominated_by[*].margins` ise **hangi hedefte ne kadar**
+kaybettiğini verir. Site11 gündüz çiftinde nominal baskılanıyor — ama kayıp **%0,14–%0,34**, yani
+yukarıdaki bandın iki mertebe altında. **Arayüz bunu "varsayılan ağırlıklar yanlış" diye
+göstermemelidir**; `note` alanı bu cümleyi taşıyor.
+
+### Süre
+
+Senkron ve önbelleksiz: ölçülen ~330 ms/örnek (gündüz, VIPER) ve **~1 370 ms/örnek** (Ay gecesi).
+`n_samples = 40` en kötü hâlde ~55 s. `total_ms` ve örnek başına `plan_ms` yanıtta; arayüz
+ilerleme göstermeli ya da küçük `n_samples` ile başlamalıdır. 4-B tarama **yok** (örnek başına
+6-17 s).
+
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,

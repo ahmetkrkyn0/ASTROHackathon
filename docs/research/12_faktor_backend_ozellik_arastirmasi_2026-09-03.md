@@ -528,7 +528,71 @@ Yürütme politikası (insan operatörü temsil eder): geride kalınca şarj mol
 
 ---
 
-## D5. ⭐⭐⭐ Pareto cephesi: ağırlık tartışması yerine baskın-olmayan rota ailesi
+## D5. ✅ ⭐⭐⭐ Pareto cephesi: ağırlık tartışması yerine baskın-olmayan rota ailesi
+
+> **Yapıldı (16 Eylül 2026, `tuna/backendEnhance`):** Yeni `backend/app/pareto.py` + yeni
+> `POST /api/pareto` (yalnızca ekleme). Ağırlık **4-simpleksinden** tekdüze çekilen vektörlerle
+> (normalize `standard_exponential` = Dirichlet(1,1,1,1), sabit tohum; numpy'ın `dirichlet`'iyle
+> **1 ULP** ayrılıyor, bilerek ona bağlanmadı) 2-B planlayıcı koşuluyor, rotalar **hücre dizisinin
+> SHA-256'sıyla** tekilleştiriliyor, mahsur rotalar **dışlanıyor** (totalleri yalnız yürüdükleri
+> öneki anlattığı için erken başarısız olarak cepheye girerlerdi) ve dört hedefte baskınlık
+> süzgecinden geçiriliyor. Hedefler yön alanlarıyla saklanıyor: `hours`
+> (`summary.total_elapsed_hours`), `energy_wh` (`…total_energy_consumed_wh`, brüt),
+> `shadow_exposure_h` (`…total_shadow_exposure` = Σ gölge_oranı·Δt — **gölge saati değil**),
+> `thermal_risk` (`astar_metrics.max_thermal_risk`); dördü de `minimize`.
+> **Belgenin "termal marj, büyük iyi" öncülü tutmuyor:** depoda rota düzeyinde marj yok,
+> `max_thermal_risk` bir **ceza**. Baskınlık her hedefin **kendi yayın kuantumunda** (1e-4 sa /
+> 1e-2 Wh / 1e-4 / 1e-4) karara bağlanıyor — kuantumun altındaki epsilon anlamsız olurdu.
+>
+> **Ölçüm (Site11, `scripts/pareto_front_report.py` → [pareto_front_report.md](pareto_front_report.md)):**
+> dört senaryoda 25 vektör → **15-24 farklı rota → yalnız 1-2 baskın-olmayan**. Bütçe büyütülünce
+> (9 → 211 vektör) farklı rota 9 → 65, cephe **1 → 4**: yani cephe tek nokta **değil**, ama
+> bütçeden çok daha yavaş büyüyor — ilk manşet ("tek noktaya çöküyor") kendi ölçümümüzde düştü ve
+> yayımlanmadı. Simpleksin bir **köşesi** (`w_slope=1`) cephede, bu yüzden `include_corners` var.
+> `f_thermal` LPR-1'in 210 063 geçilebilir hücresinin **%72,7'sinde ≥ 0,99** (VIPER 161 793'ün
+> %65,2'si), dolayısıyla `thermal_risk` çoğu senaryoda **sabit bir eksen**: "dört hedefli cephe"
+> aslında **üç** hedefli ve yanıt bunu `constant_objectives`/`effective_objectives` ile söylüyor.
+> Kalan eksenler aynı sıralamayı veriyor (Spearman, **farklı rotalar** üzerinden — ham örnekler
+> pseudo-replikasyon olurdu): saat~enerji 0,995-1,000, saat~gölge 0,62-0,99.
+>
+> **Manşet.** Cephenin genişliği saatte **%0,179**, tüm örneklenen rotalarınki **%22,2**. Aynı
+> rotaya B2'nin CVaR kuyruğu α=0,5'te **+%16,90** (α=0,99'da +%107,95) ekliyor — yani **hayatta
+> kalanların arası modelin en iyimser belirsizlik bandından ~94× dar**. Ağırlık tartışması bu
+> arazide iki ayrı sorudur: **kötü bir vektör seçmek ölçülebilir bir hatadır (%22), iyi vektörler
+> arasında seçim yapmak bu modelin çözemeyeceği bir sorudur.** Nominal (rover varsayılanı) rota
+> gündüz çiftinde baskılanıyor ama üç hedefte, dördüncüde **berabere**, ve kayıp %0,14-%0,34 —
+> bandın iki mertebe altında; "varsayılan ağırlıklar yanlış" cümlesi bu ölçümden **çıkmaz**.
+>
+> **İddia sınırı.** Üretilen şeyin adı `non_dominated`; yanıt `pareto_front` anahtarı **taşımaz**.
+> `completeness: "no_guarantee"` — ağırlıklı toplam yalnız *supported* çözümlere ulaşır
+> (Boyd & Vandenberghe §4.7.4; Das & Dennis 1997; terminoloji Könen & Stiglmayr arXiv:2501.13842),
+> **üstelik buradaki ağırlıklar hedefleri değil hücre başı maliyet kriterlerini skalerleştirdiği
+> için o garanti bile geçerli değil**. *"Duality gap"* bu literatürün terimi değil, kullanılmadı.
+> D5 darlığın **sonucunu** ölçüyor, **sebebini kurmuyor**: depo katmanların tek yükseklik gridinden
+> türediğini ve iki kriterin Spearman'ının 1,000000 olduğunu zaten kaydetmişti (`cost_engine.py`).
+>
+> **Bu maddedeki iki atıf birinci elden okununca düzeltildi:** arXiv 1505.05947 (Lavin 2015) rota
+> cephesi **üretmiyor** — her adımda açık listenin baskın-olmayanlarını bulup hemen tek düğüme
+> indiriyor, çıktısı tek rota; arXiv 2606.21755 (RoverDevKit) ise ağırlıklı-toplam karşılaştırması
+> **hiç içermiyor**, o atıf kullanılmadı. Gerçek emsal **ETH `lunar_planner`** (Richter, Kolvenbach,
+> Valsecchi, Hutter; iSpaRo 2024, arXiv:2406.16376, MIT): `α+β+γ=1` simpleksinde ağırlıklı A*,
+> taranıp sonradan analiz ediliyor — D5'in ucuz yoluyla **aynı yöntem**, aynı sınırla.
+>
+> **Ek olarak bayat etiket düzeltildi (C2/C5 deseni):** `constants.py` ağırlıkların "gradient-
+> normalised expert weights, **not AHP**" olduğunu yazarken kod 7 yerde hâlâ "AHP" diyordu
+> (`costmap`, `cost_engine` ×5, `pathfinder` ×2) — 11 no'lu belgenin tespiti. Yalnız yorum/docstring
+> değişti, tek ifade değişmedi.
+>
+> **Bit-eşitlik:** LPR-1'in checked-in v5 maliyet-gridi SHA-256'sı (`55e1bb3c…`) kıpırdamadı,
+> `COST_MODEL_ID` `…_v5`'te kaldı, nominal örneğin rotası ağırlıksız `astar` çağrısıyla **birebir
+> aynı** — üçü de testte. **Kapsam dışı:** `pymoo`/NSGA-II (yeni pinli bağımlılık, C5'in `pandas`
+> emsali), 4-B tarama (örnek başına 6-17 s), hipervolüm (1-4 elemanlı ve gürültü içindeki bir
+> cephede darlığı gizlerdi), frontend çizimi. Süre: ~330 ms/örnek (gündüz), ~1 370 ms/örnek
+> (Ay gecesi); uç nokta 40 vektörle sınırlı, modül API'si sınırsız. Tasarım:
+> [spec](../superpowers/specs/2026-09-16-d5-pareto-cephesi-design.md) (sondalar ve ölçümler dahil),
+> [plan](../superpowers/plans/2026-09-16-d5-pareto-cephesi.md). Testler: 25 birim + 22 API +
+> 19 skip-korumalı gerçek grid = **66**.
+
 
 **Ne:** Tek bir ağırlık vektörü yerine (süre, enerji, gölge saati, termal risk) uzayında **baskın-olmayan** rota kümesini üretmek; operatör cepheden seçer. 11 no'lu belge "AHP" etiketinin yanlış olduğunu söylüyordu — Pareto cephesi bu tartışmayı tamamen ortadan kaldırır.
 
@@ -612,7 +676,7 @@ Amaç: rakip/akran ekiplerin jüri karşısına neyle çıktığını görmek. B
 | C1 | ✅ Panel cos i modeli | 1 | 3 | 3 | — | RoverDevKit doğrulaması (alıntı) + NASA'nın 320/450 W çifti |
 | C2 | Batarya soğuk/hibernasyon | 2 | 3 | 4 | C1 | NASA Glenn testleri |
 | C5 | Diviner PRP/Williams termal RMSE | 1 | 3 | 3 | — | **Ölçülmüş ürünle RMSE** |
-| D5 | Pareto cephesi | 1 | 3 | 3 | — | Literatür |
+| D5 ✅ | Pareto cephesi | 1 | 3 | 3 | — | Literatür |
 | D4 | Kontrastif açıklama | 1–2 | 3 | 4 | — | XAIP literatürü |
 | D6 | Erişilebilirlik izokronları | 1 | 3 | 3 | — | Literatür |
 | B4 | Sobol duyarlılık | 1–2 | 3 | 3 | — | SALib |
