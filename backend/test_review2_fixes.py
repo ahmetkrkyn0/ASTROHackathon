@@ -179,21 +179,20 @@ def test_h2_the_efficiency_ranking_uses_a_real_quantity():
 
 
 def _diviner_module():
-    """Import scripts/diviner_validation.py by path.
+    """The module holding ``destination_transform``.
 
-    It lives outside the backend package (it is an operator script, not
-    an app module), so it is loaded directly rather than imported.
+    It used to live in ``scripts/diviner_validation.py`` and was loaded by
+    path. C5 deleted that script -- it was written for a raster Diviner
+    product that does not exist at polar resolution; the real one is a
+    605 MB ASCII triangular mesh -- and moved this pure georeferencing
+    function into ``app.thermal_validation``, where both the mesh path and
+    any future raster path can reach it. The two assertions below are
+    unchanged: the H-3 lesson is about the half-cell/top-edge registration,
+    not about which file it lives in.
     """
-    import importlib.util
-    from pathlib import Path
+    from app import thermal_validation
 
-    path = (
-        Path(__file__).resolve().parent.parent / "scripts" / "diviner_validation.py"
-    )
-    spec = importlib.util.spec_from_file_location("diviner_validation", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return thermal_validation
 
 
 def test_h3_diviner_destination_transform_uses_origin_y_as_the_top_edge():

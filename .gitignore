@@ -70,6 +70,13 @@ lunapath/data/benchmarks/
 # (scripts/build_thermal_envelope_cache.py); rebuilt together, never committed.
 lunapath/data/processed/thermal_envelope_heat1d.npz
 lunapath/data/processed/thermal_envelope_meta.json
+# C5: LRO Diviner Polar Resource Product (PRP) raw table, its Site11/LUT
+# comparison cache and provenance (scripts/build_diviner_prp_cache.py).
+# The raw .tab is 605 MB of NASA archive data; never committed.
+lunapath/data/raw/dlre_prp_south.tab
+lunapath/data/raw/dlre_prp_south.lbl
+lunapath/data/processed/diviner_prp.npz
+lunapath/data/processed/diviner_prp_meta.json
 
 # Large binaries that are fetched or generated, never authored. Committing
 # these puts ~105 MB into every future clone for files a script rebuilds:
