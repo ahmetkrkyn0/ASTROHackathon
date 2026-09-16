@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass, replace as dataclass_replace
 import os
 import sys
@@ -103,6 +104,41 @@ from .pareto import (
     OBJECTIVE_KEYS,
     sweep as pareto_sweep,
 )
+from .reachability import (
+    CONSERVATISM,
+    DEFAULT_BAND_COUNT,
+    DEFAULT_HOLD_SLICE_HOURS,
+    GATES_NOT_REPLAYED,
+    GATES_REPLAYED,
+    HOLD_LIMIT_CODES,
+    MAX_BAND_EDGES,
+    MAX_BOUNDARY_CELLS,
+    MAX_HOLD_HORIZON_HOURS,
+    MAX_REACHABLE_BLOCKS,
+    MAX_REACHABLE_CUBE_BYTES,
+    MAX_REACHABLE_GROUP_STEPS,
+    MAX_REACHABLE_SLICES,
+    PLANNER_CONFIGURATION,
+    REACHABILITY_CLAIM,
+    REACHABILITY_CORRECTIONS,
+    REACHABILITY_MODEL_ID,
+    REACHABILITY_QUOTED,
+    REACHABILITY_REFERENCES,
+    REACHABILITY_SCOPE,
+    REACHABILITY_VALIDITY,
+    UNCERTAINTY_NOT_PROPAGATED,
+    band_boundary_cells,
+    coarse_shadow_cube,
+    compare_fields,
+    default_band_edges,
+    default_hold_horizon_hours,
+    edge_group_count,
+    hold_limit,
+    hold_times,
+    isochrone_bands,
+    shift_epoch,
+    sweep as reachability_sweep,
+)
 from .pathfinder import astar
 from .profile_comparison import compare_all_profiles, solve_named_profiles
 from .localization import evaluate_pose
@@ -193,6 +229,7 @@ from .stress_test import (
 )
 from .survival import (
     DEFAULT_SOC_BINS,
+    direction_tables,
     MAX_SOC_BINS,
     MAX_SURVIVAL_HORIZON_HOURS,
     MAX_SURVIVAL_STATES,
@@ -4826,6 +4863,734 @@ def explain_contrast_endpoint(req: ExplainContrastRequest, request: Request):
             "and the interval width it could have resolved."
         ),
     }
+
+
+class ReachableRequest(BaseModel):
+    """Where can this rover still get to, from here, now, on this charge (D6)?
+
+    ``extra="forbid"`` for the same reason /api/explain-contrast forbids it:
+    the answer is a map, and a map drawn under a mistyped field would look
+    exactly as convincing as one drawn under the field the caller meant.
+
+    No weight vector. Reachability under this model is decided by the hard
+    edge gates and the battery; the criterion weights only price how
+    UNPLEASANT a drive is, and none of them can make a block reachable or
+    unreachable. Accepting a ``weights`` object here and ignoring it would be
+    worse than refusing it, so it is refused.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: Union[StartGoalPixel, StartGoalGeo]
+    rover_id: str = DEFAULT_ROVER_ID
+    start_utc: str = Field(
+        ...,
+        description=(
+            "UTC instant the first slice begins, e.g. '2026-09-05T00:00:00'. REQUIRED, "
+            "unlike /api/plan-4d: without an epoch build_shadow_series falls back to "
+            "the long-run shadow FRACTION, which is a climatology rather than a sky. "
+            "Under it every slice is priced at a mean exposure, the 'N hours later' "
+            "diff is exactly zero, and the published 'cannot reach' claim would be "
+            "made about a model the caller never asked for. /api/plan-4d can degrade "
+            "to a static series because it still returns a route; this endpoint has "
+            "nothing honest to return."
+        ),
+    )
+    horizon_hours: float = Field(
+        default=6.0,
+        gt=0.0,
+        le=168.0,
+        description="How far ahead to sweep. The slice count follows from the slice length.",
+    )
+    slice_hours: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        le=24.0,
+        description=(
+            "Length of one time slice; omitted, it is derived from the grid by "
+            "cost_cube.auto_slice_hours -- the same call, on the same fine slope grid "
+            "at the same coarse resolution, that /api/plan-4d uses, so a horizon "
+            "accepted here is one the planner could also be asked for."
+        ),
+    )
+    coarsen: int = Field(default=4, ge=1, le=16)
+    initial_soc_pct: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "State of charge at the first slice as a fraction of e_cap_wh. Must be at "
+            "or above the rover's soc_min_pct: below the reserve the 4-D planner allows "
+            "a transition that CHARGES, which breaks the monotonicity the sweep's "
+            "exactness rests on, so that case is refused rather than answered wrongly."
+        ),
+    )
+    band_hours: Optional[conlist(float, min_length=1, max_length=MAX_BAND_EDGES)] = Field(
+        default=None,
+        description=(
+            "Isochrone band upper edges in hours, strictly increasing and inside the "
+            "horizon. Omitted, the horizon is cut into band_count equal pieces -- a "
+            "drawing convention, not a physical spacing."
+        ),
+    )
+    band_count: int = Field(default=DEFAULT_BAND_COUNT, ge=1, le=MAX_BAND_EDGES)
+    later_hours: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        le=168.0,
+        description=(
+            "Run the same sweep again at start_utc + later_hours and report what the "
+            "moved shadow gains and loses. Snapped to a whole number of slices so both "
+            "sweeps sample the same clock, and the snapped value is published. This "
+            "compares two INDEPENDENT starts: it is not the question 'what do I gain "
+            "by waiting here', which the base sweep's own wait edges already answer."
+        ),
+    )
+    hold_horizon_hours: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        le=MAX_HOLD_HORIZON_HOURS,
+        description=(
+            "How long to run the per-block hold clocks for. The drive horizon is the "
+            "wrong bound for them -- a rover that arrives in two hours can stand there "
+            "for sixty, and a 3 h horizon censored every hold time on Site11 (measured: "
+            "2 086 of 2 086 blocks). Default: twice the rover's published "
+            "continuous-darkness endurance, never under the drive horizon."
+        ),
+    )
+    hold_slice_hours: float = Field(
+        default=DEFAULT_HOLD_SLICE_HOURS,
+        gt=0.0,
+        le=6.0,
+        description=(
+            "Step of the hold integral. Coarser than the drive slice on purpose: a "
+            "stationary rover's drain changes only with the Sun, and reusing the drive "
+            "slice (0.036 h on Site11) would put a 100 h hold at 2 785 full slices. It "
+            "also sets the resolution at which a block's arrival is placed on the hold "
+            "clock, published as hold.arrival_resolution_h."
+        ),
+    )
+    include_grids: bool = Field(
+        default=True,
+        description=(
+            "Publish the per-block fields (band index, earliest hours, charge, hold "
+            "times). Off leaves the band table and the counts, which is what a "
+            "dashboard needs when the map is drawn from a previous call."
+        ),
+    )
+    max_boundary_cells: int = Field(
+        default=MAX_BOUNDARY_CELLS,
+        ge=0,
+        le=MAX_BOUNDARY_CELLS,
+        description="Boundary blocks listed per band; 0 omits the outlines entirely.",
+    )
+
+
+def _nan_min(values: np.ndarray) -> float | None:
+    """The smallest finite entry, or None when there is none.
+
+    ``np.nanmin`` raises a RuntimeWarning and returns nan on an all-NaN
+    array, and an all-NaN hold-time field is the ordinary case: it means no
+    block ran its clock out inside the horizon.
+    """
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    return None if finite.size == 0 else round(float(finite.min()), 6)
+
+
+def _nan_max(values: np.ndarray) -> float | None:
+    """The largest finite entry, or None. See :func:`_nan_min`."""
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    return None if finite.size == 0 else round(float(finite.max()), 6)
+
+
+def _reachable_grid_payload(values: np.ndarray, digits: int) -> list[list[Any]]:
+    """A (H, W) float field as JSON, with every non-finite entry as null.
+
+    Starlette serialises with ``allow_nan=False``, so one nan or inf that
+    reaches the wire is an opaque 500 -- and this endpoint's natural
+    encodings are non-finite everywhere it has nothing to say (an unreachable
+    block, a censored clock). ``_read_grid_value`` already returns None for
+    the same reason. (Round 5 D6 review, engineering H-2.)
+    """
+    rounded = np.round(np.asarray(values, dtype=np.float64), digits)
+    return [
+        [None if not math.isfinite(value) else float(value) for value in row]
+        for row in rounded
+    ]
+
+
+def _reachable_sweep(
+    grids_for_plan: dict,
+    rover: dict,
+    geometry: "_CoarseGeometry",
+    coarsen: int,
+    coarse_start: tuple[int, int],
+    n_slices: int,
+    slice_hours: float,
+    start_utc: str,
+    initial_soc_pct: float,
+    tables: Any,
+) -> tuple[Any, dict[str, Any]]:
+    """One sweep, on a coarse shadow cube built chunk by chunk.
+
+    The cube is discarded with this frame: the hold integral runs on its own,
+    longer and coarser cube, and nothing else needs the drive cube afterwards.
+    """
+    shadow_cube, provenance = coarse_shadow_cube(
+        np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64),
+        grids_for_plan["metadata"],
+        coarsen,
+        n_slices,
+        slice_hours,
+        start_utc,
+    )
+    field = reachability_sweep(
+        geometry.traversable,
+        geometry.elevation,
+        geometry.slope,
+        geometry.resolution_m,
+        rover,
+        shadow_cube,
+        slice_hours,
+        coarse_start,
+        initial_soc_pct,
+        tables=tables,
+    )
+    return field, provenance
+
+
+def _require_time_varying(provenance: dict[str, Any], what: str) -> None:
+    """422 when the shadow series could not be made a function of time.
+
+    Same shape as the ``require_continuous_illumination`` refusal in
+    /api/plan-4d: name the model and name the reason, rather than answering
+    with a map built on a long-run average and a provenance field nobody
+    reads. ``build_shadow_series`` swallows every exception -- a missing
+    kernel, a mismatched cache, no spiceypy -- and returns the static series,
+    so this is the only place the failure becomes visible.
+    """
+    if provenance.get("time_varying"):
+        return
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"{what} needs a time-varying shadow series and the shadow model is "
+            f"{provenance.get('model')}: {provenance.get('reason', 'no reason given')}. "
+            "The static fallback is the long-run shadow FRACTION -- a climatology, not "
+            "a sky -- and an isochrone drawn on it would measure the terrain and the "
+            "battery while looking like a map of today."
+        ),
+    )
+
+
+@app.post("/api/reachable")
+def reachable(req: ReachableRequest, request: Request):
+    """The energy-reachability isochrone (D6): how far, in how long, on what.
+
+    Four answers, and every one of them is a statement about THIS energy
+    model under the configuration in ``planner_configuration`` -- not about
+    the rover:
+
+    * ``reachable`` -- the blocks the sweep found live at some slice, with
+      the growth curve ``blocks_per_slice`` behind it;
+    * ``isochrone`` -- which band each block falls in, i.e. how many hours
+      the earliest arrival takes, plus each band's staircase outline;
+    * ``hold`` -- per block, how long the rover could then STAND there, and
+      WHICH clock ends the stay: the reserve or the continuous-darkness
+      endurance. On a dark block the endurance usually fires first, which is
+      exactly what a bare ``time-to-0-SOC`` hides;
+    * ``later`` -- the same sweep at ``start_utc + later_hours``, because the
+      shadow moves and the set at t is not the set at t + N.
+
+    Read ``claim`` and ``conservatism`` before the map. The two envelope
+    fields are optimised independently, so the set is a RELAXATION: it
+    CONTAINS what /api/plan-4d would accept at the same coarsen, slice
+    length, epoch and horizon under that configuration. The safe reading is
+    the negative one -- a block OUTSIDE the set is one this energy model says
+    the rover cannot reach. A block inside it is a candidate, and the two
+    headline fields err in OPPOSITE directions: the set too large, the clock
+    too late.
+
+    Check ``energy_binds`` before calling the result an energy isochrone. On
+    a short horizon with a full battery neither envelope rule ever fires, the
+    frontier is the clock alone, and ``refusals`` shows it: the map is then a
+    gated distance transform, which is a true thing to publish but a
+    different thing from what the title promises.
+
+    Not Dijkstra, and the response carries why: ``edges.negative_fraction``
+    is the share of relaxed edges on which the array outproduced the load,
+    i.e. the share that would have made a shortest-path solver silently
+    wrong.
+    """
+    grids = _active_grids(request)
+    rover = get_rover(req.rover_id)
+    # No weights and no risk_alpha: neither reaches traversability, and the
+    # sweep reads nothing else from the cost model.
+    grids_for_plan = grids_for_rover(grids, req.rover_id)
+    metadata = grids_for_plan["metadata"]
+
+    start = _to_pixel(req.start, "start", metadata)
+    # The same helper /api/plan and /api/explain-contrast use, with the start
+    # passed for both roles: it checks "start" first in both of its loops, so
+    # a bad point is always reported as the start it is.
+    _validate_start_goal(grids_for_plan, start, start, rover)
+
+    soc_min = float(rover.get("soc_min_pct") or 0.0)
+    if req.initial_soc_pct < soc_min:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"initial_soc_pct={req.initial_soc_pct:g} is under {rover['name']}'s "
+                f"reserve soc_min_pct={soc_min:g}. Under battery_model='constant', "
+                "which this endpoint is fixed to, a transition starting at or above the "
+                "reserve can only end below it by draining, so the 4-D planner's "
+                "charge-recovery exception provably never fires and the two envelope "
+                "rules coincide exactly. Starting BELOW the reserve opens that "
+                "exception, and with it the monotonicity the sweep's exactness rests "
+                "on. Start at or above the reserve, or plan the recovery with "
+                "/api/plan-4d."
+            ),
+        )
+
+    # Raises the same 422 /api/plan-4d raises for a grid that does not divide.
+    geometry = _coarse_geometry(grids_for_plan, req.coarsen)
+    coarse_start = (start[0] // req.coarsen, start[1] // req.coarsen)
+    if not bool(geometry.traversable[coarse_start]):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"start {tuple(start)} falls in coarse block {coarse_start} at "
+                f"coarsen={req.coarsen}, which is not traversable: at least one fine "
+                "cell inside it exceeds the slope or thermal limit. Lower coarsen or "
+                "choose a different start."
+            ),
+        )
+
+    if req.slice_hours is None:
+        # The FINE slope distribution over a COARSE cell's length -- the same
+        # call and the same arguments as /api/plan-4d, so "the same slice
+        # length" is something a caller can actually reproduce.
+        slice_hours = auto_slice_hours(
+            grids_for_plan["slope"],
+            grids_for_plan["traversable"],
+            resolution_m=geometry.resolution_m,
+            rover=rover,
+        )
+        slice_hours_source = "auto"
+    else:
+        slice_hours = float(req.slice_hours)
+        slice_hours_source = "request"
+
+    n_slices = max(2, int(math.ceil(float(req.horizon_hours) / slice_hours)))
+    if n_slices > MAX_REACHABLE_SLICES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"horizon_hours={req.horizon_hours:g} at a {slice_hours:.6f} h slice "
+                f"needs {n_slices} slices, over the {MAX_REACHABLE_SLICES} cap; shorten "
+                "the horizon, raise coarsen, or pin a longer slice_hours."
+            ),
+        )
+    height, width = geometry.traversable.shape
+    blocks = height * width
+    if blocks > MAX_REACHABLE_BLOCKS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"coarsen={req.coarsen} leaves a {height}x{width} grid ({blocks} blocks), "
+                f"over the {MAX_REACHABLE_BLOCKS} cap; raise coarsen."
+            ),
+        )
+    if req.include_grids and blocks > MAX_LAYER_CELLS:
+        fits = math.ceil(
+            math.sqrt(
+                (int(metadata["shape"][0]) * int(metadata["shape"][1])) / MAX_LAYER_CELLS
+            )
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"include_grids publishes seven {height}x{width} fields ({blocks} blocks "
+                f"each), over the {MAX_LAYER_CELLS}-cell response ceiling /api/layers "
+                f"uses. Use coarsen={fits} or higher, or set include_grids=false and "
+                "read the band table and the counts."
+            ),
+        )
+
+    sweeps = 2 if req.later_hours is not None else 1
+    # Only the coarse cube is held: coarse_shadow_cube builds the FINE
+    # snapshots SHADOW_CHUNK_SLICES at a time and coarsens each chunk before
+    # the next, so the fine working set never scales with the horizon the way
+    # /api/plan-4d's does.
+    needed = n_slices * blocks * 8
+    if needed * sweeps > MAX_REACHABLE_CUBE_BYTES:
+        affordable = max(2, MAX_REACHABLE_CUBE_BYTES // max(1, blocks * 8 * sweeps))
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{n_slices} slices over a {height}x{width} grid needs "
+                f"{needed * sweeps / 2**20:.0f} MiB of shadow cube across {sweeps} "
+                f"sweep(s), over the {MAX_REACHABLE_CUBE_BYTES / 2**20:.0f} MiB budget; "
+                f"raise coarsen or keep the horizon at or under {affordable} slices."
+            ),
+        )
+
+    started = time.perf_counter()
+    # Built once and shared by both sweeps: the gates and travel times are a
+    # function of the terrain and the rover, not of the epoch.
+    tables = direction_tables(
+        geometry.traversable,
+        geometry.elevation,
+        geometry.slope,
+        geometry.resolution_m,
+        rover,
+    )
+    # The sweep's real unit of work is (slices x (direction, span) groups),
+    # and the span of a move is ceil(travel_h / slice_hours): a caller who
+    # pins a very short slice multiplies the group count without touching
+    # anything the caps above look at. Measured on Site11 at coarsen 4: 92
+    # groups at the auto slice, thousands at slice_hours=1e-4.
+    groups = edge_group_count(tables, slice_hours, n_slices)
+    if n_slices * groups > MAX_REACHABLE_GROUP_STEPS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"a {slice_hours:.6f} h slice splits the edges into {groups} "
+                f"(direction, span) groups, and {n_slices} slices of them is "
+                f"{n_slices * groups} grid updates -- over the "
+                f"{MAX_REACHABLE_GROUP_STEPS} ceiling. A move costs "
+                "ceil(travel_h / slice_hours) slices, so a very short slice multiplies "
+                "the work without changing the answer; leave slice_hours off to take "
+                "the grid's own value, or pin a longer one."
+            ),
+        )
+
+    horizon_hours = (n_slices - 1) * slice_hours
+    if req.band_hours is not None:
+        edges = [float(value) for value in req.band_hours]
+        if any(b <= a for a, b in zip(edges, edges[1:])) or edges[0] <= 0.0:
+            raise HTTPException(
+                status_code=422,
+                detail="band_hours must be positive and strictly increasing.",
+            )
+        if edges[-1] > horizon_hours + 1e-9:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"band_hours ends at {edges[-1]:g} h but the sweep covers "
+                    f"{horizon_hours:.4f} h ({n_slices} slices of {slice_hours:.6f} h); "
+                    "a band past the horizon would always be empty and would read as "
+                    "'nothing is that far away'."
+                ),
+            )
+        band_source = "request"
+    else:
+        edges = default_band_edges(horizon_hours, req.band_count)
+        band_source = "auto"
+
+    field, provenance = _reachable_sweep(
+        grids_for_plan, rover, geometry, req.coarsen, coarse_start, n_slices,
+        slice_hours, req.start_utc, req.initial_soc_pct, tables,
+    )
+    _require_time_varying(provenance, "/api/reachable")
+
+    # The hold clocks run on their own, longer and coarser axis: bounding
+    # them by the DRIVE horizon censored every block on Site11.
+    hold_horizon = (
+        float(req.hold_horizon_hours)
+        if req.hold_horizon_hours is not None
+        else default_hold_horizon_hours(rover, horizon_hours)
+    )
+    hold_slices = max(2, int(math.ceil(hold_horizon / req.hold_slice_hours)) + 1)
+    hold_needed = hold_slices * blocks * 8
+    if hold_needed > MAX_REACHABLE_CUBE_BYTES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"a {hold_horizon:g} h hold horizon at a {req.hold_slice_hours:g} h step "
+                f"needs {hold_slices} slices ({hold_needed / 2**20:.0f} MiB) over a "
+                f"{height}x{width} grid, over the "
+                f"{MAX_REACHABLE_CUBE_BYTES / 2**20:.0f} MiB budget; shorten "
+                "hold_horizon_hours or lengthen hold_slice_hours."
+            ),
+        )
+    hold_cube, hold_provenance = coarse_shadow_cube(
+        np.asarray(grids_for_plan["shadow_ratio"], dtype=np.float64),
+        metadata,
+        req.coarsen,
+        hold_slices,
+        float(req.hold_slice_hours),
+        req.start_utc,
+    )
+    _require_time_varying(hold_provenance, "the hold integral")
+    holds = hold_times(field, hold_cube, rover, float(req.hold_slice_hours))
+    hold_hours, hold_code = hold_limit(holds, field.reachable)
+    del hold_cube
+
+    bands = isochrone_bands(field, edges, geometry.resolution_m)
+    band_index = bands.pop("band_index")
+
+    outlines: list[dict[str, Any]] = []
+    if req.max_boundary_cells:
+        for entry in bands["bands"]:
+            cells, truncated = band_boundary_cells(
+                band_index, int(entry["band"]), req.max_boundary_cells
+            )
+            outlines.append(
+                {"band": int(entry["band"]), "cells": cells, "truncated": truncated}
+            )
+
+    later_block: dict[str, Any] | None = None
+    if req.later_hours is not None:
+        # Snapped so both sweeps sample the same clock: an unsnapped offset
+        # would put the second sweep's slices between the first's, and every
+        # difference would carry a sampling artefact nobody could separate
+        # from the moved shadow.
+        later_slices = max(1, int(round(float(req.later_hours) / slice_hours)))
+        later_hours = later_slices * slice_hours
+        later_epoch = shift_epoch(req.start_utc, later_hours)
+        later_field, later_provenance = _reachable_sweep(
+            grids_for_plan, rover, geometry, req.coarsen, coarse_start, n_slices,
+            slice_hours, later_epoch, req.initial_soc_pct, tables,
+        )
+        _require_time_varying(later_provenance, "the later-start comparison")
+        later_bands = isochrone_bands(later_field, edges, geometry.resolution_m)
+        later_index = later_bands.pop("band_index")
+        later_block = {
+            "requested_later_hours": float(req.later_hours),
+            "later_hours": round(later_hours, 6),
+            "later_slices": later_slices,
+            "snapped": abs(later_hours - float(req.later_hours)) > 1e-12,
+            "start_utc": later_epoch,
+            "shadow_model": later_provenance,
+            "comparison": compare_fields(field, later_field, geometry.resolution_m),
+            "isochrone": later_bands,
+            "energy_binds": later_field.energy_binds,
+            "refusals": later_field.refusals,
+        }
+        if req.include_grids:
+            later_block["band_index"] = [
+                [int(value) for value in row] for row in later_index
+            ]
+
+    traversable_blocks = int(geometry.traversable.sum())
+    reachable_blocks = int(field.reachable.sum())
+    soc_pct = np.where(
+        field.reachable, field.soc_at_first_wh / max(1e-12, field.e_cap_wh) * 100.0, np.nan
+    )
+    best_pct = np.where(
+        field.reachable, field.best_soc_wh / max(1e-12, field.e_cap_wh) * 100.0, np.nan
+    )
+    limited_counts = {
+        name: int((hold_code == code).sum()) for name, code in HOLD_LIMIT_CODES.items()
+    }
+
+    payload: dict[str, Any] = {
+        "start": [int(start[0]), int(start[1])],
+        "start_block": [int(coarse_start[0]), int(coarse_start[1])],
+        "rover_id": req.rover_id,
+        "rover": rover["name"],
+        "model_id": REACHABILITY_MODEL_ID,
+        "validity": REACHABILITY_VALIDITY,
+        "claim": REACHABILITY_CLAIM,
+        "scope": REACHABILITY_SCOPE,
+        "planner_configuration": PLANNER_CONFIGURATION,
+        "gates_replayed": list(GATES_REPLAYED),
+        "gates_not_replayed": [dict(item) for item in GATES_NOT_REPLAYED],
+        "conservatism": CONSERVATISM,
+        "uncertainty_not_propagated": [dict(item) for item in UNCERTAINTY_NOT_PROPAGATED],
+        "references": [dict(item) for item in REACHABILITY_REFERENCES],
+        "corrections": [dict(item) for item in REACHABILITY_CORRECTIONS],
+        "quoted": REACHABILITY_QUOTED,
+        "grid": {
+            "coarsen": int(req.coarsen),
+            "effective_resolution_m": geometry.resolution_m,
+            "coarse_shape": [height, width],
+            "blocks": blocks,
+            "traversable_blocks": traversable_blocks,
+            "block_area_km2": bands["block_area_km2"],
+            "shadow_ratio_semantics": (
+                f"a block's exposure is the AREA FRACTION of a binary per-slice mask "
+                f"over the {req.coarsen}x{req.coarsen} fine cells inside it, not the "
+                "exposure of a rover standing in the block: the rover is in exactly one "
+                "of those cells and is either lit or not. Around the 0.39 break-even "
+                "(LPR-1, flat) that average can flip the SIGN of a drive edge."
+            ),
+            "partially_lit_blocks_at_first_slice": field.partially_lit_first_slice,
+        },
+        "time": {
+            "start_utc": req.start_utc,
+            "requested_horizon_hours": float(req.horizon_hours),
+            "horizon_hours": round(horizon_hours, 6),
+            "slice_hours": slice_hours,
+            "slice_hours_source": slice_hours_source,
+            "n_slices": n_slices,
+            "arrival_quantum_h": slice_hours,
+            "note": (
+                "/api/plan-4d given neither n_slices nor horizon_hours sizes its own "
+                "horizon from the gated start-to-goal drive, which is a per-pair number "
+                "and can be several hundred slices. Comparing this map against such a "
+                "plan compares two different clocks; pass the same horizon_hours and "
+                "slice_hours to both."
+            ),
+        },
+        "shadow_model": provenance,
+        "battery": {
+            "initial_soc_pct": float(req.initial_soc_pct),
+            "initial_wh": round(float(req.initial_soc_pct) * field.e_cap_wh, 4),
+            "e_cap_wh": field.e_cap_wh,
+            "soc_min_pct": soc_min,
+            "reserve_wh": round(field.reserve_wh, 4),
+            "h_max_shadow_h": None if not math.isfinite(field.endurance_h) else field.endurance_h,
+        },
+        "reachable": {
+            "blocks": reachable_blocks,
+            "area_km2": bands["reachable_area_km2"],
+            "fraction_of_traversable": (
+                round(reachable_blocks / traversable_blocks, 6) if traversable_blocks else None
+            ),
+            "blocks_per_slice": field.live_per_slice.tolist(),
+            "best_soc_pct_upper_max": _nan_max(best_pct),
+            "soc_at_arrival_pct_upper_min": _nan_min(soc_pct),
+            "fields_are_independently_optimised": True,
+            "no_single_trajectory_realises_a_row": (
+                "the arrival slice comes from the live set, the charge is a maximum over "
+                "one predecessor and the darkness a minimum over a possibly different "
+                "one, so the charge and darkness published for a block need not be "
+                "reachable together"
+            ),
+        },
+        "energy_binds": field.energy_binds,
+        "refusals": {
+            **field.refusals,
+            "note": (
+                "transitions each rule refused during the sweep, in astar_4d's own "
+                "rejection vocabulary. soc_floor = 0 AND shadow_endurance = 0 means "
+                "neither envelope rule ever fired: the frontier was the horizon, and "
+                "the map is a gated distance transform rather than an energy isochrone. "
+                "That is a property of the horizon and the start charge, not a defect."
+            ),
+        },
+        "isochrone": {
+            **bands,
+            "edges_source": band_source,
+            "outlines": outlines,
+            "band_time_quantum_h": slice_hours,
+            "band_space_quantum_m": geometry.resolution_m,
+            "boundary_is_block_lattice": True,
+            "bands_are_not_polygons": (
+                "outlines list the blocks on a band's edge; they are not ordered, not "
+                "joined and not a ring. Filling them into a polygon would claim a "
+                "spatial precision of the block lattice and a temporal precision of the "
+                "slice that neither has."
+            ),
+        },
+        "hold": {
+            "definition": (
+                "hours the rover could stand at the block from its EARLIEST arrival, "
+                "integrating the wait drain slice by slice at that block's own exposure. "
+                "hold_limit is min(to_reserve, to_endurance) with the winner named -- "
+                "the operational number. to_zero is published beside it and is NOT in "
+                "that minimum: below the reserve this model has no transitions at all, "
+                "so it is battery physics rather than an operating margin."
+            ),
+            "horizon_hours": round(holds.horizon_h, 6),
+            "slice_hours": holds.slice_hours,
+            "arrival_resolution_h": holds.arrival_resolution_h,
+            "limit_codes": HOLD_LIMIT_CODES,
+            "limited_by_blocks": limited_counts,
+            "hold_limit_min_h": _nan_min(hold_hours),
+            "hold_limit_max_h": _nan_max(hold_hours),
+            "to_reserve_censored_blocks": int(holds.reserve_censored.sum()),
+            "to_zero_censored_blocks": int(holds.zero_censored.sum()),
+            "to_endurance_censored_blocks": int(holds.endurance_censored.sum()),
+            "to_reserve_min_h": _nan_min(holds.to_reserve_h),
+            "to_zero_min_h": _nan_min(holds.to_zero_h),
+            "to_endurance_min_h": _nan_min(holds.to_endurance_h),
+            "censoring": (
+                "a null hold time means the clock had not run out by the end of the "
+                "hold horizon, NOT that it is infinite"
+            ),
+        },
+        "edges": {
+            "relaxed": field.edges_relaxed,
+            "negative": field.negative_edges,
+            "negative_fraction": (
+                round(field.negative_edges / field.edges_relaxed, 6)
+                if field.edges_relaxed
+                else None
+            ),
+            "groups": field.edge_groups,
+            "unpaid_idle_mean_h": round(field.unpaid_idle_mean_h, 6),
+            "unpaid_idle_max_h": round(field.unpaid_idle_max_h, 6),
+            "unpaid_idle_note": (
+                "a move advances the clock by ceil(travel_h / slice_hours) whole slices "
+                "but is charged power over travel_h alone, so the remainder is wall "
+                "clock nobody pays for. That is astar_4d's convention and this sweep "
+                "inherits it deliberately -- charging the residual would make the set "
+                "no longer a relaxation of the planner -- but it biases every published "
+                "charge OPTIMISTICALLY, by up to this many hours of housekeeping per "
+                "move."
+            ),
+            "note": (
+                "A NEGATIVE edge is one where the array outproduced the load, i.e. one "
+                "the battery GAINED on. Their existence is why this is a forward sweep "
+                "over a state and not a shortest-path search over a cost: a Dijkstra "
+                "would be silently wrong wherever this fraction is above zero, and "
+                "would look correct at an epoch where it is zero."
+            ),
+        },
+        "later": later_block,
+        "timing": {
+            "sweep_s": round(field.elapsed_s, 4),
+            "total_s": round(time.perf_counter() - started, 4),
+            "sweeps": sweeps,
+        },
+        "limits": {
+            "max_slices": MAX_REACHABLE_SLICES,
+            "max_blocks": MAX_REACHABLE_BLOCKS,
+            "max_cube_bytes": MAX_REACHABLE_CUBE_BYTES,
+            "max_group_steps": MAX_REACHABLE_GROUP_STEPS,
+            "max_boundary_cells": MAX_BOUNDARY_CELLS,
+            "max_grid_cells": MAX_LAYER_CELLS,
+            "note": (
+                "the cube budget is tighter than /api/plan-4d's 512 MiB on purpose: "
+                "this endpoint can run two sweeps plus a hold cube, and every sync "
+                "endpoint here shares one 40-worker threadpool, so the per-request cap "
+                "is also a bound on what forty concurrent callers can pin."
+            ),
+        },
+        "note": (
+            "Isochrones are a MODEL result, not a rover capability. Every source in "
+            "uncertainty_not_propagated IS modelled elsewhere in this backend and none "
+            "of it is propagated here; no number is published for how much it moves the "
+            "boundary, because none was measured. /api/dem-uncertainty and "
+            "/api/stress-test are where those questions are asked."
+        ),
+    }
+
+    if req.include_grids:
+        payload["grids"] = {
+            "band_index": [[int(value) for value in row] for row in band_index],
+            "earliest_hours": _reachable_grid_payload(field.earliest_hours, 4),
+            "soc_at_arrival_pct_upper": _reachable_grid_payload(soc_pct, 3),
+            "best_soc_pct_upper": _reachable_grid_payload(best_pct, 3),
+            "hours_to_reserve_upper": _reachable_grid_payload(holds.to_reserve_h, 4),
+            "hours_to_zero_upper": _reachable_grid_payload(holds.to_zero_h, 4),
+            "hours_to_endurance_upper": _reachable_grid_payload(holds.to_endurance_h, 4),
+            "hold_limit_hours": _reachable_grid_payload(hold_hours, 4),
+            "hold_limited_by": [[int(value) for value in row] for row in hold_code],
+            "convention": (
+                "coarse blocks, row-major. band_index is -1 and every float field null "
+                "where the block was never live; hold_limited_by uses hold.limit_codes. "
+                "Every field whose name ends in _upper is an UPPER BOUND -- see "
+                "conservatism -- because it is a maximum over predecessors rather than "
+                "a value any single trajectory carries."
+            ),
+        }
+    return payload
 
 
 @app.post("/api/plan-multi")

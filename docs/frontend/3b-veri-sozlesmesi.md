@@ -2236,6 +2236,220 @@ hükmü; zeminin ölçümü değil. `claim` alanı bunu yanıtın içinde taşı
   (`main._read_grid_value` / `CostMap.explain` konvansiyonu).
 - Tarama bütçesi istek başına: `max_replans` ≤ 30 (~6,5 s en kötü hâl).
 
+## D6 eki — `POST /api/reachable`: "şu an nereye kadar gidebilirim?" (16 Eylül 2026)
+
+**Var olan hiçbir alan eklenmedi, kaldırılmadı, anlamı değiştirilmedi.** D6 yalnızca **yeni bir
+uç** ekler. `/api/plan`, `/api/plan-4d`, `/api/pareto`, `/api/explain-contrast` ve maliyet gridi
+aynen — LPR-1'in checked-in SHA-256 özeti kıpırdamadı, `COST_MODEL_ID` `…_v5`'te. Testte bu
+"birebir aynı" diye değil, **kontrol ölçülerek** kanıtlanıyor: arada hiç D6 olmadan iki özdeş
+`/api/plan` çağrısı zaten 2 yaprakta (`computation_time_ms`, `corridor_id`), `/api/plan-4d` ise
+8 yaprakta (hepsi milisaniye sayacı) farklı çıkıyor; D6'lı fark tam olarak o kümenin alt kümesi.
+
+### İstek
+
+```jsonc
+{
+  "start": {"row": 358, "col": 494},     // veya {"lon":…, "lat":…}
+  "rover_id": "lpr_1",
+  "start_utc": "2026-09-05T00:00:00",    // ZORUNLU — aşağıdaki nedenle
+  "horizon_hours": 6.0,                  // 0 < h <= 168
+  "slice_hours": null,                   // boş: /api/plan-4d ile AYNI otomatik dilim
+  "coarsen": 4,                          // 1-16
+  "initial_soc_pct": 1.0,                // rover'ın soc_min_pct'inin ALTINDA olamaz
+  "band_hours": null,                    // boş: ufuk band_count eşit parçaya bölünür
+  "band_count": 6,
+  "later_hours": 96.0,                   // "N saat sonra"; tam dilime yuvarlanır
+  "hold_horizon_hours": null,            // boş: yayımlanan dayanımın iki katı
+  "hold_slice_hours": 0.5,
+  "include_grids": true,
+  "max_boundary_cells": 4000
+}
+```
+
+**`weights` alanı YOK ve bu kasıtlı.** Bu modelde erişilebilirliği sert kenar kapıları ve
+batarya belirler; kriter ağırlıkları yalnızca bir sürüşün ne kadar *tatsız* olduğunu fiyatlar
+ve hiçbiri bir bloğu erişilebilir ya da erişilemez yapamaz. Kabul edip yok saymak reddetmekten
+kötü olurdu. Aynı gerekçeyle `risk_alpha` da yok. `extra: "forbid"` — cevap bir **harita**, ve
+yazım hatalı bir alanla çizilmiş harita doğru alanla çizilmiş kadar ikna edici görünürdü.
+
+**`start_utc` neden zorunlu** (`/api/plan-4d`'in aksine): epoch olmadan `build_shadow_series`
+uzun dönem gölge **kesrine** düşer — bir iklimoloji, gökyüzü değil. Onun üstüne çizilen izokron
+araziyi ve bataryayı ölçer ama bugünün haritası gibi görünür, ve "N saat sonra" farkı **tam
+olarak sıfır** çıkar ("küme zamanla sabittir" diye okunur; mümkün olan en güçlü yanlış iddia).
+`/api/plan-4d` statik seriye düşebilir çünkü yine de bir rota döndürür; burada geri düşülecek
+dürüst bir mod yok, o yüzden 422.
+
+### Yanıtın omurgası
+
+```jsonc
+{
+  "start": [358, 494], "start_block": [89, 123], "rover_id": "lpr_1",
+  "model_id": "time_expanded_energy_reachability_v1", "validity": "MODEL",
+
+  "claim":  "…",            // iddia sınırı, yapılandırmasıyla birlikte
+  "scope":  "…",            // durum uzayı, kenarlar, neyin durum DEĞİŞKENİ olmadığı
+  "planner_configuration": {"allow_hibernate": false, "battery_model": "constant", …},
+  "gates_replayed":     ["passability", "corner_cut", "step_slope", "lateral_slope",
+                         "travel_time_finite", "soc_floor", "shadow_endurance", "horizon"],
+  "gates_not_replayed": [{"gate": "cost_infinite", "why": "…", "direction": "enlarges the set"}, …],
+  "conservatism":       {"reachable": "OPTIMISTIC…", "earliest_hours": "PESSIMISTIC…", …},
+  "uncertainty_not_propagated": [{"source": "wheel slip", "modelled_in": "app.slip_model", …}, …],
+  "references": […], "corrections": […], "quoted": {…},
+
+  "grid": {"coarsen": 4, "effective_resolution_m": 20.0, "coarse_shape": [125,125],
+           "blocks": 15625, "traversable_blocks": 11402, "block_area_km2": 0.0004,
+           "shadow_ratio_semantics": "…", "partially_lit_blocks_at_first_slice": 1265},
+  "time": {"start_utc": "…", "horizon_hours": 5.99, "slice_hours": 0.035897,
+           "slice_hours_source": "auto", "n_slices": 168, "arrival_quantum_h": 0.035897},
+  "shadow_model": {"model": "spice_horizon", "time_varying": true, "chunks": 3, …},
+  "battery": {"initial_soc_pct": 1.0, "e_cap_wh": 5420.0, "reserve_wh": 1084.0,
+              "soc_min_pct": 0.2, "h_max_shadow_h": 50.0},
+
+  "reachable": {"blocks": 7453, "area_km2": 2.9812, "fraction_of_traversable": 0.6537,
+                "blocks_per_slice": [1, 4, 9, …],        // büyüme eğrisi
+                "best_soc_pct_upper_max": 100.0, "soc_at_arrival_pct_upper_min": 61.2,
+                "fields_are_independently_optimised": true,
+                "no_single_trajectory_realises_a_row": "…"},
+
+  "energy_binds": false,
+  "refusals": {"soc_floor": 0, "shadow_endurance": 0, "horizon": 133369, "note": "…"},
+
+  "isochrone": {"edges_hours": […], "edges_source": "auto",
+                "bands": [{"band": 0, "from_hours": 0.0, "to_hours": 0.999,
+                           "blocks": 80, "area_km2": 0.032}, …],
+                "beyond_last_edge_blocks": 0,
+                "outlines": [{"band": 0, "cells": [[r,c], …], "truncated": false}, …],
+                "band_time_quantum_h": 0.035897, "band_space_quantum_m": 20.0,
+                "boundary_is_block_lattice": true, "smoothing": "none…",
+                "bands_are_not_polygons": "…"},
+
+  "hold": {"horizon_hours": 100.0, "slice_hours": 0.5, "arrival_resolution_h": 0.5,
+           "limit_codes": {"reserve": 0, "shadow_endurance": 1, "censored": 2, "unreachable": -1},
+           "limited_by_blocks": {"reserve": 4715, "shadow_endurance": 37, "censored": 2624, …},
+           "hold_limit_min_h": 24.0, "hold_limit_max_h": 115.5,
+           "to_reserve_min_h": …, "to_zero_min_h": …, "to_endurance_min_h": …,
+           "censoring": "…"},
+
+  "edges": {"relaxed": 508770, "negative": 23240, "negative_fraction": 0.045679,
+            "groups": 92, "unpaid_idle_mean_h": 0.017823, "unpaid_idle_max_h": 0.035897, …},
+
+  "later": {"requested_later_hours": 96.0, "later_hours": 95.989, "later_slices": 2674,
+            "snapped": true, "start_utc": "…", "shadow_model": {…},
+            "comparison": {"now_blocks": 7362, "later_blocks": 7211, "kept_blocks": 7211,
+                           "gained_by_later_start_blocks": 0, "lost_by_later_start_blocks": 151,
+                           "jaccard": 0.979489, "independent_restart": true,
+                           "question_answered": "…", "question_not_answered": "…"},
+            "isochrone": {…}, "energy_binds": …, "refusals": {…}},
+
+  "grids": {"band_index": [[…]], "earliest_hours": [[…]],
+            "soc_at_arrival_pct_upper": [[…]], "best_soc_pct_upper": [[…]],
+            "hours_to_reserve_upper": [[…]], "hours_to_zero_upper": [[…]],
+            "hours_to_endurance_upper": [[…]],
+            "hold_limit_hours": [[…]], "hold_limited_by": [[…]], "convention": "…"},
+
+  "timing": {"sweep_s": 4.379, "total_s": 9.1, "sweeps": 2},
+  "limits": {…}, "note": "…"
+}
+```
+
+### Çizim sözleşmesi — frontend'in bilmesi gerekenler
+
+**Koordinat.** Bütün `grids.*` alanları **kaba blok** gridinde, satır-major, şekli
+`grid.coarse_shape`. Bir bloğun ince piksel karşılığı `blok * coarsen`; kenar uzunluğu
+`grid.effective_resolution_m`. `/api/plan`'ın `path_pixels`'i İNCE gridde — ikisi aynı katmana
+çizilecekse dönüşüm frontend'in işi, tıpkı `/api/plan-4d`'in `path_pixels_coarse`'ı gibi.
+
+**Boş değer.** `band_index` erişilemez blokta `-1`; bütün float gridlerde aynı bloklar `null`.
+Bir duruş süresinin `null` olması "sonsuz" demek **değildir**, "saat duruş ufku içinde
+dolmadı" demektir (`hold.censoring`). JSON'a hiçbir `NaN`/`Infinity` yazılmaz — Starlette
+`allow_nan=False` ile serileştirir ve tek bir `NaN` bütün ucu anlaşılmaz bir 500'e çevirirdi.
+
+**Bantlar poligon DEĞİLDİR.** `outlines[k].cells` o bandın kenarındaki blokların listesidir:
+sırasız, birleştirilmemiş, halka değil. Doldurup poligona çevirmek, verinin sahip olmadığı bir
+uzamsal **ve** zamansal hassasiyet iddia eder. Sınır kaba blok kafesinin **merdivenidir**
+(`band_space_quantum_m`) ve bant kenarları zamanda dilime kuantize edilmiştir
+(`band_time_quantum_h`). **Yumuşatma yok** ve bu bir eksik değil bir karar: araştırma belgesinin
+önerdiği `skimage.measure.find_contours` yeni bir bağımlılık olurdu ve modelin hiç
+değerlendirmediği araziden geçen bir hat üretirdi.
+
+**Renklendirme.** `band_index`'i doğrudan bir renk rampasına bağlamak doğru kullanımdır.
+`earliest_hours`'ı sürekli bir alan gibi enterpolasyonla boyamak değildir: değerler
+`arrival_quantum_h`'in katlarıdır, çünkü bir hamle `ceil(travel_h / slice_hours)` tam dilim
+ilerletir.
+
+### Okunmadan haritaya bakılmayacak alanlar
+
+1. **`claim` ve `conservatism`.** İki başlık alan **ters yönde** yanılır: `reachable` fazla
+   **büyük** (iki zarf alanı bağımsız optimize edilir ve altı planlayıcı kapısı replay
+   edilmez), `earliest_hours` fazla **geç** (hamle başına bir dilime kadar yukarı yuvarlama).
+   Birbirlerini **götürmezler** — zıt operasyonel kararlara işaret ederler ("daha uzağa git"
+   ile "daha erken çık"), o yüzden `conservatism` her alan için yönü ayrı ayrı söyler.
+
+2. **Güvenli yön tek yöndür.** Kümenin **DIŞINDAKİ** bir blok, bu enerji modelinin "oraya
+   gidemezsin" dediği bloktur. **İÇİNDEKİ** bir blok **adaydır**, söz değildir. Adı `_upper`
+   ile biten her alan bir ÜST SINIRDIR: öncüller üzerinden maksimumdur, tek bir yörüngenin
+   taşıdığı değer değil. Bir blok için yayımlanan şarj ile karanlık saati **farklı**
+   öncüllerden gelebilir (`no_single_trajectory_realises_a_row`).
+
+3. **`energy_binds`.** `false` ise enerji kuralları bu ufukta ve bu şarjda **hiç
+   tetiklenmedi**: sınır saatin kendisidir ve harita bir **kapılı mesafe dönüşümü**dür, enerji
+   izokronu değil. Site11'de dolu bataryayla 12 saatlik ufukta tam olarak böyle. Doğru bir
+   çıktıdır, ama başlığın vaat ettiğinden farklı bir şeydir; `refusals` hangi kuralın kaç kez
+   tetiklendiğini sayar.
+
+4. **`planner_configuration`.** İçerme iddiası **bu** yapılandırmaya karşıdır.
+   `allow_hibernate=true` ile koşan bir `/api/plan-4d` planı bu kümenin dışına **meşru**
+   biçimde çıkabilir: hibernasyon üçüncü bir kenar ailesidir, `p_hibernate_w` ile boşalır ve
+   uyanışta karanlık saatini sıfırlar. İki haritayı yan yana koyan bir ekran bunu yazmalı.
+
+5. **Karanlık saati "saat" değildir.** `astar_4d`'in konvansiyonu: `dark += hours × exposure`.
+   Pozlaması 0,5 olan bir blok saati yarı hızda harcar. Gerçek gridde ölçüldü: dayanımın
+   bağladığı bloklarda duruş süresi **49,5–56,0 saat**, yayımlanan `h_max_shadow_h` ise 50 h.
+
+6. **`hours_to_zero_upper` bir işletme payı DEĞİLDİR.** Rezervin altında bu modelde hiç geçiş
+   yoktur; o sayı batarya fiziğidir. İşletme sayısı `hold_limit_hours` = min(rezerv saati,
+   dayanım saati), ve hangisinin bağladığı `hold_limited_by` ile birlikte gelir. Tam karanlıkta
+   LPR-1 rezerve 66,7 h'te iner ama dayanımı 50 h'tir — yani saf enerji sayısı yanlış saati
+   gösterir.
+
+7. **`grid.shadow_ratio_semantics`.** `coarsen > 1`'de bir bloğun pozlaması, **ikili** bir
+   dilim maskesinin blok **ALAN KESRİDİR**. Rover tek bir ince hücrededir ve ya aydınlıktadır
+   ya değil. LPR-1'in 0,39 başabaş noktası civarında bu ortalama bir sürüş kenarının
+   **işaretini** çevirebilir. Kaç bloğun böyle olduğu `partially_lit_blocks_at_first_slice`.
+
+8. **`later` bağımsız bir yeniden başlangıçtır.** İki sweep de AYNI bloktan, AYNI şarjla
+   başlar; yalnızca epoch değişir. `lost_by_later_start_blocks`, arazinin kaybolması değil,
+   *o saatte yola çıkan* bir rover'ın oraya gidememesidir. "Burada N saat beklersem ne
+   kazanırım?" **başka bir sorudur** ve cevabı zaten temel sweep'in kendi bekleme kenarlarının
+   içindedir — bekleyen rover oraya daha az şarjla varır.
+
+9. **Site11'de saat ölçeği hiçbir şey değiştirmiyor.** +6 h ve +24 h'te aydınlık blok oranı
+   değişiyor (%48,30 → %48,00 → %47,89) ama erişilebilir kümede **tek blok bile** değişmiyor:
+   kutupta aydınlanma ~708 saatlik sinodik döngüyle döner, bir gün döngünün %3'üdür. Etki gün
+   ölçeğinde: +240 h'te pencere karanlığa giriyor ve 7 362 blok 586'ya düşüyor (Jaccard 0,080).
+   Bir "N saat sonra" kaydırıcısı yapılacaksa varsayılanı **saat değil gün** olmalı.
+
+10. **Yayılmayan belirsizlik.** Kayma, DEM hatası, batarya sıcaklığı ve konumlandırma kayması
+    bu backend'de **modelleniyor** ve bu uçta yayılmıyor (`uncertainty_not_propagated` her
+    birini nerede modellendiğiyle adlandırır). Sınırı ne kadar oynattıklarına dair **sayı
+    yayımlanmıyor**, çünkü ölçülmedi. `/api/dem-uncertainty` ve `/api/stress-test` o soruların
+    sorulduğu yerler.
+
+### Ölçülen maliyet (Site11, coarsen 4, 125×125)
+
+| ufuk | dilim | sweep |
+|---:|---:|---:|
+| 3 h | 84 | 2,0 s |
+| 6 h | 168 | 4,4 s |
+| 12 h | 335 | 9,3 s |
+| 24 h | 669 | 19,0 s |
+
+`later_hours` ikinci bir sweep demektir, yani süre iki katına çıkar. `include_grids: false`
+bant tablosunu ve sayıları bırakır — harita önceki bir çağrıdan çiziliyorsa istenen budur.
+Tavanlar `limits` içinde; her 422 sığacak değeri **adıyla** söyler.
+
+---
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,
