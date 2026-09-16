@@ -2,7 +2,7 @@
 
 Two-phase design:
   1. Precompute per-cell cost grid via cost_engine.compute_cost_grid()
-     (multi-criteria: slope, energy, shadow, thermal + AHP weights).
+     (multi-criteria: slope, energy, shadow, thermal + criterion weights).
   2. Run A* with trapezoidal edge interpolation over the cost grid.
 
 Edge cost formula:
@@ -66,7 +66,7 @@ def astar(
         Must contain keys: elevation, slope (or slope_grid), thermal,
         shadow_ratio, traversable, metadata (with resolution_m).
     start, goal : (row, col)
-    weights : optional AHP weight overrides
+    weights : optional criterion weight overrides
     constraints : optional constraint overrides (unused in fast mode,
                   kept for API compat)
 

@@ -95,7 +95,14 @@ def slip_free_view(rover: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
 
 
 def default_weights(rover: Mapping[str, Any] | None = None) -> dict[str, float]:
-    """Return the default AHP weights as a fresh dict."""
+    """Return the rover profile's default criterion weights as a fresh dict.
+
+    Not AHP weights, though this docstring said so until D5: they are the
+    reference document's gradient-normalised expert weights (constants.py,
+    W_ROUGHNESS_DEFAULT comment; doc 11 established the label was wrong).
+    No pairwise comparison matrix and no consistency ratio exists anywhere
+    in this repo, which is what an AHP weight would have to come with.
+    """
     rover_cfg = _resolve_rover(rover)
     return {
         "w_slope": float(rover_cfg["w_slope"]),
@@ -264,7 +271,7 @@ def net_energy_per_metre_wh(
     This is the quantity the energy criterion should always have measured.
     Counting only the draw made the penalty a monotone function of slope --
     measured Spearman correlation with ``f_slope`` was exactly 1.000000 on
-    the production slope distribution, so a quarter of the AHP weight vector
+    the production slope distribution, so a quarter of the weight vector
     could rescale the cost but never reorder two cells. Subtracting the solar
     term is what makes shadow a first-class input: a flat LIT cell costs the
     battery nothing at all, a flat DARK one costs 0.39 of the worst case, and
@@ -368,14 +375,14 @@ def f_energy_cell(
     [0.00026, 0.00074] while slope/shadow/thermal ranged over [0.02, 1.0].
     Weighted at 0.259 it contributed 0.04% of cell cost -- sweeping w_energy
     from 0.0 to 2.0 returned the byte-identical route, so a quarter of the
-    AHP weight vector decided nothing. This is the same collapse
+    weight vector decided nothing. This is the same collapse
     :func:`f_shadow_cell` documents for the shadow term, which was fixed
     there and missed here. (Backend review, #1.)
 
     Round 3 review, H-4: fixing that left a subtler problem. The repaired
     term read SLOPE ONLY, and so did ``f_slope`` -- measured Spearman
     correlation between the two penalties on the production slope
-    distribution was exactly 1.000000. Two of the four AHP criteria were
+    distribution was exactly 1.000000. Two of the four weighted criteria were
     therefore the same ordering under different curves, and
     ``w_slope + w_energy`` (0.668 of the default weight vector) expressed
     one preference rather than two. Energy now reads shadow as well,
@@ -1163,7 +1170,7 @@ def compute_cost_grid(
             * f_slope_grid(slope, rover_cfg, risk_alpha=risk_alpha, slope_sigma=slope_sigma)
             # Reads shadow as well as slope now: without it the energy layer
             # was a monotone restatement of the slope layer and two of the
-            # four AHP criteria decided the same thing. (Round 3, H-4.)
+            # four weighted criteria decided the same thing. (Round 3, H-4.)
             + resolved["w_energy"]
             * f_energy_cell_grid(
                 slope, rover_cfg, shadow, risk_alpha=risk_alpha, slope_sigma=slope_sigma

@@ -339,7 +339,7 @@ def default_cost_map(
     risk_alpha: float | None = None,
     roughness_scale: RoughnessScale | None = None,
 ) -> CostMap:
-    """The four AHP criteria, wired to the rover's weight profile -- plus the
+    """The four weighted criteria, wired to the rover's weight profile -- plus the
     measured roughness criterion (C4) when its scale is given.
 
     *layer_validity* is the ``metadata["layer_validity"]`` mapping; when
