@@ -134,6 +134,17 @@ def _steps() -> list[Step]:
             note="Indirme yok, tamamen lokal hesap.",
         ),
         Step(
+            key="diviner",
+            title="C5 - Diviner PRP (termal dogrulama referansi)",
+            argv=[py, str(_SCRIPTS / "build_diviner_prp_cache.py")],
+            produces=[
+                _PROCESSED / "diviner_prp.npz",
+                _PROCESSED / "diviner_prp_meta.json",
+            ],
+            network=True,
+            note="PDS Geosciences, LRO-L-DLRE-5-PRP-V2.0. 605 MB ham indirme.",
+        ),
+        Step(
             key="benchmark",
             title="D2 - MoonPlanBench occupancy haritalari",
             argv=[py, str(_SCRIPTS / "build_moonplanbench_cache.py")],

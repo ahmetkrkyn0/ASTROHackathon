@@ -68,9 +68,10 @@ Cunningham, Nesnas and Whittaker (RSS 2017; Autonomous Robots 2019) showed
 with Curiosity data that low thermal inertia (loose sand) predicts high
 slip better than appearance does. LunaPath's counterpart would scale the
 anchors by a Diviner-derived thermal-inertia proxy. That product is not
-available locally (``scripts/diviner_validation.py`` says how to fetch it;
-``thermal_grid.npy`` is SYNTHETIC), so :func:`thermal_inertia_slip_scale`
-is a SIGNATURE that refuses to run, not a factor that looks applied.
+available locally: ``scripts/build_diviner_prp_cache.py`` fetches the PRP,
+but that product carries annual max/average temperature, not thermal
+inertia. So :func:`thermal_inertia_slip_scale` is a SIGNATURE that refuses
+to run, not a factor that looks applied.
 
 The replan trigger
 ------------------
@@ -508,18 +509,21 @@ def thermal_inertia_slip_scale(
     anchors (Cunningham, Nesnas, Whittaker; RSS 2017: low thermal inertia,
     loose sand, high slip).
 
-    A signature, not a model. LunaPath has no measured thermal-inertia
-    layer: ``thermal_grid.npy`` is SYNTHETIC and no Diviner product is on
-    disk, so this refuses rather than return a factor that would read as
-    applied. Fetch the Diviner Polar Resource Products
-    (``LRO-L-DLRE-5-PRP-V2.0``; see ``scripts/diviner_validation.py``),
+    A signature, not a model. LunaPath has no thermal-inertia layer at
+    all: ``thermal_grid.npy`` holds a Heat1D-modelled sunlit peak (validity
+    DERIVED once shadow is folded in -- it is only SYNTHETIC when heat1d is
+    unavailable and the fallback runs), and the Diviner PRP C5 caches
+    carries annual max/average temperature, not inertia. So this refuses
+    rather than return a factor that would read as applied. Fetch the
+    Diviner Polar Resource Products
+    (``LRO-L-DLRE-5-PRP-V2.0``; see ``scripts/build_diviner_prp_cache.py``),
     derive a night-temperature / thermal-inertia proxy, and implement the
     scaling here with its own validity label.
     """
     raise NotImplementedError(
         "thermal-inertia modulation of slip needs a measured Diviner thermal "
         "inertia (or night temperature) layer; none is available locally. "
-        "See scripts/diviner_validation.py for the product to fetch "
+        "See scripts/build_diviner_prp_cache.py for the product to fetch "
         "(LRO-L-DLRE-5-PRP-V2.0)."
     )
 

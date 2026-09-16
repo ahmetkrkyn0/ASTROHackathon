@@ -371,6 +371,7 @@ the catalogue, so a reader can find every number nobody has verified.
 | **NASA PGDA (product 78)** | 100 DEM clones of Site11 | Elevation uncertainty ensemble |
 | **NAIF SPICE** | Generic kernels | Sun and Earth geometry for a given UTC |
 | **Yale BSC5** | Bright Star Catalogue, 9,096 stars | The real sky in the 3-D view |
+| **PDS Geosciences** | Diviner Polar Resource Product (`LRO-L-DLRE-5-PRP-V2.0`) | Thermal validation reference (C5) |
 | **MoonPlanBench** | 36 occupancy maps (Chancán et al. 2025) | Independent external benchmark |
 
 Licensing is taken seriously: the project is MIT, so every dependency and
@@ -470,11 +471,19 @@ python scripts/setup_caches.py --only roughness,clones # just these
 | `roughness` | LOLA roughness + PSR mask | 5th cost criterion, PSR validation | ✔ |
 | `clones` | NASA DEM clone ensemble | Uncertainty, CVaR risk appetite | ✔ |
 | `thermal` | Thermal envelope (heat1d) | Thermal dwell constraint |  |
+| `diviner` | Diviner Polar Resource Product | Thermal validation report (C5) | ✔ |
 | `benchmark` | MoonPlanBench maps | External benchmark comparison | ✔ |
 | `rtamt` | STL cross-check engine (optional) | Second opinion on the safety monitor | ✔ |
 
 Each step runs as its own process, so one failure — a download that times
 out, a product that moved — does not take the rest down.
+
+**Thermal validation (C5) is off unless its cache exists.** Without
+`diviner_prp.npz`, `scripts/validate_thermal.py` writes nothing and exits 2,
+and `test_thermal_validation_real_grid.py` skips — deliberately, because a
+validation that invents its reference is worse than one that does not run.
+Build it with `python scripts/setup_caches.py --only diviner` (605 MB from
+PDS), then `python scripts/validate_thermal.py`.
 
 **SPICE kernels** are separate and needed for real Sun/Earth geometry:
 

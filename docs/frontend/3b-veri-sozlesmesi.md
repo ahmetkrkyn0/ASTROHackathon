@@ -1932,6 +1932,72 @@ kontrol rozeti (`quoted_pct` ↔ `predicted_pct`); hibernasyonlu rotalarda `beyo
 Her sayının yanında `validity: MODEL` ve ilgili `*_source` dizesi (hepsi `"assumption:"` ile başlar).
 
 
+## C5 eki — Diviner PRP termal doğrulaması (API yüzeyi DEĞİŞMEDİ)
+
+**Bu ek hiçbir alan eklemiyor, kaldırmıyor ya da anlamını değiştirmiyor.** C5 bir doğrulama
+özelliğidir: yeni bir uç, yeni bir yanıt alanı ve yeni bir bayrak yoktur. Burada yazılmasının
+sebebi, frontend'in **zaten gönderdiği** iki sayının artık ölçülmüş bir hata bandı taşıyor
+olmasıdır — arayüzün bunu gösterme seçeneği doğsun diye.
+
+**Değişmeyenler, açıkça:** `layer_validity`, `weakest_validity`, `X-Layer-Validity` başlığı,
+`thermal` ve `thermal_min` katmanlarının değerleri, `COST_MODEL_ID` (`…_v5`), maliyet gridi
+(LPR-1'in checked-in SHA-256 özeti kıpırdamadı) ve dolayısıyla **her rota**. Termal katman
+**hâlâ `DERIVED`**; iyi bir RMSE etiketi yükseltmez.
+
+### Ölçülen hata bandı (kaynak: `docs/research/thermal_validation_report.md`)
+
+Referans: **LRO Diviner Polar Resource Product**, `LRO-L-DLRE-5-PRP-V2.0`. PDS kataloğunun
+kendi ifadesiyle *"thermal model fits to first mapping year Diviner polar observations"*,
+CODMAC Level 5 — yani **ham ölçüm değil, ölçüme oturtulmuş model**. Arayüzde "Diviner'a karşı
+doğrulandı" değil, "Diviner PRP ile karşılaştırıldı" denmelidir.
+
+| Karşılaştırılan | Bizim alan | RMSE | Bias | Spearman | n |
+|---|---|---|---|---|---|
+| PRP `temp_max` ↔ Site11 penceresi | `thermal` (gölge eşlenmiş yıllık tepe) | **39,4 °C** | −23,2 °C | 0,457 | **49 faset** |
+| PRP `temp_max` ↔ Site11 penceresi | gölgesiz sunlit peak | 37,4 °C | −10,4 °C | 0,290 | 49 faset |
+| PRP `temp_max` ↔ heat1d LUT (enlem eşlenmiş) | LUT'un kendisi | 55,3 °C | −4,4 °C | 0,811 | **5 009 faset** |
+
+**n'i gizlemeyin.** Site11 penceresi 2,5 km × 2,5 km; PRP'nin üçgen kenarı ~544 m. Hücrelerimizi
+örten 71 fasetin **22'si pencere kenarında kırpılıyor** (en küçüğü %2 örtme) ve bir fasetin
+`temp_max`'ı **bütün** üçgenini anlattığı için bunlar ölçümden çıkarıldı; geriye
+**49 karşılaştırılabilir faset** kalıyor ve RMSE'nin %95 güven aralığı **32,9 – 49,1 °C**
+gibi geniştir. (Süzgeçsiz hâli daha iyi görünür — 35,5 °C — ama kırpılmış fasetlerle
+karşılaştırma benzemeyen şeyleri karşılaştırmaktır; rapor üç eşiği de yayımlıyor.)
+Arayüz tek bir "±39 °C" rozeti gösterecekse yanında n ve aralık da görünmelidir; yoksa rozet
+olduğundan kesin okunur.
+
+### Gösterilebilecek çapraz kontrol rozeti
+
+C1'in `viper_corner_check` ve C2'nin `jsc_survival_temperature_check` rozetleriyle **aynı
+desende** bir üçüncüsü var: `cold_trap_area_check`. Williams vd. (2019) 80°S'nin kutup
+tarafındaki soğuk tuzak alanını **1,3×10⁴ km²** olarak yayımlıyor; biz aynı sayıyı PRP'nin
+kendi üçgen köşelerinden yeniden türetiyoruz:
+
+| | Değer |
+|---|---|
+| Williams'ın yayımladığı (ONLARIN) | 13 000 km² |
+| PRP v2'den bizim türettiğimiz (BİZİM aritmetik) | **14 749 km²** |
+| Fark | **+%13,4** |
+
+Bu bir hata değil, **iki farklı yayımlanmış ürün** arasındaki farktır (Williams 240 m/px
+mevsimsel haritalar; PRP v2 ~544 m Kaguya ağı) ve rozette öyle yazılmalıdır.
+
+### Gösterilmemesi gerekenler
+
+- **"Gece minimumu" sayısı yok.** Williams'ın 240 m/px mevsimsel minimum haritaları diskte
+  değil ve PRP onların yerine geçemez: PRP'nin iki sıcaklık sütunu yüzeyde **yıllık
+  maksimum** ve 2 cm derinlikte **yıllık ortalama**dır; hiçbiri mevsimsel minimum değildir.
+  Rapor bu bölümü `unavailable` + gerekçe olarak döndürür. Arayüz de boş bırakmalıdır.
+- **PRP'nin `ice_depth` sütunu** modellenmiş bir üründür, ölçüm değil; karşılaştırmaya
+  girmemiştir ve gösterilmemelidir.
+
+> **Frontend'e not (kod değişmediği için burada duruyor):** bakı (`aspect`) referans çerçevesi
+> için raporda bir **bulgu** var — heat1d `slope_az`'ı gerçek kuzeyden sayıyor, bizim
+> `aspect_grid`'imiz grid kuzeyinden; pencere boylamında fark ~72,7°. Ölçülen etkisi LUT
+> RMSE'sinde 55,3 → 53,9 °C. C5 bunu **düzeltmedi** (düzeltmek her rotayı değiştirirdi), ama
+> termal sayıların yanında "MODEL / UNCALIBRATED" etiketi gösterilmeye devam etmelidir.
+
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,
