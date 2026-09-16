@@ -421,3 +421,263 @@ def test_edge_clipped_facets_exist_and_are_excluded_from_the_headline(
         "including sliver facets flattered the RMSE; if this ever reverses, "
         "re-derive which subset is the honest one before changing the threshold"
     )
+
+
+# ── the six findings the adversarial review raised, pinned on real data ──────
+
+
+def _aspect_bins(slope_deg, aspect_deg, n_slope=13, n_aspect=16, slope_max=30.0):
+    """Heat1DModel.surface_temperature_c's nearest-bin rule, verbatim."""
+    clipped = np.clip(np.nan_to_num(slope_deg, nan=0.0), 0.0, slope_max)
+    si = np.rint(clipped / slope_max * (n_slope - 1)).astype(np.int64)
+    wrapped = np.mod(np.nan_to_num(aspect_deg, nan=0.0), 360.0)
+    ai = np.mod(np.rint(wrapped / 360.0 * n_aspect).astype(np.int64), n_aspect)
+    return si * n_aspect + ai
+
+
+def _multivalued_bins(values, keys):
+    """How many (slope, aspect) bins hold more than one distinct temperature."""
+    order = np.argsort(keys, kind="stable")
+    k, v = keys[order], np.round(values[order], 6)
+    edges = np.flatnonzero(np.diff(k)) + 1
+    return sum(
+        1 for group in np.split(v, edges) if group.size and np.unique(group).size > 1
+    )
+
+
+@pytest.fixture(scope="module")
+def band(grids, prp):
+    """The latitude band section 2 compares, with the LUT recovered correctly."""
+    from pyproj import CRS, Transformer
+
+    from app.ephemeris import true_north_grid_azimuth
+    from app.illumination_series import _window_centre_latlon
+
+    metadata = grids["metadata"]
+    lat_deg, lon_deg = _window_centre_latlon(metadata)
+    delta = float(true_north_grid_azimuth(lat_deg, lon_deg, metadata["crs"]))
+
+    slope_grid = np.asarray(grids["slope"], dtype=np.float64).ravel()
+    aspect_grid = np.asarray(grids["aspect"], dtype=np.float64).ravel()
+    thermal = np.asarray(grids["thermal_sunlit_peak"], dtype=np.float64).ravel()
+
+    # Recover the table the way the fixed script does: bin on the aspect
+    # heat1d was actually handed. Every bin then holds one value, so the
+    # "most common value" reduction the script uses is just that value.
+    keys = _aspect_bins(slope_grid, np.mod(aspect_grid - delta, 360.0))
+    table = np.full(13 * 16, np.nan)
+    for key in np.unique(keys):
+        sample = thermal[keys == key]
+        sample = sample[np.isfinite(sample)]
+        if sample.size:
+            table[key] = float(sample[0])
+
+    geographic = CRS.from_proj4(
+        f"+proj=lonlat +R={PRP_QUOTED['a_axis_radius_km'] * 1000.0:.1f} +no_defs"
+    )
+    to_geographic = Transformer.from_crs(
+        CRS.from_wkt(metadata["crs"]), geographic, always_xy=True
+    )
+    x, y = grid_cell_centres(metadata)
+    _, window_lat = to_geographic.transform(x.ravel(), y.ravel())
+    lat = prp["lat_deg"].astype(np.float64)
+    inside = (lat >= float(window_lat.min())) & (lat <= float(window_lat.max()))
+
+    facet_slope = prp["slope_deg"].astype(np.float64)[inside]
+    facet_aspect = prp["aspect_true_deg"].astype(np.float64)[inside]
+    modelled = table[_aspect_bins(facet_slope, facet_aspect)]
+    return {
+        "delta": delta,
+        "table": table,
+        "modelled": modelled,
+        "reference_c": kelvin_to_c(prp["temp_max_k"].astype(np.float64)[inside]),
+        "lon": prp["lon_deg"].astype(np.float64)[inside],
+    }
+
+
+def test_the_shipped_thermal_grid_is_already_in_the_true_north_frame(grids):
+    """Finding 4. The recovery frame is measurable, and the old claim was wrong.
+
+    ``make_thermal_grid`` rotates grid-frame aspect into heat1d's true-north
+    frame before calling it, so every shipped cell is
+    ``table[slope, aspect_grid - delta]``. If that holds, grouping the
+    shipped grid by (slope bin, ROTATED aspect bin) leaves every bin holding
+    exactly one value -- the table entry -- while grouping by the raw aspect
+    bin does not, because the rotation is not a whole number of 22.5 degree
+    bins.
+
+    That is what makes the report's earlier claims wrong: the thermal grid
+    IS bit-reproducible, and the rotation scan's minimum was measuring the
+    validation script's own recovery frame, not a bug in make_aspect_grid.
+    """
+    from app.ephemeris import true_north_grid_azimuth
+    from app.illumination_series import _window_centre_latlon
+
+    metadata = grids["metadata"]
+    lat_deg, lon_deg = _window_centre_latlon(metadata)
+    delta = float(true_north_grid_azimuth(lat_deg, lon_deg, metadata["crs"]))
+    assert not np.isclose(delta % 22.5, 0.0, atol=1e-6), (
+        "a rotation of a whole number of aspect bins would make the two "
+        "framings indistinguishable and this test vacuous"
+    )
+
+    slope = np.asarray(grids["slope"], dtype=np.float64).ravel()
+    aspect = np.asarray(grids["aspect"], dtype=np.float64).ravel()
+    thermal = np.asarray(grids["thermal_sunlit_peak"], dtype=np.float64).ravel()
+
+    true_frame = _multivalued_bins(
+        thermal, _aspect_bins(slope, np.mod(aspect - delta, 360.0))
+    )
+    raw_frame = _multivalued_bins(thermal, _aspect_bins(slope, aspect))
+
+    assert true_frame == 0, (
+        "the shipped grid must be a pure function of (slope, aspect - delta); "
+        "the recovery frame in scripts/validate_thermal.py rests on this"
+    )
+    assert raw_frame > 100, (
+        "binning on the raw aspect must be visibly wrong, otherwise the "
+        "correction this test guards would be unobservable"
+    )
+
+
+def test_the_band_comparison_splits_at_the_table_floor(band):
+    """Finding 2. A pooled bias over two opposite-signed populations is not a bias."""
+    from app.thermal_validation import split_at_model_floor
+
+    split = split_at_model_floor(
+        band["modelled"], band["reference_c"], float(np.nanmin(band["table"]))
+    )
+    assert split["n_below_floor"] > 0, "no split means nothing to report"
+    assert split["below_floor"]["bias_c"] > 0.0, (
+        "a facet colder than the table's coldest entry has a POSITIVE residual "
+        "by construction -- the model cannot reach it at all"
+    )
+    assert split["at_or_above_floor"]["bias_c"] < 0.0
+    # the pooled number resembles neither population it is made of
+    assert abs(split["pooled"]["bias_c"]) < 0.25 * abs(
+        split["at_or_above_floor"]["bias_c"]
+    )
+    # and a small minority carries most of the squared error
+    assert split["pct_below_floor"] < 25.0
+    assert split["sse_share_below_floor_pct"] > 50.0
+
+
+def test_the_band_residuals_break_the_chi_square_interval(band):
+    """Finding 3. Measure the dependence, and measure the control that isolates it."""
+    from app.thermal_validation import (
+        lag_autocorrelation,
+        rmse_ci95,
+        rmse_ci95_block_bootstrap,
+    )
+
+    residual = band["modelled"] - band["reference_c"]
+    finite = np.isfinite(residual)
+    ordered = residual[finite][np.argsort(band["lon"][finite])]
+
+    acf = lag_autocorrelation(ordered, lags=(1, 20))
+    assert acf[1] > 0.4 and acf[20] > 0.3, (
+        "these residuals are spatially dependent; if they ever stop being so, "
+        "the chi-square interval becomes admissible again and this test should "
+        "be re-derived rather than relaxed"
+    )
+
+    chi_square = rmse_ci95(ordered)
+    blocked = rmse_ci95_block_bootstrap(ordered, n_blocks=50)
+    control = rmse_ci95_block_bootstrap(
+        np.random.default_rng(0).permutation(ordered), n_blocks=50
+    )
+    assert (blocked[1] - blocked[0]) > 4.0 * (chi_square[1] - chi_square[0])
+    # the control is the proof: destroy the order and the widening goes away
+    assert (control[1] - control[0]) < 0.3 * (blocked[1] - blocked[0])
+
+
+def test_b_is_not_measurably_worse_than_a_in_the_window(grids, window_facets):
+    """Finding 5. Two RMSEs over one facet set are paired, and the gap is noise."""
+    from app.thermal_validation import paired_rmse_difference
+
+    sunlit = np.asarray(grids["thermal_sunlit_peak"], dtype=np.float64)
+    shadow = np.asarray(grids["shadow_ratio"], dtype=np.float64)
+    near_size = window_facets["near"].size
+    assignment = window_facets["assignment"]
+    reference = window_facets["reference_c"]
+
+    a, counts = aggregate_to_facets(sunlit, assignment, near_size, how="mean")
+    b, _ = aggregate_to_facets(
+        np.asarray(annual_peak_c(sunlit, shadow), dtype=np.float64),
+        assignment,
+        near_size,
+        how="mean",
+    )
+    coverage = facet_coverage_fraction(
+        counts, window_facets["area_km2"], grids["metadata"]["resolution_m"]
+    )
+    keep = (counts > 0) & (coverage >= 0.5)
+
+    paired = paired_rmse_difference(a[keep] - reference[keep], b[keep] - reference[keep])
+    assert paired["rmse_b_c"] > paired["rmse_a_c"], "the point estimates do differ"
+    assert not paired["interval_excludes_zero"], (
+        "the paired interval spans zero, so 'B's RMSE is worse than A's' is "
+        "not a measurement and no causal story may rest on it"
+    )
+    assert paired["difference_ci95_c"][0] < 0.0 < paired["difference_ci95_c"][1]
+
+
+def test_the_coldest_reference_facet_is_not_a_permanently_shadowed_one(
+    grids, window_facets
+):
+    """Finding 6. The PRP's window minimum is a FACET; our floor is a CELL."""
+    sunlit = np.asarray(grids["thermal_sunlit_peak"], dtype=np.float64)
+    shadow = np.asarray(grids["shadow_ratio"], dtype=np.float64)
+    near_size = window_facets["near"].size
+    assignment = window_facets["assignment"]
+    reference = window_facets["reference_c"]
+
+    modelled, counts = aggregate_to_facets(
+        np.asarray(annual_peak_c(sunlit, shadow), dtype=np.float64),
+        assignment,
+        near_size,
+        how="mean",
+    )
+    coverage = facet_coverage_fraction(
+        counts, window_facets["area_km2"], grids["metadata"]["resolution_m"]
+    )
+    used = (counts > 0) & (coverage >= 0.5)
+
+    flat = assignment.ravel()
+    assigned = flat >= 0
+    never_lit = (shadow >= 1.0).ravel()
+    per_facet = np.bincount(flat[assigned], minlength=near_size)
+    dark = np.bincount(
+        flat[assigned],
+        weights=never_lit[assigned].astype(np.float64),
+        minlength=near_size,
+    )
+    fraction = np.where(per_facet > 0, dark / np.maximum(per_facet, 1), np.nan)
+
+    coldest = int(np.nanargmin(np.where(used, reference, np.nan)))
+    assert fraction[coldest] < 0.05, (
+        "the facet the report calls the coldest in the window is essentially "
+        "fully lit, so it is not evidence about a permanently shadowed floor"
+    )
+    assert int(np.nansum(fraction[used] >= 1.0)) == 0, (
+        "no compared facet is entirely permanently shadowed at this mesh "
+        "resolution -- that is the finding, not that our 90 K floor is wrong"
+    )
+    # our own cold tail, put on the reference's support, is nowhere near 90 K
+    our_facet_min_k = float(np.nanmin(modelled[used])) + 273.15
+    assert our_facet_min_k > PSR_ANNUAL_MAX_K + 30.0
+    assert our_facet_min_k < float(np.nanmin(reference[used])) + 273.15
+
+
+def test_the_provenance_block_describes_the_cache_it_is_printed_with(prp, prp_meta):
+    """Finding 1. The meta and the npz are written separately and must agree."""
+    from app.thermal_validation import check_prp_provenance
+
+    assert check_prp_provenance(prp_meta, prp["lat_deg"]) == []
+
+    stale = dict(prp_meta, n_triangles=7, lat_range_deg=[11.0, 22.0])
+    problems = check_prp_provenance(stale, prp["lat_deg"])
+    assert len(problems) == 2, (
+        "a meta describing a 7-triangle cache must not pass beside a "
+        f"{prp['lat_deg'].size:,}-triangle npz"
+    )

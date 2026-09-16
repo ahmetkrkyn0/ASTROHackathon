@@ -146,16 +146,23 @@ Uygulama sırasında tasarımdan ayrılan noktalar:
 1. **LUT karşılaştırması için heat1d yeniden koşulmadı.** Tablo gönderilen gridden
    geri kazanıldı (her hücre zaten bir tablo girdisi; kutu başına mod alındı). 12–15
    dakikalık bir yeniden kurulum yerine bedava, ve **planlayıcının gerçekten okuduğu**
-   tabloyu verir. Sadakati ölçüldü ve rapora yazıldı (%22,96 hücre tutmuyor, en büyük
-   fark 5,89 °C, hep komşu kutu).
+   tabloyu verir. Sadakati ölçüldü ve rapora yazıldı.
+   **Düzeltme (17 Eylül 2026):** ilk hâlde geri kazanım **ham** `aspect_grid` üzerinde
+   binliyordu ve %22,96 hücre tutmuyordu. `make_thermal_grid` bakıyı heat1d'e vermeden
+   önce gerçek kuzeye döndürdüğü için doğru binleme `aspect_grid − Δ` (Δ = 287,3279°);
+   onunla uyuşmazlık **%0,00**, çok-değerli kutu **0**.
 2. **Enlem şeridi pencerenin kendi enlem aralığına kilitlendi** (±0,05° değil, tam
    pencere aralığı). Gerekçe: −88,9°'de Güneş'in maksimum yüksekliği enlemle hızla
    değişiyor; geniş bir şerit tabloyu başka bir aydınlanmaya karşı koyardı.
-3. **Döndürme taraması 15° yerine 5° adımla.** 15°'te minimum 285–300 arasında
-   belirsizdi; 5° onu 295°'e oturttu ve öngörülen daldan 7,7° uzakta olduğunu gösterdi.
-4. **Yakınsamanın işareti tarama tarafından seçildi.** Büyüklük geometriden geliyor
-   (72,67°) ama işaret CRS'in eksen konvansiyonuna bağlı; iki dal da yazıldı ve
-   hangisinin olduğunu ölçümün söylemesine izin verildi.
+3. **Döndürme taraması 15° yerine 5° adımla.** Sonucun yorumu **geri çekildi
+   (17 Eylül 2026):** «5° minimumu 295°'e oturttu ve öngörülen daldan 7,7° uzakta»
+   cümlesi, taramanın aslında geri kazanımın kendi çerçeve hatasını ölçtüğünü
+   bilmeden yazılmıştı. Çerçeve-doğru tabloyla minimum sıfıra geçiyor; 295° artık
+   **kontrol** satırı olarak duruyor.
+4. ~~**Yakınsamanın işareti tarama tarafından seçildi.**~~ **Geçersiz:** seçilecek bir
+   işaret yoktu. Δ = 287,3279° doğrudan `ephemeris.true_north_grid_azimuth`'tan geliyor
+   ve boru hattı onu zaten uyguluyor; tarama onu yeniden keşfetmiyordu, betiğin onu
+   atlamasını telafi ediyordu.
 5. **Bir API ucu eklenmedi.** Tasarımda "isteğe bağlı" olarak duruyordu; C5'in ürettiği
    şey bir rapor, bir çalışma zamanı katmanı değil. Uç eklemek `layer_validity`
    yüzeyine dokunmayı gerektirirdi ve bu, bit-eşitlik iddiasını gereksizce

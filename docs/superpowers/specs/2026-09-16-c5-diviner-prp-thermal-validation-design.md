@@ -213,10 +213,13 @@ büyüklüktür; hangisiyle karşılaştırıldığı adlandırılmadan sayı ve
 
 ---
 
-## Bakı (aspect) referans çerçevesi — ölçülen bir bulgu, düzeltilmeyen bir kusur
+## Bakı (aspect) referans çerçevesi — ÖNCÜL YANLIŞTI, düzeltildi (17 Eylül 2026)
+
+> **Bu bölümün ilk hâli yanlıştı ve aşağıda duruyor.** Boru hattının bir kusuru
+> sanılan şey, doğrulama betiğinin kendi kusuruydu. Düzeltme kaydı için bırakıldı.
 
 PRP üçgeninin **normali**nden eğim ve bakı hesaplanabilir, dolayısıyla LUT'u doğrudan
-faset geometrisine karşı sınamak mümkün. Ama bir referans-çerçeve sorunu var:
+faset geometrisine karşı sınamak mümkün. İlk hâlde varsayılan referans-çerçeve sorunu:
 
 - heat1d'in `slope_az` parametresi, kurulu paketin docstring'inde birebir:
   *"Slope azimuth in **radians**, clockwise from north (0 = N, pi/2 = E)"* — yani **gerçek**
@@ -224,19 +227,43 @@ faset geometrisine karşı sınamak mümkün. Ama bir referans-çerçeve sorunu 
 - Bizim `make_aspect_grid` (`lunapath/src/process_lunar_data.py:275`)
   `degrees(arctan2(-dx, dy))` hesaplıyor; bu **grid** koordinatlarında bir açıdır.
 - Polar stereografik projeksiyonda (merkez meridyen 0) grid kuzeyi ile gerçek kuzey,
-  boylam kadar ayrışır. Pencere boylamı **−72,67°**, yani ayrışma ~72,7° — 22,5°'lik
-  bakı kutularında **~3,2 kutu**.
+  boylam kadar ayrışır. Pencere boylamı **−72,67°**, yani ayrışma ~72,7°.
 
-**Bunun büyüklüğü ölçüldü (sonda 3):** LUT'ta sabit eğimde bakıya bağlı yayılım **28,4 °C**'ye
-kadar çıkıyor (2,5° eğimde), 30° eğimde 6,0 °C'ye iniyor. Sabit bakıda eğime bağlı yayılım
-**189,9 °C**. Yani eğim baskın, ama bakı ihmal edilebilir değil ve bir çerçeve dönmesi
-10–28 °C mertebesinde hata taşır — yayımlayacağımız RMSE ile **aynı mertebede**.
+**İlk iki madde doğru, üçüncüsünden çıkarılan sonuç yanlıştı.** `make_aspect_grid`
+gerçekten grid çerçevesinde üretiyor, ama `make_thermal_grid`
+(`lunapath/src/process_lunar_data.py:397`) heat1d'e göndermeden **önce**
+`ephemeris.grid_azimuth_to_true_azimuth` ile döndürüyor. Yani sevk edilen
+`thermal_grid.npy` = `table[eğim, bakı − Δ]`, Δ = **287,3279°**, ve grid gerçek-kuzey
+çerçevesinde **doğru**.
 
-**C5 bunu DÜZELTMEZ.** Düzeltmek `aspect_grid`'i değiştirmek, dolayısıyla `thermal_grid`'i,
-dolayısıyla maliyet gridini ve her rotayı değiştirmek demektir — bu bir kalibrasyon/hata
-düzeltmesidir, ayrı bir özelliktir. C5 onu **ölçer, adlandırır ve rapora bulgu olarak yazar**.
-LUT karşılaştırması bu yüzden iki biçimde sunulur: bakıyı marjinalleştirerek (yalnız eğim
-kutuları — çerçeveden bağımsız) ve bakıyı dâhil ederek (çerçeve varsayımı açıkça yazılı).
+**Ölçüm (17 Eylül 2026):** sevk edilen termal gridi `(eğim kutusu, bakı kutusu)` ile
+grupladığımızda —
+
+| Binleme çerçevesi | Uyuşmazlık | Çok-değerli kutu |
+|---|---|---|
+| `aspect_grid` (ham — betiğin ilk hâli) | %22,96 | 182 |
+| `aspect_grid − Δ` | **%0,00** | **0** |
+
+250 000 hücrenin tamamı birebir. Bu, üç ayrı yanlış iddiayı aynı anda düşürüyor:
+
+1. «Termal grid en-yakın-kutu kuralıyla **bit-eşit yeniden üretilemiyor**, nedeni
+   saptanmadı» — üretiliyor; neden `validate_thermal.py`'nin ham çerçevede
+   binlemesiydi.
+2. «5°'lik tarama minimumu **295°**, yakınsamanın −dalına 7,7°; çerçeve uyuşmazlığı
+   gerçek ve öngörülen büyüklükte» — tarama, betiğin **kendi** geri kazanım hatasının
+   telafisini ölçüyordu. Çerçeve-doğru tabloyla minimum sıfıra (5° adımda 5°'ye)
+   geçiyor ve 287–295° bölgesi **en kötü** yer oluyor.
+3. «C5 bunu düzeltmez, düzeltmek her rotayı değiştirir» — düzeltilecek bir şey yoktu;
+   düzeltme betikte kaldı ve **hiçbir grid, maliyet ya da rota değişmedi**.
+
+**Sabit eğimde bakıya bağlı yayılım ölçümü (sonda 3) geçerliliğini koruyor:** **28,4 °C**'ye
+kadar (2,5° eğimde), 30° eğimde 6,0 °C. Sabit bakıda eğime bağlı yayılım **189,9 °C**.
+Yani bakı ihmal edilebilir değil — ama bu, bir çerçeve hatası olduğunu değil, olsaydı
+pahalı olacağını gösterir.
+
+LUT karşılaştırması yine iki biçimde sunuluyor: bakıyı marjinalleştirerek (yalnız eğim
+kutuları — her azimut konvansiyonundan bağımsız) ve bakıyı dâhil ederek (çerçeve artık
+**varsayım değil, ölçülmüş**).
 
 ---
 
@@ -299,8 +326,10 @@ kalır. `layer_validity` ve `weakest_validity` **değişmez** — C4'ün kararı
 ## Kapsam dışı (ve nedeni)
 
 - **Modeli PRP'ye kalibre etmek.** Ayrı özellik; yapılırsa yayımlanmış her ölçüm geçersizleşir.
-- **`aspect_grid`'in referans çerçevesini düzeltmek.** Gerçek bir bulgu, ama düzeltmesi her
-  rotayı değiştirir; C5 ölçer ve yazar.
+- ~~**`aspect_grid`'in referans çerçevesini düzeltmek.**~~ **Düşürüldü (17 Eylül 2026):**
+  düzeltilecek bir kusur yoktu. `make_thermal_grid` dönüşümü zaten uyguluyor; kusur
+  `validate_thermal.py`'nin geri kazanım çerçevesindeydi ve orada düzeltildi. Hiçbir
+  grid, maliyet ya da rota değişmedi. Yukarıdaki bakı bölümüne bakınız.
 - **Pencereyi değiştirmek.** `(2400, 2500)` proje düzeyinde ayrı bir karar.
 - **`ice_depth` sütunu.** Modellenmiş bir ürün, ölçüm değil.
 - **Kuzey kutbu tablosu.** Site11 güneyde.
@@ -328,9 +357,12 @@ iki tarafta da 1 737 400 m → **datum kaydırması yok**. Pencere `(2400, 2500)
 **Sonda 3 — bakı ne kadar önemli?** LUT gönderilen gridden geri kazanıldı. Sabit eğimde
 bakıya bağlı yayılım **28,41 °C**'ye kadar (2,5° eğimde), 30°'de 6,02 °C'ye iniyor; sabit
 bakıda eğime bağlı yayılım **189,92 °C**. Eğim ~7× baskın **ama bakı ihmal edilebilir
-değil** — ve pencere boylamındaki 72,67°'lik çerçeve dönmesi 10–28 °C mertebesinde hata
-taşır, yani yayımlayacağımız RMSE ile **aynı mertebede**. Düz hücre tepesi **−146,37 °C**,
+değil** — 72,67°'lik bir çerçeve dönmesi 10–28 °C mertebesinde hata taşırdı, yani
+yayımlayacağımız RMSE ile **aynı mertebede**. Düz hücre tepesi **−146,37 °C**,
 C6'nın bağımsız heat1d ölçümü −146,4 °C ile uyuşuyor.
+*(17 Eylül 2026 eki: o dönme boru hattında **yok** — `make_thermal_grid` onu zaten
+uyguluyor. Sonda 3'ün ölçtüğü duyarlılık geçerli; ondan çıkarılan "grid yanlış çerçevede"
+sonucu geçersiz. Bakı bölümüne bakınız.)*
 
 **Sonda 4 — pencerede kaç PRP üçgeni var?** Medyan üçgen alanı **0,1279 km²**, eşdeğer
 kenar **544 m**. 2,5 km × 2,5 km = 6,25 km² → merkezi pencerede olan **50** üçgen,
@@ -351,7 +383,11 @@ SHA-256 `393deaa5…`, etiketin `210 × (2 880 000 + 1)` hesabıyla **birebir**.
 |---|---|---|
 | Site11 penceresi, ortalama toplulaştırma, örtme ≥ %50 | 49 faset | A 37,44 / **B 39,43** / C 72,11 °C RMSE |
 | Site11 penceresi, maksimum toplulaştırma | 49 faset | A/B bias **+62…63 °C** (yanlış eşdeğer, gösterilerek) |
-| LUT, enlem eşlenmiş, bakı çözümlenmiş | 5 009 faset | RMSE 55,30 °C, bias −4,35, ρ **0,811** |
+| ~~LUT, enlem eşlenmiş, bakı çözümlenmiş~~ | ~~5 009 faset~~ | ~~RMSE 55,30 / bias −4,35 / ρ 0,811~~ |
+| LUT, çerçeve düzeltilmiş — **havuzlanmış** | 4 989 faset | RMSE 53,87, bias −4,36, ρ 0,829 |
+| — modelin **üretebildiği** arazi | 4 328 faset | RMSE 29,67, bias **−23,46**, ρ 0,944 |
+| — modelin **üretemediği** arazi (PRP < −146,37 °C) | 661 faset (%13,2) | RMSE 127,05, bias **+120,69**; kare hatanın **%73,7**'si |
+| LUT, RMSE %95 GA — blok bootstrap (kontrollü) | 4 989 faset | **44,1–64,6 °C** (ki-kare 52,8–55,0 **geçersiz**) |
 | LUT, bakı marjinalleştirilmiş | 13 eğim kutusu | Spearman **1,000** |
 | Soğuk tuzak alanı | 112 757 üçgen | **14 749,1 km²** ↔ Williams'ın 1,3×10⁴ (**+%13,4**) |
 | Gece minimumu | — | **`unavailable`** + gerekçe |
@@ -375,32 +411,43 @@ yayımlamak, C5'in tam olarak kaçınmak için var olduğu türden bir iyimserli
 
 ### Hangi aday doğru eşleşme
 
-**B** (`annual_peak_c`) — planlayıcının okuduğu alan ve istatistik eşleşmesi odur. A'nın
-daha küçük RMSE'si (37,44 ↔ 39,43) gölge eşlemesinin **yönünü** değil PSR tabanının
-**değerini** suçluyor: B'nin sıra korelasyonu belirgin biçimde daha iyi (0,457 ↔ 0,290),
-yani eşleme hücreleri doğru **sıraya** sokuyor, ama soğuk kuyruğu yanlış **yere** koyuyor.
+**B** (`annual_peak_c`) — planlayıcının okuduğu alan ve istatistik eşleşmesi odur. B'nin
+sıra korelasyonu belirgin biçimde daha iyi (0,457 ↔ 0,290), yani eşleme hücreleri doğru
+**sıraya** sokuyor.
 
-### İki yeni bulgu (ikisi de düzeltilmedi)
+> **Düzeltildi (17 Eylül 2026).** İlk hâl «A'nın daha küçük RMSE'si (37,44 ↔ 39,43) PSR
+> tabanının değerini suçluyor» diyordu. O 1,99 °C'lik fark bir ölçüm **değil**: aynı 49
+> fasette eşleşmiş bootstrap **[−4,05, +7,48]** veriyor (sıfırı içeriyor, yeniden
+> örneklemelerin %76'sı), ve işaret örtme ≥ %90'da **dönüyor** (−0,21 °C). Karar artık
+> RMSE sıralamasına değil **tanım eşleşmesine** dayandırılıyor.
 
-1. **Bakı referans çerçevesi.** heat1d `slope_az`'ı gerçek kuzeyden, biz grid kuzeyinden
-   sayıyoruz; ayrışma 72,67°. 5°'lik tarama minimumu **295°** — yakınsamanın −dalına
-   **7,7°**, öteki dala 137,7°. Büyüklük geometriden, **işaret ölçümden** doğrulandı.
-   Kazanç küçük: 55,30 → 53,87 °C (%2,6); tarama 53,9–58,7 °C arasında. Çerçeve, toplam
-   uyuşmazlığın çoğunu **açıklamıyor**.
-2. **PSR tabanı iki yönlü yanlış.** 90 K; Site11 penceresinde PRP'nin en soğuğu 161,5 K
-   (**71 K fazla soğuğuz**, 16 253 hücre oraya çakılıyor), ama 88°S kutup tarafında
-   fasetlerin **%16,30**'u 90 K'nin **altında** (en soğuğu 28,4 K). Tek sabit, PRP'nin
-   26,8–348,7 K yayılımını temsil edemiyor.
+### İki yeni bulgu
 
-### Beklenmedik 2: LUT bit-eşit yeniden üretilemiyor
+1. ~~**Bakı referans çerçevesi.**~~ **İddia geri çekildi (17 Eylül 2026).** 295°'lik
+   tarama minimumu `make_aspect_grid`'i değil, `validate_thermal.py`'nin kendi geri
+   kazanım çerçevesini ölçüyordu. Boru hattı dönüşümü zaten uyguluyor. Ayrıntı yukarıdaki
+   bakı bölümünde.
+2. **PSR tabanı iki yönlü yanlış** — ama birinci yön yeniden ifade edildi.
+   88°S kutup tarafında fasetlerin **%16,30**'u 90 K'nin **altında** (en soğuğu 28,4 K);
+   tek sabit, PRP'nin 26,8–348,7 K yayılımını temsil edemiyor. **Bu yön sağlam.**
+   Site11 penceresi yönü ise ölçek karıştırıyordu: 90 K bir **5 m hücre** değeri,
+   161,5 K bütün bir **fasetin** yıllık maksimumu, ve o faset penceredeki hücrelerimizin
+   yalnız **%0,2**'si kadar kalıcı gölge içeriyor — bir PSR faseti değil. Aynı desteğe
+   indirilince (aynı hücreler, aynı fasetler, ortalama) bizim en soğuk fasetimiz
+   **134,8 K**: fark **71 K değil ~27 K**. 161,5 K, tabanımızın yanlışlığının değil,
+   544 m'lik örgünün bu pencerede hiçbir kalıcı gölgeli faset **çözemediğinin** ölçüsü.
 
-Geri kazanılan tablo eğim/bakı gridlerine yeniden uygulandığında hücrelerin **%22,96**'sı
-tutmuyor, en büyük fark **5,89 °C**, farklar hep **komşu kutu** değerleri. Yani gönderilen
-`thermal_grid.npy`, diskteki `slope_grid.npy`/`aspect_grid.npy`'den belgelenmiş
-en-yakın-kutu kuralıyla üretilemiyor. **Nedeni saptanmadı.** Gridlerin termal gridden
-sonra yeniden üretilmiş olması bu büyüklükle tutarlı olurdu, ama bu bir **hipotez**,
-ölçüm değil — ve C5'in işi değil. RMSE'lerin yanında ≤6 °C'lik kutu-kenarı gürültüsü
-küçük olduğu için sonuçları geçersizleştirmiyor; yazıldı.
+### Beklenmedik 2: LUT bit-eşit yeniden üretilemiyor — ÇÖZÜLDÜ
+
+İlk hâl: geri kazanılan tablo yeniden uygulandığında hücrelerin **%22,96**'sı tutmuyordu,
+en büyük fark **5,89 °C**, ve **nedeni saptanmamıştı**; hipotez "gridler termal gridden
+sonra yeniden üretilmiş olabilir" idi.
+
+**Neden saptandı (17 Eylül 2026): hipotez yanlıştı, hata geri kazanımdaydı.** Tablo ham
+`aspect_grid` üzerinde binleniyordu; oysa sevk edilen değer `table[eğim, bakı − Δ]`.
+`aspect_grid − Δ` ile binlendiğinde uyuşmazlık **%0,00**, çok-değerli kutu **0** — 250 000
+hücre birebir. Yani `thermal_grid.npy` belgelenmiş en-yakın-kutu kuralıyla diskteki
+gridlerden **tam olarak üretilebiliyor**.
 
 ### Kaynakta bulunan üç uyumsuzluk
 
