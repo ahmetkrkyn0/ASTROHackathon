@@ -58,14 +58,27 @@ from app.thermal_validation import (  # noqa: E402
     WILLIAMS_QUOTED,
     aggregate_to_facets,
     assign_cells_to_facets,
+    check_prp_provenance,
     cold_trap_area_check,
     compare_candidates,
     error_statistics,
     facet_coverage_fraction,
     grid_cell_centres,
     kelvin_to_c,
+    lag_autocorrelation,
+    paired_rmse_difference,
+    rmse_ci95_block_bootstrap,
     spearman_rho,
+    split_at_model_floor,
 )
+
+
+class ProvenanceMismatch(RuntimeError):
+    """The cached npz and its meta file describe different builds.
+
+    Raised rather than reported, because the failure mode is a report that
+    prints one build's SHA-256 above another build's statistics and exits 0.
+    """
 
 _PROCESSED = _ROOT / "lunapath" / "data" / "processed"
 _ABSOLUTE_ZERO_C_LOCAL = -273.15
@@ -97,17 +110,34 @@ def _f(value, digits=3):
 
 
 def load_inputs(processed: Path) -> dict:
+    """Open everything the report needs, and refuse a mismatched PRP pair.
+
+    ``diviner_prp.npz`` and ``diviner_prp_meta.json`` are written by two
+    separate steps with a 605 MB SHA-256 between them, and neither records
+    the other's identity. Loading them as independent objects -- which is
+    what this did -- lets the report publish the meta's byte count, checksum
+    and triangle count as the provenance of numbers computed from a
+    different npz. Measured: doctoring the meta to 1,234 B / 7 triangles /
+    latitude 11-22 degrees left every statistic correct, printed the false
+    provenance line, and exited 0. So the pair is checked here, once, before
+    anything is measured.
+    """
     metadata = json.loads((processed / "metadata.json").read_text(encoding="utf-8"))
+    prp = np.load(processed / "diviner_prp.npz")
+    prp_meta = json.loads(
+        (processed / "diviner_prp_meta.json").read_text(encoding="utf-8")
+    )
+    problems = check_prp_provenance(prp_meta, prp["lat_deg"])
+    if problems:
+        raise ProvenanceMismatch("; ".join(problems))
     return {
         "metadata": metadata,
         "sunlit_peak": np.load(processed / "thermal_grid.npy"),
         "shadow_ratio": np.load(processed / "shadow_ratio_grid.npy"),
         "slope": np.load(processed / "slope_grid.npy"),
         "aspect": np.load(processed / "aspect_grid.npy"),
-        "prp": np.load(processed / "diviner_prp.npz"),
-        "prp_meta": json.loads(
-            (processed / "diviner_prp_meta.json").read_text(encoding="utf-8")
-        ),
+        "prp": prp,
+        "prp_meta": prp_meta,
     }
 
 
@@ -300,11 +330,13 @@ def measure_window(inputs: dict) -> dict:
     coverage = facet_coverage_fraction(cell_counts, area_km2[near], resolution)
 
     results: dict[str, dict] = {}
+    aggregated_by_how: dict[str, dict] = {}
     for how in ("mean", "max"):
         aggregated = {
             name: aggregate_to_facets(field, assignment, near.size, how=how)[0]
             for name, field in candidates.items()
         }
+        aggregated_by_how[how] = aggregated
         by_threshold: dict[str, dict] = {}
         for threshold in COVERAGE_THRESHOLDS:
             keep = (cell_counts > 0) & (coverage >= threshold)
@@ -317,6 +349,40 @@ def measure_window(inputs: dict) -> dict:
 
     counts = cell_counts
     used = (counts > 0) & (coverage >= float(PRIMARY_COVERAGE))
+
+    # A and B are two models scored on ONE set of facets, so whether B is
+    # really worse is a PAIRED question. Two marginal intervals read side by
+    # side cannot answer it, and the point estimates alone invite a causal
+    # story the sample may not support -- so the paired bootstrap is
+    # computed at every threshold and published beside the table.
+    mean_aggregated = aggregated_by_how["mean"]
+    paired_a_vs_b: dict[str, dict | None] = {}
+    for threshold in COVERAGE_THRESHOLDS:
+        keep = (cell_counts > 0) & (coverage >= threshold)
+        paired_a_vs_b[f"{threshold:.2f}"] = paired_rmse_difference(
+            mean_aggregated["A_thermal_sunlit_peak"][keep] - reference_c[keep],
+            mean_aggregated["B_thermal_annual_peak"][keep] - reference_c[keep],
+        )
+
+    # How much permanently shadowed ground does a Diviner facet here even
+    # contain? This is the support question behind the PSR floor comparison:
+    # our floor is a 5 m CELL value and the PRP's coldest facet is a
+    # ~0.128 km^2 FACET value, and the report used to subtract one from the
+    # other. Measured per facet so the two can be compared on one support.
+    never_lit = np.asarray(inputs["shadow_ratio"], dtype=np.float64) >= 1.0
+    flat_assignment = assignment.ravel()
+    assigned = flat_assignment >= 0
+    cells_per = np.bincount(flat_assignment[assigned], minlength=near.size)
+    dark_per = np.bincount(
+        flat_assignment[assigned],
+        weights=never_lit.ravel()[assigned].astype(np.float64),
+        minlength=near.size,
+    )
+    never_lit_fraction = np.where(
+        cells_per > 0, dark_per / np.maximum(cells_per, 1), np.nan
+    )
+    coldest = int(np.nanargmin(np.where(used, reference_c, np.nan))) if used.any() else -1
+    our_b_facet = mean_aggregated["B_thermal_annual_peak"]
     return {
         "n_facet_centres_inside_window": int(inside.sum()),
         "n_facets_considered": int(near.size),
@@ -356,6 +422,42 @@ def measure_window(inputs: dict) -> dict:
             else None,
         },
         "by_aggregation": results,
+        "paired_a_vs_b": paired_a_vs_b,
+        "never_lit_cells_in_window": int(never_lit.sum()),
+        "never_lit_area_km2": float(
+            never_lit.sum() * resolution**2 / 1e6
+        ),
+        "window_area_km2": float(rows * cols * resolution**2 / 1e6),
+        "facet_area_km2_median": float(np.median(area_km2[near])),
+        "never_lit_fraction_in_compared_facets": {
+            "min": float(np.nanmin(never_lit_fraction[used])) if used.any() else None,
+            "median": float(np.nanmedian(never_lit_fraction[used]))
+            if used.any()
+            else None,
+            "max": float(np.nanmax(never_lit_fraction[used])) if used.any() else None,
+            "n_over_half": int(np.nansum(never_lit_fraction[used] > 0.5))
+            if used.any()
+            else None,
+            "n_fully_dark": int(np.nansum(never_lit_fraction[used] >= 1.0))
+            if used.any()
+            else None,
+        },
+        "coldest_compared_facet": {
+            "prp_temp_max_k": float(reference_c[coldest] - _ABSOLUTE_ZERO_C_LOCAL),
+            "never_lit_fraction": float(never_lit_fraction[coldest]),
+            "coverage": float(coverage[coldest]),
+            "n_cells": int(cell_counts[coldest]),
+        }
+        if coldest >= 0
+        else None,
+        # Our own cold tail put on the reference's support: the same cells,
+        # averaged over the same facets. This is the number the PRP's facet
+        # minimum can honestly be subtracted from.
+        "our_annual_peak_facet_min_k": float(
+            np.nanmin(our_b_facet[used]) - _ABSOLUTE_ZERO_C_LOCAL
+        )
+        if used.any()
+        else None,
     }
 
 
@@ -363,12 +465,53 @@ def measure_window(inputs: dict) -> dict:
 
 
 def measure_lookup_table(inputs: dict) -> dict:
+    """Recover heat1d's table from the shipped grid and compare it to the PRP.
+
+    The recovery has to bin on the aspect heat1d was actually handed, not on
+    the aspect grid as it sits on disk. ``make_thermal_grid`` rotates the
+    grid-frame aspect into the true-north frame heat1d's ``slope_az``
+    expects (``process_lunar_data.py``, via
+    ``ephemeris.grid_azimuth_to_true_azimuth``), so the shipped value at a
+    cell is ``table[slope, aspect_grid - delta]``. Binning on the raw aspect
+    instead smears each table entry across two neighbouring aspect bins and
+    hands back a table rotated by delta.
+
+    Measured on Site11, delta = 287.3279 degrees: binning on
+    ``aspect_grid - delta`` reconstructs thermal_grid.npy **exactly** --
+    0.00% of cells disagree, 0 bins hold more than one value -- while
+    binning on the raw aspect leaves 22.96% disagreeing across 182
+    multivalued bins. That is the whole of the "not bit-reproducible"
+    puzzle, and it lived in this script, not in the pipeline.
+
+    It matters beyond tidiness. A table recovered in the raw frame satisfies
+    ``raw(slope, a) = heat1d(slope, a - delta)``, and section 2b then samples
+    it at the PRP's TRUE-north aspect -- two different frames. The rotation
+    scan below duly finds its minimum where that is undone, at ``+delta``
+    (measured: 295 degrees on a 5-degree grid, against delta = 287.3279).
+    Reading that minimum as evidence of a frame bug in ``make_aspect_grid``
+    was a false attribution: the agreement was exact rather than
+    coincidental, but what it measured was this script.
+    """
+    from app.ephemeris import true_north_grid_azimuth
+    from app.illumination_series import _window_centre_latlon
+
     metadata = inputs["metadata"]
     prp = inputs["prp"]
+
+    centre_lat, centre_lon = _window_centre_latlon(metadata)
+    delta = float(true_north_grid_azimuth(centre_lat, centre_lon, metadata["crs"]))
+    aspect_grid = np.asarray(inputs["aspect"], dtype=np.float64)
     recovered = recover_lookup_table(
-        inputs["sunlit_peak"], inputs["slope"], inputs["aspect"]
+        inputs["sunlit_peak"], inputs["slope"], np.mod(aspect_grid - delta, 360.0)
     )
     table = recovered["table_c"]
+
+    # The frame the script used to bin in, kept as a measurement rather than
+    # a claim: it is what produced the "cause not determined" mismatch and
+    # the 295-degree rotation minimum in the first published report.
+    raw_frame = recover_lookup_table(
+        inputs["sunlit_peak"], inputs["slope"], aspect_grid
+    )
 
     from pyproj import CRS, Transformer
 
@@ -386,17 +529,46 @@ def measure_lookup_table(inputs: dict) -> dict:
     band = (lat >= lat_low) & (lat <= lat_high)
     slope = prp["slope_deg"].astype(np.float64)[band]
     aspect = prp["aspect_true_deg"].astype(np.float64)[band]
+    band_lon = prp["lon_deg"].astype(np.float64)[band]
     reference_c = kelvin_to_c(prp["temp_max_k"].astype(np.float64)[band])
 
     modelled = evaluate_lookup_table(table, slope, aspect)
     aspect_resolved = error_statistics(modelled, reference_c)
 
-    # Frame-independent view: marginalise aspect away entirely. Our grid's
-    # aspect is measured in GRID coordinates while heat1d documents slope_az
-    # as clockwise from TRUE north, and the two differ by the meridian
-    # convergence (~72.7 deg at this longitude). Binning by slope alone is
-    # immune to that, so it is the comparison that does not rest on an
-    # unverified convention.
+    # A lookup table has a coldest entry. Every facet the PRP reports below
+    # it is terrain this model cannot produce at all, so its residual is
+    # positive by construction; pooling those with the rest is what makes a
+    # large one-sided error read as "near unbiased". All three populations
+    # are published, and so is the share of squared error the unreachable
+    # one carries.
+    floor_split = split_at_model_floor(modelled, reference_c, float(np.nanmin(table)))
+
+    # Is the chi-square interval in `aspect_resolved` even admissible here?
+    # It needs independent residuals. Neighbouring facets in an annulus
+    # share terrain, so the honest answer is measured: autocorrelation along
+    # longitude, a moving-block bootstrap that respects it, and the same
+    # bootstrap on a permuted copy as the control that separates real
+    # dependence from an artefact of blocking.
+    residual = modelled - reference_c
+    finite = np.isfinite(residual)
+    ordered = residual[finite][np.argsort(band_lon[finite])]
+    shuffled = np.random.default_rng(0).permutation(ordered)
+    dependence = {
+        "autocorrelation_along_longitude": {
+            str(k): v for k, v in lag_autocorrelation(ordered).items()
+        },
+        "rmse_ci95_blocks_50_c": rmse_ci95_block_bootstrap(ordered, n_blocks=50),
+        "rmse_ci95_blocks_25_c": rmse_ci95_block_bootstrap(ordered, n_blocks=25),
+        "rmse_ci95_blocks_50_permuted_c": rmse_ci95_block_bootstrap(
+            shuffled, n_blocks=50
+        ),
+    }
+
+    # Frame-independent view: marginalise aspect away entirely. The frame is
+    # now established rather than assumed -- the recovery above reproduces
+    # the shipped grid exactly in the true-north frame -- but binning by
+    # slope alone still rests on one assumption fewer, so it is kept as the
+    # comparison that survives any azimuth convention at all.
     edges = np.linspace(0.0, LUT_SLOPE_MAX_DEG, LUT_N_SLOPE + 1)
     by_slope = []
     table_slope_mean = np.nanmean(table, axis=1)
@@ -424,26 +596,48 @@ def measure_lookup_table(inputs: dict) -> dict:
 
     # How much of the disagreement could an aspect rotation explain? Scanning
     # it is a DIAGNOSTIC, not a fit: nothing downstream is changed by the
-    # answer. If the best offset lands near the meridian convergence, that is
-    # evidence the grid-vs-true-north frame mismatch is real and costly.
-    rotation_scan = []
-    for offset in range(0, 360, 5):
-        rotated = evaluate_lookup_table(table, slope, np.mod(aspect + offset, 360.0))
-        residual = rotated - reference_c
-        residual = residual[np.isfinite(residual)]
-        rotation_scan.append(
-            {
-                "offset_deg": offset,
-                "rmse_c": float(np.sqrt(np.mean(residual**2))) if residual.size else None,
-            }
-        )
-    valid_scan = [r for r in rotation_scan if r["rmse_c"] is not None]
-    best = min(valid_scan, key=lambda r: r["rmse_c"]) if valid_scan else None
+    # answer. Now that the table is recovered in the frame heat1d was handed,
+    # a minimum AT ZERO is the expected result and the confirmation that the
+    # two sides are in one frame. The same scan is run against the
+    # raw-frame table as a control, because its minimum is the artefact that
+    # was previously published as a finding about make_aspect_grid.
+    def _scan(source: np.ndarray) -> list[dict]:
+        out = []
+        for offset in range(0, 360, 5):
+            rotated = evaluate_lookup_table(
+                source, slope, np.mod(aspect + offset, 360.0)
+            )
+            residual = rotated - reference_c
+            residual = residual[np.isfinite(residual)]
+            out.append(
+                {
+                    "offset_deg": offset,
+                    "rmse_c": float(np.sqrt(np.mean(residual**2)))
+                    if residual.size
+                    else None,
+                }
+            )
+        return out
+
+    def _best(scan: list[dict]) -> dict | None:
+        valid = [r for r in scan if r["rmse_c"] is not None]
+        return min(valid, key=lambda r: r["rmse_c"]) if valid else None
+
+    rotation_scan = _scan(table)
+    best = _best(rotation_scan)
+    best_raw_frame = _best(_scan(raw_frame["table_c"]))
 
     return {
         "recovered_lut": {
             k: v for k, v in recovered.items() if k not in ("table_c", "counts")
         },
+        "recovered_lut_raw_frame": {
+            k: v for k, v in raw_frame.items() if k not in ("table_c", "counts")
+        },
+        "aspect_frame_delta_deg": delta,
+        "best_rotation_raw_frame": best_raw_frame,
+        "aspect_resolved_split": floor_split,
+        "residual_dependence": dependence,
         "lut_table_c": table.tolist(),
         "latitude_band_deg": [lat_low, lat_high],
         "n_facets_in_band": int(band.sum()),
@@ -464,11 +658,15 @@ def measure_lookup_table(inputs: dict) -> dict:
         "rotation_scan": rotation_scan,
         "best_rotation": best,
         # Magnitude of the grid-north / true-north separation across the
-        # window. For a polar stereographic projection the meridian
-        # convergence is the longitude difference from the central meridian
-        # (0 here), so |mean longitude| is that angle. Reported unsigned:
-        # the sign depends on the axis convention in the CRS's WKT, and the
-        # rotation scan above measures the direction empirically anyway.
+        # window, from geometry alone: for a polar stereographic projection
+        # the meridian convergence is the longitude difference from the
+        # central meridian (0 here), so |mean longitude| is that angle.
+        #
+        # Kept as a cross-check on `aspect_frame_delta_deg`, which comes
+        # from ephemeris.true_north_grid_azimuth and is what the pipeline
+        # actually applies: 360 - 287.3279 = 72.672 against 72.669 here.
+        # It is NOT evidence of a frame mismatch -- the report used to read
+        # it that way, and the shipped grid is already rotated by it.
         "window_mean_longitude_deg": float(
             np.mean(to_geographic.transform(x.ravel(), y.ravel())[0])
         ),
@@ -517,6 +715,19 @@ def measure_psr_floor(inputs: dict, window: dict) -> dict:
         "prp_window_min_k": window["reference_temp_max_c"]["min"] is not None
         and float(window["reference_temp_max_c"]["min"]) - _ABSOLUTE_ZERO_C_LOCAL
         or None,
+        # The floor is a 5 m CELL value; the PRP's window minimum is a whole
+        # FACET's modelled annual maximum. Subtracting one from the other
+        # compares unlike things -- this report's own section 1 says so --
+        # so our cold tail is also carried here on the reference's support:
+        # the same cells, averaged over the same facets.
+        "our_facet_min_k": window.get("our_annual_peak_facet_min_k"),
+        "coldest_compared_facet": window.get("coldest_compared_facet"),
+        "never_lit_fraction_in_compared_facets": window.get(
+            "never_lit_fraction_in_compared_facets"
+        ),
+        "never_lit_area_km2": window.get("never_lit_area_km2"),
+        "window_area_km2": window.get("window_area_km2"),
+        "facet_area_km2_median": window.get("facet_area_km2_median"),
         "prp_band_min_k": float(temp_max_k[band].min()) if band.any() else None,
         "prp_poleward88_min_k": float(temp_max_k[poleward_88].min()),
         "prp_below_floor_pct_poleward88": float(
@@ -619,13 +830,14 @@ def measure(processed: Path, williams_dir: Path | None) -> dict:
 # ── rendering ───────────────────────────────────────────────────────────────
 
 
-def _stats_row(name: str, stats: dict) -> str:
+def _stats_row(name: str, stats: dict, code: bool = True) -> str:
     interval = stats.get("rmse_ci95_c")
     interval_text = (
         "—" if not interval else f"{_f(interval[0], 1)} – {_f(interval[1], 1)}"
     )
+    label = f"`{name}`" if code else name
     return (
-        f"| `{name}` | {_f(stats.get('rmse_c'), 2)} | {interval_text} | "
+        f"| {label} | {_f(stats.get('rmse_c'), 2)} | {interval_text} | "
         f"{_f(stats.get('bias_c'), 2)} | {_f(stats.get('mae_c'), 2)} | "
         f"{_f(stats.get('spearman'), 3)} | {_f(stats.get('n_compared'))} |"
     )
@@ -635,6 +847,7 @@ def render(data: dict) -> str:
     prp_meta = data["prp_meta"]
     window = data["window"]
     lut = data["lookup_table"]
+    split = lut["aspect_resolved_split"]
     cold = data["cold_traps"]
     night = data["night_minimum"]
     psr = data["psr_floor"]
@@ -674,6 +887,12 @@ def render(data: dict) -> str:
         f"SHA-256 `{prp_meta['raw_sha256']}`, "
         f"{prp_meta['n_triangles']:,} üçgen, "
         f"enlem {prp_meta['lat_range_deg'][0]:.3f}…{prp_meta['lat_range_deg'][1]:.3f}°.",
+        "",
+        "Bu künye **ölçülen `.npz` ile karşılaştırıldı** (üçgen sayısı ve enlem "
+        "aralığı); tutmasaydı rapor yazılmaz, `validate_thermal.py` 2 dönerdi. "
+        "Önceden iki dosya bağımsız açılıyordu ve künye hiç denetlenmiyordu: "
+        "meta'yı 1 234 B / 7 üçgen / enlem 11–22° yapıp denedik, bütün sayılar "
+        "doğru kaldı, sahte künye basıldı ve betik 0 döndü. Artık dönmüyor.",
         "",
         "---",
         "",
@@ -771,21 +990,53 @@ def render(data: dict) -> str:
         f"korelasyonu A'dan belirgin biçimde daha iyi "
         f"({_f(_primary_mean['B_thermal_annual_peak']['spearman'], 3)} ↔ "
         f"{_f(_primary_mean['A_thermal_sunlit_peak']['spearman'], 3)}) — "
-        "yani gölge eşlemesi hücreleri **doğru sıraya** sokuyor. Ama B'nin RMSE'si "
-        f"A'dan **daha kötü** "
-        f"({_f(_primary_mean['B_thermal_annual_peak']['rmse_c'], 2)} ↔ "
-        f"{_f(_primary_mean['A_thermal_sunlit_peak']['rmse_c'], 2)} °C) "
-        "ve soğuk yönde iki katına yakın bias taşıyor "
+        "yani gölge eşlemesi hücreleri **doğru sıraya** sokuyor. B'nin bias'ı ise "
+        "soğuk yönde A'nınkinin iki katına yakın "
         f"({_f(_primary_mean['B_thermal_annual_peak']['bias_c'], 2)} ↔ "
-        f"{_f(_primary_mean['A_thermal_sunlit_peak']['bias_c'], 2)} °C). "
-        "Nedeni aşağıdaki PSR tabanıdır, ve bu bir kusurdur, bir tercih değil.",
+        f"{_f(_primary_mean['A_thermal_sunlit_peak']['bias_c'], 2)} °C); nedeni "
+        "aşağıdaki PSR tabanıdır.",
         "",
+    ]
+    _paired = window.get("paired_a_vs_b", {}).get(primary)
+    if _paired:
+        _flip = {
+            t: b
+            for t, b in window.get("paired_a_vs_b", {}).items()
+            if b and b["difference_c"] * _paired["difference_c"] < 0.0
+        }
+        lines += [
+            "**RMSE farkı bir ölçüm değil — eşleşmiş test öyle diyor.** A ile B aynı "
+            f"**{_paired['n']}** fasette puanlanıyor, yani soru eşleşmiş bir sorudur; "
+            "iki ayrı marjinal aralığı yan yana okumak onu yanıtlamaz. Fasetler "
+            "yeniden örneklenip iki RMSE birlikte hesaplandığında fark "
+            f"**{_paired['difference_c']:+.2f} °C**, %95 aralığı "
+            f"**[{_paired['difference_ci95_c'][0]:+.2f}, "
+            f"{_paired['difference_ci95_c'][1]:+.2f}]** — **sıfırı içeriyor**, ve "
+            f"yeniden örneklemelerin yalnızca %{100 * _paired['share_b_worse']:.0f}"
+            "'sında B gerçekten daha kötü çıkıyor."
+            + (
+                " Üstelik işaret örtme eşiğiyle **dönüyor** ("
+                + ", ".join(
+                    f"≥ %{float(t) * 100:.0f}: {b['difference_c']:+.2f} °C"
+                    for t, b in sorted(_flip.items())
+                )
+                + ")."
+                if _flip
+                else ""
+            ),
+            "",
+            "Bu yüzden rapor \"B'nin RMSE'si A'dan daha kötü\" **demiyor** ve o farkın "
+            "üstüne bir neden kurmuyor. Kurulabilecek tek şey şudur: ölçebildiğimiz "
+            "yerde ikisi arasında **RMSE farkı yok**, sıralama farkı **var**.",
+            "",
+        ]
+    lines += [
         "**Karar:** karşılaştırmanın doğru tarafı **B**'dir — planlayıcının okuduğu "
-        "alan odur ve istatistik eşleşmesi odur. A'nın daha küçük RMSE'si, gölge "
-        "eşlemesinin **yönünü** değil, PSR tabanının **değerini** suçlar: gölgeyi hiç "
-        "uygulamamak, bu pencerede yanlış bir tabanla uygulamaktan tesadüfen daha az "
-        "hata veriyor. Doğru okuma \"A daha iyi model\" değil, \"B'nin soğuk kuyruğu "
-        "fazla soğuk\"tur.",
+        "alan odur ve istatistik eşleşmesi odur. Bu karar RMSE sıralamasına değil, "
+        "**tanım eşleşmesine** dayanıyor: PRP `temp_max` aydınlanma dâhil bir yıllık "
+        "maksimumdur, bizde karşılığı `annual_peak_c`'dir. A'nın gölgeyi hiç görmemesi "
+        "onu daha iyi bir model yapmaz; bu pencerede RMSE'sinin küçük çıkması da "
+        "ayırt edilebilir bir üstünlük değildir.",
         "",
         "---",
         "",
@@ -803,8 +1054,10 @@ def render(data: dict) -> str:
         f"| Bizim tabanımız | {psr['our_floor_k']:.0f} K |",
         f"| Penceredeki hiç aydınlanmayan hücre sayısı | "
         f"{psr['n_never_lit_cells_in_window']:,} |",
-        f"| PRP'nin penceredeki en soğuk `temp_max`'ı | "
+        f"| PRP'nin penceredeki en soğuk `temp_max`'ı (**faset**) | "
         f"{_f(psr['prp_window_min_k'], 1)} K |",
+        f"| Bizim en soğuk fasetimiz (**aynı destek**: aynı hücreler, faset ort.) | "
+        f"{_f(psr['our_facet_min_k'], 1)} K |",
         f"| PRP'nin enlem şeridindeki en soğuk `temp_max`'ı | "
         f"{_f(psr['prp_band_min_k'], 1)} K |",
         f"| PRP'nin 88°S kutup tarafındaki en soğuğu | "
@@ -819,12 +1072,31 @@ def render(data: dict) -> str:
         "",
         "**İki yönlü bir bulgu, ve ikisi de yazılmalı:**",
         "",
-        f"1. **Site11 penceresinde taban fazla soğuk.** PRP'nin penceredeki en soğuk "
-        f"faseti {_f(psr['prp_window_min_k'], 1)} K; bizim tabanımız "
-        f"{psr['our_floor_k']:.0f} K, yani yaklaşık "
-        f"**{_f((psr['prp_window_min_k'] or 0) - psr['our_floor_k'], 0)} K daha soğuk**. "
-        f"Penceredeki {psr['n_never_lit_cells_in_window']:,} hiç-aydınlanmayan hücre "
-        "bu tabana çakıldığı için B adayının bias'ı A'nınkinin iki katına çıkıyor.",
+        f"1. **Site11 penceresinde taban fazla soğuk — ama aynı destekte, 71 K değil "
+        f"{_f((psr['prp_window_min_k'] or 0) - (psr['our_facet_min_k'] or 0), 0)} K.** "
+        "Ham 90 K'yi PRP'nin penceredeki en soğuk fasetiyle "
+        f"({_f(psr['prp_window_min_k'], 1)} K) yan yana koymak **benzemeyen şeyleri** "
+        "karşılaştırmaktır ve bu raporun §1'de kendi koyduğu kuralı çiğner: 90 K bir "
+        f"**5 m hücre** değeri, {_f(psr['prp_window_min_k'], 1)} K ise bütün bir "
+        f"**~{_f(psr['facet_area_km2_median'], 3)} km² fasetin** modellenmiş yıllık "
+        "maksimumu. Ölçüldü: o en soğuk faset, penceredeki hücrelerimizin yalnızca "
+        f"**%{100 * (psr['coldest_compared_facet'] or {}).get('never_lit_fraction', 0.0):.1f}"
+        "**'i kadarında hiç-aydınlanmayan alan içeriyor — yani bir PSR faseti "
+        "**değil**. Karşılaştırılan fasetlerde hiç-aydınlanmayan oranın medyanı "
+        f"%{100 * (psr['never_lit_fraction_in_compared_facets'] or {}).get('median', 0.0):.1f}, "
+        f"yarıdan fazlası karanlık olan faset sayısı "
+        f"{(psr['never_lit_fraction_in_compared_facets'] or {}).get('n_over_half')}, "
+        f"tamamı karanlık olan "
+        f"{(psr['never_lit_fraction_in_compared_facets'] or {}).get('n_fully_dark')}. "
+        f"Kendi soğuk kuyruğumuzu **aynı desteğe** indirince (aynı hücreler, aynı "
+        f"fasetler, ortalama) en soğuk fasetimiz **{_f(psr['our_facet_min_k'], 1)} K** "
+        f"çıkıyor; dürüst fark budur. Penceredeki "
+        f"{psr['n_never_lit_cells_in_window']:,} hiç-aydınlanmayan hücre "
+        f"({_f(psr['never_lit_area_km2'], 3)} km², pencerenin "
+        f"%{100 * (psr['never_lit_area_km2'] or 0) / (psr['window_area_km2'] or 1):.1f}"
+        "'i) 90 K'ye çakılı ve B'nin soğuk kuyruğunu belirliyor; ama 161.5 K bunun "
+        "**ölçüsü değil** — o, 544 m'lik örgünün bu pencerede hiçbir kalıcı gölgeli "
+        "faset çözemediğini söylüyor.",
         f"2. **Bölge genelinde taban fazla sıcak.** 88°S'nin kutup tarafındaki "
         f"fasetlerin **%{_f(psr['prp_below_floor_pct_poleward88'], 2)}**'i "
         f"{psr['our_floor_k']:.0f} K'nin altında, en soğuğu "
@@ -854,17 +1126,32 @@ def render(data: dict) -> str:
         f"{lut['recovered_lut']['n_bins_total']} kutu dolu, "
         f"düz hücre tepesi **{_f(lut['recovered_lut']['flat_cell_peak_c'], 2)} °C** "
         "(C6'nın heat1d ölçümü −146,4 °C ile uyuşuyor). "
-        f"{lut['recovered_lut']['n_bins_multivalued']} kutuda birden fazla değer var: "
-        "geri kazanılan tablo eğim/bakı gridlerine yeniden uygulandığında hücrelerin "
-        f"**%{_f(lut['recovered_lut']['reconstruction_mismatch_pct'], 2)}**'i "
-        f"tutmuyor, en büyük fark "
-        f"**{_f(lut['recovered_lut']['reconstruction_max_abs_diff_c'], 2)} °C** ve "
-        "farklar hep **komşu kutu** değerleri. Yani gönderilen termal grid, diskteki "
-        "eğim/bakı gridlerinden belgelenmiş en-yakın-kutu kuralıyla **bit-eşit olarak "
-        "yeniden üretilemiyor**. Ölçüldü ve yazıldı; nedeni **saptanmadı** (eğim/bakı "
-        "gridlerinin termal gridden sonra yeniden üretilmiş olması bu büyüklükle "
-        "tutarlı olurdu, ama bu bir hipotezdir, ölçüm değil). Aşağıdaki RMSE'lerin "
-        "yanında bu ≤6 °C'lik kutu-kenarı gürültüsü küçüktür.",
+        f"{lut['recovered_lut']['n_bins_multivalued']} kutuda birden fazla değer var "
+        "ve geri kazanılan tablo eğim/bakı gridlerine yeniden uygulandığında "
+        f"hücrelerin **%{_f(lut['recovered_lut']['reconstruction_mismatch_pct'], 2)}"
+        "**'i tutmuyor. Yani gönderilen termal grid, belgelenmiş en-yakın-kutu "
+        "kuralıyla **bit-eşit olarak yeniden üretiliyor**.",
+        "",
+        "**Bunun için doğru çerçevede binlemek gerekiyor, ve bu bir düzeltmedir.** "
+        "`make_thermal_grid`, heat1d'e göndermeden önce bakıyı grid kuzeyinden "
+        "gerçek kuzeye çeviriyor (`ephemeris.grid_azimuth_to_true_azimuth`), yani "
+        "diskteki hücre değeri `table[eğim, bakı − Δ]`. Bu raporun ilk sürümü "
+        "tabloyu **ham** `aspect_grid` üzerinde binliyordu; ölçülen fark:",
+        "",
+        "| Binleme çerçevesi | Uyuşmazlık | Çok-değerli kutu |",
+        "|---|---|---|",
+        f"| `aspect_grid` (ilk sürüm) | "
+        f"%{_f(lut['recovered_lut_raw_frame']['reconstruction_mismatch_pct'], 2)} | "
+        f"{lut['recovered_lut_raw_frame']['n_bins_multivalued']} |",
+        f"| `aspect_grid − Δ` (Δ = {_f(lut['aspect_frame_delta_deg'], 4)}°) | "
+        f"**%{_f(lut['recovered_lut']['reconstruction_mismatch_pct'], 2)}** | "
+        f"**{lut['recovered_lut']['n_bins_multivalued']}** |",
+        "",
+        "İlk sürümün «nedeni **saptanmadı**» dediği %22.96 buydu: hata boru hattında "
+        "değil, bu betikteydi. Ham çerçevede binlemek her tablo girdisini iki komşu "
+        "bakı kutusuna yayıyor ve geriye **Δ kadar dönmüş** bir tablo veriyor — sonra "
+        "o tablo PRP'nin gerçek-kuzey bakısıyla örnekleniyordu, yani §2b iki ayrı "
+        "çerçeveyi karşılaştırıyordu.",
         "",
         f"PRP faset eğimi: {_f(lut['prp_slope_deg']['min'], 2)}° … "
         f"{_f(lut['prp_slope_deg']['max'], 2)}° "
@@ -888,74 +1175,125 @@ def render(data: dict) -> str:
         f"Eğim kutuları arası Spearman: "
         f"**{_f(lut['aspect_marginalised_spearman'], 3)}**.",
         "",
-        "### 2b. Bakı çözümlenmiş (çerçeve varsayımı açık)",
+        "### 2b. Bakı çözümlenmiş (çerçeve doğrulanmış)",
         "",
-        "| Aday | RMSE (°C) | RMSE %95 GA | Bias (°C) | MAE (°C) | Spearman | n |",
+        "**Tek satır yayımlanmıyor, çünkü burada iki popülasyon var.** heat1d LUT'u "
+        "tek bir fasetin eğim/bakısından yıllık tepe üretir; faset içi gölgelenme "
+        f"görmez. Tablonun küresel minimumu **{_f(split['model_floor_c'], 2)} °C** "
+        f"({_f(split['model_floor_c'] - _ABSOLUTE_ZERO_C_LOCAL, 1)} K), yani bundan "
+        "soğuk hiçbir fasete model **yapısal olarak** ulaşamaz: oradaki artık "
+        "kurgu gereği pozitiftir ve modelin başka yerdeki uyumu hakkında hiçbir şey "
+        "söylemez.",
+        "",
+        "| Popülasyon | RMSE (°C) | RMSE %95 GA¹ | Bias (°C) | MAE (°C) | Spearman | n |",
         "|---|---|---|---|---|---|---|",
-        _stats_row("heat1d LUT (gölgesiz)", lut["aspect_resolved"]),
+        _stats_row("havuzlanmış (yalnız bütünlük için)", split["pooled"], code=False),
+    ]
+    if split["at_or_above_floor"]:
+        lines.append(
+            _stats_row("modelin üretebildiği arazi", split["at_or_above_floor"], code=False)
+        )
+    if split["below_floor"]:
+        lines.append(
+            _stats_row("modelin üretemediği arazi", split["below_floor"], code=False)
+        )
+    lines += [
         "",
-        "**Çerçeve uyarısı — C5'in bulgusu.** heat1d'in `slope_az` parametresi kurulu "
-        "paketin docstring'inde *\"clockwise from north (0 = N, pi/2 = E)\"*, yani "
-        "**gerçek** yerel kuzeye göre tanımlı. Bizim `make_aspect_grid`'imiz "
-        "(`lunapath/src/process_lunar_data.py:275`) açıyı **grid** koordinatlarında "
-        "hesaplıyor. Polar stereografik projeksiyonda bu ikisi meridyen yakınsaması "
-        "kadar ayrışır ve pencere boylamında (−72,67°) bu ~72,7° eder — 22,5°'lik "
-        "bakı kutularında ~3,2 kutu.",
+        f"Şeritteki fasetlerin **%{_f(split['pct_below_floor'], 1)}**'i "
+        f"({split['n_below_floor']:,} faset) LUT'un tabanından soğuk ve toplam kare "
+        f"hatanın **%{_f(split['sse_share_below_floor_pct'], 1)}**'i oradan geliyor. "
+        "İki zıt işaretli bias havuzlandığında "
+        f"{_f(split['pooled']['bias_c'], 2)} °C çıkıyor ve bu **\"neredeyse yansız\"** "
+        "diye okunur — oysa ölçülen şey şudur: **karşılaştırılabilir arazide model "
+        f"{_f(abs(split['at_or_above_floor']['bias_c']), 1)} °C fazla soğuk**, "
+        "kalanında ise o değeri üretemiyor. Havuzlanmış satır, okur kendisi "
+        "hesaplayacağı için duruyor; tek başına **asla** durmuyor.",
         "",
     ]
-    if lut["best_rotation"]:
-        # The convergence's MAGNITUDE is predicted by geometry; its SIGN
-        # depends on the axis convention in the CRS's WKT, so both branches
-        # are printed and the scan is allowed to say which one it is. That
-        # is a measurement choosing between two prior hypotheses, not a fit.
-        convergence = float(lut["meridian_convergence_deg"])
-        branch_plus = float(np.mod(convergence, 360.0))
-        branch_minus = float(np.mod(-convergence, 360.0))
-        best_offset = float(lut["best_rotation"]["offset_deg"])
 
-        def _separation(target: float) -> float:
-            return abs((best_offset - target + 180.0) % 360.0 - 180.0)
-
-        sep_plus, sep_minus = _separation(branch_plus), _separation(branch_minus)
-        predicted = branch_plus if sep_plus <= sep_minus else branch_minus
-        separation = min(sep_plus, sep_minus)
+    dep = lut.get("residual_dependence") or {}
+    _chi = lut["aspect_resolved"].get("rmse_ci95_c")
+    _blk = dep.get("rmse_ci95_blocks_50_c")
+    _blk25 = dep.get("rmse_ci95_blocks_25_c")
+    _perm = dep.get("rmse_ci95_blocks_50_permuted_c")
+    if _chi and _blk and _perm:
+        _acf = dep.get("autocorrelation_along_longitude", {})
         lines += [
-            "Tanısal tarama (5° adımlarla, bakıya sabit bir ofset eklenip RMSE "
-            "yeniden hesaplanarak):",
+            "**¹ Bu sütundaki ki-kare aralığı burada geçersizdir, ve yerine konan "
+            "ölçülmüştür.** `rmse_ci95` artıkların bağımsız ve normal olmasını "
+            "şart koşar; `1/√n` daralmasını satın alan şey bağımsızlıktır. Şerit bir "
+            "halkadır, komşu fasetler aynı araziyi paylaşır: boylam boyunca özilinti "
+            + ", ".join(
+                f"lag-{k}: {v:+.2f}" for k, v in _acf.items() if v is not None
+            )
+            + ".",
+            "",
+            "| Aralık | 95% GA (°C) | Genişlik |",
+            "|---|---|---|",
+            f"| Ki-kare (`rmse_ci95`) | {_f(_chi[0], 2)} – {_f(_chi[1], 2)} | "
+            f"{_f(_chi[1] - _chi[0], 2)} |",
+            f"| **Hareketli blok bootstrap, 50 blok** | **{_f(_blk[0], 2)} – "
+            f"{_f(_blk[1], 2)}** | **{_f(_blk[1] - _blk[0], 2)}** |",
+            f"| Aynısı, 25 blok (daha muhafazakâr) | {_f(_blk25[0], 2)} – "
+            f"{_f(_blk25[1], 2)} | {_f(_blk25[1] - _blk25[0], 2)} |",
+            f"| **Kontrol:** aynı bloklama, **karıştırılmış** artıklar | "
+            f"{_f(_perm[0], 2)} – {_f(_perm[1], 2)} | {_f(_perm[1] - _perm[0], 2)} |",
+            "",
+            "Kontrol satırı bu tablonun tek anlamlı satırıdır: aynı değerler, aynı "
+            "bloklama, bağımsızlık bozulunca genişlik ki-kareye geri dönüyor. Demek "
+            "ki genişleme **yöntemden değil, gerçek uzamsal bağımlılıktan**. "
+            "Özilinti ~200 fasette sıfıra indiğine göre bağımsız uzanım sayısı "
+            f"{split['pooled']['n_compared']:,} değil kabaca "
+            f"{split['pooled']['n_compared'] // 200:,}; `1/√n` daralması o n'e göre "
+            "okunmalı. Yayımlanan sayı blok bootstrap aralığıdır.",
+            "",
+        ]
+
+    _rot0 = next(
+        (r["rmse_c"] for r in lut["rotation_scan"] if r["offset_deg"] == 0), None
+    )
+    if lut["best_rotation"] and _rot0 is not None:
+        lines += [
+            "**Çerçeve tanısı — ve bir düzeltmenin kaydı.** Bakıya sabit bir ofset "
+            "eklenip RMSE yeniden hesaplanıyor (5° adım). Tablo doğru çerçevede geri "
+            "kazanıldığına göre beklenen sonuç **sıfırda minimum**dur, ve çıkan budur:",
             "",
             "| | Ofset | RMSE (°C) |",
             "|---|---|---|",
-            f"| Ofsetsiz | 0° | {_f(lut['aspect_resolved']['rmse_c'], 2)} |",
-            f"| **Taramanın en iyisi** | **{best_offset:.0f}°** | "
-            f"**{_f(lut['best_rotation']['rmse_c'], 2)}** |",
-            f"| Meridyen yakınsaması, + dalı | {branch_plus:.1f}° | — |",
-            f"| Meridyen yakınsaması, − dalı | {branch_minus:.1f}° | — |",
+            f"| Ofsetsiz | 0° | {_f(_rot0, 3)} |",
+            f"| Taramanın en iyisi | {lut['best_rotation']['offset_deg']:.0f}° | "
+            f"{_f(lut['best_rotation']['rmse_c'], 3)} |",
+            f"| **Kontrol:** ham çerçeveli tablo, taramanın en iyisi | "
+            f"**{lut['best_rotation_raw_frame']['offset_deg']:.0f}°** | "
+            f"{_f(lut['best_rotation_raw_frame']['rmse_c'], 3)} |",
+            f"| Çerçeve dönmesi Δ | {_f(lut['aspect_frame_delta_deg'], 2)}° | — |",
             "",
-            f"Yakınsamanın **büyüklüğü** geometriden öngörülüyor "
-            f"({_f(lut['meridian_convergence_deg'], 2)}°); **işareti** CRS'in eksen "
-            "konvansiyonuna bağlı olduğu için iki dal da yazıldı ve hangisi olduğunu "
-            f"taramanın söylemesine izin verildi. Minimum {predicted:.1f}° dalına "
-            f"**{separation:.1f}°** uzakta (öteki dala "
-            f"{max(sep_plus, sep_minus):.1f}°), yani LUT'un 22,5°'lik bakı "
-            "kutusundan daha yakın. Çerçeve uyuşmazlığı **gerçek ve öngörülen "
-            "büyüklükte**. Ama kazanç küçük: "
-            f"{_f(lut['aspect_resolved']['rmse_c'], 2)} → "
-            f"{_f(lut['best_rotation']['rmse_c'], 2)} °C "
-            f"(%{_f(100.0 * (1.0 - lut['best_rotation']['rmse_c'] / lut['aspect_resolved']['rmse_c']), 1)}), "
-            "ve tüm tarama yalnızca "
+            "Minimum bir tarama adımı içinde sıfırda ve dönmenin kazandırdığı "
+            f"{_f(abs(_rot0 - lut['best_rotation']['rmse_c']), 3)} °C, taramanın "
             f"{_f(min(r['rmse_c'] for r in lut['rotation_scan']), 1)}–"
-            f"{_f(max(r['rmse_c'] for r in lut['rotation_scan']), 1)} °C arasında "
-            "geziniyor. Toplam uyuşmazlığın çoğunu bakı çerçevesi **açıklamıyor** "
-            "(gölgeleme, topografya ve model farkları duruyor).",
+            f"{_f(max(r['rmse_c'] for r in lut['rotation_scan']), 1)} °C'lik "
+            "genliği yanında yoktur. **Kontrol satırı bu bölümün bulgusudur:** ham "
+            "çerçevede geri kazanılmış tablo taranınca minimum "
+            f"{lut['best_rotation_raw_frame']['offset_deg']:.0f}°'ye, yani Δ = "
+            f"{_f(lut['aspect_frame_delta_deg'], 2)}°'ye oturuyor. Bu raporun ilk "
+            "sürümü o minimumu «C5'in bulgusu» diye yayımlamış ve "
+            "`make_aspect_grid`'in grid-kuzeyi bakısını heat1d'e ham gönderdiğine "
+            "yormuştu. **Yanlış atıftı:** boru hattı dönüşümü zaten uyguluyor "
+            f"(yukarıdaki %{_f(lut['recovered_lut']['reconstruction_mismatch_pct'], 2)} "
+            "birebir yeniden üretim bunun kanıtı), tarama ise bu betiğin kendi "
+            "geri kazanım hatasını ölçüyordu. Sayısal uyum tesadüf değildi — tam "
+            "olarak Δ'ydı — ama işaret ettiği kusur **doğrulayıcıdaydı**.",
             "",
             "Bu bir **tanıdır, bir uydurma değildir**: hiçbir parametre bu sayıya "
             "göre değiştirilmemiştir.",
             "",
         ]
     lines += [
-        "**C5 bunu düzeltmez.** Düzeltmek `aspect_grid`'i, dolayısıyla `thermal_grid`'i, "
-        "dolayısıyla maliyet gridini ve her rotayı değiştirir; bu bir kalibrasyon/hata "
-        "düzeltmesidir ve ayrı bir özelliktir. C5 ölçer, adlandırır, yazar.",
+        "**Planlayıcının bakı çerçevesinde düzeltilecek bir şey yok.** Sevk edilen "
+        "`thermal_grid.npy`, `table[eğim, bakı − Δ]`'dan **birebir** yeniden "
+        "üretiliyor; yani heat1d gerçek-kuzey bakısını almış. Düzeltilen şey bu "
+        "raporun kendi geri kazanım çerçevesiydi; hiçbir grid, hiçbir maliyet, "
+        "hiçbir rota değişmedi.",
         "",
         "---",
         "",
@@ -1001,6 +1339,14 @@ def render(data: dict) -> str:
         "künyeleriyle durur.",
         "- RMSE / bias / Spearman **bizimdir**; hangi alan, hangi çözünürlük, hangi n "
         "ile hesaplandığı her tabloda yazılıdır.",
+        "- **Havuzlanmış bir bias tek başına yayımlanmaz.** Modelin üretemeyeceği "
+        "arazi ayrı satırdadır; §2b'de iki popülasyonu havuzlamak −4,36 °C veriyor "
+        "ve bu \"neredeyse yansız\" diye okunurdu.",
+        "- **Güven aralıkları yöntemiyle birlikte okunur.** Ki-kare aralığı yalnız "
+        "bağımsız artıklar için geçerlidir; uzamsal ilintili şeritte hareketli blok "
+        "bootstrap yayımlanır ve yanına onu doğrulayan **kontrol** konur. İki RMSE "
+        "aynı örnek üzerindeyse fark **eşleşmiş** testle sınanır, iki marjinal aralık "
+        "yan yana okunarak değil.",
         "- Termal katmanımız hâlâ **MODEL / UNCALIBRATED**. Bu rapor ona bir hata bandı "
         "kazandırır, etiketini yükseltmez.",
         "- Hiçbir rota sayısı değişmedi; C5 planlayıcıya dokunmaz.",
@@ -1036,15 +1382,32 @@ def main() -> int:
         if missing:
             print(f"processed grids missing ({', '.join(missing)}); nothing written")
             return 2
-        if not (processed / "diviner_prp.npz").exists():
+        cache = [
+            n
+            for n in ("diviner_prp.npz", "diviner_prp_meta.json")
+            if not (processed / n).exists()
+        ]
+        if cache:
             print(
-                "Diviner PRP cache absent. Run:\n"
+                f"Diviner PRP cache incomplete ({', '.join(cache)}). Run:\n"
                 "  python scripts/build_diviner_prp_cache.py\n"
                 "Nothing measured, nothing written -- this report does not "
                 "invent a reference."
             )
             return 2
-        data = measure(processed, Path(args.williams_dir))
+        try:
+            data = measure(processed, Path(args.williams_dir))
+        except ProvenanceMismatch as mismatch:
+            print(
+                f"Diviner PRP cache and its meta file disagree: {mismatch}\n"
+                "That pair is written by two separate steps, so an interrupted "
+                "or re-pointed build leaves one new and one stale. Rebuild "
+                "both:\n"
+                "  python scripts/build_diviner_prp_cache.py\n"
+                "Nothing written -- this report does not attest a checksum for "
+                "data that did not produce its numbers."
+            )
+            return 2
         if args.json:
             Path(args.json).write_text(
                 json.dumps(data, indent=1, default=float), encoding="utf-8"

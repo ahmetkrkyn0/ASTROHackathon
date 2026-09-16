@@ -236,6 +236,18 @@ def rmse_ci95(errors: np.ndarray) -> tuple[float, float] | None:
     This exists because C5's Site11 window holds about fifty Diviner facets.
     An RMSE from fifty samples has a visibly wide interval, and publishing
     the point estimate alone would overstate what a 2.5 km window can say.
+
+    PRECONDITION -- the residuals must be independent and identically
+    distributed, and zero-mean normal. Independence is what buys the
+    ``1/sqrt(n)`` shrinkage, so the interval is only as good as that
+    assumption. On a spatially extended sample it is not: measured on the
+    latitude band's 5,009 facets, the residuals are right-skewed (skew 2.06,
+    excess kurtosis 3.23, D'Agostino p = 0) and autocorrelated along
+    longitude (+0.70 at lag 1, still +0.41 at lag 50), and this interval
+    comes out about eight times narrower than
+    :func:`rmse_ci95_block_bootstrap` on the same numbers. Use that one
+    whenever the residuals carry a spatial or serial order; this one is for
+    the small, effectively independent facet sets it was written for.
     """
     from scipy.stats import chi2
 
@@ -248,6 +260,217 @@ def rmse_ci95(errors: np.ndarray) -> tuple[float, float] | None:
     lower = rmse * float(np.sqrt(n / chi2.ppf(0.975, n)))
     upper = rmse * float(np.sqrt(n / chi2.ppf(0.025, n)))
     return lower, upper
+
+
+def lag_autocorrelation(
+    values: np.ndarray, lags: tuple[int, ...] = (1, 5, 20, 50, 200)
+) -> dict[int, float | None]:
+    """Autocorrelation of an ORDERED residual series at the given lags.
+
+    The caller supplies the order that matters -- for a latitude band that
+    is longitude, because neighbouring facets share terrain and therefore
+    share error. This is the diagnostic that says whether
+    :func:`rmse_ci95`'s independence precondition holds, so it is measured
+    and published rather than assumed either way.
+    """
+    series = np.asarray(values, dtype=np.float64).ravel()
+    series = series[np.isfinite(series)]
+    out: dict[int, float | None] = {}
+    for lag in lags:
+        if lag < 1 or series.size <= lag + 1:
+            out[int(lag)] = None
+            continue
+        a, b = series[:-lag], series[lag:]
+        if np.ptp(a) == 0.0 or np.ptp(b) == 0.0:
+            out[int(lag)] = None
+            continue
+        rho = float(np.corrcoef(a, b)[0, 1])
+        out[int(lag)] = None if not np.isfinite(rho) else rho
+    return out
+
+
+def rmse_ci95_block_bootstrap(
+    errors: np.ndarray,
+    n_blocks: int = 50,
+    reps: int = 800,
+    seed: int = 0,
+) -> tuple[float, float] | None:
+    """95% RMSE interval from a moving-block bootstrap over ORDERED residuals.
+
+    Resamples contiguous blocks instead of individual residuals, so whatever
+    dependence lives inside a block survives into the resample. That is the
+    part :func:`rmse_ci95` throws away: an annulus of Diviner facets is not
+    5,009 independent draws, it is a few dozen stretches of terrain, and an
+    interval that assumes otherwise reports a precision the sample does not
+    have.
+
+    *errors* must already be in the order the dependence runs along (sort by
+    longitude for a latitude band). ``n_blocks`` sets the block length to
+    ``n // n_blocks``: fewer, longer blocks are the more conservative
+    choice. Deterministic for a given *seed*, because a published interval
+    that moves between runs is not a published interval.
+
+    A control worth running alongside it: the same call on a randomly
+    permuted copy of the same residuals returns to roughly the chi-square
+    width, which is how one tells a real dependence from an artefact of the
+    blocking.
+    """
+    residuals = np.asarray(errors, dtype=np.float64).ravel()
+    residuals = residuals[np.isfinite(residuals)]
+    n = residuals.size
+    blocks = int(n_blocks)
+    if n < 4 or blocks < 2 or blocks > n:
+        return None
+    length = n // blocks
+    if length < 1:
+        return None
+    rng = np.random.default_rng(int(seed))
+    starts = np.arange(0, n - length + 1)
+    offsets = np.arange(length)
+    draws = np.empty(int(reps), dtype=np.float64)
+    for r in range(int(reps)):
+        picked = rng.choice(starts, size=blocks, replace=True)
+        index = (picked[:, None] + offsets[None, :]).ravel()
+        draws[r] = np.sqrt(np.mean(residuals[index] ** 2))
+    low, high = np.percentile(draws, [2.5, 97.5])
+    return float(low), float(high)
+
+
+def paired_rmse_difference(
+    errors_a: np.ndarray,
+    errors_b: np.ndarray,
+    reps: int = 4000,
+    seed: int = 0,
+) -> dict[str, Any] | None:
+    """Is B's RMSE really worse than A's, on the SAME samples?
+
+    Two RMSEs computed over one shared set of facets are paired, so the
+    honest test resamples the facets and recomputes both -- not two marginal
+    intervals read side by side. Returns the difference ``RMSE(b) -
+    RMSE(a)`` with its bootstrap interval and the share of resamples in
+    which B really is worse.
+
+    This exists because a difference can sit well inside both marginal
+    intervals and still get written up as a finding. ``share_b_worse`` near
+    0.5 and an interval straddling zero mean the ordering is not a
+    measurement, whatever the point estimates look like.
+    """
+    a = np.asarray(errors_a, dtype=np.float64).ravel()
+    b = np.asarray(errors_b, dtype=np.float64).ravel()
+    if a.size != b.size:
+        raise ValueError(f"paired inputs must match in length, got {a.size} and {b.size}")
+    valid = np.isfinite(a) & np.isfinite(b)
+    a, b = a[valid], b[valid]
+    n = a.size
+    if n < 3:
+        return None
+    rmse_a = float(np.sqrt(np.mean(a**2)))
+    rmse_b = float(np.sqrt(np.mean(b**2)))
+    rng = np.random.default_rng(int(seed))
+    draws = np.empty(int(reps), dtype=np.float64)
+    for r in range(int(reps)):
+        index = rng.integers(0, n, n)
+        draws[r] = np.sqrt(np.mean(b[index] ** 2)) - np.sqrt(np.mean(a[index] ** 2))
+    low, high = np.percentile(draws, [2.5, 97.5])
+    return {
+        "n": int(n),
+        "rmse_a_c": rmse_a,
+        "rmse_b_c": rmse_b,
+        "difference_c": rmse_b - rmse_a,
+        "difference_ci95_c": [float(low), float(high)],
+        "share_b_worse": float(np.mean(draws > 0.0)),
+        "interval_excludes_zero": bool(low > 0.0 or high < 0.0),
+    }
+
+
+def split_at_model_floor(
+    model_c: np.ndarray,
+    reference_c: np.ndarray,
+    floor_c: float,
+    traversable_threshold_c: float = -150.0,
+) -> dict[str, Any]:
+    """Split a comparison at the coldest value the model can produce at all.
+
+    A lookup table has a global minimum. Every reference facet colder than
+    it is terrain the model is *structurally* incapable of reaching, so its
+    residual is positive by construction and has nothing to do with how well
+    the model fits anywhere else. Pooling the two populations is what turns
+    a large one-sided error into a small-looking bias: measured on the
+    latitude band, +124.13 degC over 661 facets and -23.89 degC over 4,348
+    average to -4.35, which reads as "near unbiased" and is not.
+
+    So all three are returned -- pooled, representable, unreachable -- with
+    the share of squared error the unreachable group carries (73.4% of it,
+    from 13.2% of the facets). The pooled row is kept because it is what a
+    reader would otherwise compute themselves; it is just never the only
+    row.
+    """
+    model = np.asarray(model_c, dtype=np.float64).ravel()
+    reference = np.asarray(reference_c, dtype=np.float64).ravel()
+    valid = np.isfinite(model) & np.isfinite(reference)
+    model, reference = model[valid], reference[valid]
+    below = reference < float(floor_c)
+    residual = model - reference
+    squared = residual**2
+    total = float(squared.sum())
+    return {
+        "model_floor_c": float(floor_c),
+        "pooled": error_statistics(model, reference, traversable_threshold_c),
+        "at_or_above_floor": error_statistics(
+            model[~below], reference[~below], traversable_threshold_c
+        )
+        if (~below).any()
+        else None,
+        "below_floor": error_statistics(
+            model[below], reference[below], traversable_threshold_c
+        )
+        if below.any()
+        else None,
+        "n_below_floor": int(below.sum()),
+        "pct_below_floor": float(100.0 * below.mean()) if below.size else 0.0,
+        "sse_share_below_floor_pct": (
+            float(100.0 * squared[below].sum() / total) if total > 0.0 else None
+        ),
+    }
+
+
+def check_prp_provenance(meta: dict[str, Any], lat_deg: np.ndarray) -> list[str]:
+    """Does ``diviner_prp_meta.json`` describe the npz actually loaded?
+
+    The two files are written by separate, non-atomic steps -- the npz
+    first, then a SHA-256 over a 605 MB raw table, then the meta -- so an
+    interrupted or re-pointed build can leave a new cache beside an old
+    provenance block. Nothing in the pair records the other's identity, and
+    the report prints the meta's byte count, SHA-256, triangle count and
+    latitude range as the provenance of statistics computed from the npz.
+
+    Returns one human-readable line per disagreement, empty when they
+    correspond. The caller is expected to refuse to publish rather than
+    attest a checksum for data that did not produce its numbers.
+    """
+    lat = np.asarray(lat_deg, dtype=np.float64).ravel()
+    problems: list[str] = []
+    claimed = meta.get("n_triangles")
+    if claimed is None:
+        problems.append("meta has no n_triangles")
+    elif int(claimed) != int(lat.size):
+        problems.append(
+            f"n_triangles {int(claimed):,} in the meta, {int(lat.size):,} in the npz"
+        )
+    span = meta.get("lat_range_deg")
+    if span is None or len(span) != 2:
+        problems.append("meta has no lat_range_deg pair")
+    elif lat.size:
+        low, high = float(np.min(lat)), float(np.max(lat))
+        if not (
+            np.isclose(float(span[0]), low, atol=1e-3)
+            and np.isclose(float(span[1]), high, atol=1e-3)
+        ):
+            problems.append(
+                f"lat_range_deg [{float(span[0]):.3f}, {float(span[1]):.3f}] in the "
+                f"meta, [{low:.3f}, {high:.3f}] in the npz"
+            )
+    return problems
 
 
 def error_statistics(

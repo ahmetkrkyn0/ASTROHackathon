@@ -301,3 +301,139 @@ def test_filtering_sliver_facets_actually_changes_the_comparison():
     assert unfiltered["n_compared"] == 3
     assert filtered["n_compared"] == 2
     assert filtered["rmse_c"] > unfiltered["rmse_c"]
+
+
+# ── the chi-square interval's precondition, and what to use instead ──────────
+
+
+def test_block_bootstrap_widens_on_correlated_residuals_and_not_on_shuffled():
+    """The control is the point: blocking must not widen an iid sample.
+
+    A moving-block bootstrap that reported a wide interval for independent
+    residuals would prove nothing about the band. So the same call is run on
+    a correlated series and on a permuted copy of THAT SERIES -- same values,
+    same blocking, dependence destroyed -- and only the first may widen.
+    """
+    from app.thermal_validation import rmse_ci95, rmse_ci95_block_bootstrap
+
+    rng = np.random.default_rng(0)
+    noise = rng.normal(0.0, 10.0, 4000)
+    correlated = np.convolve(noise, np.ones(200) / 200.0, mode="same") * 14.0
+
+    chi_square = rmse_ci95(correlated)
+    blocked = rmse_ci95_block_bootstrap(correlated, n_blocks=50)
+    shuffled = rmse_ci95_block_bootstrap(rng.permutation(correlated), n_blocks=50)
+
+    assert (blocked[1] - blocked[0]) > 4.0 * (chi_square[1] - chi_square[0])
+    assert (shuffled[1] - shuffled[0]) < 0.5 * (blocked[1] - blocked[0])
+
+
+def test_block_bootstrap_is_deterministic_and_guards_degenerate_shapes():
+    from app.thermal_validation import rmse_ci95_block_bootstrap
+
+    rng = np.random.default_rng(1)
+    sample = rng.normal(0.0, 5.0, 500)
+    assert rmse_ci95_block_bootstrap(sample, n_blocks=25) == (
+        rmse_ci95_block_bootstrap(sample, n_blocks=25)
+    )
+    assert rmse_ci95_block_bootstrap(np.array([1.0, 2.0])) is None
+    assert rmse_ci95_block_bootstrap(sample, n_blocks=1) is None
+    assert rmse_ci95_block_bootstrap(sample, n_blocks=501) is None
+
+
+def test_lag_autocorrelation_separates_a_smooth_series_from_white_noise():
+    from app.thermal_validation import lag_autocorrelation
+
+    rng = np.random.default_rng(2)
+    white = lag_autocorrelation(rng.normal(0.0, 1.0, 5000), lags=(1, 20))
+    smooth = lag_autocorrelation(
+        np.convolve(rng.normal(0.0, 1.0, 5000), np.ones(100) / 100.0, mode="same"),
+        lags=(1, 20),
+    )
+    assert abs(white[1]) < 0.1 and abs(white[20]) < 0.1
+    assert smooth[1] > 0.9 and smooth[20] > 0.5
+    assert lag_autocorrelation(np.array([1.0, 2.0]), lags=(50,))[50] is None
+
+
+# ── two RMSEs over one shared sample are paired ─────────────────────────────
+
+
+def test_paired_difference_calls_a_real_gap_real_and_a_noise_gap_noise():
+    from app.thermal_validation import paired_rmse_difference
+
+    rng = np.random.default_rng(3)
+    a = rng.normal(0.0, 10.0, 400)
+    clear = paired_rmse_difference(a, a * 3.0)
+    assert clear["difference_c"] > 0.0
+    assert clear["interval_excludes_zero"]
+    assert clear["share_b_worse"] > 0.99
+
+    noise = paired_rmse_difference(a, rng.normal(0.0, 10.0, 400))
+    assert not noise["interval_excludes_zero"]
+    assert noise["difference_ci95_c"][0] < 0.0 < noise["difference_ci95_c"][1]
+
+
+def test_paired_difference_refuses_unpaired_inputs():
+    from app.thermal_validation import paired_rmse_difference
+
+    with pytest.raises(ValueError, match="paired inputs must match"):
+        paired_rmse_difference(np.zeros(5), np.zeros(6))
+    assert paired_rmse_difference(np.zeros(2), np.zeros(2)) is None
+
+
+# ── the model floor splits the comparison in two ────────────────────────────
+
+
+def test_split_at_model_floor_separates_a_cancelling_pool():
+    """Two opposite-signed populations must not average into 'near unbiased'."""
+    from app.thermal_validation import split_at_model_floor
+
+    floor = -140.0
+    reference = np.concatenate([np.full(10, -200.0), np.full(90, -50.0)])
+    model = np.concatenate([np.full(10, floor), np.full(90, -56.0)])
+
+    split = split_at_model_floor(model, reference, floor)
+    assert split["n_below_floor"] == 10
+    assert split["pct_below_floor"] == pytest.approx(10.0)
+    assert split["below_floor"]["bias_c"] == pytest.approx(60.0)
+    assert split["at_or_above_floor"]["bias_c"] == pytest.approx(-6.0)
+    # the pooled bias sits between the two and resembles neither
+    assert abs(split["pooled"]["bias_c"]) < abs(split["below_floor"]["bias_c"])
+    # and the unreachable tenth carries most of the squared error
+    assert split["sse_share_below_floor_pct"] > 90.0
+
+
+def test_split_at_model_floor_reports_no_split_when_nothing_is_below():
+    from app.thermal_validation import split_at_model_floor
+
+    reference = np.full(20, -50.0)
+    split = split_at_model_floor(np.full(20, -60.0), reference, -140.0)
+    assert split["n_below_floor"] == 0
+    assert split["below_floor"] is None
+    assert split["sse_share_below_floor_pct"] == pytest.approx(0.0)
+    assert split["at_or_above_floor"]["n_compared"] == 20
+
+
+# ── the provenance block must describe the cache it is printed beside ───────
+
+
+def test_provenance_check_catches_a_meta_that_describes_another_build():
+    from app.thermal_validation import check_prp_provenance
+
+    lat = np.linspace(-90.0, -76.0, 1000)
+    good = {"n_triangles": 1000, "lat_range_deg": [-90.0, -76.0]}
+    assert check_prp_provenance(good, lat) == []
+
+    stale = {"n_triangles": 7, "lat_range_deg": [11.0, 22.0]}
+    problems = check_prp_provenance(stale, lat)
+    assert len(problems) == 2
+    assert "n_triangles" in problems[0] and "1,000" in problems[0]
+    assert "lat_range_deg" in problems[1]
+
+
+def test_provenance_check_names_missing_keys_rather_than_raising():
+    from app.thermal_validation import check_prp_provenance
+
+    problems = check_prp_provenance({}, np.linspace(-90.0, -80.0, 10))
+    assert any("n_triangles" in p for p in problems)
+    assert any("lat_range_deg" in p for p in problems)
