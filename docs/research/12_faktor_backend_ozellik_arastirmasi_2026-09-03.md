@@ -680,7 +680,98 @@ Yürütme politikası (insan operatörü temsil eder): geride kalınca şarj mol
 
 ---
 
-## D6. ⭐⭐⭐ Enerji-erişilebilirlik izokronları ("şu an nereye kadar gidebilirim?")
+## D6. ✅ ⭐⭐⭐ Enerji-erişilebilirlik izokronları ("şu an nereye kadar gidebilirim?")
+
+> **Yapıldı (16 Eylül 2026).** `POST /api/reachable` + `app/reachability.py`. Ama **bu
+> maddenin algoritma öncülü yanlıştı ve üç atfından ikisi tutmadı** — hepsi kaynaklar
+> birinci elden okunarak düzeltildi ve `REACHABILITY_CORRECTIONS` içine yazıldı.
+>
+> **(1) Dijkstra çalışmaz — ölçüldü.** `cost_engine.move_battery_drain_wh` işaretlidir
+> (kendi docstring'i: "Positive drains, NEGATIVE CHARGES … NOT floored at zero"): düz ve
+> aydınlık bir hücrede LPR-1'in paneli sürüşten fazla üretir, metre başına −0,245 Wh, düz
+> hücrede başabaş gölge oranı **0,3908** (VIPER 0,2400). Site11'de coarsen 4, 48 dilim,
+> 8 yön: **2026-09-05'te sürüş kenarlarının %28,94'ü (1 080 811 / 3 734 496, en kötü
+> −5,735 Wh) ve bekleme kenarlarının %53,9'u negatif**. Tuzak: **2026-09-01'de tam olarak
+> sıfır** — test paketinin çoğunun kullandığı epoch. Bir Dijkstra orada doğru görünür,
+> aydınlık bir epoch'ta sessizce yanlış cevap verir ve hiçbir test kırmızıya dönmez.
+> Tabanlanmış ikiz `net_energy_per_metre_wh` de kullanılamaz: `max(0,…)` olduğu için
+> "güneşte sürerek menzil kazanamazsın" der, ki bu modelde yanlış ve yalnızca tek yönde
+> yanlış.
+>
+> **(2) Tompkins Dijkstra demiyor.** 192 sayfalık tez tam metin okundu: **"Dijkstra"
+> kelimesi 0 kez geçiyor**; TEMPEST'in arayıcısı **ISE**, "similar to A*", D* tarzı
+> artımlı onarımla. §3.1.5 şarj edilebilir enerjiyi **non-monotonic RESOURCE PARAMETER**
+> (bir DPARMS **durum değişkeni**) diye sınıflıyor — enerjiyi amaç fonksiyonuna koymanın
+> tam tersi. Doyum kuralı `e_{i+1} = max(e_i + Δe, e_min)` / `> e_max` ise red,
+> `pathfinder_4d`'in ileri yöndeki `min(e_cap_wh, battery − drain)`'inin aynası. §3.1.7'nin
+> "the search will never terminate" cümlesi **kendi artımlı sezgisel aramasıyla** ilgili,
+> Dijkstra'nın label-setting optimalliğiyle değil — modül bunu ona söyletmiyor. Ve **tez
+> hiçbir uzamsal erişilebilirlik haritası hesaplamıyor** ("isochron" 0 kez); "Reachable
+> State Space" mesafe–zaman düzleminde skaler bir varış aralığı.
+>
+> **(3) arXiv 2509.15062 doğru, ama bağlam.** "softplus ceza + SCP + NMPC" tarifi
+> **doğrulandı** (§III-E, §III-F, §IV) ve sayıları `REACHABILITY_QUOTED`'a kondu
+> (198,9 W / 200 W; rakipler 235,8 W ve 234,7 W). Belgenin söylemediği: makale **hiç
+> erişilebilirlik kümesi hesaplamıyor**.
+>
+> **(4) "Fast Marching" atfı doğrulanamadı.** Sakayori & Ishigami 2021 ödeme duvarının
+> arkasında (tandfonline ve ResearchGate HTTP 403); indekslenmiş özeti hiçbir Fast
+> Marching'den söz etmiyor. D6 onu yöntem kaynağı göstermiyor.
+>
+> **Yerine yapılan:** ileri, **zaman-genişletilmiş** erişilebilirlik sweep'i. Durum
+> `(dilim, kaba blok)`, blok başına iki alan: erişilebilecek **en yüksek şarj** ve
+> **en düşük sürekli karanlık saati**. Her kenar saati en az bir dilim ilerlettiği için
+> graf bir **DAG**'dır ve geçiş fonksiyonları monoton olduğundan ileri tarama alan başına
+> **kesin**dir — öncelik kuyruğu yok, SOC bini yok. Negatif kenarlar tam da bu yüzden
+> zararsız: taramanın bozulacak bir öncelik sırası yok. Kesinlik birim testinde **kaba
+> kuvvetle** doğrulanıyor.
+>
+> İki alan **bağımsız** optimize edildiği için küme bir **gevşetmedir**: `/api/plan-4d`'in
+> kabul ettiğini **içerir**. Güvenli yön tek yöndür — kümenin **dışındaki** blok "oraya
+> gidemezsin" demektir; içindeki **adaydır**. Gerçek gridde `astar_4d` örneklenmiş
+> bloklarda koşuldu: **11/11 = %100**, ve planlayıcının varış dilimi her satırda sweep'in
+> ilk diliminden büyük ya da eşit. İçerme **yapılandırmaya karşı** kuruluyor
+> (`planner_configuration` yanıtta): `allow_hibernate=True` üçüncü bir kenar ailesidir,
+> karanlık saatini sıfırlar ve kümenin dışına meşru biçimde çıkabilir.
+>
+> **Kendi kendini yalanlayabilen alan:** kısa ufukta ve dolu bataryayla enerji kuralları
+> **hiç tetiklenmiyor** — sınır saattir ve harita bir *kapılı mesafe dönüşümü*dür. Yanıt
+> bunu `energy_binds` + `refusals` ile söylüyor. Bütçe eğrisi (LPR-1 gündüz, 2026-09-05):
+> tam şarj 12 h'te **11 156** blok (`soc_floor` 0), çeyrek şarjda **182** blok
+> (`soc_floor` 18 900) — %98,4 düşüş, ve ufuk dört katına çıksa bile 182'de kalıyor.
+>
+> **"N saat sonra" Site11'de saat ölçeğinde hiçbir şey değiştirmiyor** ve bu ölçüldü:
+> +6 h ve +24 h'te aydınlık blok oranı değişiyor (%48,30 → %48,00 → %47,89) ama kümede
+> **tek blok bile** değişmiyor; kutupta aydınlanma ~708 saatlik sinodik döngüyle döner.
+> Etki gün ölçeğinde: +240 h'te pencere karanlığa giriyor, 7 362 blok **586**'ya düşüyor
+> (Jaccard 0,080). Tabloya iki "aydınlık" sütunu tam da bu yüzden kondu — yoksa Jaccard
+> 1,0 "küme zamanla sabittir" diye okunurdu ve güneşin hiç modellenmediği durumdan
+> ayırt edilemezdi.
+>
+> **`time-to-0-SOC` tek başına yanıltıcı:** tam karanlıkta LPR-1 rezerve 66,7 h'te, sıfıra
+> 83,4 h'te iner ama dayanımı **50 h**'tir — yani saf enerji sayısı, API'nin geri kalanının
+> görev başarısızlığı saydığı bir durumu tarif eder. Yayımlanan işletme sayısı
+> `hold_limit = min(rezerv, dayanım)` ve hangisinin bağladığı. Ayrıca karanlık saati
+> **pozlamayla ağırlıklıdır** (`dark += hours × exposure`), yani duvar saati değildir:
+> gerçek gridde dayanımın bağladığı bloklarda duruş **49,5–56,0 h** çıkıyor.
+>
+> **`skimage` eklenmedi.** Kurulu (0.26.0) ama `backend/requirements.txt`'te yok — yeni
+> bağımlılık olurdu. Bantlar blok indisi + merdiven sınır blokları olarak, saf numpy ile.
+> **`start_utc` zorunlu**: epoch olmadan gölge serisi uzun dönem **kesre** düşer (bir
+> iklimoloji) ve "N saat sonra" farkı tam sıfır çıkardı.
+>
+> **Bit-eşitlik:** LPR-1'in checked-in v5 maliyet-gridi SHA-256'sı (`55e1bb3c…`)
+> kıpırdamadı, `COST_MODEL_ID` `…_v5`'te. `/api/plan` ve `/api/plan-4d`'in değişmediği
+> "birebir aynı" diye değil **kontrol ölçülerek** kanıtlandı: arada hiç D6 olmadan iki
+> özdeş çağrı zaten 2 ve 8 yaprakta farklı çıkıyor (hepsi milisaniye sayacı ya da çağrı
+> kimliği); D6'lı fark o kümenin alt kümesi. **Kapsam dışı:** ağırlık vektörü (uç onu
+> kabul bile etmiyor — hiçbir ağırlık bir bloğu erişilebilir yapamaz), maliyet küpü,
+> hibernasyon kenarı, belirsizlik yayılımı, frontend çizimi. Süre: 3 h ufuk 2,0 s,
+> 12 h 9,3 s, 24 h 19,0 s (coarsen 4). Tasarım:
+> [spec](../superpowers/specs/2026-09-16-d6-enerji-izokronlari-design.md) (sondalar ve
+> ölçümler dahil), [plan](../superpowers/plans/2026-09-16-d6-enerji-izokronlari.md),
+> [rapor](reachability_report.md). Testler: 30 birim + 18 API + 16 skip-korumalı gerçek
+> grid = **64**.
 
 **Ne:** Rover'ın mevcut konum, zaman ve SOC'siyle **ulaşabileceği bölge** (ve "N saat sonra"ki hali); `time-to-0-SOC` metriğinin uzamsal karşılığı.
 
@@ -756,7 +847,7 @@ Amaç: rakip/akran ekiplerin jüri karşısına neyle çıktığını görmek. B
 | C5 | Diviner PRP/Williams termal RMSE | 1 | 3 | 3 | — | **Ölçülmüş ürünle RMSE** |
 | D5 ✅ | Pareto cephesi | 1 | 3 | 3 | — | Literatür |
 | D4 | Kontrastif açıklama | 1–2 | 3 | 4 | — | XAIP literatürü |
-| D6 | Erişilebilirlik izokronları | 1 | 3 | 3 | — | Literatür |
+| D6 ✅ | Erişilebilirlik izokronları | 1 | 3 | 3 | — | Literatür |
 | B4 | Sobol duyarlılık | 1–2 | 3 | 3 | — | SALib |
 | A5 | Zaman pencereli TSP görev planı | 3–4 | 3 | 3 | A1 | VIPER Alg. #1 |
 | D7 | enav dataset ile enerji doğrulama | 2 | 3 | 3 | — | **Ölçülmüş veri** |
