@@ -401,6 +401,7 @@ kernels are hundreds of megabytes and are fetched or generated locally.
 | `POST` | `/api/replan` | Evaluate triggers, replan if one fires |
 | `POST` | `/api/risk-sweep` | Same route planned at several risk appetites |
 | `POST` | `/api/pareto` | Weight-simplex sweep: the routes nothing else beats, plus why the surviving set is so small. Measured on Site11 it collapses to 1-4 routes whose spread is ~94x narrower than the model's own uncertainty -- not a Pareto front, and the response says so (`completeness: no_guarantee`). |
+| `POST` | `/api/explain-contrast` | Why this route and why not yours: the planner's own gates replayed over the route you drew, the cost difference criterion by criterion, and the weight change that would flip it. Route cost is exactly affine in the weights, so the counterfactual is a closed form rather than a search -- but measured on Site11 some answers sit inside NASA's own DEM uncertainty, and the response says which are actionable. |
 | `POST` | `/api/safety-check` | Run the formal safety monitor over a supplied telemetry trace |
 | `POST` | `/api/stress-test` | Monte Carlo the mission |
 
