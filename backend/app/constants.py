@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .panel import rover_panel_block
 from .slip_model import SlipAnchor, rover_slip_block
 
 # Shared environment constants
@@ -17,8 +18,23 @@ THERMAL_MIN_TRAVERSABLE_C = -150.0
 # nothing -- ``rover_catalog`` says so explicitly rather than letting a
 # frontend infer that every listed number is modelled. Seven fields used to
 # sit in the catalogue with zero readers anywhere in the codebase; four of
-# them are now wired (p_peak_w, p_shadow_w, p_hibernate_w, h_max_shadow_h)
-# and the rest are labelled. (Round 3 review, M-8.)
+# them were then wired (p_peak_w, p_shadow_w, p_hibernate_w, h_max_shadow_h)
+# and the rest were labelled. (Round 3 review, M-8.)
+#
+# C2 correction: that sentence was FALSE for p_hibernate_w. It was added to
+# this set when the sentence was written and nothing in the repository read
+# it -- not one module, not one test, not one script -- so the catalogue
+# claimed a modelled input that steered nothing, which is the exact defect
+# the DECLARED_ONLY_FIELDS split exists to prevent. C2 is the feature that
+# finally reads it (app/battery.py, the planner's HIBERNATE edge), so the
+# sentence is true again now; it was not true between then and now.
+#
+# C2 also moves thermal_tau_s into this set. C6 has read it since it shipped
+# (thermal_dwell.dwell_unavailable_reason and build_dwell_cube both take
+# rover["thermal_tau_s"]) while the catalogue went on publishing it as
+# reference-only -- the same defect in the other direction. It is published
+# as a top-level key in rover_catalog() as well, so correcting the label does
+# not make the number disappear from the API.
 MODELLED_FIELDS: frozenset[str] = frozenset(
     {
         "mass_kg",
@@ -49,11 +65,22 @@ MODELLED_FIELDS: frozenset[str] = frozenset(
         "w_thermal",
         # C4: the fifth criterion's weight (LOLA LDRM roughness).
         "w_roughness",
+        # C2: the vehicle's internal thermal time constant. C6's dwell model
+        # has always read it; C2's dawn pre-heat times the warm-up with it.
+        "thermal_tau_s",
         "sensor_payload_w",
         "sensor_heater_w",
         # C3: the anchors cost_engine.edge_travel_time_s reads through
         # slip_model.slip_ratio -- every time and energy figure depends on it.
         "slip_curve",
+        # C1: the panel geometry app/panel.py turns into the cos i gain that
+        # multiplies p_solar_w. Read only under panel_model="cos_incidence";
+        # every value is an ASSUMPTION and says so in panel_geometry_source.
+        "panel_tilt_deg",
+        "panel_face_azimuths_deg",
+        "panel_azimuth_mode",
+        "panel_azimuth_deg",
+        "panel_geometry_source",
     }
 )
 
@@ -63,7 +90,6 @@ MODELLED_FIELDS: frozenset[str] = frozenset(
 DECLARED_ONLY_FIELDS: tuple[str, ...] = (
     "f_net_n",
     "regen_efficiency",
-    "thermal_tau_s",
     "h_design_shadow_h",
     # C3: published regolith / test-bed parameters behind the slip anchors
     # (Yutu-2's Bekker-type ranges, VIPER's GRC-1 test bed). Reference only:
@@ -223,7 +249,50 @@ HEATER_THERMOSTAT_ASSUMPTION_SOURCE: str = (
     "as the battery lasts -- the reading of a catalogue that publishes a heater power "
     "(p_heater_w, p_shadow_w) and a shadow endurance (h_max_shadow_h) but no W-to-K "
     "coefficient; the energy the heater draws is already in cost_engine.housekeeping_power_w. "
-    "Not a rover specification: no profile publishes a thermostat set point"
+    "Not a rover specification: no profile publishes a thermostat set point. "
+    "C2 AMENDMENT: the clause 'no W-to-K coefficient' describes the CATALOGUE, and it is still "
+    "true of the catalogue -- but it is no longer true of the model. app.battery derives one "
+    "(eps*sigma*A, and its linearisation kA) from p_heater_w under an explicit sizing "
+    "assumption (battery.HEATER_SIZING_SOURCE), so under heater_power_model='delta_t' or "
+    "'radiative' the thermostat becomes POWER-LIMITED rather than unbounded: it holds the "
+    "lower bound only where the array and the heater can actually hold it, and falls short "
+    "in colder cells. Those two flags require this one, because kA*(T_set - T_env) IS the "
+    "steady-state power of exactly the thermostat assumed here"
+)
+
+# ── C1: the solar array's geometry ──────────────────────────────────────────
+# Solar income has always been p_solar_w * (1 - shadow_ratio), which says the
+# array is permanently face-on to the Sun. Otten et al. (ICRA 2015) state what
+# that assumes -- "two-degree-of-freedom articulated solar arrays that can
+# always point directly at the sun" -- and the default profile has no such
+# array: lpr_1's 410 W is NASA VIPER's (PIP) and its 5 420 Wh is VIPER's too
+# (Bluethmann slide 2 -- the PIP has no battery figure), and VIPER's arrays
+# are three body-mounted faces with the gimbals on the antenna and cameras.
+#
+# No rover in this catalogue publishes a panel tilt or a mounting angle, so
+# every value below is an EXPLICIT assumption, labelled the way C3's
+# transferred slip anchors are. The two families differ in what they are
+# assumed FROM, so they carry different source strings.
+PANEL_GEOMETRY_SOURCE_VIPER_BODY: str = (
+    "assumption: three body-mounted faces at 90 deg tilt with the rover free to turn to "
+    "the best heading, read from NASA's own descriptions of VIPER -- 'three approximate "
+    "1 m2 solar arrays (one each on the port, starboard, and aft surfaces), generating "
+    "410 (TBR) W of total power' (VIPER Proposal Information Package, NTRS 20210015009 "
+    "p. 8); 'Solar Array (3-sides)' with 'Radiators (on top)' and the driving mode "
+    "'Omni-directional driving with sun on corner / Maximizing power generation' "
+    "(Bluethmann, LSIC 2024, NTRS 20240013903, slides 3 and 5); the gimbals are on the "
+    "high-gain antenna and navigation cameras only (slide 7), so the arrays do not "
+    "articulate. The 90 deg TILT is an inference from 'surfaces' plus radiators on top: "
+    "NASA never calls VIPER's arrays vertical, and NASA's Vertical Solar Array Technology "
+    "is a different programme. Not a rover specification"
+)
+PANEL_GEOMETRY_SOURCE_POLAR_PLATE: str = (
+    "assumption: one deployable plate at RoverDevKit's polar tilt convention "
+    "min(80 deg, |latitude|) -- 'high-latitude runs can pass a fixed tilt, typically "
+    "min(80 deg, |lambda|), to represent a deployable panel aligned with the "
+    "low-elevation polar sun' (arXiv 2606.21755 sect. 3.4) -- free to turn in azimuth. "
+    "This profile publishes no panel geometry at all; the convention is a stand-in, the "
+    "paper's own default array is horizontal, and nothing here is a rover specification"
 )
 
 # Multi-rover catalogue
@@ -266,6 +335,12 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
+        # C1: assumed panel geometry -- see PANEL_GEOMETRY_SOURCE_VIPER_BODY.
+        "panel_tilt_deg": 90.0,
+        "panel_face_azimuths_deg": (90.0, -90.0, 180.0),
+        "panel_azimuth_mode": "free_heading",
+        "panel_azimuth_deg": None,
+        "panel_geometry_source": PANEL_GEOMETRY_SOURCE_VIPER_BODY,
     },
     "luvmi_m": {
         "name": "LUVMI-M",
@@ -305,6 +380,12 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
+        # C1: assumed panel geometry -- see PANEL_GEOMETRY_SOURCE_POLAR_PLATE.
+        "panel_tilt_deg": 80.0,
+        "panel_face_azimuths_deg": (0.0,),
+        "panel_azimuth_mode": "sun_tracking",
+        "panel_azimuth_deg": None,
+        "panel_geometry_source": PANEL_GEOMETRY_SOURCE_POLAR_PLATE,
     },
     "nasa_viper": {
         "name": "NASA VIPER",
@@ -354,6 +435,12 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
+        # C1: assumed panel geometry -- see PANEL_GEOMETRY_SOURCE_VIPER_BODY.
+        "panel_tilt_deg": 90.0,
+        "panel_face_azimuths_deg": (90.0, -90.0, 180.0),
+        "panel_azimuth_mode": "free_heading",
+        "panel_azimuth_deg": None,
+        "panel_geometry_source": PANEL_GEOMETRY_SOURCE_VIPER_BODY,
     },
     "cnsa_yutu_2": {
         "name": "CNSA Yutu-2",
@@ -401,6 +488,12 @@ ROVERS: dict[str, dict[str, Any]] = {
         "w_roughness": W_ROUGHNESS_DEFAULT,
         "sensor_payload_w": None,
         "sensor_heater_w": None,
+        # C1: assumed panel geometry -- see PANEL_GEOMETRY_SOURCE_POLAR_PLATE.
+        "panel_tilt_deg": 80.0,
+        "panel_face_azimuths_deg": (0.0,),
+        "panel_azimuth_mode": "sun_tracking",
+        "panel_azimuth_deg": None,
+        "panel_geometry_source": PANEL_GEOMETRY_SOURCE_POLAR_PLATE,
     },
 }
 
@@ -457,6 +550,19 @@ def rover_default_weights(rover_id: str | None = None) -> dict[str, float]:
     }
 
 
+def _battery_block_for(rover: dict[str, Any]) -> dict[str, Any]:
+    """C2's per-profile availability block.
+
+    Imported inside the function on purpose: ``app.battery`` reads
+    ``app.thermal_dwell``, which reads this module, so a top-level import
+    would close a cycle. ``app.survival`` imports ``app.safe_haven`` the same
+    way and for the same reason.
+    """
+    from .battery import rover_battery_block
+
+    return rover_battery_block(rover)
+
+
 def rover_catalog() -> list[dict[str, Any]]:
     """Return a frontend-friendly rover catalogue."""
     catalog: list[dict[str, Any]] = []
@@ -476,6 +582,14 @@ def rover_catalog() -> list[dict[str, Any]]:
                 "slope_lateral_max_deg": float(rover["slope_lateral_max_deg"]),
                 "soc_min_pct": float(rover["soc_min_pct"]),
                 "h_max_shadow_h": float(rover["h_max_shadow_h"]),
+                # C2: promoted out of declared_only because C6 has always read
+                # it and C2's dawn pre-heat times the warm-up with it. Published
+                # here so correcting the label does not remove the number from
+                # the API -- nullable, because LUVMI-M declares none.
+                "thermal_tau_s": (
+                    None if rover.get("thermal_tau_s") is None
+                    else float(rover["thermal_tau_s"])
+                ),
                 "sensor_payload_w": rover.get("sensor_payload_w"),
                 "sensor_heater_w": rover.get("sensor_heater_w"),
                 "default_weights": rover_default_weights(rover_id),
@@ -489,6 +603,17 @@ def rover_catalog() -> list[dict[str, Any]]:
                 # sources, and the claim limit -- a literature-anchored
                 # MODEL, never a measurement.
                 "slip_model": rover_slip_block(rover),
+                # C1: the assumed panel geometry the cos i gain is computed
+                # from, its faces and its source string. Steers nothing
+                # unless a request asks for panel_model="cos_incidence".
+                "panel_model": rover_panel_block(rover),
+                # C2: whether the cold-capacity curve, the calibrated heater and
+                # hibernation are available for this profile, and the reason
+                # where they are not -- so a reader sees that LUVMI-M has no
+                # cold curve and no hibernation rather than seeing numbers
+                # invented to fill the gaps. Steers nothing unless a request
+                # asks for one of the three models.
+                "battery_model": _battery_block_for(rover),
             }
         )
     return catalog

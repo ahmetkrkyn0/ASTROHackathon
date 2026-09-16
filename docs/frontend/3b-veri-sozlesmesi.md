@@ -1613,6 +1613,325 @@ sınırlayıcı); replan panelinde `entrenchment` geri sayımı (iki bar: termal
 ayrı bir "zarf" panelinde `GET /api/thermal-envelope` kutu matrisi (JSC'nin Fig. 6'sının bizim eksenlerimizdeki
 karşılığı). Her sayının yanında `validity: MODEL`, `thermal_lag_validity: UNCALIBRATED` ve varsa `heater_source`.
 
+## Güneş paneli geliş açısı ve panel geometrisi — cos i modeli (15 Eylül 2026 eki, C1)
+
+Güneş geliri artık yalnızca "aydınlık mı" sorusuna değil, **panelin o ışığa ne kadar döndüğüne** de bakıyor.
+Her zaman dilimi için site genelinde tek bir **panel kazancı** `g(t)` hesaplanıyor:
+
+```
+cos i = sin e · cos β + cos e · sin β · cos(α☉ − ψ)          (RoverDevKit, arXiv 2606.21755 § 3.4)
+g(t)  = Σ_yüzey alan_k · max(0, cos i_k) / raw_ref
+```
+
+`e` ve `α☉` SPICE'in pencere merkezindeki Güneş yüksekliği ve gerçek-kuzey azimutu (aynı dizi
+`/api/illumination-series`'in `sun` alanında zaten var), `β` panel eğimi, `ψ` panel azimutu. `raw_ref` **dizinin
+kendi en iyi geometrisindeki** ham değer; bölme şart, çünkü kataloğun `p_solar_w`'si düz bir levhanın anma gücü
+**değil**: NASA VIPER'ın PIP'i diziyi "three approximate 1 m2 solar arrays (one each on the port, starboard, and
+aft surfaces), generating 410 (TBR) W of total power" diye tanımlıyor ve 450 W, Bluethmann'ın (LSIC 2024)
+"Solar arrays: 320W per panel (450W on corner)" ifadesindeki **köşe** değeri. Normalize etmeden çarpmak geometriyi
+iki kez sayardı. Tek düz levhada `raw_ref = 1`'dir ve `g = max(0, cos i)` olur.
+Rapor: [panel_cos_i_report.md](../research/panel_cos_i_report.md).
+
+Kurallar:
+
+- **`panel_model` verilmezse (varsayılan `"sun_pointed"`) her şey bit-eşittir** — `g ≡ 1`, yani bugüne kadarki
+  model. O model gizli bir varsayımdı ve kaynağı açıkça yazmıştı: Otten vd. (ICRA 2015, A2'nin de kaynağı)
+  "two-degree-of-freedom articulated solar arrays that can always point directly at the sun", Lamarre vd.
+  (AERO 2024, B1'in kaynağı) "panels perfectly oriented towards the Sun at all times". Üç standart 4-B rota,
+  2-B SHA-256 kilitleri ve `COST_MODEL_ID = …_v5` **değişmedi**.
+- **Kazanç üç yere birden girer, hep aynı diziden:** 4-B maliyet küpünün enerji kriteri (MOVE), bekleme küpü
+  (WAIT) ve planlayıcının taşıdığı batarya. Tek yerde hesaplanıp aşağı aktarılır; iki kez hesaplansa son
+  basamakta ayrışır ve bit-eşitlik kilidi kırılırdı.
+- **Güneş ufkun altındayken `g = 0`.** Eğik bir panelin cos i'si `e < 0`'da bile pozitif çıkar; bu ışık yoktur.
+- **Panel geometrisi katalogda VARSAYIMDIR.** Beş alan (`panel_tilt_deg`, `panel_face_azimuths_deg`,
+  `panel_azimuth_mode`, `panel_azimuth_deg`, `panel_geometry_source`) ve kaynak dizesi hep `"assumption:"` ile
+  başlar. LPR-1 ve NASA VIPER: üç yüzey (port/starboard/aft = +90° / −90° / 180°), eğim 90°, kip `free_heading`.
+  Eğimin 90° olduğu NASA'nın "surfaces" + "Radiators (on top)" ifadelerinden **çıkarımdır**; NASA VIPER dizisi
+  için "vertical" demiyor. LUVMI-M ve Yutu-2: tek levha, RoverDevKit'in kutup kuralı `min(80°, |λ|)` = 80°,
+  kip `sun_tracking`.
+- **Model `MODEL`.** Yalnız geometri: verim, alan, toz, sıcaklık katsayısı, albedo, arazi yansıması **yok**.
+  `validity: "MODEL"` her blokta.
+- **2-B `/api/plan`'de kazanç uygulanamaz** ve blok bunu söyler: epok yok → Güneş yüksekliği yok, üstelik 2-B
+  gölge katmanı uzun dönem ortalamasıdır. `panel.applied: false`, `reason` içinde `/api/plan-4d` yönlendirmesi.
+- **RoverDevKit'in kendi Pragyan doğrulaması ONLARIN sonucudur** (`roverdevkit_quoted`), bizim ölçümümüz değil.
+  NASA'nın iki gücü arasındaki oranı modelin yeniden üretmesi (`viper_corner_check`) **bizim aritmetiğimizdir**
+  ve enerji modelinin doğrulanması değildir.
+
+### `POST /api/plan-4d` — bir yeni istek alanı
+
+```json
+{"start": {"row": 358, "col": 494}, "goal": {"row": 206, "col": 426}, "rover_id": "lpr_1",
+ "start_utc": "2026-09-28T00:00:00", "panel_model": "cos_incidence"}
+```
+
+| Alan | Tür | Anlam |
+|---|---|---|
+| `panel_model` | `"sun_pointed"` (varsayılan) \| `"cos_incidence"` | `"sun_pointed"`: dizi her zaman Güneş'e dik (C1 öncesi model, bit-eşit). `"cos_incidence"`: kataloğun panel geometrisi SPICE Güneş izine karşı. `start_utc`, kernel ve panel geometrisi ilan eden bir rover ister; yoksa gerekçeli **422**. |
+
+### Her yanıtta `panel` bloğu (`/api/plan-4d`, `/api/plan`, `/api/illumination-series`, `/api/panel-gain`)
+
+```json
+{"model": "cos_incidence", "requested": "cos_incidence", "applied": true, "reason": null,
+ "model_id": "multi_face_cos_incidence_v1", "validity": "MODEL", "scope": "...", "claim": "...",
+ "geometry": {"faces": [{"tilt_deg": 90.0, "azimuth_offset_deg": 90.0, "area_weight": 1.0}, "..."],
+              "n_faces": 3, "azimuth_mode": "free_heading", "tilt_mode": "fixed", "azimuth_deg": null,
+              "reference_raw": 1.4142136, "kind": "assumption", "source": "assumption: ..."},
+ "gain": {"min": 0.999527, "mean": 0.999574, "max": 0.999622, "n_slices": 48},
+ "gain_series": [0.999527, "..."],
+ "sun_elevation_deg": {"min": 1.5758, "max": 1.7614},
+ "counterfactuals": {"sun_pointed": {"mean": 1.0, "mean_when_sun_up": 1.0, "min": 1.0, "max": 1.0, "sun_up_fraction": 1.0, "positive_fraction": 1.0, "source": "counterfactual: ..."},
+                     "horizontal": {"...": "..."}, "polar_tracking": {"...": "..."},
+                     "polar_fixed_north": {"...": "..."}, "body_three_face": {"...": "..."}},
+ "viper_corner_check": {"one_face_raw": 1.0, "corner_raw": 1.4142136, "corner_reference_azimuth_deg": 135.0,
+                        "model_ratio": 1.4142136, "published_ratio": 1.40625, "per_panel_w": 320.0,
+                        "predicted_on_corner_w": 452.55, "published_on_corner_w": 450.0,
+                        "difference_w": 2.55, "difference_pct": 0.57, "quote": "...", "source": "...", "note": "..."},
+ "roverdevkit_quoted": {"peak_power": "...", "mass_model": "...", "default_array": "...", "scope": "...", "note": "..."}}
+```
+
+| Alan | Anlam |
+|---|---|
+| `applied` | `requested` **ve** kazanç serisi gerçekten kurulabildiyse `true`. İstenip kurulamadıysa `false` + `reason`. |
+| `gain_series` | Dilim başına `g(t)`, `path_states`'in dilim ekseniyle aynı hizada. `applied: false` iken `null`. |
+| `counterfactuals` | Aynı Güneş izinde beş geometrinin kazancı. Model riskinin büyüklüğünü sınırlar; hiçbiri bir araç hakkında iddia değildir. `mean_when_sun_up` yalnız Güneş'in ufkun ÜSTÜNDE olduğu dilimlerin ortalamasıdır — sabit bir paneli yalnız ışık topladığı dilimlerde ortalamak onu haksız yere kayırırdı. `positive_fraction` geometrinin hiç olmazsa bir şey topladığı dilim oranı; izleyen dizide `sun_up_fraction`'a eşittir, sabit dizide küçüktür ve aradaki fark dönememenin bedelidir. |
+| `viper_corner_check` | Modelin NASA'nın iki VIPER gücü arasındaki oranı yeniden üretmesi. **Bizim aritmetiğimiz**, NASA'nın doğrulaması değil. |
+
+### `POST /api/stress-test` — aynı bayrak, koşumun kendi kazanç serisi
+
+Monte Carlo koşumları (B5) sürekli bir saatte ilerler ve planın ufkunu aşar, dolayısıyla planın kazanç serisini
+kullanamaz; kendi (uzatılmış) dilimleri için yeni bir seri kurar ve güneş terimini `∫(1−gölge)·g dt`
+kümülatifinden okur.
+
+```json
+{"path_states": "...", "slice_hours": 0.5, "start_utc": "2026-09-28T00:00:00", "panel_model": "cos_incidence"}
+```
+
+```json
+{"sky_model": {"model": "spice_horizon", "time_varying": true,
+               "panel_model": {"applied": true, "requested": "cos_incidence",
+                               "min": 0.99953, "mean": 0.99958, "max": 0.99962, "n_slices": 520}}}
+```
+
+- **Planı `cos_incidence` ile yaptıysanız stres testine de verin.** Vermezseniz koşumlar `g = 1` ile ilerler ve
+  planın zaten düştüğü gelir konusunda **iyimser** olur.
+- **Statik gökyüzünde uygulanmaz** (`horizon_map.npy` ya da epok yoksa): `applied: false` ve gerekçe. Uzun dönem
+  gölge ortalamasını anlık bir cos i ile çarpmak, 2-B `/api/plan`'de reddedilen tutarsızlığın aynısıdır.
+- Epok/kernel/geometri varken istenip kurulamazsa gerekçeli **422**.
+
+### B1'in alanı kazancı nasıl okuyor — `survival.panel_gain`
+
+`report_survival` ya da `max_failure_probability` ile birlikte `panel_model="cos_incidence"` verilirse, kurtarma
+politikasının alanı (B1) diziyi **tek bir muhafazakâr skalerle** ücretlendirir:
+
+```json
+{"survival": {"...": "...",
+  "panel_gain": {"applied": true, "solar_gain": 0.9995465, "mean_gain": 0.9995839, "n_slices": 520,
+                 "note": "the MINIMUM gain over the field's horizon, not the mean: a survival bound may be conservative about charging, never optimistic"}}}
+```
+
+Neden dilim başına değil: `survival._power_terms` `p_solar_w`'yi `base_w` ve `slope_w`'ye **zıt işaretlerle**
+gömer ve DP'nin kapalı formlu drenaj integrali buna dayanır. Minimum, alanın **kendi** ufku (planınkinden uzun:
+plan + kurtarma + 2 × en hızlı sürüş) üzerinden alınır — planın ufku kullanılsaydı Güneş planın hemen ardından
+battığında sınır iyimser kalırdı. `n_slices` minimumun alındığı dilim sayısıdır.
+
+### `GET /api/panel-gain` — kazanç serisi tek başına
+
+```
+GET /api/panel-gain?start_utc=2026-09-28T00:00:00&rover_id=lpr_1&n_slices=48&slice_hours=0.5
+```
+
+```json
+{"rover_id": "lpr_1", "start_utc": "2026-09-28T00:00:00", "slices": 48, "slice_hours": 0.5,
+ "sun": [{"index": 0, "utc": "2026-09-28T00:00:00Z", "azimuth_true_deg": 52.027, "azimuth_grid_deg": 339.355, "elevation_deg": 1.5758}, "..."],
+ "panel": { "...": "yukarıdaki blok" }}
+```
+
+Epok yoksa, kernel yoksa ya da rover panel geometrisi ilan etmiyorsa **422** ve gerekçe; geometri **uydurulmaz**.
+
+### `GET /api/illumination-series` — iki yeni sorgu parametresi
+
+`rover_id` (varsayılan `lpr_1`) ve `panel_model` (varsayılan `"sun_pointed"`). İkisi de **eklemedir**;
+verilmezlerse yanıtın mevcut alanlarının hiçbiri değişmez.
+
+- **`rover_id` şart olduğu için:** `panel` bloğu bir rover'ın geometrisini yayımlıyor ve hangisi olduğunu
+  söylemesi gerekiyor — yoksa başka bir profille planlayan istemci LPR-1'in üç yüzeyli dizisini kendisininmiş
+  gibi okur. Blok artık `rover_id` alanı taşıyor. Bilinmeyen rover **422**.
+- **`panel_model` şart olduğu için:** `requested` **isteğin** özelliğidir, sonucun değil. Varsayılanda blok
+  geometriyi, karşı-olguları ve iddia sınırını verir ama `applied: false` ve `gain_series: null` olur;
+  `cos_incidence` verilirse dilim başına kazanç serisi gelir.
+
+### `GET /api/rovers` — profil başına `panel_model`
+
+```json
+{"id": "nasa_viper", "name": "NASA VIPER", "...": "...",
+ "panel_model": {"declared": true, "tilt_deg": 90.0, "n_faces": 3, "azimuth_mode": "free_heading",
+                 "tilt_mode": "fixed", "azimuth_deg": null, "reference_raw": 1.4142136,
+                 "faces": ["..."], "kind": "assumption", "source": "assumption: ...",
+                 "model_id": "multi_face_cos_incidence_v1", "validity": "MODEL", "claim": "..."}}
+```
+
+**Frontend'in çizebileceği (kod değişmeden):** zaman çizelgesinde `gain_series` eğrisi (Güneş yüksekliği eğrisinin
+altında ikinci bant); rota kartında `panel.gain.mean` ve `counterfactuals.horizontal` ile yan yana "bu geometri ↔
+yatay panel" karşılaştırma çubuğu; Hangar'da rover başına `panel_model.faces`'ten küçük bir üstten görünüm şeması
+ve `source` metni; ayrı bir rozette `viper_corner_check.predicted_on_corner_w` ↔ `published_on_corner_w`. Her
+sayının yanında `validity: MODEL` ve geometrinin `source` dizesi (hepsi `"assumption:"` ile başlar).
+
+## Batarya soğuk davranışı, hibernasyon ve karanlık dayanımı (16 Eylül 2026 eki, C2)
+
+**Ne değişti:** hiçbir mevcut alan. Üç yeni istek bayrağı, her yanıtta bir `battery` bloğu, bir yeni uç,
+`/api/rovers`'ta iki yeni anahtar. **Üçü de varsayılan olarak KAPALI** ve kapalıyken her sayı C2'den
+öncekiyle bit-eşittir (LPR-1'in iki checked-in maliyet-gridi SHA-256 özeti kıpırdamadı, `COST_MODEL_ID`
+`…_v5`'te kaldı).
+
+**Etiket: MODEL, kalibre edilmemiş.** Bu katalogdaki hiçbir rover sıcaklığa bağlı kapasite eğrisi, ısıtıcı
+iletkenliği (`k`), ışıma alanı (`A`), termostat set noktası ya da hibernasyon dayanımı yayımlamıyor.
+NASA Glenn'in (200 K donma eşiği, vakumda 4/4, ISRO'nun −160 °C / 14 günü, Surveyor 1'in altı döngüsü) ve
+NASA JSC'nin (Stefan-Boltzmann yasası, %26) sayıları **onlarındır**; `nasa_glenn_quoted` / `jsc_quoted`
+bloklarında alıntı olarak durur ve hiçbir hesabımızla karıştırılmaz.
+
+### `/api/plan-4d` — üç yeni istek alanı
+
+| Alan | Değerler | Varsayılan |
+|---|---|---|
+| `battery_model` | `"constant"` \| `"temperature_derated"` | `"constant"` |
+| `heater_power_model` | `"constant"` \| `"delta_t"` \| `"radiative"` | `"constant"` |
+| `allow_hibernate` | `true` \| `false` | `false` |
+| `battery_shape_exponent` | 0 < x ≤ 8 | `1.0` |
+
+- **`battery_model="temperature_derated"`** depolanan şarjı *teslim edilebilir* şarj olarak okur: profilin
+  kendi `bat_op_min_c`'sinde ve üstünde 1,0, alıntılanan 200 K donma noktasında ve altında 0,0, arada
+  etiketli bir varsayım (varsayılan doğrusal; `battery_shape_exponent` şekli değiştirir). Sürekli karanlık
+  dayanımı da yayımlanan `h_max_shadow_h`'nin bu durumun rezerv üstünde hâlâ teslim edebildiği kesirle
+  ölçeklenmişi olur — tam şarj + rating sıcaklığında **dört profilde de tam olarak** yayımlanan sabiti verir.
+- **`heater_power_model`** ısıtıcının gücünü gölge oranından değil **yüzey sıcaklığından** okur:
+  `radiative` NASA JSC'nin kendi `Q = εσA(T_obj⁴ − T_env⁴)` yasası, `delta_t` onun doğrusal hâli. Tek katsayı
+  (`εσA`, ve doğrusallaştırması `kA`) katalogdaki `p_heater_w`'den, etiketli bir boyutlandırma varsayımıyla
+  okunur; ε ve A **ayrı ayrı asla uydurulmaz**. `heater_model="thermostat_assumed"` **zorunludur**.
+- **`allow_hibernate=true`** planlayıcıya üçüncü bir kenar ailesi ekler: karanlıkta uykuya geçer,
+  `p_hibernate_w` çeker, **ilk ışıkta** uyanır. Uyanma bedeli NASA Glenn'in "dawn mode"udur — ön-ısıtıcılar
+  **güneş dizisinden** beslenir, batarya izoledir, yani bedel zaman ve güneş geliridir, batarya değil.
+
+### Yeni: her yanıtta `battery` bloğu (`/api/plan`, `/api/plan-4d`)
+
+```json
+{"battery": {
+  "model_id": "cold_capacity_radiative_heater_hibernation_v1", "validity": "MODEL",
+  "scope": "...", "claim": "...",
+  "requested": {"battery_model": "constant", "heater_power_model": "constant", "allow_hibernate": false},
+  "applied": false, "reason": null, "shape_exponent": 1.0,
+  "catalogue": {
+    "cold_capacity": {"available": true, "reason": null, "rating_c": 0.0,
+                      "freeze_c": -73.15, "freeze_k": 200.0,
+                      "freeze_source": "assumption: ...", "shape_source": "assumption: ..."},
+    "heater": {"available": true, "k_a_w_per_k": 0.1667, "es_a_w_per_k4": 4.6845e-09,
+               "implied_area_m2_at_emissivity_1": 0.0826, "set_point_c": 0.0,
+               "set_point_component": "battery", "sizing_surface_c": -150.0,
+               "p_heater_w": 25.0, "source": "assumption: ..."},
+    "hibernation": {"available": true, "reason": null, "p_hibernate_w": 108,
+                    "dark_rate": 1.6615, "power_source": "assumption: ...",
+                    "endurance_source": "assumption: ...",
+                    "evidence_limit": {"coldest_cited_k": 80.0, "coldest_cited_c": -193.15,
+                                       "longest_cited_h": 336.0, "note": "..."}},
+    "published_shadow_endurance_h": 50.0},
+  "jsc_survival_temperature_check": {"quoted_pct": 26.0, "predicted_pct": 26.50,
+                                     "difference_pct_points": 0.50, "by_environment": ["..."],
+                                     "quoted_text": "Decreasing a component's survival temperature ..."},
+  "nasa_glenn_quoted": {"freeze_k": 200.0, "isro_days": 14, "surveyor_1": "...", "dawn_mode": "..."},
+  "jsc_quoted": {"law": "Q_rad = eps * sigma * A * (T_obj^4 - T_env^4)", "...": "..."},
+  "viper_quoted": {"drilling_in_shadow_h": 9.5, "min_power_shadow_h": 50.0},
+  "references": ["..."],
+  "route": {"actions": ["move", "wait", "hibernate", "..."], "hibernate_steps": 0,
+            "hibernate_hours": null, "hibernate_dark_hours": null, "coldest_inner_c": null,
+            "beyond_cited_evidence": null, "beyond_cited_evidence_reason": null,
+            "margins_use_nameplate_charge": true}}}
+```
+
+`applied` kuralı A1/A2/B1/C6/C1 ile aynı: **istenmiş VE uygulanabilmiş**. `/api/plan` (2-B) her zaman
+`applied: false` ve gerekçesi yazılı — *"the 2-D cost grid has no epoch"*: sıcaklığa bağlı bir ısıtıcı ve
+derate edilmiş bir batarya dilim başına yüzey ister, 2-B gridin termal katmanı ise uzun vadeli yıllık zirvedir.
+
+**`route.margins_use_nameplate_charge: true`** bilinçli bir sınır beyanıdır: SHERPA marjları
+(`safe_haven.route_margins`) nominal şarj ve sabit idame gücü üzerinden hesaplanır, yani `battery_model`
+açıkken planlayıcının kendi sayıları değildir.
+
+### `/api/plan-4d` — metrikler ve rota dizileri (yalnızca ekleme)
+
+| Alan | Ne |
+|---|---|
+| `path_actions` | dönüşüm başına `"move"` \| `"wait"` \| `"hibernate"`; uzunluk `len(path_states) − 1` |
+| `metrics.hibernate_steps` | hibernasyon kenarı sayısı (bunlar `wait_steps`'e **dahil değildir**) |
+| `metrics.hibernate_hours` | uyku + dawn pre-heat toplam saati |
+| `metrics.hibernate_dark_hours` | uykunun sürekli-karanlık bütçesinden harcadığı saat |
+| `metrics.coldest_inner_c` | uyku boyunca inilen en düşük iç sıcaklık |
+| `metrics.hibernation_beyond_cited_evidence` (+ `_reason`) | alıntılanan kanıtın (80 K / 14 gün) dışına çıkıldı mı |
+| `metrics.hibernation_allowed`, `metrics.battery_model` | hangi kuralların yürürlükte olduğu |
+
+**Önemli:** bir hibernasyon bir bekleme gibi yerinde durur. Ardışık `path_states`'ten bacak türetip
+`previous[:2] == current[:2]` diye bekleme sayan her tüketici artık `path_actions`'ı okumalıdır; yoksa
+uykudaki rover'ı `p_hibernate_w` yerine idame gücünde modeller. `metrics.max_continuous_shadow_h` uyku
+sırasındaki **zirveyi** bildirir (şafaktaki sıfırlamayı değil), yani D3'ün LP-R01'i hâlâ söylediği şeyi ölçer.
+
+### Yeni ret kodları (`metrics.edges_rejected`)
+
+| Anahtar | Ne zaman |
+|---|---|
+| `hibernate_unwakeable` | dawn pre-heat tamamlanamıyor: dizi ön-ısıtıcıyı besleyemiyor ya da ısıtıcı yüzeye karşı doymuş |
+| `hibernate_too_cold` | uyku bataryayı hayatta kalma zarfının dışına çıkarırdı (200 K'nın altı) |
+
+### Yeni uç: `GET /api/battery-model`
+
+```
+GET /api/battery-model?rover_id=lpr_1&inner_c=-20&soc_pct=100&shape_exponent=1.0
+```
+
+```json
+{"rover_id": "lpr_1", "battery": {"...": "yukarıdaki blok"},
+ "curve": [{"inner_c": -73.15, "usable_fraction": 0.0, "endurance_h": 0.0}, "...11 nokta..."],
+ "heater": {"available": true, "k_a_w_per_k": 0.1667, "by_surface": [
+    {"surface_c": -150.0, "constant_w": 25.0, "delta_t_w": 25.0, "radiative_w": 25.0,
+     "heated_equilibrium_c": 0.0}, "..."]},
+ "state": {"inner_c": -20.0, "soc_pct": 100.0, "stored_wh": 5420.0, "usable_fraction": 0.726589,
+           "deliverable_wh": 3937.91, "shadow_endurance_h": 32.9118,
+           "components_past_operating_limit": ["battery", "electronics"],
+           "envelope": {"lo_c": 0.0, "hi_c": 35.0, "lo_component": "battery", "hi_component": "battery"},
+           "nominal_inner_c": 17.5},
+ "survival_envelope": {"lo_c": -73.15, "hi_c": 35.0, "lo_component": "battery", "hi_component": "battery"},
+ "shape_exponent": 1.0}
+```
+
+Bilinmeyen rover **422**. Eğrisi olmayan profilde (LUVMI-M) `curve: []` ve `state.usable_fraction: null`,
+gerekçesiyle — **değer uydurulmaz**.
+
+### `/api/rovers` — iki yeni anahtar
+
+```json
+{"id": "lpr_1", "...": "...",
+ "thermal_tau_s": 7200.0,
+ "battery_model": {"model_id": "...", "validity": "MODEL",
+                   "cold_capacity": {"available": true, "...": "..."},
+                   "heater": {"available": true, "...": "..."},
+                   "hibernation": {"available": true, "...": "..."},
+                   "published_shadow_endurance_h": 50.0}}
+```
+
+**`thermal_tau_s` `declared_only` bloğundan çıktı ve üst düzey anahtar oldu.** Sebep bir dürüstlük
+düzeltmesidir, kapsam değişikliği değil: C6 bu alanı gönderildiği günden beri okuyor
+(`thermal_dwell.build_dwell_cube`), katalog ise onu "hiçbir şey okumuyor" diye yayımlamaya devam ediyordu.
+Sayı **kaybolmadı**, yer değiştirdi. LUVMI-M'de `null`.
+
+> **Frontend'e not (kod değişmediği için burada duruyor):**
+> `frontend/src/mission/useThermalDwellCapability.ts:13`'teki yorum `thermal_tau_s`'yi "declared_only altında
+> yayımlandığı için" okumamayı gerekçelendiriyor. O gerekçe bu ekle **bayatladı** — alan artık modellenmiş
+> ve üst düzeyde. Yorum düzeltilmedi çünkü C2 frontend koduna dokunmuyor; okuyan biri bunu bilsin diye yazıldı.
+
+**Frontend'in çizebileceği (kod değişmeden):** rota kartında `path_actions`'tan bir bant (sürüş / bekleme /
+**uyku**); Hangar'da profil başına `battery_model.cold_capacity.available` rozeti ve LUVMI-M için gerekçe
+metni; `curve`'den sıcaklık-kapasite eğrisi; `heater.by_surface`'tan üç ısıtıcı modelinin karşılaştırma
+çubuğu; `jsc_survival_temperature_check` için C1'in `viper_corner_check` rozetiyle aynı desende bir çapraz
+kontrol rozeti (`quoted_pct` ↔ `predicted_pct`); hibernasyonlu rotalarda `beyond_cited_evidence` uyarısı.
+Her sayının yanında `validity: MODEL` ve ilgili `*_source` dizesi (hepsi `"assumption:"` ile başlar).
+
+
 ## Değişmeyenler
 
 `fetchLayer`, `/api/plan`, `/api/plan-4d` (mevcut alanları), `/api/cell-telemetry`,

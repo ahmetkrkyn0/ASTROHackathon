@@ -167,6 +167,8 @@ def build_cost_cube(
     roughness: np.ndarray | None = None,
     roughness_scale: "RoughnessScale | None" = None,
     surface_series: np.ndarray | None = None,
+    solar_gain_series: Sequence[float] | np.ndarray | None = None,
+    heater_w_series: np.ndarray | None = None,
 ) -> np.ndarray:
     """(T, H', W') cost cube, one slice per shadow-ratio snapshot.
 
@@ -177,6 +179,23 @@ def build_cost_cube(
     Given, it is used as is (the thermal dwell model reads the same array,
     so the cube and the dwell see one surface); omitted, it is computed
     here. Either way the slices are identical bit for bit.
+
+    Panel gain (C1)
+    ---------------
+    *solar_gain_series* is the per-slice cos i gain (:mod:`app.panel`), one
+    scalar per snapshot, which the energy criterion multiplies into the
+    cell's solar income. ``None`` is the pre-C1 cube, bit for bit.
+
+    Heater power (C2)
+    -----------------
+    *heater_w_series* is the ``(T, H', W')`` survival-heater power the caller
+    derived from ``surface_series`` (:func:`app.battery.heater_power_w_grid`),
+    already coarsened. Given, the energy criterion prices each cell's heater
+    from its own TEMPERATURE instead of its exposure; ``None`` is the pre-C2
+    cube, bit for bit. Only this 4-D path ever has one: the 2-D
+    ``compute_cost_grid`` has no epoch and so no per-slice surface, which is
+    why ``COST_MODEL_ID`` does not move for C2 and the checked-in cost-grid
+    digests are untouched.
 
     Roughness (C4)
     --------------
@@ -300,6 +319,25 @@ def build_cost_cube(
     # removed np.vectorize), so per-slice evaluation costs a handful of
     # array ops per slice rather than the ~22 s that made the optimisation
     # necessary in the first place.
+    heaters = None
+    if heater_w_series is not None:
+        heaters = np.asarray(heater_w_series, dtype=np.float64)
+        expected_heat = (len(shadow_ratio_series),) + slope_c.shape
+        if heaters.shape != expected_heat:
+            raise ValueError(
+                f"heater_w_series {heaters.shape} must be {expected_heat}: one coarse "
+                "heater-power grid per shadow snapshot"
+            )
+
+    gains = None
+    if solar_gain_series is not None:
+        gains = np.asarray(solar_gain_series, dtype=np.float64).reshape(-1)
+        if gains.size != len(shadow_ratio_series):
+            raise ValueError(
+                f"solar_gain_series has {gains.size} entries for "
+                f"{len(shadow_ratio_series)} shadow snapshots"
+            )
+
     slices: list[np.ndarray] = []
     for index, snapshot in enumerate(shadow_ratio_series):
         shadow_c = coarsen_grid(np.asarray(snapshot, dtype=np.float64), coarsen)
@@ -329,6 +367,8 @@ def build_cost_cube(
             slope_sigma=sigma_c,
             roughness=roughness_c,
             roughness_scale=roughness_scale,
+            solar_gain=1.0 if gains is None else float(gains[index]),
+            heater_w=None if heaters is None else heaters[index],
         )
         slices.append(cost_map.total(context))
 
@@ -348,6 +388,8 @@ def wait_cost(
     dt_hours: float,
     rover: Mapping[str, Any],
     weights: Mapping[str, float],
+    solar_gain: float = 1.0,
+    heater_w: float | None = None,
 ) -> float:
     """Cost of holding position for one time slice.
 
@@ -371,14 +413,80 @@ def wait_cost(
     the heater load here matches the one the energy penalty and the
     simulator use. It previously charged full heater power even in full
     sunlight. (Round 3 review, M-9.)
+
+    *solar_gain* is C1's panel gain for THIS slice. The illuminated fraction
+    says whether the Sun is visible from the cell; the gain says how much of
+    that light the array actually faces. 1.0 is the pre-C1 model and is
+    bit-for-bit the identity. (C1.)
+
+    *heater_w* is C2's temperature-derived heater power for THIS cell at THIS
+    slice. The illuminated fraction says how much light the cell gets; the
+    heater power says how cold it actually is, and on Site11 those two layers
+    are independent (measured Spearman -0.0014). ``None`` is the pre-C2 model
+    and is the identity. (C2.)
     """
     frac = min(1.0, max(0.0, float(illum_frac)))
     dt = max(0.0, float(dt_hours))
 
-    solar_in_w = float(rover["p_solar_w"]) * frac
-    net_w = solar_in_w - housekeeping_power_w(1.0 - frac, rover)
+    solar_in_w = float(rover["p_solar_w"]) * frac * float(solar_gain)
+    net_w = solar_in_w - housekeeping_power_w(1.0 - frac, rover, heater_w)
 
     # Rate form, so the dt factor is applied once, at the end.
+    soc_drain_per_hour = max(0.0, -net_w / float(rover["e_cap_wh"]))
+    shadow_penalty = f_shadow_cell(1.0 - frac)
+
+    return float(
+        dt
+        * (
+            1.0
+            + weights["w_energy"] * soc_drain_per_hour
+            + weights["w_shadow"] * shadow_penalty
+        )
+    )
+
+
+def hibernate_cost(
+    illum_frac: float,
+    dt_hours: float,
+    rover: Mapping[str, Any],
+    weights: Mapping[str, float],
+    solar_gain: float = 1.0,
+) -> float:
+    """Cost of lying dormant for *dt_hours* instead of holding station (C2).
+
+    The same shape as :func:`wait_cost` -- hours scaled by the same two
+    weighted penalties -- with the catalogue's ``p_hibernate_w`` in place of
+    the shadow housekeeping draw. Sharing the shape is the point: a HIBERNATE
+    edge and a WAIT edge have to be comparable on one objective, and the only
+    difference between them is the power the vehicle draws while it stands
+    still.
+
+    That difference is not always a saving. Measured on this catalogue,
+    ``p_hibernate_w / p_shadow_w`` is 1.662 for LPR-1 (its dormant draw is
+    LARGER than running its heaters -- the reference document defines the mode
+    as 'idle + heater + thermal management'), 0.769 for NASA VIPER and 0.083
+    for Yutu-2. So hibernation is genuinely cheaper for two of the four
+    profiles and genuinely dearer for one, and the planner is left to work out
+    which on the objective rather than being told.
+
+    Never negative and never below ``dt``, exactly as ``wait_cost`` is not:
+    the SOC term is floored at zero and the shadow penalty is non-negative.
+    That is what keeps the A* heuristic admissible AND consistent across a
+    zero-distance edge -- a dormant hour must never be a reward, or a rover
+    could lower its cost by sleeping in the sunshine.
+    """
+    frac = min(1.0, max(0.0, float(illum_frac)))
+    dt = max(0.0, float(dt_hours))
+    hibernate_w = rover.get("p_hibernate_w")
+    if hibernate_w is None:
+        raise ValueError(
+            "rover declares no p_hibernate_w: hibernation is undefined for this "
+            "profile and no draw is invented for it"
+        )
+
+    solar_in_w = float(rover["p_solar_w"]) * frac * float(solar_gain)
+    net_w = solar_in_w - float(hibernate_w)
+
     soc_drain_per_hour = max(0.0, -net_w / float(rover["e_cap_wh"]))
     shadow_penalty = f_shadow_cell(1.0 - frac)
 
@@ -398,8 +506,24 @@ def build_wait_cost_cube(
     dt_hours: float,
     weights: Mapping[str, float] | None = None,
     coarsen: int = 1,
+    solar_gain_series: Sequence[float] | np.ndarray | None = None,
+    heater_w_series: np.ndarray | None = None,
 ) -> np.ndarray:
-    """(T, H', W') cost of waiting one slice in each cell at each time."""
+    """(T, H', W') cost of waiting one slice in each cell at each time.
+
+    *solar_gain_series* is C1's per-slice panel gain, one scalar per
+    snapshot. Omitted, the pre-C1 whole-cube value table is used and the
+    result is bit-identical to before. Given, the value table has to be
+    built PER SLICE: with a slice-dependent gain the same illuminated
+    fraction buys different amounts of charge at different times, and one
+    table across the whole cube would collapse exactly that distinction.
+
+    *heater_w_series* is C2's ``(T, H', W')`` heater power, already coarsened.
+    It varies per CELL as well as per slice, so with it the de-duplication key
+    becomes the PAIR (illuminated fraction, heater power) rather than the
+    fraction alone -- two cells equally lit but at different temperatures must
+    not share a value. Omitted, the pre-C2 path runs unchanged.
+    """
     if len(illum_frac_series) == 0:
         raise ValueError("illum_frac_series must contain at least one snapshot")
 
@@ -416,12 +540,61 @@ def build_wait_cost_cube(
         for frac in illum_frac_series
     ]
     stacked = np.stack(coarse, axis=0)
-    unique, inverse = np.unique(stacked, return_inverse=True)
-    table = np.array(
-        [wait_cost(value, dt_hours, rover, resolved) for value in unique],
-        dtype=np.float64,
-    )
-    return table[inverse].reshape(stacked.shape)
+
+    heaters = None
+    if heater_w_series is not None:
+        heaters = np.asarray(heater_w_series, dtype=np.float64)
+        if heaters.shape != stacked.shape:
+            raise ValueError(
+                f"heater_w_series {heaters.shape} must be {stacked.shape}: one coarse "
+                "heater-power grid per illumination snapshot"
+            )
+
+    if solar_gain_series is None and heaters is None:
+        unique, inverse = np.unique(stacked, return_inverse=True)
+        table = np.array(
+            [wait_cost(value, dt_hours, rover, resolved) for value in unique],
+            dtype=np.float64,
+        )
+        return table[inverse].reshape(stacked.shape)
+
+    if solar_gain_series is None:
+        gains = np.ones(stacked.shape[0], dtype=np.float64)
+    else:
+        gains = np.asarray(solar_gain_series, dtype=np.float64).reshape(-1)
+        if gains.size != stacked.shape[0]:
+            raise ValueError(
+                f"solar_gain_series has {gains.size} entries for "
+                f"{stacked.shape[0]} illumination snapshots"
+            )
+    out = np.empty(stacked.shape, dtype=np.float64)
+    for index in range(stacked.shape[0]):
+        slice_frac = stacked[index]
+        if heaters is None:
+            unique, inverse = np.unique(slice_frac, return_inverse=True)
+            table = np.array(
+                [
+                    wait_cost(value, dt_hours, rover, resolved, solar_gain=float(gains[index]))
+                    for value in unique
+                ],
+                dtype=np.float64,
+            )
+        else:
+            pairs = np.stack([slice_frac.ravel(), heaters[index].ravel()], axis=1)
+            unique, inverse = np.unique(pairs, axis=0, return_inverse=True)
+            inverse = np.asarray(inverse).reshape(-1)
+            table = np.array(
+                [
+                    wait_cost(
+                        float(value), dt_hours, rover, resolved,
+                        solar_gain=float(gains[index]), heater_w=float(heat),
+                    )
+                    for value, heat in unique
+                ],
+                dtype=np.float64,
+            )
+        out[index] = table[inverse].reshape(slice_frac.shape)
+    return out
 
 
 def auto_slice_hours(

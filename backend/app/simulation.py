@@ -121,8 +121,15 @@ def simulate_path(
     rover: dict[str, Any] | None = None,
     pixel_size_m: float | None = None,
     elevation_grid: np.ndarray | None = None,
+    solar_gain: float = 1.0,
 ) -> list[RoverState]:
     """Simulate rover traversal over an A* path.
+
+    *solar_gain* is C1's panel gain (:mod:`app.panel`), a single scalar here
+    because a 2-D route carries no time axis: the 2-D grid's shadow ratio is
+    a long-run fraction, so the only gain that pairs with it is a long-run
+    one. 1.0 -- the default -- is the pre-C1 model and is bit-for-bit the
+    identity.
 
     Physics model
     -------------
@@ -156,7 +163,7 @@ def simulate_path(
 
     rover_cfg = get_rover() if rover is None else rover
     battery_capacity_wh = float(rover_cfg["e_cap_wh"])
-    solar_power_w = float(rover_cfg.get("p_solar_w") or 0.0)
+    solar_power_w = float(rover_cfg.get("p_solar_w") or 0.0) * float(solar_gain)
     soc_min_pct = float(rover_cfg.get("soc_min_pct") or 0.0)
     # The reserve the rover is not supposed to spend. The barrier term of the
     # documented cost function encodes it, but the barrier had no production

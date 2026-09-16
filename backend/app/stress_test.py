@@ -236,8 +236,16 @@ def wilson_interval(successes: int, trials: int, z: float = _Z_95) -> tuple[floa
 class RouteLegs:
     """A ``/api/plan-4d`` route as the simulator sees it: S states on the
     planner's grid, S-1 legs between them, each a MOVE (nominal drive hours
-    and traction power from the planner's own trapezoidal edge slope) or a
-    WAIT (nothing to drive, a planned hold)."""
+    and traction power from the planner's own trapezoidal edge slope), a
+    WAIT (nothing to drive, a planned hold) or -- since C2 -- a HIBERNATE
+    (a dormant hold at ``p_hibernate_w``).
+
+    A hibernation holds position exactly as a wait does, so the geometric
+    test below cannot tell the two apart: without the planner's own
+    ``path_actions`` this simulator would charge a dormant rover at
+    housekeeping power and spend its darkness budget at the wrong rate.
+    ``is_hibernate`` is all-False when no actions are supplied, which is the
+    pre-C2 route exactly."""
 
     cells: np.ndarray        # (S, 2) int
     slices: np.ndarray       # (S,) int
@@ -247,6 +255,7 @@ class RouteLegs:
     travel_h: np.ndarray     # (S-1,) nominal drive hours, 0 for waits
     traction_w: np.ndarray   # (S-1,) p_base * (1 + mu sin theta), 0 for waits
     slice_hours: float
+    is_hibernate: np.ndarray | None = None   # (S-1,) bool; None = no hibernation (C2)
 
     @property
     def n_states(self) -> int:
@@ -254,11 +263,18 @@ class RouteLegs:
 
     @property
     def n_waits(self) -> int:
-        return int(np.count_nonzero(self.is_wait))
+        # A hibernation is not a wait, and the planner does not count it as one.
+        return int(np.count_nonzero(self.is_wait)) - self.n_hibernations
+
+    @property
+    def n_hibernations(self) -> int:
+        if self.is_hibernate is None:
+            return 0
+        return int(np.count_nonzero(self.is_hibernate))
 
     @property
     def n_moves(self) -> int:
-        return int(self.is_wait.shape[0]) - self.n_waits
+        return int(self.is_wait.shape[0]) - int(np.count_nonzero(self.is_wait))
 
     @property
     def planned_duration_h(self) -> float:
@@ -276,8 +292,14 @@ def route_legs(
     rover: Any,
     slice_hours: float,
     traversable: np.ndarray | None = None,
+    actions: Any | None = None,
 ) -> RouteLegs:
     """Validate a route and price its legs the way ``astar_4d`` did.
+
+    *actions* is the planner's own ``path_actions`` (C2), one entry per leg.
+    Given, a leg marked ``"hibernate"`` is held at ``p_hibernate_w`` instead of
+    housekeeping power and spends the darkness budget at the dormant rate.
+    Omitted, every stationary leg is a wait, which is the pre-C2 route exactly.
 
     *states* are ``(row, col, slice)`` triples on the planner's grid. Raises
     ``ValueError`` -- naming the state -- when the route does not start at
@@ -353,11 +375,28 @@ def route_legs(
             1.0 + mu_coeff * math.sin(math.radians(max(0.0, edge_slope)))
         )
 
+    hibernate_mask = None
+    if actions is not None:
+        kinds = [str(a) for a in actions]
+        if len(kinds) != n_legs:
+            raise ValueError(
+                f"actions has {len(kinds)} entries for {n_legs} legs: path_actions "
+                "carries one entry per transition"
+            )
+        hibernate_mask = np.array([k == "hibernate" for k in kinds], dtype=bool)
+        stationary_mismatch = int(np.count_nonzero(hibernate_mask & ~is_wait))
+        if stationary_mismatch:
+            raise ValueError(
+                f"{stationary_mismatch} legs are marked 'hibernate' but move between "
+                "two different cells: a dormant rover holds position"
+            )
+
     return RouteLegs(
         cells=cells,
         slices=slices,
         planned_h=slices.astype(np.float64) * step,
         is_wait=is_wait,
+        is_hibernate=hibernate_mask,
         distance_m=distance,
         travel_h=travel,
         traction_w=traction,
@@ -400,8 +439,12 @@ class RouteSky:
     tts_h: np.ndarray | None           # (S,) hours to the nearest haven, inf unreachable
     slice_hours: float
     time_varying: bool = True
+    #: C1's per-slice panel gain, (T,). ``None`` is the pre-C1 sky: the
+    #: array is treated as face-on to the Sun and the run is bit-identical.
+    solar_gain: np.ndarray | None = None
     # Derived tables, filled in __post_init__.
     cumulative: np.ndarray = None  # type: ignore[assignment]
+    cumulative_lit_gain: np.ndarray | None = None
     next_dark_h: np.ndarray = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -429,6 +472,24 @@ class RouteSky:
         self.cumulative = np.vstack(
             [np.zeros((1, self.shadow.shape[1])), np.cumsum(self.shadow, axis=0)]
         ) * self.slice_hours
+        # C1: the runs advance on a continuous clock, so a per-slice gain
+        # cannot be looked up by index -- the income over [a, b] is
+        # integral of (1 - shadow) * g, and that needs its own cumulative
+        # table alongside the exposure one. Built only when a gain is given,
+        # so the pre-C1 path allocates nothing and reads nothing.
+        if self.solar_gain is None:
+            self.cumulative_lit_gain = None
+        else:
+            gain = np.asarray(self.solar_gain, dtype=np.float64).reshape(-1)
+            if gain.size != self.shadow.shape[0]:
+                raise ValueError(
+                    f"solar_gain has {gain.size} entries for {self.shadow.shape[0]} slices"
+                )
+            self.solar_gain = gain
+            lit_gain = (1.0 - self.shadow) * gain[:, None]
+            self.cumulative_lit_gain = np.vstack(
+                [np.zeros((1, self.shadow.shape[1])), np.cumsum(lit_gain, axis=0)]
+            ) * self.slice_hours
         # Absolute hour at which each cell next goes dark, per slice: SHERPA's
         # time-to-sun-shadow read at any instant.
         self.next_dark_h = _next_time_table(
@@ -659,12 +720,43 @@ def simulate_runs(
     )
     p_solar_w = float(rover.get("p_solar_w") or 0.0)
     dark_w = p_idle_w + shadow_extra_w
+    # C2: the dormant draw and the rate at which a dormancy spends the
+    # continuous-darkness budget. Both are inert unless the route carries
+    # hibernate legs, so a pre-C2 route runs the pre-C2 arithmetic.
+    hibernate_legs = legs.is_hibernate
+    if hibernate_legs is not None and hibernate_legs.any():
+        from . import battery as battery_module
+        p_hibernate_w = float(rover["p_hibernate_w"])
+        hibernate_rate = battery_module.hibernate_dark_rate(rover)
+    else:
+        hibernate_legs = None
+        p_hibernate_w = 0.0
+        hibernate_rate = 1.0
 
     def housekeeping(exposure: np.ndarray) -> np.ndarray:
         return p_idle_w + exposure * shadow_extra_w
 
     def slice_of(x: np.ndarray) -> np.ndarray:
         return np.clip(np.floor(x / step), 0, n_slices - 1).astype(np.int64)
+
+    lit_gain_cumulative = sky.cumulative_lit_gain
+
+    def lit_gain_mean(column: int, a: np.ndarray, b: np.ndarray, exposure: np.ndarray) -> np.ndarray:
+        """Time-mean of ``(1 - shadow) * g`` over [a, b] for *column*.
+
+        Without a gain series this is exactly ``1 - exposure``, returned as
+        that expression so the pre-C1 arithmetic is untouched.
+        """
+        if lit_gain_cumulative is None:
+            return 1.0 - exposure
+        span = b - a
+        integral = np.interp(b, times, lit_gain_cumulative[:, column]) - np.interp(
+            a, times, lit_gain_cumulative[:, column]
+        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            mean = np.where(span > 0.0, integral / np.where(span > 0.0, span, 1.0), 0.0)
+        instant = (1.0 - shadow[slice_of(a), column]) * sky.solar_gain[slice_of(a)]
+        return np.where(span > 0.0, mean, instant)
 
     def exposure_mean(column: int, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """Time-mean shadow of *column* over [a, b]; the instant value at a
@@ -778,12 +870,31 @@ def simulate_runs(
         hold = depart - clock
         held = mask & (hold > 0.0)
         exposure = exposure_mean(s_from, clock, depart)
-        drain = (housekeeping(exposure) * m_power - p_solar_w * (1.0 - exposure)) * hold
+        dormant = hibernate_legs is not None and bool(hibernate_legs[leg])
+        if dormant:
+            # A dormant hold draws the catalogue's p_hibernate_w rather than
+            # housekeeping power, and spends the darkness budget at
+            # p_hibernate_w / p_shadow_w -- the same two rules the planner
+            # applies, so the SHERPA protocol reproduces the plan it is given
+            # instead of re-simulating a rover that stayed awake.
+            drain = (p_hibernate_w * m_power) * hold
+        else:
+            drain = (
+                housekeeping(exposure) * m_power
+                - p_solar_w * lit_gain_mean(s_from, clock, depart, exposure)
+            ) * hold
         battery = np.where(held, np.minimum(e_cap_wh, battery - drain), battery)
         end_exposure = shadow[slice_of(depart), s_from]
-        dark = np.where(
-            held, np.where(end_exposure >= thr, dark + hold * end_exposure, 0.0), dark
-        )
+        if dormant:
+            dark = np.where(
+                held,
+                np.where(end_exposure >= thr, dark + hold * end_exposure * hibernate_rate, 0.0),
+                dark,
+            )
+        else:
+            dark = np.where(
+                held, np.where(end_exposure >= thr, dark + hold * end_exposure, 0.0), dark
+            )
         if sky.earth is not None:
             dsn_hours += np.where(held & ~link, hold, 0.0)
         min_battery = np.where(held, np.minimum(min_battery, battery), min_battery)
@@ -795,13 +906,25 @@ def simulate_runs(
         else:
             travel = np.where(mask, legs.travel_h[leg] / m_speed, 0.0)
             arrive = depart + travel
-            exposure = 0.5 * (
-                exposure_mean(s_from, depart, arrive) + exposure_mean(s_to, depart, arrive)
-            )
+            exposure_from = exposure_mean(s_from, depart, arrive)
+            exposure_to = exposure_mean(s_to, depart, arrive)
+            exposure = 0.5 * (exposure_from + exposure_to)
+            if lit_gain_cumulative is None:
+                # The pre-C1 expression, character for character. Averaging
+                # (1 - e) over the two columns is algebraically the same as
+                # 1 - mean exposure but NOT the same in IEEE-754 (they differ
+                # in 25 percent of random pairs), and this path is the
+                # bit-equality lock.
+                lit_gain = 1.0 - exposure
+            else:
+                lit_gain = 0.5 * (
+                    lit_gain_mean(s_from, depart, arrive, exposure_from)
+                    + lit_gain_mean(s_to, depart, arrive, exposure_to)
+                )
             drain = (
                 legs.traction_w[leg] * m_power
                 + housekeeping(exposure) * m_power
-                - p_solar_w * (1.0 - exposure)
+                - p_solar_w * lit_gain
             ) * travel
             battery = np.where(mask, np.minimum(e_cap_wh, battery - drain), battery)
             end_exposure = shadow[slice_of(arrive), s_to]
@@ -821,7 +944,10 @@ def simulate_runs(
             if pinned.any():
                 hold_end = arrive + second_hold
                 exposure = exposure_mean(s_to, arrive, hold_end)
-                drain = (housekeeping(exposure) * m_power - p_solar_w * (1.0 - exposure)) * second_hold
+                drain = (
+                    housekeeping(exposure) * m_power
+                    - p_solar_w * lit_gain_mean(s_to, arrive, hold_end, exposure)
+                ) * second_hold
                 battery = np.where(pinned, np.minimum(e_cap_wh, battery - drain), battery)
                 end_exposure = shadow[slice_of(hold_end), s_to]
                 dark = np.where(
