@@ -313,13 +313,22 @@ REACHABILITY_CORRECTIONS: tuple[dict[str, str], ...] = (
     {
         "claim": "The note attributes a Fast Marching energy map to Sakayori & Ishigami 2021.",
         "correction": (
-            "Unverified. The full text is paywalled (HTTP 403 from tandfonline and "
-            "researchgate); the indexed abstract names a power-consumption model "
+            "Still unverified HERE, but the access claim was wrong and is withdrawn. "
+            "The paper is OPEN ACCESS -- confirmed by Ishigami himself by email on "
+            "2026-09-17. The HTTP 403 from tandfonline and researchgate was real and "
+            "still reproduces, but it is Taylor & Francis refusing automated requests, "
+            "not a subscription wall: an observation about our fetch, which this entry "
+            "had over-read as an observation about the paper. What remains open is the "
+            "attribution itself: the indexed abstract names a power-consumption model "
             "approximated from a dynamic simulation, with solar-array generation taken "
             "into account, and no Fast Marching. D6 cites it for context only and "
-            "claims nothing about its algorithm."
+            "claims nothing about its algorithm until the full text has been read."
         ),
-        "read": "2026-09-16, abstract via Semantic Scholar; full text not obtained",
+        "read": (
+            "2026-09-16, abstract via Semantic Scholar; full text not obtained "
+            "programmatically. 2026-09-17: author supplied the open-access link; "
+            "full-text reading still pending."
+        ),
     },
     {
         "claim": (
@@ -423,8 +432,11 @@ REACHABILITY_REFERENCES: tuple[dict[str, str], ...] = (
         "url": "https://doi.org/10.1080/01691864.2021.1959396",
         "used_for": (
             "CONTEXT ONLY, and with a correction: the research note attributes a Fast "
-            "Marching energy map to this paper. The full text is paywalled (HTTP 403) "
-            "and could NOT be read here; its abstract names no Fast Marching -- it "
+            "Marching energy map to this paper. The paper is OPEN ACCESS (confirmed by "
+            "its author, 2026-09-17); an earlier revision of this entry called it "
+            "paywalled, which was wrong -- the HTTP 403 we measured is Taylor & Francis "
+            "refusing automated fetches, not a subscription wall. The full text has "
+            "still not been read here, and its abstract names no Fast Marching -- it "
             "describes a power-consumption model approximated from a dynamic "
             "simulation, with solar-array generation taken into account. D6 therefore "
             "does not cite it as a method source and claims nothing about its "
@@ -492,8 +504,10 @@ REACHABILITY_QUOTED: dict[str, Any] = {
         "result": (
             "'one result indicated that the energy margin could be improved by 4.1 kJ, "
             "13.9 at maximum' (abstract as indexed; the percent sign is missing in the "
-            "indexed text and the full text is paywalled, so the unit of 13.9 is NOT "
-            "verified here)."
+            "indexed text and the full text has not been read here, so the unit of "
+            "13.9 is NOT verified). The paper is open access -- an earlier revision "
+            "said paywalled on the strength of an HTTP 403, which measured our fetch "
+            "and not the paper."
         ),
         "not_ours": "A different rover, a different terrain and a different objective.",
     },
